@@ -1,0 +1,90 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project Overview
+
+**Mario Kart World (MKW) real-time race telemetry tracker.** Captures a 1920×1080 @ 60fps OBS camera feed and uses OpenCV template matching to detect game screens, track player selections, and record race data (laps, coins, timestamps, minimap position). Designed to integrate with a Tauri frontend via stdio sidecar IPC.
+
+## Running the App
+
+```bash
+pip install -r requirements.txt
+
+# Run the package (new structured version)
+python -m mkw_tracker
+
+# Options
+python -m mkw_tracker --purge-tight   # Force-regenerate _tight.png template caches
+python -m mkw_tracker --history       # Load "last 100 runs" history replay mode
+python -m mkw_tracker --no-ipc        # Disable stdin/stdout IPC (standalone mode)
+
+# Legacy monolith (reference only — do not edit)
+python "!!!FINAL-ab-new-bubbles.py"
+```
+
+**Runtime keyboard shortcuts:** `q` quit · `Tab` toggle debug overlay · `m` toggle minimap frame logging · `d` dump debug crops to `debug_laps/`
+
+## Package Structure
+
+```
+mkw_tracker/
+├── main.py          Entry point: cv2 capture loop + asyncio IPC daemon thread
+├── config/          Settings dataclass (hot-reloadable from SQLite)
+├── database/        SQLite (connection, migrations, config_repo, replay_repo)
+├── detection/       ScreenDetector, SelectionTracker, template helpers
+├── race/            LapTracker, CoinTracker, TimestampTracker, FinishDetector, MushroomTracker
+├── minimap/         MinimapTracker, MinimapRecorder, MinimapPlayer
+├── overlay/         Pure OpenCV drawing functions (no logic)
+├── lifecycle/       RaceLifecycle: screen-change callback driving all state transitions
+├── ipc/             IpcServer (asyncio stdin reader) + protocol message types
+├── sync/            SyncClient stub (future server upload/fetch)
+└── utils/           Camera setup, image helpers
+```
+
+Legacy JSON files (`minimap_seeds.json`, `minimap_rois.json`, `minimap_thresholds.json`, `replays/`) are migrated into SQLite on first run by `database/replay_repo.py:import_json_files()`.
+
+## Architecture
+
+### Screen Detection (`detection/screen.py`)
+Two-phase detection:
+- **Phase 1** (every frame): re-confirm current screen with one template match
+- **Phase 2** (after `CONFIRM_LOSS_FRAMES=3` consecutive misses): scan all reachable candidates from `TRANSITIONS` directed graph
+
+`Screen` is an Enum. Each `Tell` has a primary ROI + optional `alt_roi` + optional `required_also` list. Template images live in `images/screens/`.
+
+### Selection Tracking (`detection/selection.py`)
+Scans ROIs at 10Hz max. Characters/karts: binary threshold → `TM_CCOEFF_NORMED`. Costumes: Canny edge detection (background-agnostic). Requires `CHAR_CONFIRM_FRAMES=5` consecutive wins; `COSTUME_LOSS_FRAMES=8` consecutive misses before clearing.
+
+### Race Telemetry (`race/`)
+All trackers run during `RACING` screen only, at 10Hz. `TimestampTracker` uses burst capture (3 consecutive scans, 2 identical required) triggered by lap crossing or finish detection.
+
+### Minimap Tracking (`minimap/tracker.py`)
+`seed()` locks an HSV-CLAHE-normalized template. Per-frame gatekeeping pipeline: locked-score rejection → jump gate (40px) → re-acquire (5 frames) → Hough ring detection → two-candidate tiebreak (velocity + Hough). EMA smoothing. Visual freeze after 4 low-conf frames, full suspend after 36. Auto-calibration on race completion via inverse-scaled margin formula.
+
+### Race Lifecycle (`lifecycle/race.py`)
+`RaceLifecycle.on_screen_change()` drives all start/pause/resume/finalize transitions. Attached to `ScreenDetector.on_screen_change`.
+
+### IPC (`ipc/`)
+`IpcServer` runs asyncio in a daemon thread. Reads newline-delimited JSON from stdin into `inbound_queue`; main loop drains queue once per frame. Outbound events written to stdout. See `docs/ipc-protocol.md`.
+
+### Config (`config/`)
+`Defaults` dataclass defines all ~60 constants. `Settings` loads from `config` table (falls back to defaults). `settings.update(key, value)` writes to DB; `settings.reload(keys)` hot-reloads affected trackers.
+
+## Key Data Files
+
+| Path | Purpose |
+|------|---------|
+| `mkw_tracker.db` | SQLite: config, replays, minimap seeds/ROIs/thresholds |
+| `images/screens/*.png` | Screen detection templates |
+| `images/characters/*.png` | Character name templates |
+| `images/costumes/*.png` | Costume name templates (edge-based) |
+| `images/karts/*.png` | Kart name templates |
+| `images/courses/*.png` | Course name templates |
+| `images/timestamps/cropped/0.png`–`9.png` | Digit templates |
+| `images/mushrooms/1mush.png`–`3mush.png` | Mushroom count templates |
+| `images/heads/<player>.png` | Head images for replay bubbles (BGRA) |
+
+## Important Constants
+
+All ROI coordinates are **full 1080p pixels**. `DISPLAY_SCALE = 720/1080` applied for 720p label drawing. Minimap tuning knobs prefixed `_MM_`. All constants are also in the `config` table and listed in `docs/config-reference.md`.

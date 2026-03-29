@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.pyc
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+
+# Node
+node_modules/
+dist-ui/
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# DB / runtime
+mkw_tracker.db
+*.db-shm
+*.db-wal
+
+# Debug outputs
+debug_laps/
+
+# Legacy monolith reference (local only)
+\!!!FINAL-ab-new-bubbles.py
+
+# Probe / scratch files
+probe_*.py
+probe_*.png
+probe_*.bin
+test_stream.bin
+
+# Tauri signing keys (should live in ~/.tauri/, never in the repo)
+*.key
+*.key.pub
+
+# Misplaced home-dir shorthand (literal ~/  folder)
+~/
+
+# Claude Code local state
+.claude/
+
+# Tauri sidecar binaries (built by CI)
+src-tauri/binaries/
+
+# IDEs
+.vscode/
+.idea/
+*.swp

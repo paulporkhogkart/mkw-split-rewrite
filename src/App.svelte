@@ -1,0 +1,75 @@
+<script>
+  import { onMount } from "svelte";
+  import { check } from "@tauri-apps/plugin-updater";
+  import { relaunch } from "@tauri-apps/plugin-process";
+  import { listen } from "@tauri-apps/api/event";
+  import { getVersion } from "@tauri-apps/api/app";
+
+  let trackerStatus = "Connecting to tracker...";
+  let updateStatus = "";
+  let version = "";
+
+  onMount(async () => {
+    version = await getVersion();
+
+    // Forward tracker IPC events (emitted from Rust when sidecar writes to stdout)
+    await listen("tracker-event", (event) => {
+      console.log("[tracker]", event.payload);
+      try {
+        const msg = JSON.parse(event.payload);
+        if (msg.type === "ready") trackerStatus = "Tracker connected";
+      } catch {}
+    });
+
+    // Check for a newer version on every launch
+    try {
+      const update = await check();
+      if (update) {
+        updateStatus = `Updating to v${update.version}…`;
+        await update.downloadAndInstall();
+        await relaunch();
+      }
+    } catch (e) {
+      // Non-fatal — no network, no release, etc.
+      console.warn("Update check failed:", e);
+    }
+  });
+</script>
+
+<main>
+  <h1>MKW Tracker {#if version}<span id="version">v{version}</span>{/if}</h1>
+  <p id="tracker">{trackerStatus}</p>
+  {#if updateStatus}
+    <p id="update">{updateStatus}</p>
+  {/if}
+</main>
+
+<style>
+  :global(body) {
+    margin: 0;
+    background: #0d0d1a;
+    color: #e8e8f0;
+    font-family: monospace;
+  }
+  main {
+    padding: 2rem;
+  }
+  h1 {
+    font-size: 1.2rem;
+    margin: 0 0 0.5rem;
+    color: #7eb8f7;
+  }
+  #version {
+    font-size: 0.8rem;
+    color: #888;
+    margin-left: 0.4rem;
+  }
+  p {
+    margin: 0.25rem 0;
+    font-size: 0.9rem;
+  }
+  #update {
+    color: #4caf50;
+    margin-top: 0.5rem;
+  }
+</style>

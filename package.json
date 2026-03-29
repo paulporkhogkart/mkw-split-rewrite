@@ -1,0 +1,26 @@
+{
+  "name": "mkw-tracker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:sidecar": "python scripts/prepare_sidecar.py",
+    "build:full": "npm run build:sidecar && npm run build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "icons": "python scripts/gen_icons.py"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-process": "^2",
+    "@tauri-apps/plugin-updater": "^2"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^3",
+    "@tauri-apps/cli": "^2",
+    "svelte": "^4",
+    "vite": "^5"
+  }
+}
