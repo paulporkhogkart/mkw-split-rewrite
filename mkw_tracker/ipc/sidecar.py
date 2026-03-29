@@ -15,20 +15,24 @@ class IpcServer:
     - Reads newline-delimited JSON from stdin and puts parsed dicts into
       `inbound_queue` for the main loop to drain.
     - Provides `emit(line)` to write a JSON line to stdout from any thread.
+      emit() is non-blocking: it enqueues the line and a dedicated writer
+      thread drains the queue, so a slow Tauri reader never stalls the main loop.
     """
 
     def __init__(self):
         self.inbound_queue: queue.SimpleQueue = queue.SimpleQueue()
+        self._emit_queue:   queue.SimpleQueue = queue.SimpleQueue()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
-        self._stdout_lock = threading.Lock()
 
     # ── Start / stop ─────────────────────────────────────────────────────────
 
     def start(self):
-        """Spawn the asyncio daemon thread."""
-        self._thread = threading.Thread(target=self._run, daemon=True, name="ipc-thread")
+        """Spawn the asyncio reader thread and the stdout writer thread."""
+        self._thread = threading.Thread(target=self._run, daemon=True, name="ipc-reader")
         self._thread.start()
+        writer = threading.Thread(target=self._writer, daemon=True, name="ipc-writer")
+        writer.start()
 
     def stop(self):
         if self._loop is not None:
@@ -37,12 +41,28 @@ class IpcServer:
     # ── Emit from main thread ────────────────────────────────────────────────
 
     def emit(self, line: str):
-        """Write a JSON line to stdout (thread-safe)."""
-        with self._stdout_lock:
-            sys.stdout.write(line + "\n")
-            sys.stdout.flush()
+        """Non-blocking: enqueue a JSON line for the writer thread to flush."""
+        self._emit_queue.put_nowait(line)
 
     # ── Internal ─────────────────────────────────────────────────────────────
+
+    def _writer(self):
+        """Drain the emit queue and write to stdout. Blocks only on I/O, not the main loop."""
+        stdout = sys.stdout
+        while True:
+            line = self._emit_queue.get()   # blocks until something to write
+            try:
+                stdout.write(line + "\n")
+                # Batch-flush: drain any additional items queued since we woke
+                while True:
+                    try:
+                        line = self._emit_queue.get_nowait()
+                        stdout.write(line + "\n")
+                    except queue.Empty:
+                        break
+                stdout.flush()
+            except Exception:
+                pass
 
     def _run(self):
         self._loop = asyncio.new_event_loop()

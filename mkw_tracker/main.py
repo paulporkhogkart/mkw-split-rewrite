@@ -30,7 +30,7 @@ from .overlay.panels import draw_screen_badge, draw_legend, draw_state_panel
 from .lifecycle.race import RaceLifecycle
 from .ipc.sidecar import IpcServer
 from .ipc.protocol import (parse_inbound, emit_ready, emit_screen_change, emit_selection_update,
-                            emit_lap_update, emit_coin_update, emit_finish,
+                            emit_lap_update, emit_coin_update, emit_mush_update, emit_finish,
                             emit_pb_achieved, emit_pb_export, emit_state, emit_error)
 from .utils.camera import build_camera_source
 
@@ -116,6 +116,11 @@ def run(args):
     mm_rec    = MinimapRecorder()
     mm_player = MinimapPlayer()
 
+    # ── IPC server ───────────────────────────────────────────────────────────
+    ipc = IpcServer()
+    if not args.no_ipc:
+        ipc.start()
+
     lifecycle = RaceLifecycle(
         selection=tracker,
         laps=laps,
@@ -128,15 +133,17 @@ def run(args):
         mm_player=mm_player,
         history_mode=args.history,
         transition_count=transition_count,
+        ipc=ipc,
     )
     detector.on_screen_change = lifecycle.on_screen_change
 
-    # ── IPC server ───────────────────────────────────────────────────────────
-    ipc = IpcServer()
-    if not args.no_ipc:
-        ipc.start()
-
     # ── Camera ───────────────────────────────────────────────────────────────
+    # Set Windows timer resolution to 1ms for the lifetime of this process.
+    # The default is 15.6ms, which makes cv2.waitKey(1) / Event.wait(0.001)
+    # sleep for up to 15.6ms — the primary cause of variable input lag.
+    import ctypes as _ctypes
+    _ctypes.windll.winmm.timeBeginPeriod(1)
+
     cap = build_camera_source(width=1920, height=1080, fps=60)
     print(f"Camera: {cap.width}x{cap.height} @ {cap.fps} fps")
     print("Screen detector running. Press 'q' to quit.\n")
@@ -150,6 +157,13 @@ def run(args):
 
     show_debug  = [True]    # Tab toggles this
     current_frame = [None]
+
+    # Previous-state snapshots for on-change IPC emission
+    _prev_sel    = (None, None, None, None)   # (character, costume, kart, course)
+    _prev_lap    = (None, None)               # (current_lap, total_laps)
+    _prev_coins  = None
+    _prev_mush   = 0
+    _prev_finish = False
 
     # ── Main capture loop ────────────────────────────────────────────────────
     while True:
@@ -243,6 +257,43 @@ def run(args):
         avg_tells = sum(tells_buf)     / len(tells_buf)
         peak_ms   = max(update_ms_buf)
 
+        # ── IPC on-change events ─────────────────────────────────────────────
+        sel_key = (selection.character, selection.costume,
+                   selection.kart, selection.course)
+        if sel_key != _prev_sel and any(sel_key):
+            ipc.emit(emit_selection_update(*sel_key))
+            _prev_sel = sel_key
+
+        lap_key = (lap_state.current_lap, lap_state.total_laps)
+        if lap_key != _prev_lap and any(lap_key):
+            completed_lap = (lap_state.current_lap or 0) - 1
+            split = ts.splits.get(completed_lap) if lap_inc else None
+            ipc.emit(emit_lap_update(lap_state.current_lap, lap_state.total_laps, split))
+            _prev_lap = lap_key
+
+        if coin_state.coins != _prev_coins and coin_state.coins is not None:
+            ipc.emit(emit_coin_update(coin_state.coins))
+            _prev_coins = coin_state.coins
+
+        if mush_state.count != _prev_mush:
+            ipc.emit(emit_mush_update(mush_state.count))
+            _prev_mush = mush_state.count
+
+        if finish_just_detected and not _prev_finish:
+            ipc.emit(emit_finish(
+                finish_state.result,
+                ts_state.total_time,
+                dict(ts.splits),
+            ))
+            _prev_finish = True
+
+        # Reset race-specific prev-state when the lap tracker clears (new race)
+        if lap_key == (None, None) and _prev_lap != (None, None):
+            _prev_lap    = (None, None)
+            _prev_coins  = None
+            _prev_mush   = 0
+            _prev_finish = False
+
         # ── Draw ─────────────────────────────────────────────────────────────
         if not show_debug[0]:
             display = cv2.resize(frame, (1280, 720), interpolation=cv2.INTER_LINEAR)
@@ -299,7 +350,7 @@ def run(args):
 
             cv2.imshow("MKW Tracker", display)
 
-        key = cv2.waitKey(1) & 0xFF
+        key = cap.waitKey(1) & 0xFF
         if key == ord("q"):
             break
         if key == 9:   # Tab — toggle debug overlay
@@ -310,6 +361,7 @@ def run(args):
         if key == ord("d"):
             _debug_dump(frame, laps, coins, ts, mush)
 
+    _ctypes.windll.winmm.timeEndPeriod(1)
     cap.release()
     cv2.destroyAllWindows()
     close_connection()

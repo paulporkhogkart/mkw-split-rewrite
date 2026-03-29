@@ -11,7 +11,8 @@ from ..race.coins import CoinState
 from ..race.timestamp import TimestampState
 from ..race.finish import FinishState
 from ..race.mushrooms import MushroomState
-from ..minimap.tracker import MinimapState
+from ..minimap.tracker import MinimapState, MINIMAP_ROI
+from ..utils.image import DISPLAY_SCALE
 
 FONT       = cv2.FONT_HERSHEY_SIMPLEX
 FONT_LARGE = 0.8
@@ -131,7 +132,11 @@ def draw_state_panel(
         bgr   = _template_to_bgr(char_template)
         th, tw = bgr.shape[:2]
         thumb = cv2.resize(bgr, (tw * 3, th * 3), interpolation=cv2.INTER_NEAREST)
-        tx, ty = panel_x, y + 4
+        # Position: just left of the minimap ROI, bottom-aligned to it
+        mm_left   = int(MINIMAP_ROI[0] * DISPLAY_SCALE)
+        mm_bottom = int((MINIMAP_ROI[1] + MINIMAP_ROI[3]) * DISPLAY_SCALE)
+        tx = mm_left - thumb.shape[1] - 4
+        ty = mm_bottom - thumb.shape[0]
         # Clip to display bounds
         disp_h, disp_w = display.shape[:2]
         paste_h = min(thumb.shape[0], disp_h - ty)

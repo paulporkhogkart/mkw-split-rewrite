@@ -77,6 +77,10 @@ def emit_coin_update(coins: Optional[int]) -> str:
     return _emit("coin_update", coins=coins)
 
 
+def emit_mush_update(count: int) -> str:
+    return _emit("mush_update", count=count)
+
+
 def emit_finish(result: Optional[str], total_time: Optional[str],
                 splits: Optional[Dict[int, str]] = None) -> str:
     return _emit("finish", result=result, total_time=total_time,

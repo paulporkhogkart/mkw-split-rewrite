@@ -123,6 +123,7 @@ class FfmpegCameraSource:
         self.height = height
         self.fps    = fps
         self._n = width * height * 3  # bytes per bgr24 frame
+        self._pending_key = -1        # key press captured while waiting for a frame
 
         # Triple-buffer ring: reader writes to bufs[_wi]; .read() returns
         # bufs[(_wi + 2) % 3] (the frame written just before the current one).
@@ -149,7 +150,7 @@ class FfmpegCameraSource:
             "-flags",            "low_delay",
             "-loglevel",         "error",
             "-f", "dshow",
-            "-rtbufsize",        "1M",         # minimal dshow ring buffer (~0.16 frames P010)
+            "-rtbufsize",        "16M",        # ~4 P010 frames; 1M was sub-frame, causing drops
             "-thread_queue_size", "1",          # restrict ffmpeg's input thread queue to 1 packet
             "-video_size", f"{width}x{height}", "-framerate", str(fps),
             "-i", f"video={device_name}",
@@ -233,13 +234,40 @@ class FfmpegCameraSource:
                 _diag_drain = 0
 
     def read(self) -> Tuple[bool, Optional[np.ndarray]]:
-        if not self._new_frame.wait(timeout=5.0):
-            return False, None
+        # Wait for the next frame while keeping the Windows message pump alive.
+        #
+        # cv2.waitKey(1) was the original approach but is the wrong tool here:
+        # it's designed to be called once after imshow, not 16× per frame.
+        # More importantly, it sleeps via the Windows timer which defaults to
+        # 15.6ms resolution — making every "1ms" wait wildly variable.
+        #
+        # Instead: cv2.pollKey() processes all pending messages immediately
+        # (non-blocking), then Event.wait(0.001) sleeps precisely 1ms thanks
+        # to timeBeginPeriod(1) set in main.py. This gives the same message-pump
+        # coverage as waitKey while being far more predictable.
+        import time as _time
+        deadline = _time.monotonic() + 5.0
+        while True:
+            k = cv2.pollKey()   # non-blocking: flush Windows message queue now
+            if k != -1:
+                self._pending_key = k
+            if self._new_frame.wait(0.001):   # sleeps ≤1ms; precise with timeBeginPeriod(1)
+                break
+            if _time.monotonic() > deadline:
+                return False, None
         self._new_frame.clear()
         with self._lock:
             # The slot written two steps ago is safe: the reader is now one
             # full slot ahead, and the main loop processes in under a frame period.
             return True, self._bufs[(self._wi + 2) % 3]
+
+    def waitKey(self, delay: int = 1) -> int:
+        """Return any key press captured during read(), then fall back to cv2.waitKey()."""
+        k = self._pending_key
+        self._pending_key = -1
+        if k != -1:
+            return k
+        return cv2.waitKey(delay)
 
     def release(self) -> None:
         self._running = False
@@ -267,6 +295,9 @@ class VideoCaptureSource:
 
     def read(self) -> Tuple[bool, Optional[np.ndarray]]:
         return self._cap.read()
+
+    def waitKey(self, delay: int = 1) -> int:
+        return cv2.waitKey(delay)
 
     def release(self) -> None:
         self._cap.release()

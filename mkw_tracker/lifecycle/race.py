@@ -38,6 +38,7 @@ class RaceLifecycle:
         mm_player:  MinimapPlayer,
         history_mode: bool = False,
         transition_count: Optional[list] = None,
+        ipc=None,
     ):
         self._selection  = selection
         self._laps       = laps
@@ -51,6 +52,8 @@ class RaceLifecycle:
         self._history_mode = history_mode
         self._transition_count = transition_count if transition_count is not None else [0]
 
+        self._ipc = ipc
+
         self._paused_from_racing = False
         self._resuming_race      = False
 
@@ -62,6 +65,9 @@ class RaceLifecycle:
     def on_screen_change(self, old: Screen, new: Screen):
         self._transition_count[0] += 1
         print(f"  {old.name:25s}  ->  {new.name}")
+        if self._ipc is not None:
+            from ..ipc.protocol import emit_screen_change
+            self._ipc.emit(emit_screen_change(old.name, new.name))
 
         # ── From RACING ─────────────────────────────────────────────────────
         if old == Screen.RACING:
