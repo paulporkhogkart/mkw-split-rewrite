@@ -226,4 +226,6 @@ jobs:
           generate_release_notes: true
           files: |
             *.zip
+            *.exe
+            *.exe.sig
             latest.json
