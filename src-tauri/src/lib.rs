@@ -81,7 +81,7 @@ pub fn run() {
             if let tauri::RunEvent::Exit = event {
                 if let Some(state) = app_handle.try_state::<SidecarState>() {
                     if let Ok(mut guard) = state.0.lock() {
-                        if let Some(child) = guard.as_mut() {
+                        if let Some(child) = guard.take() {
                             let _ = child.kill();
                         }
                     }
