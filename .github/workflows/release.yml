@@ -145,18 +145,16 @@ jobs:
           import json, os, glob, datetime
 
           bundle_dir = "src-tauri/target/release/bundle/nsis"
-          zip_files  = glob.glob(f"{bundle_dir}/*.nsis.zip")
-          sig_files  = glob.glob(f"{bundle_dir}/*.nsis.zip.sig")
+          exe_files  = glob.glob(f"{bundle_dir}/*x64-setup.exe")
+          sig_files  = glob.glob(f"{bundle_dir}/*x64-setup.exe.sig")
 
-          if not zip_files:
+          if not exe_files or not sig_files:
               raise FileNotFoundError(
-                  f"No *.nsis.zip found in {bundle_dir}. Files present: "
+                  f"Installer or signature not found in {bundle_dir}. Files present: "
                   + str(os.listdir(bundle_dir))
-                  + "\nCheck that TAURI_SIGNING_PRIVATE_KEY secret is set correctly."
               )
 
-
-          installer  = os.path.basename(zip_files[0])
+          installer  = os.path.basename(exe_files[0])
           signature  = open(sig_files[0]).read().strip()
 
           version = os.environ["VERSION"]
@@ -189,7 +187,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: tauri-installer
-          path: src-tauri/target/release/bundle/nsis/*.nsis.zip
+          path: |
+            src-tauri/target/release/bundle/nsis/*x64-setup.exe
+            src-tauri/target/release/bundle/nsis/*x64-setup.exe.sig
           retention-days: 1
 
       - name: Upload update manifest artifact
