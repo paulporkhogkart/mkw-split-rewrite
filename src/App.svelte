@@ -1,9 +1,9 @@
 <script>
   import { onMount } from "svelte";
   import { check } from "@tauri-apps/plugin-updater";
-  import { relaunch } from "@tauri-apps/plugin-process";
   import { listen } from "@tauri-apps/api/event";
   import { getVersion } from "@tauri-apps/api/app";
+  import { invoke } from "@tauri-apps/api/core";
 
   let trackerStatus = "Connecting to tracker...";
   let updateStatus = "";
@@ -12,7 +12,25 @@
   onMount(async () => {
     version = await getVersion();
 
-    // Forward tracker IPC events (emitted from Rust when sidecar writes to stdout)
+    // Check for update before starting the tracker. If an update is found,
+    // install it and let NSIS relaunch — Python is never spawned so there are
+    // no file locks to worry about.
+    try {
+      const update = await check();
+      if (update) {
+        updateStatus = `Updating to v${update.version}…`;
+        await update.downloadAndInstall();
+        // NSIS handles relaunch — do not call relaunch() here.
+        return;
+      }
+    } catch (e) {
+      // Non-fatal — no network, no release, etc.
+      console.warn("Update check failed:", e);
+    }
+
+    // No update: start the Python tracker and listen for its events.
+    await invoke("start_tracker");
+
     await listen("tracker-event", (event) => {
       console.log("[tracker]", event.payload);
       try {
@@ -20,21 +38,6 @@
         if (msg.type === "ready") trackerStatus = "Tracker connected";
       } catch {}
     });
-
-    // Check for a newer version on every launch
-    try {
-      const update = await check();
-      if (update) {
-        updateStatus = `Updating to v${update.version}…`;
-        await update.downloadAndInstall();
-        // NSIS handles relaunch itself — do not call relaunch() here or it
-        // spawns a second instance before the installer finishes, causing
-        // an infinite-window loop.
-      }
-    } catch (e) {
-      // Non-fatal — no network, no release, etc.
-      console.warn("Update check failed:", e);
-    }
   });
 </script>
 
