@@ -27,7 +27,9 @@
       if (update) {
         updateStatus = `Updating to v${update.version}…`;
         await update.downloadAndInstall();
-        await relaunch();
+        // NSIS handles relaunch itself — do not call relaunch() here or it
+        // spawns a second instance before the installer finishes, causing
+        // an infinite-window loop.
       }
     } catch (e) {
       // Non-fatal — no network, no release, etc.

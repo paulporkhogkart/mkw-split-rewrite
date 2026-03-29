@@ -27,9 +27,21 @@ pub fn run() {
             };
 
             #[cfg(not(debug_assertions))]
-            let spawn_result: Result<_, tauri_plugin_shell::Error> = shell
-                .sidecar("mkw-tracker")
-                .and_then(|cmd| cmd.spawn());
+            let spawn_result = {
+                // The Python sidecar is installed alongside the Tauri exe as
+                // mkw-tracker-x86_64-pc-windows-msvc.exe (via bundle.resources).
+                // We cannot use shell.sidecar() because the binary is not
+                // registered under externalBin — that caused NSIS to install it
+                // as mkw-tracker.exe, overwriting the Tauri binary.
+                let exe_dir = std::env::current_exe()
+                    .expect("current_exe")
+                    .parent()
+                    .expect("exe parent dir")
+                    .to_path_buf();
+                shell
+                    .command(exe_dir.join("mkw-tracker-x86_64-pc-windows-msvc.exe").to_string_lossy().as_ref())
+                    .spawn()
+            };
 
             match spawn_result {
                 Ok((mut rx, child)) => {
