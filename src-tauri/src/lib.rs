@@ -27,10 +27,9 @@ pub fn run() {
             };
 
             #[cfg(not(debug_assertions))]
-            let spawn_result = shell
+            let spawn_result: Result<_, tauri_plugin_shell::Error> = shell
                 .sidecar("mkw-tracker")
-                .map_err(|e| e.into())
-                .and_then(|cmd| cmd.spawn().map_err(|e| e.into()));
+                .and_then(|cmd| cmd.spawn());
 
             match spawn_result {
                 Ok((mut rx, child)) => {

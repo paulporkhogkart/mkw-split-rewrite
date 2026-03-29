@@ -18,6 +18,11 @@ SIDECAR_EXE  = "mkw-tracker-x86_64-pc-windows-msvc.exe"
 
 
 def main() -> None:
+    dst_exe = os.path.join(BINARIES_DIR, SIDECAR_EXE)
+    if os.path.exists(dst_exe):
+        print(f"==> Sidecar already present at {dst_exe}, skipping PyInstaller build.")
+        return
+
     # Run PyInstaller
     print("==> Building Python sidecar…")
     subprocess.run(
@@ -29,7 +34,6 @@ def main() -> None:
 
     # Copy the entry-point exe (renamed to include the Rust target triple)
     src_exe = os.path.join(SIDECAR_SRC, "mkw-tracker.exe")
-    dst_exe = os.path.join(BINARIES_DIR, SIDECAR_EXE)
     shutil.copy2(src_exe, dst_exe)
     print(f"    {src_exe} → {dst_exe}")
 
