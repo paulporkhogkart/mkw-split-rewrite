@@ -134,6 +134,10 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
+      - name: List NSIS bundle output (debug)
+        shell: bash
+        run: ls src-tauri/target/release/bundle/nsis/
+
       - name: Generate update manifest (latest.json)
         shell: bash
         run: |
@@ -143,6 +147,14 @@ jobs:
           bundle_dir = "src-tauri/target/release/bundle/nsis"
           zip_files  = glob.glob(f"{bundle_dir}/*.nsis.zip")
           sig_files  = glob.glob(f"{bundle_dir}/*.nsis.zip.sig")
+
+          if not zip_files:
+              raise FileNotFoundError(
+                  f"No *.nsis.zip found in {bundle_dir}. Files present: "
+                  + str(os.listdir(bundle_dir))
+                  + "\nCheck that TAURI_SIGNING_PRIVATE_KEY secret is set correctly."
+              )
+
 
           installer  = os.path.basename(zip_files[0])
           signature  = open(sig_files[0]).read().strip()
