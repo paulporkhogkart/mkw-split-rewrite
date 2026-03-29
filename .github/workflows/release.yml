@@ -110,6 +110,10 @@ jobs:
              src-tauri/binaries/mkw-tracker-x86_64-pc-windows-msvc.exe
           cp -r sidecar_tmp/mkw-tracker/_internal src-tauri/binaries/_internal
 
+      - name: Verify sidecar binary present
+        shell: bash
+        run: ls -lh src-tauri/binaries/
+
       - name: Stamp version into tauri.conf.json
         shell: bash
         run: |
