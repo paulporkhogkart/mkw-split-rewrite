@@ -15,6 +15,10 @@ SPEC_FILE    = "mkw_tracker.spec"
 SIDECAR_SRC  = os.path.join("dist", "mkw-tracker")
 BINARIES_DIR = os.path.join("src-tauri", "binaries")
 SIDECAR_EXE  = "mkw-tracker-x86_64-pc-windows-msvc.exe"
+# Tauri installs resources into a bin/ subdirectory so the Python engine
+# doesn't sit alongside the Tauri exe and confuse users or appear in search.
+# prepare_sidecar.py just populates src-tauri/binaries/; the resources mapping
+# in tauri.conf.json handles the bin/ destination at bundle time.
 
 
 def main() -> None:

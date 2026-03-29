@@ -31,7 +31,7 @@ fn start_tracker(app: tauri::AppHandle, state: tauri::State<SidecarState>) {
             .expect("exe parent dir")
             .to_path_buf();
         shell
-            .command(exe_dir.join("mkw-tracker-x86_64-pc-windows-msvc.exe").to_string_lossy().as_ref())
+            .command(exe_dir.join("bin/mkw-tracker-x86_64-pc-windows-msvc.exe").to_string_lossy().as_ref())
             .spawn()
     };
 
