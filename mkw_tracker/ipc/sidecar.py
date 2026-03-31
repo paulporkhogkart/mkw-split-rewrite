@@ -3,9 +3,12 @@ import asyncio
 import queue
 import sys
 import threading
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from .protocol import parse_inbound, emit_error
+
+if TYPE_CHECKING:
+    from .broadcaster import EventBroadcaster
 
 
 class IpcServer:
@@ -17,13 +20,15 @@ class IpcServer:
     - Provides `emit(line)` to write a JSON line to stdout from any thread.
       emit() is non-blocking: it enqueues the line and a dedicated writer
       thread drains the queue, so a slow Tauri reader never stalls the main loop.
+    - Optionally fans out every emitted event to an EventBroadcaster (WS pub-sub).
     """
 
-    def __init__(self):
+    def __init__(self, broadcaster: "Optional[EventBroadcaster]" = None):
         self.inbound_queue: queue.SimpleQueue = queue.SimpleQueue()
         self._emit_queue:   queue.SimpleQueue = queue.SimpleQueue()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
+        self._broadcaster = broadcaster
 
     # ── Start / stop ─────────────────────────────────────────────────────────
 
@@ -41,8 +46,11 @@ class IpcServer:
     # ── Emit from main thread ────────────────────────────────────────────────
 
     def emit(self, line: str):
-        """Non-blocking: enqueue a JSON line for the writer thread to flush."""
+        """Non-blocking: enqueue a JSON line for the writer thread to flush,
+        and fan out to any attached WebSocket broadcaster."""
         self._emit_queue.put_nowait(line)
+        if self._broadcaster is not None:
+            self._broadcaster.broadcast(line)
 
     # ── Internal ─────────────────────────────────────────────────────────────
 
@@ -67,6 +75,8 @@ class IpcServer:
     def _run(self):
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
+        if self._broadcaster is not None:
+            self._broadcaster.attach(self._loop)
         try:
             self._loop.run_until_complete(self._read_stdin())
         except Exception:

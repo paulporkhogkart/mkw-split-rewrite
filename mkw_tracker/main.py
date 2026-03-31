@@ -31,7 +31,8 @@ from .lifecycle.race import RaceLifecycle
 from .ipc.sidecar import IpcServer
 from .ipc.protocol import (parse_inbound, emit_ready, emit_screen_change, emit_selection_update,
                             emit_lap_update, emit_coin_update, emit_mush_update, emit_finish,
-                            emit_pb_achieved, emit_pb_export, emit_state, emit_error)
+                            emit_pb_achieved, emit_pb_export, emit_state, emit_devices_list,
+                            emit_error)
 from .utils.camera import build_camera_source
 
 
@@ -40,7 +41,7 @@ _WINDOW = 60   # rolling-average window size (frames)
 
 def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
                         minimap: MinimapTracker, lifecycle: RaceLifecycle,
-                        show_debug: list):
+                        show_debug: list, cap):
     """Dispatch a single inbound IPC command."""
     t = msg.get("type", "")
 
@@ -92,6 +93,13 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
             msg.get("h", 0),
         )
 
+    elif t == "list_devices":
+        from .utils.camera import list_dshow_video_devices
+        devices    = list_dshow_video_devices()
+        configured = settings.get("camera_device", "")
+        active     = getattr(cap, "device_name", "")
+        ipc.emit(emit_devices_list(devices, configured, active))
+
 
 def run(args):
     # ── Database setup ───────────────────────────────────────────────────────
@@ -117,7 +125,12 @@ def run(args):
     mm_player = MinimapPlayer()
 
     # ── IPC server ───────────────────────────────────────────────────────────
-    ipc = IpcServer()
+    broadcaster = None
+    if args.ws_port is not None:
+        from .ipc.broadcaster import EventBroadcaster
+        broadcaster = EventBroadcaster(port=args.ws_port)
+
+    ipc = IpcServer(broadcaster=broadcaster)
     if not args.no_ipc:
         ipc.start()
 
@@ -144,7 +157,9 @@ def run(args):
     import ctypes as _ctypes
     _ctypes.windll.winmm.timeBeginPeriod(1)
 
-    cap = build_camera_source(width=1920, height=1080, fps=60)
+    configured_device = settings.get("camera_device", "") or None
+    cap = build_camera_source(width=1920, height=1080, fps=60,
+                              device_name=configured_device)
     print(f"Camera: {cap.width}x{cap.height} @ {cap.fps} fps")
     print("Screen detector running. Press 'q' to quit.\n")
 
@@ -183,7 +198,7 @@ def run(args):
         while not ipc.inbound_queue.empty():
             msg = ipc.inbound_queue.get_nowait()
             _handle_ipc_command(msg, ipc, detector, settings,
-                                 minimap, lifecycle, show_debug)
+                                 minimap, lifecycle, show_debug, cap)
 
         # ── Update all trackers ──────────────────────────────────────────────
         screen, perf  = detector.update(frame)
@@ -402,6 +417,8 @@ def main():
                         help="Load 'last 100 runs' replay mode.")
     parser.add_argument("--no-ipc", action="store_true",
                         help="Disable stdin/stdout IPC (run as standalone).")
+    parser.add_argument("--ws-port", type=int, metavar="PORT", default=None,
+                        help="Broadcast all events on a local WebSocket (e.g. 8765).")
     args = parser.parse_args()
     run(args)
 

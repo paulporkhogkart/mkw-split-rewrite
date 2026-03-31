@@ -99,5 +99,9 @@ def emit_state(state_dict: dict) -> str:
     return _emit("state", **state_dict)
 
 
+def emit_devices_list(devices: List[str], configured: str, active: str) -> str:
+    return _emit("devices_list", devices=devices, configured=configured, active=active)
+
+
 def emit_error(message: str) -> str:
     return _emit("error", message=message)

@@ -93,13 +93,13 @@ def _find_p010_device() -> Optional[str]:
     return None
 
 
-def _find_obs_index() -> int:
-    """Return the cv2.VideoCapture index for OBS Virtual Camera, or 0."""
+def _find_obs_device() -> tuple[int, str]:
+    """Return (index, name) for OBS Virtual Camera, or (0, '')."""
     for index, name in enumerate(list_dshow_video_devices()):
         if "obs" in name.lower():
             print(f"[Camera] OBS Virtual Camera at index {index}: {name!r}")
-            return index
-    return 0
+            return index, name
+    return 0, ""
 
 
 # ── Source classes ────────────────────────────────────────────────────────────
@@ -156,6 +156,7 @@ class FfmpegCameraSource:
             "-i", f"video={device_name}",
             "-f", "rawvideo", "-pix_fmt", "bgr24", "pipe:1",
         ]
+        self.device_name = device_name
         self._proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
         )
@@ -282,15 +283,16 @@ class VideoCaptureSource:
     """SDR camera source: thin wrapper around cv2.VideoCapture (dshow backend)."""
 
     def __init__(self, index: int, width: int = 1920, height: int = 1080,
-                 fps: int = 60) -> None:
+                 fps: int = 60, device_name: str = "") -> None:
         self._cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH,  width)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
         self._cap.set(cv2.CAP_PROP_FPS,          fps)
-        self.width  = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        self.height = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        self.fps    = self._cap.get(cv2.CAP_PROP_FPS)
-        print(f"[Camera] DSHOW SDR: index={index} "
+        self.width       = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        self.height      = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        self.fps         = self._cap.get(cv2.CAP_PROP_FPS)
+        self.device_name = device_name or f"index:{index}"
+        print(f"[Camera] DSHOW SDR: {self.device_name!r} "
               f"{self.width}x{self.height} @ {self.fps}fps")
 
     def read(self) -> Tuple[bool, Optional[np.ndarray]]:
@@ -309,13 +311,23 @@ def build_camera_source(
     width: int = 1920,
     height: int = 1080,
     fps: int = 60,
+    device_name: Optional[str] = None,
 ) -> "FfmpegCameraSource | VideoCaptureSource":
     """
     Auto-select camera backend:
-      1. Probe DirectShow devices for P010 (HDR) capability.
-      2. If found → FfmpegCameraSource (stable HDR conversion via ffmpeg).
-      3. Otherwise → VideoCaptureSource on OBS Virtual Camera (SDR fallback).
+      1. If *device_name* is given, use that device (HDR or SDR as appropriate).
+      2. Otherwise probe DirectShow devices for P010 (HDR) capability.
+      3. If found → FfmpegCameraSource (stable HDR conversion via ffmpeg).
+      4. Otherwise → VideoCaptureSource on OBS Virtual Camera (SDR fallback).
     """
+    if device_name:
+        print(f"[Camera] Using configured device: {device_name!r}")
+        if _device_has_p010(device_name):
+            return FfmpegCameraSource(device_name, width, height, fps)
+        devices = list_dshow_video_devices()
+        idx = next((i for i, n in enumerate(devices) if n == device_name), 0)
+        return VideoCaptureSource(idx, width, height, fps, device_name=device_name)
+
     print("[Camera] Probing DirectShow devices for P010 (HDR)...")
     p010_device = _find_p010_device()
     if p010_device:
@@ -323,4 +335,5 @@ def build_camera_source(
         return FfmpegCameraSource(p010_device, width, height, fps)
 
     print("[Camera] No P010 device — falling back to SDR (cv2.VideoCapture)")
-    return VideoCaptureSource(_find_obs_index(), width, height, fps)
+    obs_idx, obs_name = _find_obs_device()
+    return VideoCaptureSource(obs_idx, width, height, fps, device_name=obs_name)

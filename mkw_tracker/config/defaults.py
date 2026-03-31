@@ -88,6 +88,7 @@ class Defaults:
     camera_width: int = 1920
     camera_height: int = 1080
     camera_fps: int = 60
+    camera_device: str = ""   # empty = auto-detect
 
     def __post_init__(self):
         if self.lap_current_roi is None:
