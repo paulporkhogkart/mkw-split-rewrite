@@ -54,8 +54,15 @@ def _emit(type_: str, **payload) -> str:
     return json.dumps({"type": type_, **payload})
 
 
-def emit_ready(version: str) -> str:
-    return _emit("ready", version=version)
+def emit_ready(version: str, setup_complete: bool = True) -> str:
+    return _emit("ready", version=version, setup_complete=setup_complete)
+
+
+def emit_camera_status(ok: bool, error: str = "",
+                       width: int = 0, height: int = 0,
+                       device: str = "") -> str:
+    return _emit("camera_status", ok=ok, error=error,
+                 width=width, height=height, device=device)
 
 
 def emit_screen_change(from_screen: str, to_screen: str) -> str:
@@ -105,3 +112,58 @@ def emit_devices_list(devices: List[str], configured: str, active: str) -> str:
 
 def emit_error(message: str) -> str:
     return _emit("error", message=message)
+
+
+def emit_heartbeat(fps: float, screen: str, tracking: bool) -> str:
+    return _emit("heartbeat", fps=round(fps, 1), screen=screen, tracking=tracking)
+
+
+def emit_frame_data(data: str, width: int, height: int, label: str = "") -> str:
+    return _emit("frame_data", data=data, width=width, height=height, label=label)
+
+
+def emit_template_score(screen: str, score: float, threshold: float,
+                        matched: bool, roi: list,
+                        template_img: Optional[str] = None,
+                        live_crop: Optional[str] = None,
+                        roi_key: str = "primary", **_) -> str:
+    data = dict(screen=screen, roi_key=roi_key, score=round(score, 4),
+                threshold=threshold, matched=matched, roi=roi)
+    if template_img is not None:
+        data["template_img"] = template_img
+    if live_crop is not None:
+        data["live_crop"] = live_crop
+    return _emit("template_score", **data)
+
+
+def emit_template_images(screen: str, template_img: Optional[str],
+                         live_crop: Optional[str] = None,
+                         roi_key: str = "primary", **_) -> str:
+    return _emit("template_images", screen=screen, roi_key=roi_key,
+                 template_img=template_img, live_crop=live_crop)
+
+
+def emit_template_saved(screen: str, score: float, threshold: float,
+                        matched: bool, **_) -> str:
+    return _emit("template_saved", screen=screen, score=round(score, 4),
+                 threshold=threshold, matched=matched)
+
+
+def emit_tells_list(tells: list) -> str:
+    return _emit("tells_list", tells=tells)
+
+
+def emit_rois_list(rois: dict) -> str:
+    return _emit("rois_list", rois=rois)
+
+
+def emit_camera_paused() -> str:
+    return _emit("camera_paused")
+
+
+def emit_camera_resumed() -> str:
+    return _emit("camera_resumed")
+
+
+def emit_roi_preview(data: Optional[str]) -> str:
+    return _emit("roi_preview", data=data)

@@ -120,6 +120,14 @@ class SelectionTracker:
         self._kart_templates    = load_template_dir(kart_dir)
         self._course_templates  = load_template_dir(course_dir)
 
+        # ROIs — read from settings so wizard edits take effect after restart
+        from ..config.settings import get_settings as _gs
+        _s = _gs()
+        self._char_name_roi   = tuple(_s.get('char_name_roi',   list(CHAR_NAME_ROI)))
+        self._costume_roi     = tuple(_s.get('costume_roi',     list(COSTUME_ROI)))
+        self._kart_name_roi   = tuple(_s.get('kart_name_roi',   list(KART_NAME_ROI)))
+        self._course_name_roi = tuple(_s.get('course_name_roi', list(COURSE_NAME_ROI)))
+
         self._last_scan: float = 0.0
         self._relevant_costumes: Dict[str, np.ndarray] = {}
         if self.state.character:
@@ -167,7 +175,7 @@ class SelectionTracker:
     # ------------------------------------------------------------------
     def _update_character(self, frame: np.ndarray) -> bool:
         changed = False
-        char_crop = prepare_roi(self._crop(frame, CHAR_NAME_ROI))
+        char_crop = prepare_roi(self._crop(frame, self._char_name_roi))
         if char_crop is None:
             return False
 
@@ -207,7 +215,7 @@ class SelectionTracker:
             self._char_confirm_streak  = 0
 
         if self.state.character and self._relevant_costumes:
-            cos_crop = prepare_text_edges(self._crop(frame, COSTUME_ROI))
+            cos_crop = prepare_text_edges(self._crop(frame, self._costume_roi))
             cname, cconf = match_best(
                 None, self._relevant_costumes,
                 threshold=0.3, reconfirm_threshold=0.5,
@@ -236,7 +244,7 @@ class SelectionTracker:
     # ------------------------------------------------------------------
     def _update_kart(self, frame: np.ndarray) -> bool:
         name, conf = match_best(
-            self._crop(frame, KART_NAME_ROI), self._kart_templates,
+            self._crop(frame, self._kart_name_roi), self._kart_templates,
             reconfirm_name=self.state.kart, reconfirm_threshold=0.9,
         )
         if name and name != self.state.kart:
@@ -251,7 +259,7 @@ class SelectionTracker:
     # ------------------------------------------------------------------
     def _update_course(self, frame: np.ndarray) -> bool:
         name, conf = match_best(
-            self._crop(frame, COURSE_NAME_ROI), self._course_templates,
+            self._crop(frame, self._course_name_roi), self._course_templates,
             reconfirm_name=self.state.course, reconfirm_threshold=0.95,
         )
         if name and name != self.state.course:

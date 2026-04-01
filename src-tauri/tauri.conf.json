@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "mkw-tracker",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "identifier": "com.paulporkhogkart.mkw-tracker",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -37,9 +37,12 @@
       {
         "label": "main",
         "title": "MKW Tracker",
-        "width": 400,
-        "height": 380,
-        "resizable": false
+        "width": 1200,
+        "height": 800,
+        "resizable": true,
+        "minWidth": 600,
+        "minHeight": 440,
+        "decorations": false
       }
     ],
     "security": {

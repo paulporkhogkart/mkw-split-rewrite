@@ -56,6 +56,12 @@ class Defaults:
     mushroom_scan_interval: float = 0.1
     mushroom_roi: list = None
 
+    # ── Selection screen ROIs ──────────────────────────────────────────────────
+    char_name_roi:   list = None
+    costume_roi:     list = None
+    kart_name_roi:   list = None
+    course_name_roi: list = None
+
     # ── Minimap tracker ───────────────────────────────────────────────────────
     minimap_roi: list = None          # [x, y, w, h]
     mm_radius_min: int = 12
@@ -90,21 +96,36 @@ class Defaults:
     camera_fps: int = 60
     camera_device: str = ""   # empty = auto-detect
 
+    # ── Setup ─────────────────────────────────────────────────────────────────
+    setup_complete: int = 0   # 0 = first-time setup required, 1 = done
+
     def __post_init__(self):
+        # All ROI defaults are stored as fractions of 1920×1080.
+        # Settings.get() multiplies by the fixed 1920×1080 reference dims
+        # (frames are always normalised to that resolution before detection).
+        W, H = 1920.0, 1080.0
         if self.lap_current_roi is None:
-            self.lap_current_roi = [282, 979, 282 + 38, 979 + 49]
+            self.lap_current_roi = [282/W, 979/H, 320/W, 1028/H]
         if self.lap_total_roi is None:
-            self.lap_total_roi = [341, 990, 341 + 27, 990 + 38]
+            self.lap_total_roi = [341/W, 990/H, 368/W, 1028/H]
         if self.coin_left_roi is None:
-            self.coin_left_roi = [118, 984, 118 + 36, 984 + 44]
+            self.coin_left_roi = [118/W, 984/H, 154/W, 1028/H]
         if self.coin_right_roi is None:
-            self.coin_right_roi = [154, 984, 154 + 36, 984 + 44]
+            self.coin_right_roi = [154/W, 984/H, 190/W, 1028/H]
         if self.finish_roi is None:
-            self.finish_roi = [1290, 410, 1290 + 90, 410 + 90]
+            self.finish_roi = [1290/W, 410/H, 1380/W, 500/H]
         if self.mushroom_roi is None:
-            self.mushroom_roi = [50, 50, 50 + 190, 50 + 190]
+            self.mushroom_roi = [50/W, 50/H, 240/W, 240/H]
         if self.minimap_roi is None:
-            self.minimap_roi = [1442, 251, 466, 796]
+            self.minimap_roi = [1442/W, 251/H, 466/W, 796/H]
+        if self.char_name_roi is None:
+            self.char_name_roi = [1210/W, 830/H, 1770/W, 894/H]
+        if self.costume_roi is None:
+            self.costume_roi = [1210/W, 916/H, 1770/W, 958/H]
+        if self.kart_name_roi is None:
+            self.kart_name_roi = [1240/W, 830/H, 1740/W, 894/H]
+        if self.course_name_roi is None:
+            self.course_name_roi = [163/W, 387/H, 647/W, 462/H]
 
     def as_dict(self) -> dict:
         return asdict(self)

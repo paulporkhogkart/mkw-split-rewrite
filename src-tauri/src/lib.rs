@@ -2,6 +2,39 @@ use std::sync::Mutex;
 use tauri::{Emitter, Manager};
 use tauri_plugin_shell::{process::CommandEvent, ShellExt};
 
+/// Silently grant camera permission to the webview so getUserMedia works without
+/// the native "localhost wants to use your camera" popup. Must be called after
+/// the window is created (i.e. inside the setup closure).
+#[cfg(target_os = "windows")]
+fn grant_camera_permission(window: &tauri::WebviewWindow) {
+    let _ = window.with_webview(|webview| {
+        use webview2_com::{
+            Microsoft::Web::WebView2::Win32::{
+                COREWEBVIEW2_PERMISSION_KIND,
+                COREWEBVIEW2_PERMISSION_KIND_CAMERA,
+                COREWEBVIEW2_PERMISSION_STATE_ALLOW,
+            },
+            PermissionRequestedEventHandler,
+        };
+
+        unsafe {
+            let wv = webview.controller().CoreWebView2().unwrap();
+            let handler = PermissionRequestedEventHandler::create(Box::new(|_, args| {
+                if let Some(args) = args {
+                    let mut kind = COREWEBVIEW2_PERMISSION_KIND(0);
+                    args.PermissionKind(&mut kind)?;
+                    if kind == COREWEBVIEW2_PERMISSION_KIND_CAMERA {
+                        args.SetState(COREWEBVIEW2_PERMISSION_STATE_ALLOW)?;
+                    }
+                }
+                Ok(())
+            }));
+            let mut token: i64 = 0;
+            wv.add_PermissionRequested(&handler, &mut token).unwrap();
+        }
+    });
+}
+
 /// Holds the Python sidecar child process once started. None until start_tracker is called.
 struct SidecarState(Mutex<Option<tauri_plugin_shell::process::CommandChild>>);
 
@@ -16,7 +49,7 @@ fn do_spawn_sidecar(app: tauri::AppHandle, state: &SidecarState) {
             .expect("project root");
         shell
             .command("python")
-            .args(["-m", "mkw_tracker", "--ws-port", "8765"])
+            .args(["-m", "mkw_tracker", "--ws-port", "8765", "--no-display"])
             .current_dir(project_root)
             .spawn()
     };
@@ -30,7 +63,7 @@ fn do_spawn_sidecar(app: tauri::AppHandle, state: &SidecarState) {
             .to_path_buf();
         shell
             .command(exe_dir.join("bin/mkw-tracker-x86_64-pc-windows-msvc.exe").to_string_lossy().as_ref())
-            .args(["--ws-port", "8765"])
+            .args(["--ws-port", "8765", "--no-display"])
             .spawn()
     };
 
@@ -86,6 +119,16 @@ fn restart_tracker(app: tauri::AppHandle, state: tauri::State<SidecarState>) {
     do_spawn_sidecar(app, &state);
 }
 
+/// Open a URI (e.g. ms-settings:camera) via the system shell.
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    std::process::Command::new("cmd")
+        .args(["/c", "start", "", &url])
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 /// Write a newline-delimited JSON message to the tracker's stdin.
 #[tauri::command]
 fn send_to_tracker(state: tauri::State<SidecarState>, message: String) -> Result<(), String> {
@@ -101,9 +144,11 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .invoke_handler(tauri::generate_handler![start_tracker, restart_tracker, send_to_tracker])
+        .invoke_handler(tauri::generate_handler![start_tracker, restart_tracker, send_to_tracker, open_url])
         .setup(|app| {
             app.manage(SidecarState(Mutex::new(None)));
+            #[cfg(target_os = "windows")]
+            grant_camera_permission(&app.get_webview_window("main").expect("main window"));
             Ok(())
         })
         .build(tauri::generate_context!())

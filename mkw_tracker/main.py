@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 
 from .database.connection import get_connection, close_connection
+from .database.config_repo import get_config as _get_config_direct
 from .database.migrations import apply_migrations
 from .database.replay_repo import export_mkwreplay
 from .config.settings import get_settings
@@ -32,16 +33,35 @@ from .ipc.sidecar import IpcServer
 from .ipc.protocol import (parse_inbound, emit_ready, emit_screen_change, emit_selection_update,
                             emit_lap_update, emit_coin_update, emit_mush_update, emit_finish,
                             emit_pb_achieved, emit_pb_export, emit_state, emit_devices_list,
-                            emit_error)
+                            emit_error, emit_heartbeat, emit_frame_data, emit_template_score,
+                            emit_template_saved, emit_template_images, emit_tells_list, emit_rois_list,
+                            emit_camera_paused, emit_camera_resumed, emit_camera_status,
+                            emit_roi_preview)
 from .utils.camera import build_camera_source
 
 
 _WINDOW = 60   # rolling-average window size (frames)
 
+# All templates and ROI coordinates are in 1920×1080 space.
+# Frames from the capture card are normalised to this size immediately
+# after reading so every downstream component works at a fixed resolution.
+_REF_W, _REF_H = 1920, 1080
+
+
+def _norm(frame):
+    """Resize frame to the 1920×1080 reference resolution if needed."""
+    if frame is None:
+        return None
+    h, w = frame.shape[:2]
+    if w == _REF_W and h == _REF_H:
+        return frame
+    return cv2.resize(frame, (_REF_W, _REF_H), interpolation=cv2.INTER_LINEAR)
+
 
 def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
                         minimap: MinimapTracker, lifecycle: RaceLifecycle,
-                        show_debug: list, cap):
+                        show_debug: list, cap, current_frame: list,
+                        setup_mode: list):
     """Dispatch a single inbound IPC command."""
     t = msg.get("type", "")
 
@@ -93,6 +113,10 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
             msg.get("h", 0),
         )
 
+    elif t == "mark_setup_complete":
+        settings.update("setup_complete", 1)
+        setup_mode[0] = False
+
     elif t == "list_devices":
         from .utils.camera import list_dshow_video_devices
         devices    = list_dshow_video_devices()
@@ -100,11 +124,194 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
         active     = getattr(cap, "device_name", "")
         ipc.emit(emit_devices_list(devices, configured, active))
 
+    elif t == "capture_frame":
+        import base64 as _b64
+        frame = current_frame[0]
+        if frame is None:
+            return
+        roi    = msg.get("roi")        # [x1, y1, x2, y2] or None
+        draw   = msg.get("draw_roi", False)
+        scale  = msg.get("scale", 0.333)
+        label  = msg.get("label", "")
+        work   = frame.copy() if draw and roi else frame
+        if draw and roi:
+            x1, y1, x2, y2 = [int(v) for v in roi]
+            cv2.rectangle(work, (x1, y1), (x2, y2), (0, 220, 80), 4)
+        h, w  = work.shape[:2]
+        new_w = max(1, int(w * scale))
+        new_h = max(1, int(h * scale))
+        small = cv2.resize(work, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+        _, buf = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, 72])
+        ipc.emit(emit_frame_data(_b64.b64encode(buf.tobytes()).decode("ascii"),
+                                  new_w, new_h, label))
+
+    elif t == "get_template_images":
+        roi_key = msg.get("roi_key", "primary")
+        result  = detector.get_template_images(current_frame[0], msg.get("screen", ""),
+                                               roi_key=roi_key)
+        if result:
+            ipc.emit(emit_template_images(**result))
+        else:
+            ipc.emit(emit_error(f"Unknown screen: {msg.get('screen')!r}"))
+
+    elif t == "test_template":
+        frame = current_frame[0]
+        if frame is not None:
+            roi_key = msg.get("roi_key", "primary")
+            result  = detector.test_tell_by_name(frame, msg.get("screen", ""),
+                                                  roi_key=roi_key)
+            if result:
+                ipc.emit(emit_template_score(**result))
+            else:
+                ipc.emit(emit_error(f"Unknown screen: {msg.get('screen')!r}"))
+
+    elif t == "capture_template":
+        frame = current_frame[0]
+        if frame is not None:
+            roi_key = msg.get("roi_key", "primary")
+            result  = detector.capture_and_save_template(frame, msg.get("screen", ""),
+                                                          roi_key=roi_key)
+            if result:
+                ipc.emit(emit_template_saved(**result))
+            else:
+                ipc.emit(emit_error(f"Failed to capture template for: {msg.get('screen')!r}"))
+
+    elif t == "add_required_also":
+        sn  = msg.get("screen", "")
+        roi = msg.get("roi")
+        result = detector.add_required_also(sn, roi=roi)
+        if result is not None:
+            _persist_tell_structure(settings, sn, detector)
+            ipc.emit(emit_tells_list(detector.get_tells_config()))
+
+    elif t == "remove_required_also":
+        sn    = msg.get("screen", "")
+        index = int(msg.get("index", 0))
+        result = detector.remove_required_also(sn, index=index)
+        if result is not None:
+            _persist_tell_structure(settings, sn, detector)
+            ipc.emit(emit_tells_list(detector.get_tells_config()))
+
+    elif t == "add_alt":
+        sn  = msg.get("screen", "")
+        roi = msg.get("roi")
+        result = detector.add_alt(sn, roi=roi)
+        if result is not None:
+            _persist_tell_structure(settings, sn, detector)
+            ipc.emit(emit_tells_list(detector.get_tells_config()))
+
+    elif t == "remove_alt":
+        sn = msg.get("screen", "")
+        result = detector.remove_alt(sn)
+        if result is not None:
+            _persist_tell_structure(settings, sn, detector)
+            ipc.emit(emit_tells_list(detector.get_tells_config()))
+
+    elif t == "list_tells":
+        ipc.emit(emit_tells_list(detector.get_tells_config()))
+
+    elif t == "list_rois":
+        ipc.emit(emit_rois_list({
+            "char_name":   settings.get("char_name_roi"),
+            "costume":     settings.get("costume_roi"),
+            "kart_name":   settings.get("kart_name_roi"),
+            "course_name": settings.get("course_name_roi"),
+            "lap_current": settings.get("lap_current_roi"),
+            "lap_total":   settings.get("lap_total_roi"),
+            "coin_left":   settings.get("coin_left_roi"),
+            "coin_right":  settings.get("coin_right_roi"),
+            "finish":      settings.get("finish_roi"),
+            "mushroom":    settings.get("mushroom_roi"),
+        }))
+
+    elif t == "update_tell":
+        screen_name          = msg.get("screen", "")
+        roi                  = msg.get("roi")
+        binary_thresh        = msg.get("binary_thresh")
+        required_also_rois   = msg.get("required_also_rois")
+        required_also_thresh = msg.get("required_also_thresh")
+        alt_binary_thresh    = msg.get("alt_binary_thresh")
+        alt_roi              = msg.get("alt_roi")
+        detector.update_tell(screen_name, roi=roi, binary_thresh=binary_thresh,
+                             required_also_rois=required_also_rois,
+                             required_also_thresh=required_also_thresh,
+                             alt_binary_thresh=alt_binary_thresh,
+                             alt_roi=alt_roi)
+        # Persist primary ROI and threshold (per screen including aliases)
+        from .detection.screen import Screen as _Scr, TELL_ALIAS_GROUPS as _TAG
+        try:
+            _canon = _Scr[screen_name]
+            for _sn in [screen_name] + [a.name for a in _TAG.get(_canon, [])]:
+                if roi:
+                    settings.update(f"tell_roi_{_sn}", roi)
+                if binary_thresh is not None:
+                    settings.update(f"tell_thresh_{_sn}", int(binary_thresh))
+        except KeyError:
+            pass
+        # Persist structure changes (required_also rois/thresh, alt roi/thresh)
+        if required_also_rois is not None or required_also_thresh is not None \
+                or alt_binary_thresh is not None or alt_roi is not None:
+            _persist_tell_structure(settings, screen_name, detector)
+
+    elif t == "get_roi_preview":
+        frame = current_frame[0]
+        if frame is None:
+            return
+        roi = msg.get("roi")
+        binary_thresh = msg.get("binary_thresh", 170)
+        if not roi or len(roi) < 4:
+            return
+        x1, y1, x2, y2 = [int(v) for v in roi]
+        fh, fw = frame.shape[:2]
+        x1 = max(0, min(x1, fw - 1));  x2 = max(x1 + 1, min(x2, fw))
+        y1 = max(0, min(y1, fh - 1));  y2 = max(y1 + 1, min(y2, fh))
+        crop = frame[y1:y2, x1:x2]
+        if crop.size == 0:
+            return
+        import base64 as _b64
+        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop.copy()
+        if binary_thresh is not None:
+            _, processed = cv2.threshold(gray, int(binary_thresh), 255, cv2.THRESH_BINARY)
+        else:
+            _, processed = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        _, buf = cv2.imencode(".png", processed)
+        ipc.emit(emit_roi_preview(_b64.b64encode(buf.tobytes()).decode("ascii")))
+
+
+def _persist_tell_structure(settings, screen_name: str, detector) -> None:
+    """Persist full required_also + alt structure for a canonical screen and its aliases.
+
+    req_also is saved as [[path, [x1,y1,x2,y2]], ...].
+    alt is saved as [path, [x1,y1,x2,y2]] when present, or False when explicitly
+    removed (so startup loading can distinguish "removed" from "never configured").
+    """
+    from .detection.screen import Screen as _Scr, TELL_ALIAS_GROUPS as _TAG
+    try:
+        canon = _Scr[screen_name]
+    except KeyError:
+        return
+    tell = detector._tells_by_screen.get(canon)
+    if tell is None:
+        return
+    req_also = [[p, list(r)] for p, r in tell.required_also]
+    alt = ([tell.alt_image_path, list(tell.alt_roi)]
+           if tell.alt_image_path and tell.alt_roi else False)
+    req_also_thresh = list(tell.required_also_thresh)
+    while len(req_also_thresh) < len(tell.required_also):
+        req_also_thresh.append(170)
+    alt_thresh = tell.alt_binary_thresh if tell.alt_image_path else None
+    for sn in [screen_name] + [a.name for a in _TAG.get(canon, [])]:
+        settings.update(f"tell_req_also_{sn}", req_also)
+        settings.update(f"tell_alt_{sn}", alt)
+        settings.update(f"tell_and_thresh_{sn}", req_also_thresh)
+        settings.update(f"tell_alt_thresh_{sn}", alt_thresh)
+
 
 def run(args):
     # ── Database setup ───────────────────────────────────────────────────────
     apply_migrations()
     settings = get_settings()
+    display_enabled = not args.no_display
 
     # ── Template loading ─────────────────────────────────────────────────────
     load_finish_templates()
@@ -114,6 +321,47 @@ def run(args):
     transition_count = [0]
 
     detector  = ScreenDetector(on_screen_change=None)
+
+    # Apply any persisted tell overrides from the wizard.
+    # These keys are not in Defaults so settings.get() would never find them
+    # (Settings._load only caches keys present in Defaults).  Read directly
+    # from the DB via get_config so the values survive app restarts.
+    for _screen_enum, _tell in detector._tells_by_screen.items():
+        _sn = _screen_enum.name
+        _roi_ov        = _get_config_direct(f"tell_roi_{_sn}")
+        _thresh_ov     = _get_config_direct(f"tell_thresh_{_sn}")
+        _req_also_ov   = _get_config_direct(f"tell_req_also_{_sn}")   # [[path,[roi]], ...]
+        _alt_ov        = _get_config_direct(f"tell_alt_{_sn}")        # [path,[roi]] | False
+        _and_thresh_ov = _get_config_direct(f"tell_and_thresh_{_sn}") # [int, ...]
+        _alt_thresh_ov = _get_config_direct(f"tell_alt_thresh_{_sn}") # int | None
+        if _roi_ov and isinstance(_roi_ov, list) and len(_roi_ov) >= 4:
+            _tell.roi = tuple(int(v) for v in _roi_ov)
+        if _thresh_ov is not None:
+            _tell.binary_thresh = int(_thresh_ov)
+        if _req_also_ov and isinstance(_req_also_ov, list):
+            _tell.required_also = [
+                (_item[0], tuple(int(v) for v in _item[1]))
+                for _item in _req_also_ov
+                if isinstance(_item, list) and len(_item) >= 2 and len(_item[1]) >= 4
+            ]
+            _tell.required_also_templates = [None] * len(_tell.required_also)
+        if _and_thresh_ov and isinstance(_and_thresh_ov, list):
+            _tell.required_also_thresh = [int(t) for t in _and_thresh_ov]
+            while len(_tell.required_also_thresh) < len(_tell.required_also):
+                _tell.required_also_thresh.append(170)
+        # alt: list → apply; False → explicitly removed; None → key not in DB, keep default
+        if isinstance(_alt_ov, list) and len(_alt_ov) >= 2 and _alt_ov[0]:
+            _tell.alt_image_path = _alt_ov[0]
+            _tell.alt_roi        = tuple(int(v) for v in _alt_ov[1])
+        elif _alt_ov is False:
+            _tell.alt_image_path = None
+            _tell.alt_roi        = None
+        if _alt_thresh_ov is not None:
+            _tell.alt_binary_thresh = int(_alt_thresh_ov)
+    # Re-load templates now that required_also / alt paths may have changed
+    for _tell in detector._tells_by_screen.values():
+        _tell.load()
+
     tracker   = SelectionTracker(purge_tight=args.purge_tight)
     laps      = LapTracker()
     coins     = CoinTracker()
@@ -150,6 +398,11 @@ def run(args):
     )
     detector.on_screen_change = lifecycle.on_screen_change
 
+    # ── Setup mode ───────────────────────────────────────────────────────────
+    setup_mode = [not bool(settings.get("setup_complete", 0))]
+    if setup_mode[0]:
+        print("[Setup] First-time setup required — running in setup mode.")
+
     # ── Camera ───────────────────────────────────────────────────────────────
     # Set Windows timer resolution to 1ms for the lifetime of this process.
     # The default is 15.6ms, which makes cv2.waitKey(1) / Event.wait(0.001)
@@ -158,20 +411,37 @@ def run(args):
     _ctypes.windll.winmm.timeBeginPeriod(1)
 
     configured_device = settings.get("camera_device", "") or None
-    cap = build_camera_source(width=1920, height=1080, fps=60,
-                              device_name=configured_device)
-    print(f"Camera: {cap.width}x{cap.height} @ {cap.fps} fps")
-    print("Screen detector running. Press 'q' to quit.\n")
 
-    ipc.emit(emit_ready(version="dev" if args.no_ipc else "sidecar"))
+    if setup_mode[0]:
+        # First-time setup: don't open camera yet. It will be opened on demand
+        # when the frontend sends open_camera from the Camera wizard step.
+        cap = None
+        print("[Setup] Camera deferred — waiting for open_camera command.")
+    else:
+        try:
+            cap = build_camera_source(device_name=configured_device)
+            print(f"Camera: {cap.width}x{cap.height} @ {cap.fps} fps"
+                  + (f" (normalised to {_REF_W}x{_REF_H})"
+                     if cap.width != _REF_W or cap.height != _REF_H else ""))
+            ipc.emit(emit_camera_status(ok=True, width=_REF_W, height=_REF_H,
+                                         device=getattr(cap, "device_name", "")))
+        except Exception as _e:
+            cap = None
+            ipc.emit(emit_camera_status(ok=False, error=str(_e)))
+            print(f"[Camera] Failed to open: {_e}")
+
+    ipc.emit(emit_ready(version="dev" if args.no_ipc else "sidecar",
+                        setup_complete=not setup_mode[0]))
+    print("Screen detector running. Press 'q' to quit.\n")
 
     # ── Per-loop state ───────────────────────────────────────────────────────
     frame_times:   deque = deque(maxlen=_WINDOW)
     update_ms_buf: deque = deque(maxlen=_WINDOW)
     tells_buf:     deque = deque(maxlen=_WINDOW)
 
-    show_debug  = [True]    # Tab toggles this
+    show_debug    = [True]   # Tab toggles this
     current_frame = [None]
+    cam_paused    = [False]  # True while setup wizard holds the camera
 
     # Previous-state snapshots for on-change IPC emission
     _prev_sel    = (None, None, None, None)   # (character, costume, kart, course)
@@ -180,25 +450,126 @@ def run(args):
     _prev_mush   = 0
     _prev_finish = False
 
+    _last_heartbeat = 0.0
+
     # ── Main capture loop ────────────────────────────────────────────────────
+    frame = None
     while True:
-        ret, frame = cap.read()
-        if not ret:
-            print("Failed to grab frame")
-            break
+        # ── Camera-paused state (setup wizard holds the device) ───────────────
+        while cam_paused[0]:
+            time.sleep(0.02)
+            t_now = time.perf_counter()
+            if t_now - _last_heartbeat >= 1.0:
+                ipc.emit(emit_heartbeat(0.0, "PAUSED", False))
+                _last_heartbeat = t_now
+            while not ipc.inbound_queue.empty():
+                _msg = ipc.inbound_queue.get_nowait()
+                if _msg.get("type") in ("resume_camera", "open_camera"):
+                    _dev = settings.get("camera_device", "") or None
+                    if cap is not None:
+                        cap.release()
+                        cap = None
+                    try:
+                        cap = build_camera_source(device_name=_dev)
+                        _ret, _frame = cap.read()
+                        if _ret and _frame is not None:
+                            current_frame[0] = _norm(_frame)
+                            ipc.emit(emit_camera_status(ok=True,
+                                                        width=_REF_W, height=_REF_H,
+                                                        device=getattr(cap, "device_name", "")))
+                        else:
+                            cap.release()
+                            cap = None
+                            ipc.emit(emit_camera_status(ok=False,
+                                                        error="Device opened but no frames received"))
+                    except Exception as _e:
+                        cap = None
+                        ipc.emit(emit_camera_status(ok=False, error=str(_e)))
+                    cam_paused[0] = False
+                    ipc.emit(emit_camera_resumed())
+                else:
+                    _handle_ipc_command(_msg, ipc, detector, settings,
+                                         minimap, lifecycle, show_debug, cap,
+                                         current_frame, setup_mode)
 
-        t_frame = time.perf_counter()
-        frame_times.append(t_frame)
-
-        # Expose current frame to lifecycle (for minimap seeding)
-        current_frame[0]      = frame
-        lifecycle.current_frame = frame
+        # ── Read frame ───────────────────────────────────────────────────────
+        if cap is not None:
+            ret, frame = cap.read()
+            if ret:
+                frame = _norm(frame)
+                t_frame = time.perf_counter()
+                frame_times.append(t_frame)
+                current_frame[0] = frame
+                lifecycle.current_frame = frame
+            elif setup_mode[0]:
+                # In setup mode a missing frame is non-fatal
+                time.sleep(0.033)
+                t_frame = time.perf_counter()
+            else:
+                print("Failed to grab frame")
+                break
+        else:
+            time.sleep(0.033)
+            t_frame = time.perf_counter()
 
         # ── Drain IPC queue ──────────────────────────────────────────────────
         while not ipc.inbound_queue.empty():
             msg = ipc.inbound_queue.get_nowait()
-            _handle_ipc_command(msg, ipc, detector, settings,
-                                 minimap, lifecycle, show_debug, cap)
+            if msg.get("type") == "pause_camera":
+                if cap is not None:
+                    cap.release()
+                    cap = None
+                cam_paused[0] = True
+                ipc.emit(emit_camera_paused())
+            elif msg.get("type") == "open_camera":
+                # Close any existing capture first (handles device changes)
+                if cap is not None:
+                    cap.release()
+                    cap = None
+                try:
+                    _dev = settings.get("camera_device", "") or None
+                    cap = build_camera_source(device_name=_dev)
+                    # Attempt a real frame read to confirm the device is actually
+                    # delivering frames before reporting success to the frontend.
+                    _ret, _frame = cap.read()
+                    if _ret and _frame is not None:
+                        current_frame[0] = _norm(_frame)
+                        ipc.emit(emit_camera_status(ok=True,
+                                                    width=_REF_W, height=_REF_H,
+                                                    device=getattr(cap, "device_name", "")))
+                        print(f"[Camera] Opened: {cap.device_name!r} {cap.width}x{cap.height} @ {cap.fps} fps"
+                              + (f" (normalised to {_REF_W}x{_REF_H})"
+                                 if cap.width != _REF_W or cap.height != _REF_H else ""))
+                    else:
+                        cap.release()
+                        cap = None
+                        ipc.emit(emit_camera_status(ok=False,
+                                                    error="Device opened but no frames received"))
+                except Exception as _e:
+                    cap = None
+                    ipc.emit(emit_camera_status(ok=False, error=str(_e)))
+                    print(f"[Camera] open_camera failed: {_e}")
+            else:
+                _handle_ipc_command(msg, ipc, detector, settings,
+                                     minimap, lifecycle, show_debug, cap,
+                                     current_frame, setup_mode)
+
+        # ── Setup mode: emit heartbeat and skip all tracking ─────────────────
+        if setup_mode[0]:
+            if t_frame - _last_heartbeat >= 1.0:
+                ipc.emit(emit_heartbeat(0.0, "SETUP", False))
+                _last_heartbeat = t_frame
+            if display_enabled and frame is not None:
+                display = cv2.resize(frame, (1280, 720), interpolation=cv2.INTER_LINEAR)
+                cv2.imshow("MKW Tracker", display)
+                key = cap.waitKey(1) & 0xFF if cap is not None else cv2.waitKey(1) & 0xFF
+                if key == ord("q"):
+                    break
+            continue
+
+        # Guard: skip tracking frames if camera hasn't delivered yet
+        if frame is None:
+            continue
 
         # ── Update all trackers ──────────────────────────────────────────────
         screen, perf  = detector.update(frame)
@@ -272,6 +643,11 @@ def run(args):
         avg_tells = sum(tells_buf)     / len(tells_buf)
         peak_ms   = max(update_ms_buf)
 
+        # ── Heartbeat ────────────────────────────────────────────────────────
+        if t_frame - _last_heartbeat >= 1.0:
+            ipc.emit(emit_heartbeat(avg_fps, screen.name, mm_state.tracking))
+            _last_heartbeat = t_frame
+
         # ── IPC on-change events ─────────────────────────────────────────────
         sel_key = (selection.character, selection.costume,
                    selection.kart, selection.course)
@@ -310,74 +686,76 @@ def run(args):
             _prev_finish = False
 
         # ── Draw ─────────────────────────────────────────────────────────────
-        if not show_debug[0]:
-            display = cv2.resize(frame, (1280, 720), interpolation=cv2.INTER_LINEAR)
-            mm_player.draw(None, display, screen)
-            cv2.imshow("MKW Tracker", display)
-        else:
-            # Full-res ROI boxes
-            draw_debug_rois(
-                frame, None,
-                current_screen=screen,
-                current_score=perf.current_score,
-                candidate_screens=detector._candidate_screens(),
-                candidate_scores=perf.candidate_scores,
-                tells_by_screen=detector._tells_by_screen,
-            )
-            draw_selection_rois(frame, None, screen, selection)
-            draw_lap_rois(frame, None, screen, lap_state)
-            draw_coin_rois(frame, None, screen, coin_state)
-            draw_timestamp_rois(frame, None, screen, ts_state)
-            draw_finish_roi(frame, None, screen, finish_state)
-            draw_mushroom_roi(frame, None, screen, mush_state)
-            draw_minimap_crosshair(frame, None, screen, mm_state, tracker=minimap)
+        if display_enabled:
+            if not show_debug[0]:
+                display = cv2.resize(frame, (1280, 720), interpolation=cv2.INTER_LINEAR)
+                mm_player.draw(None, display, screen)
+                cv2.imshow("MKW Tracker", display)
+            else:
+                # Full-res ROI boxes
+                draw_debug_rois(
+                    frame, None,
+                    current_screen=screen,
+                    current_score=perf.current_score,
+                    candidate_screens=detector._candidate_screens(),
+                    candidate_scores=perf.candidate_scores,
+                    tells_by_screen=detector._tells_by_screen,
+                )
+                draw_selection_rois(frame, None, screen, selection)
+                draw_lap_rois(frame, None, screen, lap_state)
+                draw_coin_rois(frame, None, screen, coin_state)
+                draw_timestamp_rois(frame, None, screen, ts_state)
+                draw_finish_roi(frame, None, screen, finish_state)
+                draw_mushroom_roi(frame, None, screen, mush_state)
+                draw_minimap_crosshair(frame, None, screen, mm_state, tracker=minimap)
 
-            display = cv2.resize(frame, (1280, 720), interpolation=cv2.INTER_LINEAR)
+                display = cv2.resize(frame, (1280, 720), interpolation=cv2.INTER_LINEAR)
 
-            # 720p labels
-            draw_debug_rois(
-                None, display,
-                current_screen=screen,
-                current_score=perf.current_score,
-                candidate_screens=detector._candidate_screens(),
-                candidate_scores=perf.candidate_scores,
-                tells_by_screen=detector._tells_by_screen,
-            )
-            draw_selection_rois(None, display, screen, selection)
-            draw_lap_rois(None, display, screen, lap_state)
-            draw_coin_rois(None, display, screen, coin_state)
-            draw_timestamp_rois(None, display, screen, ts_state)
-            draw_finish_roi(None, display, screen, finish_state)
-            draw_mushroom_roi(None, display, screen, mush_state)
-            draw_minimap_crosshair(None, display, screen, mm_state, tracker=minimap)
-            mm_player.draw(None, display, screen)
+                # 720p labels
+                draw_debug_rois(
+                    None, display,
+                    current_screen=screen,
+                    current_score=perf.current_score,
+                    candidate_screens=detector._candidate_screens(),
+                    candidate_scores=perf.candidate_scores,
+                    tells_by_screen=detector._tells_by_screen,
+                )
+                draw_selection_rois(None, display, screen, selection)
+                draw_lap_rois(None, display, screen, lap_state)
+                draw_coin_rois(None, display, screen, coin_state)
+                draw_timestamp_rois(None, display, screen, ts_state)
+                draw_finish_roi(None, display, screen, finish_state)
+                draw_mushroom_roi(None, display, screen, mush_state)
+                draw_minimap_crosshair(None, display, screen, mm_state, tracker=minimap)
+                mm_player.draw(None, display, screen)
 
-            draw_screen_badge(display, screen)
-            draw_legend(display)
-            draw_state_panel(
-                display, screen, perf, selection, lap_state, coin_state,
-                ts_state, finish_state, mush_state, mm_state,
-                avg_fps=avg_fps, avg_ms=avg_ms, avg_tells=avg_tells,
-                peak_ms=peak_ms, transition_count=transition_count[0],
-                lap_splits=ts.splits,
-                char_template=minimap._char_template,
-            )
+                draw_screen_badge(display, screen)
+                draw_legend(display)
+                draw_state_panel(
+                    display, screen, perf, selection, lap_state, coin_state,
+                    ts_state, finish_state, mush_state, mm_state,
+                    avg_fps=avg_fps, avg_ms=avg_ms, avg_tells=avg_tells,
+                    peak_ms=peak_ms, transition_count=transition_count[0],
+                    lap_splits=ts.splits,
+                    char_template=minimap._char_template,
+                )
 
-            cv2.imshow("MKW Tracker", display)
+                cv2.imshow("MKW Tracker", display)
 
-        key = cap.waitKey(1) & 0xFF
-        if key == ord("q"):
-            break
-        if key == 9:   # Tab — toggle debug overlay
-            show_debug[0] = not show_debug[0]
-        if key == ord("m"):
-            minimap.debug_log = not minimap.debug_log
-            print(f"  [mm debug] per-frame logging {'ON' if minimap.debug_log else 'OFF'}")
-        if key == ord("d"):
-            _debug_dump(frame, laps, coins, ts, mush)
+            key = (cap.waitKey(1) if cap is not None else cv2.waitKey(1)) & 0xFF
+            if key == ord("q"):
+                break
+            if key == 9:   # Tab — toggle debug overlay
+                show_debug[0] = not show_debug[0]
+            if key == ord("m"):
+                minimap.debug_log = not minimap.debug_log
+                print(f"  [mm debug] per-frame logging {'ON' if minimap.debug_log else 'OFF'}")
+            if key == ord("d"):
+                _debug_dump(frame, laps, coins, ts, mush)
 
     _ctypes.windll.winmm.timeEndPeriod(1)
-    cap.release()
+    if cap is not None:
+        cap.release()
     cv2.destroyAllWindows()
     close_connection()
     import os as _os; _os._exit(0)
@@ -419,6 +797,8 @@ def main():
                         help="Disable stdin/stdout IPC (run as standalone).")
     parser.add_argument("--ws-port", type=int, metavar="PORT", default=None,
                         help="Broadcast all events on a local WebSocket (e.g. 8765).")
+    parser.add_argument("--no-display", action="store_true",
+                        help="Suppress OpenCV window (headless mode for Tauri).")
     args = parser.parse_args()
     run(args)
 

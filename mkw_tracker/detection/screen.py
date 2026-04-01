@@ -11,6 +11,39 @@ from ..utils.paths import resource_path
 
 
 # ---------------------------------------------------------------------------
+# Image encoding helpers (used for IPC template comparison)
+# ---------------------------------------------------------------------------
+
+def _encode_img(img: Optional[np.ndarray]) -> Optional[str]:
+    """Encode a numpy image as a base64 PNG string, or None if img is None."""
+    if img is None:
+        return None
+    import base64 as _b64
+    _, buf = cv2.imencode(".png", img)
+    return _b64.b64encode(buf.tobytes()).decode("ascii")
+
+
+def _encode_crop_roi(frame: np.ndarray, roi: tuple,
+                     binary_thresh: Optional[int]) -> Optional[str]:
+    """Crop frame to roi, binarise with the given threshold, return as base64 PNG."""
+    x1, y1, x2, y2 = roi
+    crop = frame[y1:y2, x1:x2]
+    if crop.size == 0:
+        return None
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop
+    if binary_thresh is not None:
+        _, processed = cv2.threshold(gray, binary_thresh, 255, cv2.THRESH_BINARY)
+    else:
+        _, processed = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    return _encode_img(processed)
+
+
+def _encode_crop(frame: np.ndarray, tell) -> Optional[str]:
+    """Convenience wrapper: crop frame to tell.roi with tell's binary_thresh."""
+    return _encode_crop_roi(frame, tell.roi, tell.binary_thresh)
+
+
+# ---------------------------------------------------------------------------
 # Screen identifiers
 # ---------------------------------------------------------------------------
 
@@ -31,6 +64,7 @@ class Screen(Enum):
     REPLAY_MENU          = auto()
     RESET                = auto()
     GHOST_RESET          = auto()
+    UNKNOWN_RESET        = auto()
     POST_TIME_TRIAL      = auto()
     REPLAY_RACE_AGAINST  = auto()
     GALLERY              = auto()
@@ -46,7 +80,8 @@ TRANSITIONS: Dict[Screen, Set[Screen]] = {
     Screen.UNKNOWN: {
         Screen.TITLE, Screen.MAIN_MENU, Screen.HOME, Screen.CHARACTER_SELECT,
         Screen.KART_SELECT, Screen.COURSE_SELECT, Screen.START_TIME_TRIAL,
-        Screen.RESET, Screen.POST_TIME_TRIAL, Screen.UNKNOWN_RACE_ACTIVE,
+        Screen.RESET, Screen.GHOST_RESET, Screen.UNKNOWN_RESET,
+        Screen.POST_TIME_TRIAL, Screen.UNKNOWN_RACE_ACTIVE,
         Screen.RACE_MENU, Screen.REPLAY_MENU, Screen.REPLAY_RACE_AGAINST,
         Screen.GALLERY, Screen.SINGLEPLAYER_MENU, Screen.TIME_TRIALS,
     },
@@ -65,6 +100,7 @@ TRANSITIONS: Dict[Screen, Set[Screen]] = {
     Screen.UNKNOWN_RACE_ACTIVE: {Screen.RACE_MENU, Screen.REPLAY_MENU, Screen.POST_TIME_TRIAL, Screen.RESET, Screen.HOME},
     Screen.RESET: {Screen.RACING, Screen.CHARACTER_SELECT, Screen.COURSE_SELECT, Screen.MAIN_MENU, Screen.TITLE, Screen.HOME},
     Screen.GHOST_RESET: {Screen.GHOST, Screen.MAIN_MENU, Screen.COURSE_SELECT, Screen.HOME},
+    Screen.UNKNOWN_RESET: {Screen.UNKNOWN_RACE_ACTIVE, Screen.RACING, Screen.GHOST, Screen.CHARACTER_SELECT, Screen.COURSE_SELECT, Screen.MAIN_MENU, Screen.TITLE, Screen.HOME},
     Screen.POST_TIME_TRIAL: {Screen.HOME, Screen.COURSE_SELECT, Screen.RESET},
     Screen.RACE_MENU: {Screen.RACING, Screen.RESET, Screen.HOME},
     Screen.REPLAY_MENU: {Screen.GHOST, Screen.REPLAY_RACE_AGAINST, Screen.HOME, Screen.GHOST_RESET},
@@ -99,24 +135,37 @@ class Tell:
 
     alt_image_path: Optional[str] = None
     alt_roi: Optional[tuple] = None
+    alt_binary_thresh: int = 170          # independent thresh for the OR-alt ROI
 
-    required_also: list = field(default_factory=list)  # [(path, roi), ...]
+    required_also: list = field(default_factory=list)          # [(path, roi), ...]
+    required_also_thresh: list = field(default_factory=list)   # [int, ...] per-AND thresh
 
     template: Optional[np.ndarray] = field(default=None, repr=False)
     alt_template: Optional[np.ndarray] = field(default=None, repr=False)
     required_also_templates: list = field(default_factory=list, repr=False)
 
     def load(self):
-        self.template = cv2.imread(resource_path(self.image_path), cv2.IMREAD_GRAYSCALE)
+        from ..utils.paths import data_dir, resource_path
+        import os
+
+        def _load_one(rel_path: str) -> Optional[np.ndarray]:
+            user = str(data_dir() / rel_path)
+            if os.path.exists(user):
+                img = cv2.imread(user, cv2.IMREAD_GRAYSCALE)
+                if img is not None:
+                    return img
+            return cv2.imread(resource_path(rel_path), cv2.IMREAD_GRAYSCALE)
+
+        self.template = _load_one(self.image_path)
         if self.template is None:
             print(f"[WARN] Could not load template: {self.image_path}")
         if self.alt_image_path:
-            self.alt_template = cv2.imread(resource_path(self.alt_image_path), cv2.IMREAD_GRAYSCALE)
+            self.alt_template = _load_one(self.alt_image_path)
             if self.alt_template is None:
                 print(f"[WARN] Could not load alt template: {self.alt_image_path}")
         self.required_also_templates = []
         for path, _ in self.required_also:
-            tmpl = cv2.imread(resource_path(path), cv2.IMREAD_GRAYSCALE)
+            tmpl = _load_one(path)
             if tmpl is None:
                 print(f"[WARN] Could not load required_also template: {path}")
             self.required_also_templates.append(tmpl)
@@ -148,6 +197,8 @@ TELLS: list = [
     Tell(screen=Screen.RESET, image_path="images/screens/reset.png",
          roi=(0, 589, 527, 1080), binary_thresh=None),
     Tell(screen=Screen.GHOST_RESET, image_path="images/screens/reset.png",
+         roi=(0, 589, 527, 1080), binary_thresh=None),
+    Tell(screen=Screen.UNKNOWN_RESET, image_path="images/screens/reset.png",
          roi=(0, 589, 527, 1080), binary_thresh=None),
     Tell(screen=Screen.POST_TIME_TRIAL, image_path="images/screens/posttimetrial.png",
          roi=(1334, 784, 1334+164, 784+55), binary_thresh=170,
@@ -190,6 +241,17 @@ TELLS: list = [
 
 
 # ---------------------------------------------------------------------------
+# Alias groups: canonical screen → screens that share the same tell.
+# Editing the canonical screen's ROI/thresh propagates to all aliases.
+# ---------------------------------------------------------------------------
+
+TELL_ALIAS_GROUPS: Dict[Screen, list] = {
+    Screen.RACING: [Screen.GHOST, Screen.UNKNOWN_RACE_ACTIVE],
+    Screen.RESET:  [Screen.GHOST_RESET, Screen.UNKNOWN_RESET],
+}
+
+
+# ---------------------------------------------------------------------------
 # Detection helpers
 # ---------------------------------------------------------------------------
 
@@ -219,8 +281,9 @@ def detect_tell(frame: np.ndarray, tell: Tell) -> tuple:
 
     if tell.required_also:
         scores = [primary_score]
-        for (_, roi), tmpl in zip(tell.required_also, tell.required_also_templates):
-            scores.append(_match_tell(frame, roi, tmpl, tell.binary_thresh))
+        for i, ((_, roi), tmpl) in enumerate(zip(tell.required_also, tell.required_also_templates)):
+            thresh = tell.required_also_thresh[i] if i < len(tell.required_also_thresh) else 170
+            scores.append(_match_tell(frame, roi, tmpl, thresh))
         min_score = min(scores)
         return min_score >= tell.match_threshold, min_score
 
@@ -228,7 +291,7 @@ def detect_tell(frame: np.ndarray, tell: Tell) -> tuple:
         return True, primary_score
 
     if tell.alt_template is not None and tell.alt_roi is not None:
-        alt_score = _match_tell(frame, tell.alt_roi, tell.alt_template, tell.binary_thresh)
+        alt_score = _match_tell(frame, tell.alt_roi, tell.alt_template, tell.alt_binary_thresh)
         if alt_score >= tell.match_threshold:
             return True, alt_score
 
@@ -253,6 +316,16 @@ class ScreenDetector:
         Screen.RACE_MENU:       Screen.RACING,
         Screen.REPLAY_MENU:     Screen.GHOST,
         Screen.POST_TIME_TRIAL: Screen.RACING,
+    }
+
+    # Resolves UNKNOWN_RESET → specific reset type when the next screen is known.
+    # If the next state is UNKNOWN_RACE_ACTIVE the race type is still ambiguous and
+    # UNKNOWN_RACE_ACTIVE will resolve it via _RACE_TYPE_RESOLUTION later.
+    _RESET_TYPE_RESOLUTION: Dict[Screen, Screen] = {
+        Screen.RACING:             Screen.RESET,
+        Screen.GHOST:              Screen.GHOST_RESET,
+        Screen.RACE_MENU:          Screen.RESET,
+        Screen.REPLAY_MENU:        Screen.GHOST_RESET,
     }
 
     def __init__(
@@ -371,6 +444,14 @@ class ScreenDetector:
                     self.on_screen_change(Screen.UNKNOWN_RACE_ACTIVE, resolved)
                 old = resolved
 
+        if old == Screen.UNKNOWN_RESET:
+            resolved = self._RESET_TYPE_RESOLUTION.get(new)
+            if resolved is not None:
+                self.current_screen = resolved
+                if self.on_screen_change:
+                    self.on_screen_change(Screen.UNKNOWN_RESET, resolved)
+                old = resolved
+
         if new == Screen.HOME:
             if old not in (Screen.HOME, Screen.UNKNOWN, Screen.UNKNOWN_RACE_ACTIVE, Screen.GALLERY):
                 self._pre_home_screen = old
@@ -387,3 +468,317 @@ class ScreenDetector:
         if screen != self.current_screen:
             self._on_transition(self.current_screen, screen)
             self._loss_streak = 0
+
+    # ------------------------------------------------------------------
+    def _roi_key_parts(self, tell, roi_key: str):
+        """Return (template, roi, thresh) for a given roi_key, or (None, None, None)."""
+        if roi_key == "primary":
+            return tell.template, tell.roi, tell.binary_thresh
+        if roi_key == "alt":
+            if tell.alt_roi is None:
+                return None, None, None
+            return tell.alt_template, tell.alt_roi, tell.alt_binary_thresh
+        if roi_key.startswith("and_"):
+            idx = int(roi_key[4:])
+            if idx >= len(tell.required_also):
+                return None, None, None
+            tmpl = tell.required_also_templates[idx] if idx < len(tell.required_also_templates) else None
+            _, roi = tell.required_also[idx]
+            thresh = tell.required_also_thresh[idx] if idx < len(tell.required_also_thresh) else 170
+            return tmpl, roi, thresh
+        return None, None, None
+
+    def test_tell_by_name(self, frame: np.ndarray, screen_name: str,
+                          roi_key: str = "primary") -> Optional[dict]:
+        """Test a Tell's specific ROI against the current frame."""
+        try:
+            screen = Screen[screen_name]
+        except KeyError:
+            return None
+        tell = self._tells_by_screen.get(screen)
+        if tell is None or frame is None:
+            return None
+        tmpl, roi, thresh = self._roi_key_parts(tell, roi_key)
+        if roi is None:
+            return None
+        score = _match_tell(frame, roi, tmpl, thresh)
+        detected = score >= tell.match_threshold
+        return {
+            "screen":       screen_name,
+            "roi_key":      roi_key,
+            "score":        round(score, 4),
+            "threshold":    tell.match_threshold,
+            "matched":      detected,
+            "roi":          list(roi),
+            "template_img": _encode_img(tmpl),
+            "live_crop":    _encode_crop_roi(frame, roi, thresh),
+        }
+
+    def get_template_images(self, frame: Optional[np.ndarray], screen_name: str,
+                            roi_key: str = "primary") -> Optional[dict]:
+        """Return the stored template + (optional) live crop for a specific ROI."""
+        try:
+            screen = Screen[screen_name]
+        except KeyError:
+            return None
+        tell = self._tells_by_screen.get(screen)
+        if tell is None:
+            return None
+        tmpl, roi, thresh = self._roi_key_parts(tell, roi_key)
+        if roi is None:
+            return None
+        return {
+            "screen":       screen_name,
+            "roi_key":      roi_key,
+            "template_img": _encode_img(tmpl),
+            "live_crop":    _encode_crop_roi(frame, roi, thresh) if frame is not None else None,
+        }
+
+    # ------------------------------------------------------------------
+    def get_tells_config(self) -> list:
+        """Return serialisable config for all tells (for IPC list_tells response)."""
+        result = []
+        for screen, tell in self._tells_by_screen.items():
+            entry = {
+                "screen": screen.name,
+                "image_path": tell.image_path,
+                "roi": list(tell.roi),
+                "match_threshold": tell.match_threshold,
+                "binary_thresh": tell.binary_thresh,
+            }
+            if tell.alt_image_path:
+                entry["alt_image_path"] = tell.alt_image_path
+                entry["alt_roi"] = list(tell.alt_roi) if tell.alt_roi else None
+                entry["alt_binary_thresh"] = tell.alt_binary_thresh
+            if tell.required_also:
+                thresh_list = list(tell.required_also_thresh)
+                while len(thresh_list) < len(tell.required_also):
+                    thresh_list.append(170)
+                entry["required_also"] = [
+                    {"path": p, "roi": list(r), "thresh": thresh_list[i]}
+                    for i, (p, r) in enumerate(tell.required_also)
+                ]
+            if screen in TELL_ALIAS_GROUPS:
+                entry["aliases"] = [s.name for s in TELL_ALIAS_GROUPS[screen]]
+            result.append(entry)
+        return result
+
+    # ------------------------------------------------------------------
+    def update_tell(self, screen_name: str,
+                    roi=None, binary_thresh=None, required_also_rois=None,
+                    required_also_thresh=None, alt_binary_thresh=None, alt_roi=None):
+        """Update an in-memory tell's ROI, threshold, and/or required_also ROIs.
+
+        Changes propagate automatically to any alias screens defined in
+        TELL_ALIAS_GROUPS (e.g. editing RACING also updates GHOST and
+        UNKNOWN_RACE_ACTIVE since they share the same tell).
+        """
+        try:
+            screen = Screen[screen_name]
+        except KeyError:
+            return
+        tell = self._tells_by_screen.get(screen)
+        if tell is None:
+            return
+        if roi is not None and len(roi) >= 4:
+            tell.roi = tuple(int(v) for v in roi)
+        if binary_thresh is not None:
+            tell.binary_thresh = int(binary_thresh)
+        if required_also_rois is not None:
+            for i, r in enumerate(required_also_rois):
+                if i < len(tell.required_also) and r and len(r) >= 4:
+                    path, _ = tell.required_also[i]
+                    tell.required_also[i] = (path, tuple(int(v) for v in r))
+        if required_also_thresh is not None:
+            for i, t in enumerate(required_also_thresh):
+                if i < len(tell.required_also_thresh):
+                    tell.required_also_thresh[i] = int(t)
+                else:
+                    while len(tell.required_also_thresh) < i:
+                        tell.required_also_thresh.append(170)
+                    tell.required_also_thresh.append(int(t))
+        if alt_binary_thresh is not None:
+            tell.alt_binary_thresh = int(alt_binary_thresh)
+        if alt_roi is not None and len(alt_roi) >= 4:
+            tell.alt_roi = tuple(int(v) for v in alt_roi)
+        # Propagate to alias screens
+        for alias_screen in TELL_ALIAS_GROUPS.get(screen, []):
+            alias_tell = self._tells_by_screen.get(alias_screen)
+            if alias_tell is None:
+                continue
+            if roi is not None:
+                alias_tell.roi = tell.roi
+            if binary_thresh is not None:
+                alias_tell.binary_thresh = tell.binary_thresh
+            if required_also_rois is not None:
+                alias_tell.required_also = list(tell.required_also)
+            if required_also_thresh is not None:
+                alias_tell.required_also_thresh = list(tell.required_also_thresh)
+            if alt_binary_thresh is not None:
+                alias_tell.alt_binary_thresh = tell.alt_binary_thresh
+            if alt_roi is not None:
+                alias_tell.alt_roi = tell.alt_roi
+
+    # ------------------------------------------------------------------
+    def capture_and_save_template(self, frame: np.ndarray,
+                                   screen_name: str,
+                                   roi_key: str = "primary") -> Optional[dict]:
+        """Crop frame to the specified ROI, binarise, save as user template, reload, re-test."""
+        try:
+            screen = Screen[screen_name]
+        except KeyError:
+            return None
+        tell = self._tells_by_screen.get(screen)
+        if tell is None or frame is None:
+            return None
+
+        _, roi, thresh = self._roi_key_parts(tell, roi_key)
+        if roi is None:
+            return None
+
+        # Determine save path based on which ROI we're capturing
+        if roi_key == "primary":
+            image_path = tell.image_path
+        elif roi_key == "alt":
+            image_path = tell.alt_image_path
+        elif roi_key.startswith("and_"):
+            idx = int(roi_key[4:])
+            image_path, _ = tell.required_also[idx]
+        else:
+            return None
+
+        x1, y1, x2, y2 = roi
+        crop = frame[y1:y2, x1:x2]
+        if crop.size == 0:
+            return None
+
+        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop.copy()
+        if thresh is not None:
+            _, processed = cv2.threshold(gray, thresh, 255, cv2.THRESH_BINARY)
+        else:
+            _, processed = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+        from ..utils.paths import data_dir
+        import os
+        save_path = str(data_dir() / image_path)
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        cv2.imwrite(save_path, processed)
+
+        # Reload and re-score this ROI specifically
+        tell.load()
+        tmpl, _, thresh = self._roi_key_parts(tell, roi_key)
+        score = _match_tell(frame, roi, tmpl, thresh)
+        return {
+            "screen":    screen_name,
+            "roi_key":   roi_key,
+            "score":     round(score, 4),
+            "threshold": tell.match_threshold,
+            "matched":   score >= tell.match_threshold,
+        }
+
+    # ------------------------------------------------------------------
+    def _tell_to_dict(self, screen: Screen, tell) -> dict:
+        """Serialise a single tell to the same format as get_tells_config entries."""
+        entry = {
+            "screen":          screen.name,
+            "image_path":      tell.image_path,
+            "roi":             list(tell.roi),
+            "match_threshold": tell.match_threshold,
+            "binary_thresh":   tell.binary_thresh,
+        }
+        if tell.alt_image_path:
+            entry["alt_image_path"] = tell.alt_image_path
+            entry["alt_roi"] = list(tell.alt_roi) if tell.alt_roi else None
+            entry["alt_binary_thresh"] = tell.alt_binary_thresh
+        if tell.required_also:
+            thresh_list = list(tell.required_also_thresh)
+            while len(thresh_list) < len(tell.required_also):
+                thresh_list.append(170)
+            entry["required_also"] = [
+                {"path": p, "roi": list(r), "thresh": thresh_list[i]}
+                for i, (p, r) in enumerate(tell.required_also)
+            ]
+        if screen in TELL_ALIAS_GROUPS:
+            entry["aliases"] = [s.name for s in TELL_ALIAS_GROUPS[screen]]
+        return entry
+
+    def _propagate_structure(self, screen: Screen, tell) -> None:
+        """Copy required_also and alt fields to all alias screens."""
+        for alias_screen in TELL_ALIAS_GROUPS.get(screen, []):
+            alias = self._tells_by_screen.get(alias_screen)
+            if alias is None:
+                continue
+            alias.required_also = list(tell.required_also)
+            alias.required_also_templates = list(tell.required_also_templates)
+            alias.required_also_thresh = list(tell.required_also_thresh)
+            alias.alt_image_path = tell.alt_image_path
+            alias.alt_roi = tell.alt_roi
+            alias.alt_template = tell.alt_template
+            alias.alt_binary_thresh = tell.alt_binary_thresh
+
+    # ------------------------------------------------------------------
+    def add_required_also(self, screen_name: str, roi=None) -> Optional[dict]:
+        """Add one required_also (AND) entry. Limited to one per tell."""
+        try:
+            screen = Screen[screen_name]
+        except KeyError:
+            return None
+        tell = self._tells_by_screen.get(screen)
+        if tell is None or len(tell.required_also) >= 1:
+            return None
+        sn_lower = screen_name.lower()
+        new_path = f"images/screens/{sn_lower}-and-0.png"
+        new_roi  = tuple(int(v) for v in roi) if roi and len(roi) >= 4 else tell.roi
+        tell.required_also.append((new_path, new_roi))
+        tell.required_also_templates.append(None)
+        tell.required_also_thresh.append(170)
+        self._propagate_structure(screen, tell)
+        return self._tell_to_dict(screen, tell)
+
+    def remove_required_also(self, screen_name: str, index: int = 0) -> Optional[dict]:
+        """Remove a required_also entry by index."""
+        try:
+            screen = Screen[screen_name]
+        except KeyError:
+            return None
+        tell = self._tells_by_screen.get(screen)
+        if tell is None or index >= len(tell.required_also):
+            return None
+        tell.required_also.pop(index)
+        if index < len(tell.required_also_templates):
+            tell.required_also_templates.pop(index)
+        if index < len(tell.required_also_thresh):
+            tell.required_also_thresh.pop(index)
+        self._propagate_structure(screen, tell)
+        return self._tell_to_dict(screen, tell)
+
+    def add_alt(self, screen_name: str, roi=None) -> Optional[dict]:
+        """Add an alt (OR) template entry. Limited to one per tell."""
+        try:
+            screen = Screen[screen_name]
+        except KeyError:
+            return None
+        tell = self._tells_by_screen.get(screen)
+        if tell is None or tell.alt_image_path is not None:
+            return None
+        sn_lower = screen_name.lower()
+        tell.alt_image_path = f"images/screens/{sn_lower}-alt.png"
+        tell.alt_roi = tuple(int(v) for v in roi) if roi and len(roi) >= 4 else tell.roi
+        tell.alt_template = None
+        self._propagate_structure(screen, tell)
+        return self._tell_to_dict(screen, tell)
+
+    def remove_alt(self, screen_name: str) -> Optional[dict]:
+        """Remove the alt (OR) template entry."""
+        try:
+            screen = Screen[screen_name]
+        except KeyError:
+            return None
+        tell = self._tells_by_screen.get(screen)
+        if tell is None or tell.alt_image_path is None:
+            return None
+        tell.alt_image_path = None
+        tell.alt_roi        = None
+        tell.alt_template   = None
+        self._propagate_structure(screen, tell)
+        return self._tell_to_dict(screen, tell)

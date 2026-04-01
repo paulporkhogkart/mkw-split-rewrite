@@ -4,6 +4,19 @@ from typing import Any, Optional
 from .defaults import Defaults
 from ..database.config_repo import get_config, set_config, ensure_defaults
 
+# All frames are normalised to this resolution before any detection, so
+# fractional ROI values are always scaled against these fixed constants —
+# never against the raw camera dimensions.
+_REF_W, _REF_H = 1920, 1080
+
+# Keys whose values are [x1,y1,x2,y2] or [x,y,w,h] and may be stored as
+# fractions (0-1).  get() auto-scales them to pixels using the reference dims.
+_ROI_KEYS = frozenset({
+    'lap_current_roi', 'lap_total_roi', 'coin_left_roi', 'coin_right_roi',
+    'finish_roi', 'mushroom_roi', 'minimap_roi',
+    'char_name_roi', 'costume_roi', 'kart_name_roi', 'course_name_roi',
+})
+
 
 class Settings:
     """
@@ -51,7 +64,21 @@ class Settings:
     # ------------------------------------------------------------------
     def get(self, key: str, default: Any = None) -> Any:
         with self._lock:
-            return self._data.get(key, default)
+            val = self._data.get(key, default)
+        # Auto-scale fractional ROIs to camera pixel space.
+        # Fractional ROIs have all values in [0, 1]; absolute ones have values > 1.
+        if key in _ROI_KEYS and isinstance(val, list) and len(val) >= 4:
+            try:
+                if max(float(v) for v in val[:4]) <= 1.0:
+                    return [
+                        int(round(float(val[0]) * _REF_W)),
+                        int(round(float(val[1]) * _REF_H)),
+                        int(round(float(val[2]) * _REF_W)),
+                        int(round(float(val[3]) * _REF_H)),
+                    ]
+            except (TypeError, ValueError):
+                pass
+        return val
 
     # __getattr__ so callers can do settings.selection_scan_interval
     def __getattr__(self, name: str) -> Any:
