@@ -108,6 +108,16 @@ fn start_tracker(app: tauri::AppHandle, state: tauri::State<SidecarState>) {
     do_spawn_sidecar(app, &state);
 }
 
+/// Kill the running tracker without restarting it (e.g. before applying an update).
+#[tauri::command]
+fn stop_tracker(state: tauri::State<SidecarState>) {
+    if let Ok(mut guard) = state.0.lock() {
+        if let Some(child) = guard.take() {
+            let _ = child.kill();
+        }
+    }
+}
+
 /// Kill the running tracker and immediately restart it (e.g. after a device change).
 #[tauri::command]
 fn restart_tracker(app: tauri::AppHandle, state: tauri::State<SidecarState>) {
@@ -144,7 +154,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .invoke_handler(tauri::generate_handler![start_tracker, restart_tracker, send_to_tracker, open_url])
+        .invoke_handler(tauri::generate_handler![start_tracker, stop_tracker, restart_tracker, send_to_tracker, open_url])
         .setup(|app| {
             app.manage(SidecarState(Mutex::new(None)));
             #[cfg(target_os = "windows")]

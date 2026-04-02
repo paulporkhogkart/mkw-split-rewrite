@@ -867,7 +867,10 @@
   }
 
   async function applyUpdate() {
-    if (pendingUpdate) await pendingUpdate.install();
+    if (pendingUpdate) {
+      await invoke("stop_tracker");
+      await pendingUpdate.install();
+    }
   }
 
   async function checkForUpdate() {
