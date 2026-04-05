@@ -1,0 +1,386 @@
+# Character name template capture — English
+#
+# Prerequisites:
+#   - Game is on the character select screen
+#   - The first character in the roster is highlighted (top-left)
+#
+# Fill in `preamble` with whatever button presses get you FROM your current
+# game state (e.g. title screen) TO the character select screen.
+# Leave it empty if you start the runner already on character select.
+
+name: "Characters (English)"
+category: characters
+language: en
+
+preamble: []
+# Example preamble from title screen (adjust delays to your game version):
+# preamble:
+#   - { A: 0.1 }          # press A on title
+#   - { wait: 3.0 }       # wait for main menu
+#   - { A: 0.1 }          # Select profile / continue
+#   - { wait: 2.0 }
+#   - { A: 0.1 }          # Time Trials
+#   - { wait: 1.0 }
+#   - { A: 0.1 }          # Select Character
+#   - { wait: 1.5 }       # wait for character select to load
+
+# ---
+# Each item:
+#   name         : display name (informational only)
+#   file         : filename to save (no .png)
+#   before       : button presses to navigate FROM previous item TO this one
+#   capture_wait : seconds to wait after `before` before snapping the frame
+#
+# The very first item's `before` is run from the start position defined
+# by `preamble` — typically the first character already highlighted.
+# ---
+
+items:
+
+  - name: "Baby Daisy"
+    file: baby_daisy
+    before: []          # already on first character after preamble
+    capture_wait: 0.4
+
+  - name: "Baby Luigi"
+    file: baby_luigi
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Baby Mario"
+    file: baby_mario
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Baby Peach"
+    file: baby_peach
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Baby Rosalina"
+    file: baby_rosalina
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Birdo"
+    file: birdo
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Bowser"
+    file: bowser
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Bowser Jr"
+    file: bowser_jr
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Cataquack"
+    file: cataquack
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Chargin' Chuck"
+    file: chargin_chuck
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Cheep Cheep"
+    file: cheep_cheep
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Coin Coffer"
+    file: coin_coffer
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Conkdor"
+    file: conkdor
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Cow"
+    file: cow
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Daisy"
+    file: daisy
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Dolphin"
+    file: dolphin
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Donkey Kong"
+    file: donkey_kong
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Dry Bones"
+    file: dry_bones
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Fish Bone"
+    file: fish_bone
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Goomba"
+    file: goomba
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Hammer Bro"
+    file: hammer_bro
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "King Boo"
+    file: king_boo
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Koopa Troopa"
+    file: koopa_troopa
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Lakitu"
+    file: lakitu
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Luigi"
+    file: luigi
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Mario"
+    file: mario
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Monty Mole"
+    file: monty_mole
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Nabbit"
+    file: nabbit
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Para-Biddybud"
+    file: para-biddybud
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Pauline"
+    file: pauline
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Peach"
+    file: peach
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Peepa"
+    file: peepa
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Penguin"
+    file: penguin
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Pianta"
+    file: pianta
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Piranha Plant"
+    file: piranha_plant
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Pokey"
+    file: pokey
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Rocky Wrench"
+    file: rocky_wrench
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Rosalina"
+    file: rosalina
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Shy Guy"
+    file: shy_guy
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Sidestepper"
+    file: sidestepper
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Snowman"
+    file: snowman
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Spike"
+    file: spike
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Stingby"
+    file: stingby
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Swoop"
+    file: swoop
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Toad"
+    file: toad
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Toadette"
+    file: toadette
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Waluigi"
+    file: waluigi
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Wario"
+    file: wario
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Wiggler"
+    file: wiggler
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4
+
+  - name: "Yoshi"
+    file: yoshi
+    before:
+      - { DPAD_RIGHT: 0.05 }
+      - { wait: 0.3 }
+    capture_wait: 0.4

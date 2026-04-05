@@ -62,6 +62,10 @@
   let dragStartRoi      = null;   // roi snapshot at drag start
   let hoveredHandle     = null;
   let liveRoiCrop       = null;   // live crop for selection/hud steps
+  let assetTemplateImg  = null;   // saved template image for templates step
+  let assetLiveCrop     = null;   // live crop for templates step
+  let templateCategory  = "characters";
+  let templateItemIdx   = 0;
   let _roiPollTimer     = null;
   let currentBinaryThresh = 170;
   let activeRoiKey      = "primary";  // which ROI is selected for editing in the screens step
@@ -85,10 +89,88 @@
   let pythonFrameW = 1920;        // actual Python capture width (from camera_status)
   let pythonFrameH = 1080;        // actual Python capture height
 
-  const STEPS = ["welcome", "camera", "screens", "selection", "hud", "done"];
+  const STEPS = ["welcome", "camera", "screens", "selection", "hud", "templates", "done"];
   const STEP_LABELS = {
     welcome: "Welcome", camera: "Camera", screens: "Screens",
-    selection: "Selection", hud: "HUD", done: "Done",
+    selection: "Selection", hud: "HUD", templates: "Templates", done: "Done",
+  };
+
+  // ── Asset template step ───────────────────────────────────────────────────────
+  const ASSET_CATEGORIES = [
+    { key: "characters", label: "Characters" },
+    { key: "karts",      label: "Karts"      },
+    { key: "courses",    label: "Courses"    },
+    { key: "costumes",   label: "Costumes"   },
+    { key: "mushrooms",  label: "Mushrooms"  },
+  ];
+
+  function toFilename(name) {
+    return name.toLowerCase().replace(/[?'.]/g, "").replace(/\s+/g, "_");
+  }
+
+  function fileToDisplayName(file) {
+    return file.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+  }
+
+  const ASSET_ITEMS = {
+    characters: [
+      "Baby Daisy","Baby Luigi","Baby Mario","Baby Peach","Baby Rosalina",
+      "Birdo","Bowser","Bowser Jr","Cataquack","Chargin' Chuck","Cheep Cheep",
+      "Coin Coffer","Conkdor","Cow","Daisy","Dolphin","Donkey Kong","Dry Bones",
+      "Fish Bone","Goomba","Hammer Bro","King Boo","Koopa Troopa","Lakitu",
+      "Luigi","Mario","Monty Mole","Nabbit","Para-Biddybud","Pauline","Peach",
+      "Peepa","Penguin","Pianta","Piranha Plant","Pokey","Rocky Wrench","Rosalina",
+      "Shy Guy","Sidestepper","Snowman","Spike","Stingby","Swoop","Toad",
+      "Toadette","Waluigi","Wario","Wiggler","Yoshi",
+    ].map(n => ({ name: n, file: toFilename(n) })),
+    karts: [
+      "b_dasher","baby_blooper","big_horn","billdozer","blastronaut_iii",
+      "bowser_bruiser","buggybud","bumble_v","carpet_flyer","chargin_truck",
+      "cloud_9","cute_scoot","dolphin_dasher","dread_sled","fin_twin",
+      "funky_dorrie","hot_rod","hyper_pipe","junkyard_hog","lil_dumpy",
+      "lobster_roller","loco_moto","mach_rocket","mecha_trike","pipe_frame",
+      "plushbuggy","rally_bike","rally_kart","rally_romper","rallygator",
+      "reel_racer","ribbit_revster","roadster_royale","rob_hog","standard_bike",
+      "standard_kart","stellar_sled","tune_thumper","w-twin_chopper","zoom_buggy",
+    ].map(f => ({ name: fileToDisplayName(f), file: f })),
+    courses: [
+      "Acorn Heights","Airship Fortress","Boo Cinema","Bowser's Castle",
+      "Cheep Cheep Falls","Choco Mountain","Crown City","Dandelion Depths",
+      "Desert Hills","Dino Dino Jungle","DK Pass","DK Spaceport","Dry Bones Burnout",
+      "Faraway Oasis","Great ? Block Ruins","Koopa Troopa Beach","Mario Bros. Circuit",
+      "Mario Circuit","Moo Moo Meadows","Peach Beach","Peach Stadium","Rainbow Road",
+      "Salty Salty Speedway","Shy Guy Bazaar","Sky-High Sundae","Starview Peak",
+      "Toad's Factory","Wario Stadium","Wario's Galleon","Whistlestop Summit",
+    ].map(n => ({ name: n, file: toFilename(n) })),
+    costumes: [
+      "aero","all-terrain","aristocrat","aurora","aviator","biker","biker_jr",
+      "burger_bud","conductor","cowboy","dune_rider","engineer","explorer",
+      "farmer","fisherman","food_slinger","gondolier","happi","mariachi",
+      "matsuri","mechanic","oasis","pirate","pit_crew","pro_racer","road_ruffian",
+      "runner","sailor","sightseeing","slope_styler","soft_server","supercharged",
+      "swimwear","touring","vacation","wampire","wicked_wasp","work_crew","yukata",
+    ].map(f => ({ name: fileToDisplayName(f), file: f })),
+    mushrooms: [
+      { name: "3 Mushrooms", file: "3mush" },
+      { name: "2 Mushrooms", file: "2mush" },
+      { name: "1 Mushroom",  file: "1mush" },
+    ],
+  };
+
+  const ASSET_ROI_KEYS = {
+    characters: "char_name",
+    karts:      "kart_name",
+    courses:    "course_name",
+    costumes:   "costume",
+    mushrooms:  "mushroom",
+  };
+
+  const ASSET_HINTS = {
+    characters: n => `Navigate to character select in-game and choose ${n}.`,
+    karts:      n => `Navigate to kart select in-game and choose ${n}.`,
+    courses:    n => `Navigate to course select in-game and choose ${n}.`,
+    costumes:   n => `Navigate to character select, pick a character that has the ${n} costume, and equip it.`,
+    mushrooms:  n => `Start a time trial race with ${n} and wait for racing to begin.`,
   };
 
   // Only canonical screens are shown in the wizard. GHOST, UNKNOWN_RACE_ACTIVE,
@@ -284,6 +366,18 @@
       case "roi_preview":
         liveRoiCrop = msg.data ? `data:image/png;base64,${msg.data}` : null;
         break;
+      case "asset_preview":
+        if (msg.category === templateCategory) {
+          assetTemplateImg = msg.template_img ? `data:image/png;base64,${msg.template_img}` : null;
+          assetLiveCrop    = msg.live_crop    ? `data:image/png;base64,${msg.live_crop}`    : null;
+        }
+        break;
+      case "asset_saved":
+        capturingTemplate = false;
+        if (msg.category === templateCategory) {
+          send({ type: "get_asset_template", category: msg.category, item_name: msg.item_name });
+        }
+        break;
       case "devices_list":
         devices = msg.devices ?? [];
         configuredDevice = msg.configured ?? "";
@@ -377,6 +471,8 @@
       return rois[SELECTION_ROIS[selectionIdx]?.key] ?? null;
     } else if (wizardStep === "hud") {
       return rois[HUD_ROIS[hudIdx]?.key] ?? null;
+    } else if (wizardStep === "templates") {
+      return rois[ASSET_ROI_KEYS[templateCategory]] ?? null;
     }
     return null;
   }
@@ -658,16 +754,25 @@
     engineFrame = null;
   }
 
-  // ── ROI preview poll (screens/selection/hud steps) ────────────────────────────
+  // ── ROI preview poll (screens/selection/hud/templates steps) ─────────────────
   function startRoiPoll() {
     if (_roiPollTimer) return;
     _roiPollTimer = setInterval(() => {
       if (!trackerConnected || !wizardOpen) return;
       if (wizardStep === "screens") {
         send({ type: "test_template", screen: SCREEN_NAMES[screenIdx], roi_key: activeRoiKey });
+      } else if (wizardStep === "templates") {
+        const item = ASSET_ITEMS[templateCategory]?.[templateItemIdx];
+        if (item) send({ type: "get_asset_template", category: templateCategory, item_name: item.file });
       } else {
         const roi = getCurrentRoi();
-        if (roi) send({ type: "get_roi_preview", roi, binary_thresh: currentBinaryThresh });
+        if (!roi) return;
+        const isCostume = wizardStep === "selection" && SELECTION_ROIS[selectionIdx]?.key === "costume";
+        if (isCostume) {
+          send({ type: "get_roi_preview", roi, use_edges: true });
+        } else {
+          send({ type: "get_roi_preview", roi, binary_thresh: currentBinaryThresh });
+        }
       }
     }, 1000);
   }
@@ -736,14 +841,17 @@
   }
 
   function goStep(step) {
-    wizardStep    = step;
-    screenIdx     = 0; selectionIdx = 0; hudIdx = 0;
-    currentScore  = null;
-    templateImg   = null;
-    liveCropImg   = null;
-    liveRoiCrop   = null;
-    hoveredHandle = null;
-    activeRoiKey  = "primary";
+    wizardStep       = step;
+    screenIdx        = 0; selectionIdx = 0; hudIdx = 0;
+    templateCategory = "characters"; templateItemIdx = 0;
+    currentScore     = null;
+    templateImg      = null;
+    liveCropImg      = null;
+    liveRoiCrop      = null;
+    assetTemplateImg = null;
+    assetLiveCrop    = null;
+    hoveredHandle    = null;
+    activeRoiKey     = "primary";
     syncThreshToScreen();
     if (step === "camera") {
       if (!setupComplete) {
@@ -796,8 +904,17 @@
     send({ type: "capture_template", screen: SCREEN_NAMES[screenIdx], roi_key: activeRoiKey });
   }
 
+  function captureAsset() {
+    const item = ASSET_ITEMS[templateCategory]?.[templateItemIdx];
+    if (!item) return;
+    capturingTemplate = true;
+    assetTemplateImg  = null;
+    send({ type: "capture_asset_template", category: templateCategory, item_name: item.file });
+  }
+
   function prevItem() {
     currentScore = null; liveCropImg = null; liveRoiCrop = null;
+    assetTemplateImg = null; assetLiveCrop = null;
     hoveredHandle = null; activeRoiKey = "primary";
     if (wizardStep === "screens") {
       if (screenIdx > 0) screenIdx--; else goStep("camera");
@@ -805,19 +922,45 @@
       if (selectionIdx > 0) selectionIdx--; else goStep("screens");
     } else if (wizardStep === "hud") {
       if (hudIdx > 0) hudIdx--; else goStep("selection");
+    } else if (wizardStep === "templates") {
+      if (templateItemIdx > 0) {
+        templateItemIdx--;
+      } else {
+        const catIdx = ASSET_CATEGORIES.findIndex(c => c.key === templateCategory);
+        if (catIdx > 0) {
+          templateCategory = ASSET_CATEGORIES[catIdx - 1].key;
+          templateItemIdx  = ASSET_ITEMS[templateCategory].length - 1;
+        } else {
+          goStep("hud");
+        }
+      }
     }
     syncThreshToScreen();
   }
 
   function nextItem() {
     currentScore = null; liveCropImg = null; liveRoiCrop = null;
+    assetTemplateImg = null; assetLiveCrop = null;
     hoveredHandle = null; activeRoiKey = "primary";
     if (wizardStep === "screens") {
       if (screenIdx < SCREEN_NAMES.length - 1) screenIdx++; else goStep("selection");
     } else if (wizardStep === "selection") {
       if (selectionIdx < SELECTION_ROIS.length - 1) selectionIdx++; else goStep("hud");
     } else if (wizardStep === "hud") {
-      if (hudIdx < HUD_ROIS.length - 1) hudIdx++; else goStep("done");
+      if (hudIdx < HUD_ROIS.length - 1) hudIdx++; else goStep("templates");
+    } else if (wizardStep === "templates") {
+      const catItems = ASSET_ITEMS[templateCategory];
+      if (templateItemIdx < catItems.length - 1) {
+        templateItemIdx++;
+      } else {
+        const catIdx = ASSET_CATEGORIES.findIndex(c => c.key === templateCategory);
+        if (catIdx < ASSET_CATEGORIES.length - 1) {
+          templateCategory = ASSET_CATEGORIES[catIdx + 1].key;
+          templateItemIdx  = 0;
+        } else {
+          goStep("done");
+        }
+      }
     }
     syncThreshToScreen();
   }
@@ -928,8 +1071,10 @@
     stopEnginePoll();
   }
 
+  $: assetItem = ASSET_ITEMS[templateCategory]?.[templateItemIdx];
+
   // Start/stop the ROI preview poll on editable wizard steps.
-  $: if (wizardOpen && ["screens", "selection", "hud"].includes(wizardStep)) {
+  $: if (wizardOpen && ["screens", "selection", "hud", "templates"].includes(wizardStep)) {
     startRoiPoll();
   } else {
     stopRoiPoll();
@@ -1087,6 +1232,7 @@
               <li><strong>17 game screens</strong> — menu and race state detection</li>
               <li><strong>4 selection areas</strong> — character, kart, costume, and course names</li>
               <li><strong>6 HUD areas</strong> — laps, coins, timestamp, finish, mushrooms</li>
+              <li><strong>Asset templates</strong> — all characters, karts, courses, costumes, and mushroom counts</li>
             </ul>
             <p>Keep your game open during setup. A live preview of your camera feed appears throughout.</p>
             <button class="btn-primary btn-lg" on:click={() => goStep("camera")}>Start Setup →</button>
@@ -1399,16 +1545,20 @@
                   <span class="roi-size">{r[2]-r[0]} × {r[3]-r[1]} px</span>
                 </div>
               {/if}
-              <!-- Threshold slider + live crop -->
-              <div class="thresh-row">
-                <label class="thresh-label">Binarize</label>
-                <input type="range" min="0" max="255" step="1"
-                  bind:value={currentBinaryThresh}
-                  class="thresh-slider" />
-                <span class="thresh-val">{currentBinaryThresh}</span>
-              </div>
+              <!-- Threshold slider (hidden for costume — uses edge detection instead) -->
+              {#if SELECTION_ROIS[selectionIdx]?.key === "costume"}
+                <p class="hint" style="font-size:.65rem">Edge detection (Canny) — background-agnostic</p>
+              {:else}
+                <div class="thresh-row">
+                  <label class="thresh-label">Binarize</label>
+                  <input type="range" min="0" max="255" step="1"
+                    bind:value={currentBinaryThresh}
+                    class="thresh-slider" />
+                  <span class="thresh-val">{currentBinaryThresh}</span>
+                </div>
+              {/if}
               <div class="tmpl-pane">
-                <div class="tmpl-pane-label">Live Crop</div>
+                <div class="tmpl-pane-label">Live Crop{SELECTION_ROIS[selectionIdx]?.key === "costume" ? " (edges)" : ""}</div>
                 {#if liveRoiCrop}
                   <img src={liveRoiCrop} alt="Live ROI crop" class="tmpl-img" />
                 {:else}
@@ -1471,6 +1621,74 @@
             </div>
           </div>
 
+        <!-- TEMPLATES -->
+        {:else if wizardStep === "templates"}
+          <div class="step-two-col">
+            <div class="preview-col">
+              <div class="preview-wrapper">
+                {#if cameraOk}
+                  <video bind:this={videoEl} autoplay playsinline muted class="preview-video"></video>
+                  <canvas bind:this={canvasEl} class="preview-canvas roi-canvas"
+                    on:mousedown={onCanvasMouseDown}
+                    on:mousemove={onCanvasMouseMove}
+                  ></canvas>
+                {:else}
+                  <div class="preview-placeholder">
+                    <span>Camera unavailable</span>
+                    <button class="btn-secondary" style="font-size:.7rem;margin-top:.4rem"
+                      on:click={() => goStep("camera")}>← Fix Camera</button>
+                  </div>
+                {/if}
+              </div>
+              <p class="preview-cap">Live feed · ROI from {ASSET_CATEGORIES.find(c => c.key === templateCategory)?.label ?? ""} step</p>
+            </div>
+            <div class="info-col">
+              <div class="asset-cat-tabs">
+                {#each ASSET_CATEGORIES as cat}
+                  <button class="asset-cat-tab" class:active={templateCategory === cat.key}
+                    on:click={() => {
+                      templateCategory = cat.key;
+                      templateItemIdx  = 0;
+                      assetTemplateImg = null;
+                      assetLiveCrop    = null;
+                      drawRoi();
+                    }}>
+                    {cat.label}
+                  </button>
+                {/each}
+              </div>
+              <div class="item-header">
+                <span class="item-num">{templateItemIdx + 1} / {ASSET_ITEMS[templateCategory]?.length}</span>
+                <h3>{assetItem?.name}</h3>
+              </div>
+              <p class="hint">{ASSET_HINTS[templateCategory]?.(assetItem?.name) ?? ""}</p>
+              <div class="tmpl-compare">
+                <div class="tmpl-pane">
+                  <div class="tmpl-pane-label">Saved Template</div>
+                  {#if assetTemplateImg}
+                    <img src={assetTemplateImg} alt="Saved template" class="tmpl-img" />
+                  {:else}
+                    <div class="tmpl-empty">No template</div>
+                  {/if}
+                </div>
+                <div class="tmpl-pane">
+                  <div class="tmpl-pane-label">Live Crop{templateCategory === "costumes" ? " (edges)" : ""}</div>
+                  {#if assetLiveCrop}
+                    <img src={assetLiveCrop} alt="Live crop" class="tmpl-img" />
+                  {:else}
+                    <div class="tmpl-empty">Live…</div>
+                  {/if}
+                </div>
+              </div>
+              <div class="btn-row">
+                <button class="btn-secondary" on:click={captureAsset} disabled={capturingTemplate}>
+                  {capturingTemplate ? "Saving…" : "Capture Template"}
+                </button>
+              </div>
+              <p class="capture-note"><strong>Capture</strong> saves the live crop as the new template for {assetItem?.name ?? "this item"}.</p>
+            </div>
+          </div>
+
         <!-- DONE -->
         {:else if wizardStep === "done"}
           <div class="step-centred">
@@ -1484,7 +1702,7 @@
 
       </div><!-- /wiz-body -->
 
-      {#if ["screens", "selection", "hud"].includes(wizardStep)}
+      {#if ["screens", "selection", "hud", "templates"].includes(wizardStep)}
         <footer class="wiz-footer">
           <button class="btn-nav" on:click={prevItem}>← Back</button>
           <div class="dot-row">
@@ -1496,9 +1714,13 @@
               {#each SELECTION_ROIS as _, i}
                 <span class="nav-dot nav-dot-lg" class:active={i === selectionIdx}></span>
               {/each}
-            {:else}
+            {:else if wizardStep === "hud"}
               {#each HUD_ROIS as _, i}
                 <span class="nav-dot nav-dot-lg" class:active={i === hudIdx}></span>
+              {/each}
+            {:else if wizardStep === "templates"}
+              {#each ASSET_CATEGORIES as cat, i}
+                <span class="nav-dot nav-dot-lg" class:active={ASSET_CATEGORIES.findIndex(c => c.key === templateCategory) === i}></span>
               {/each}
             {/if}
           </div>
@@ -1652,6 +1874,19 @@
   .item-num     { font-size: 0.67rem; color: #444; flex-shrink: 0; }
   .hint         { font-size: 0.73rem; color: #777; margin: 0; line-height: 1.55; }
   .future-note  { color: #444; font-style: italic; }
+
+  /* Asset category tabs */
+  .asset-cat-tabs {
+    display: flex; flex-wrap: wrap; gap: 0.25rem; margin-bottom: 0.25rem;
+  }
+  .asset-cat-tab {
+    background: #06060c; color: #555;
+    border: 1px solid #1a1a2e; border-radius: 3px;
+    padding: 0.2rem 0.5rem; font-family: inherit; font-size: 0.68rem;
+    cursor: pointer; transition: color 0.12s, background 0.12s;
+  }
+  .asset-cat-tab:hover { background: #0d0d1a; color: #999; }
+  .asset-cat-tab.active { background: #0d0d1a; color: #7eb8f7; border-color: #2a2a5a; }
 
   .score-box {
     display: flex; align-items: center; gap: 0.4rem;

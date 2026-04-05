@@ -36,7 +36,7 @@ from .ipc.protocol import (parse_inbound, emit_ready, emit_screen_change, emit_s
                             emit_error, emit_heartbeat, emit_frame_data, emit_template_score,
                             emit_template_saved, emit_template_images, emit_tells_list, emit_rois_list,
                             emit_camera_paused, emit_camera_resumed, emit_camera_status,
-                            emit_roi_preview)
+                            emit_roi_preview, emit_asset_preview, emit_asset_saved)
 from .utils.camera import build_camera_source
 
 
@@ -259,6 +259,7 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
             return
         roi = msg.get("roi")
         binary_thresh = msg.get("binary_thresh", 170)
+        use_edges = msg.get("use_edges", False)
         if not roi or len(roi) < 4:
             return
         x1, y1, x2, y2 = [int(v) for v in roi]
@@ -269,13 +270,102 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
         if crop.size == 0:
             return
         import base64 as _b64
-        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop.copy()
-        if binary_thresh is not None:
-            _, processed = cv2.threshold(gray, int(binary_thresh), 255, cv2.THRESH_BINARY)
+        if use_edges:
+            from .detection.templates import prepare_text_edges as _pte
+            processed = _pte(crop)
         else:
-            _, processed = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop.copy()
+            if binary_thresh is not None:
+                _, processed = cv2.threshold(gray, int(binary_thresh), 255, cv2.THRESH_BINARY)
+            else:
+                _, processed = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         _, buf = cv2.imencode(".png", processed)
         ipc.emit(emit_roi_preview(_b64.b64encode(buf.tobytes()).decode("ascii")))
+
+    elif t == "get_asset_template":
+        import base64 as _b64
+        frame = current_frame[0]
+        category  = msg.get("category", "")
+        item_name = msg.get("item_name", "")
+        _roi_map = {
+            "characters": settings.get("char_name_roi"),
+            "karts":      settings.get("kart_name_roi"),
+            "courses":    settings.get("course_name_roi"),
+            "costumes":   settings.get("costume_roi"),
+            "mushrooms":  settings.get("mushroom_roi"),
+        }
+        _dir_map = {
+            "characters": "images/characters",
+            "karts":      "images/karts",
+            "courses":    "images/courses",
+            "costumes":   "images/costumes",
+            "mushrooms":  "images/mushrooms",
+        }
+        _roi = _roi_map.get(category)
+        _img_dir = _dir_map.get(category)
+        if not _roi or not _img_dir or not item_name:
+            return
+        from .utils.paths import resource_path as _rp
+        _tmpl_path = _rp(f"{_img_dir}/{item_name}.png")
+        _template_img = None
+        if os.path.exists(_tmpl_path):
+            _tmpl = cv2.imread(_tmpl_path)
+            if _tmpl is not None:
+                _, _buf = cv2.imencode(".png", _tmpl)
+                _template_img = _b64.b64encode(_buf.tobytes()).decode("ascii")
+        _live_crop = None
+        if frame is not None:
+            _x1, _y1, _x2, _y2 = [int(v) for v in _roi]
+            _crop = frame[_y1:_y2, _x1:_x2]
+            if _crop.size > 0:
+                if category == "costumes":
+                    from .detection.templates import prepare_text_edges as _pte
+                    _processed = _pte(_crop)
+                else:
+                    _gray = cv2.cvtColor(_crop, cv2.COLOR_BGR2GRAY) if len(_crop.shape) == 3 else _crop.copy()
+                    _, _processed = cv2.threshold(_gray, 170, 255, cv2.THRESH_BINARY)
+                _, _buf = cv2.imencode(".png", _processed)
+                _live_crop = _b64.b64encode(_buf.tobytes()).decode("ascii")
+        ipc.emit(emit_asset_preview(category, item_name, _template_img, _live_crop))
+
+    elif t == "capture_asset_template":
+        import base64 as _b64
+        frame = current_frame[0]
+        category  = msg.get("category", "")
+        item_name = msg.get("item_name", "")
+        _roi_map = {
+            "characters": settings.get("char_name_roi"),
+            "karts":      settings.get("kart_name_roi"),
+            "courses":    settings.get("course_name_roi"),
+            "costumes":   settings.get("costume_roi"),
+            "mushrooms":  settings.get("mushroom_roi"),
+        }
+        _dir_map = {
+            "characters": "images/characters",
+            "karts":      "images/karts",
+            "courses":    "images/courses",
+            "costumes":   "images/costumes",
+            "mushrooms":  "images/mushrooms",
+        }
+        _roi = _roi_map.get(category)
+        _img_dir = _dir_map.get(category)
+        if not _roi or not _img_dir or not item_name or frame is None:
+            return
+        _x1, _y1, _x2, _y2 = [int(v) for v in _roi]
+        _crop = frame[_y1:_y2, _x1:_x2]
+        if _crop.size == 0:
+            return
+        from .utils.paths import resource_path as _rp
+        _save_path = _rp(f"{_img_dir}/{item_name}.png")
+        if category == "costumes":
+            # Save raw colour — load_template_dir applies edge processing at load time
+            cv2.imwrite(_save_path, _crop)
+        else:
+            # Binarise before saving so the on-disk template matches the live crop space
+            _gray = cv2.cvtColor(_crop, cv2.COLOR_BGR2GRAY) if len(_crop.shape) == 3 else _crop.copy()
+            _, _binary = cv2.threshold(_gray, 170, 255, cv2.THRESH_BINARY)
+            cv2.imwrite(_save_path, _binary)
+        ipc.emit(emit_asset_saved(category, item_name))
 
 
 def _persist_tell_structure(settings, screen_name: str, detector) -> None:
@@ -373,10 +463,9 @@ def run(args):
     mm_player = MinimapPlayer()
 
     # ── IPC server ───────────────────────────────────────────────────────────
-    broadcaster = None
-    if args.ws_port is not None:
-        from .ipc.broadcaster import EventBroadcaster
-        broadcaster = EventBroadcaster(port=args.ws_port)
+    from .ipc.broadcaster import EventBroadcaster
+    ws_port = args.ws_port if args.ws_port is not None else 8765
+    broadcaster = EventBroadcaster(port=ws_port)
 
     ipc = IpcServer(broadcaster=broadcaster)
     if not args.no_ipc:
@@ -442,6 +531,11 @@ def run(args):
     show_debug    = [True]   # Tab toggles this
     current_frame = [None]
     cam_paused    = [False]  # True while setup wizard holds the camera
+
+    from .utils.paths import resource_path as _rp
+    broadcaster.enable_autotemplate(current_frame, settings, detector,
+                                    os.path.dirname(_rp("images")))
+    del _rp
 
     # Previous-state snapshots for on-change IPC emission
     _prev_sel    = (None, None, None, None)   # (character, costume, kart, course)
@@ -673,7 +767,7 @@ def run(args):
         if finish_just_detected and not _prev_finish:
             ipc.emit(emit_finish(
                 finish_state.result,
-                ts_state.total_time,
+                ts.total_time,
                 dict(ts.splits),
             ))
             _prev_finish = True

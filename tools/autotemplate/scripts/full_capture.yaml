@@ -1,0 +1,577 @@
+# Full Template Capture Script
+# Converted from tools/autotemplate/scripts/prompt.md
+#
+# ── Step semantics ──────────────────────────────────────────────────────────────
+#
+#   press: BUTTON          tap and release; combined with wait: N to pause after
+#   hold: BUTTON           hold for `duration` seconds then release
+#   wait: N                pause N seconds (standalone, or after press/replay)
+#   replay: "file.json"    play back a recorded input JSON from recordings/
+#   macro: name            expand a named macro from the `macros` section
+#
+#   screenshot: id         save full 1080p frame → screenshots/{lang}/id.png
+#   tell: screen           capture primary screen-detection ROI → screens/{lang}/id.png
+#                          also saves a full screenshot → screenshots/{lang}/id.png
+#   roi: screen            capture ALL detection ROIs for screen → screens/{lang}/
+#   char: "Name"           capture character name text ROI → characters/{lang}/name.png
+#                          (runner deduplicates within the current language pass)
+#   costume: "Name"        capture costume name text ROI → costumes/{lang}/name.png
+#                          (deduplicates per language pass)
+#   kart: "Name"           capture kart name text ROI → karts/{lang}/name.png
+#   course: "Name"         capture course name text ROI → courses/{lang}/name.png
+#   reconnect: true        reconnect controller to Switch via stored MAC address
+#
+# ROI coordinates are shared/configured once and reused across all languages.
+# The captured template image and full screenshot are always saved per-language.
+# Multiple keys on one step are processed in order: nav → wait → captures.
+# Steps with only capture keys (no press/hold/wait) capture the current frame.
+
+name: "Full Template Capture"
+version: 1
+
+# ── Languages ──────────────────────────────────────────────────────────────────
+# Processed in order. First language must match the current console language.
+# change_language steps run between passes; never before the first or after the last.
+
+languages:
+  - { id: en_uk, name: "English (UK/AU)" }
+  - { id: en_us, name: "English (US)" }
+  - { id: fr_fr, name: "Français (France)" }
+  - { id: fr_ca, name: "Français (Canada)" }
+  - { id: de,    name: "Deutsch" }
+  - { id: es_es, name: "Español (España)" }
+  - { id: es_la, name: "Español (Latinoamérica)" }
+  - { id: it,    name: "Italiano" }
+  - { id: nl,    name: "Nederlands" }
+  - { id: pt_pt, name: "Português (Portugal)" }
+  - { id: pt_br, name: "Português (Brasil)" }
+  - { id: ru,    name: "Русский" }
+  - { id: ja,    name: "日本語" }
+  - { id: zh_tw, name: "中文 (繁體)" }
+  - { id: zh_cn, name: "中文 (简体)" }
+  - { id: ko,    name: "한국어" }
+  - { id: pl,    name: "Polish/English" }
+  - { id: th,    name: "Thai/English" }
+
+# ── Macros ─────────────────────────────────────────────────────────────────────
+
+macros:
+
+  # Reset track-selection cursor to the top-left corner of the grid.
+  # Tilts R stick down to zoom out (same effect as X, avoids accidental double-press).
+  reset_cursor:
+    - { wait: 1.0 }
+    - { rstick_down: 3.0 }
+    - { wait: 1.0 }
+    - { hold: DPAD_LEFT,  duration: 5.0 }
+    - { hold: DPAD_UP,    duration: 3.5 }
+
+  # Use this instead of reset_cursor when already on the course map (no X press needed)
+  reset_map_cursor:
+    - { wait: 1.0 }
+    - { rstick_down: 3.0 }
+    - { wait: 1.0 }
+    - { hold: DPAD_LEFT,  duration: 5.0 }
+    - { hold: DPAD_UP,    duration: 3.5 }
+
+# ── Language Change ─────────────────────────────────────────────────────────────
+# Starting state: HOME screen (MKW closed, cursor back at home row).
+# Navigates to System Settings → Language, selects the next language,
+# confirms the console restart, then reconnects the controller.
+
+change_language:
+  # Navigate from GALLERY icon to System Settings cog (4 rights)
+  - { press: DPAD_RIGHT, wait: 1.0 }
+  - { press: DPAD_RIGHT, wait: 1.0 }
+  - { press: DPAD_RIGHT, wait: 1.0 }
+  - { press: DPAD_RIGHT, wait: 1.0 }
+  - { press: A, duration: 0.3,          wait: 5.0 }   # open System Settings
+  # Scroll down to Language row (16 presses)
+  - { press: DPAD_DOWN,  wait: 1.0 }
+  - { press: DPAD_DOWN,  wait: 1.0 }
+  - { press: DPAD_DOWN,  wait: 1.0 }
+  - { press: DPAD_DOWN,  wait: 1.0 }
+  - { press: DPAD_DOWN,  wait: 1.0 }
+  - { press: DPAD_DOWN,  wait: 1.0 }
+  - { press: DPAD_DOWN,  wait: 1.0 }
+  - { press: DPAD_DOWN,  wait: 1.0 }
+  - { press: DPAD_DOWN,  wait: 1.0 }
+  - { press: DPAD_DOWN,  wait: 1.0 }
+  - { press: DPAD_DOWN,  wait: 1.0 }
+  - { press: DPAD_DOWN,  wait: 1.0 }
+  - { press: DPAD_DOWN,  wait: 1.0 }
+  - { press: DPAD_DOWN,  wait: 1.0 }
+  - { press: DPAD_DOWN,  wait: 1.0 }
+  - { press: DPAD_DOWN,  wait: 1.0 }
+  - { press: A, duration: 0.3,          wait: 1.0 }   # open Language submenu
+  # Hand off to the operator: use arrow keys in the console to scroll to the
+  # correct language entry, then press Enter to resume.
+  - { manual_scroll: true }
+  - { press: A, duration: 0.3,          wait: 1.0 }   # select language
+  - { press: DPAD_DOWN,  wait: 1.0 }
+  - { press: A, duration: 0.3,          wait: 1.0 }   # confirm
+  - { press: A, duration: 0.3,          wait: 20.0 }  # confirm restart — console reboots (~20 s)
+  - { reconnect: true,   wait: 5.0 }   # reconnect controller via stored MAC
+  - { press: A, duration: 0.3,          wait: 5.0 }   # HOME screen loaded; MKW hovered
+
+# ── Main Flow ──────────────────────────────────────────────────────────────────
+# Starting state: HOME screen, MKW hovered and most recently opened, not running.
+# Executed once per language.
+
+flow:
+
+  # ── Launch ────────────────────────────────────────────────────────────────────
+  - { press: A, duration: 0.3, wait: 1.5 }
+  - { press: A, duration: 0.3, wait: 20.0 }   # wait for title screen to fully load
+
+  # ── Title screen ──────────────────────────────────────────────────────────────
+  - { screenshot: title, tell: title }
+
+  - { press: A, duration: 0.3, wait: 3.0 }
+
+  # ── Main menu ─────────────────────────────────────────────────────────────────
+  - { screenshot: mainmenu, roi: mainmenu }
+
+  - { press: A, duration: 0.3, wait: 3.0 }
+
+  # ── Singleplayer menu ─────────────────────────────────────────────────────────
+  - { screenshot: singleplayer, tell: singleplayer }
+
+  # Navigate down to Time Trials (2 presses)
+  - { press: DPAD_DOWN, wait: 0.5 }
+  - { press: DPAD_DOWN, wait: 0.5 }
+
+  # ── Time Trials selection ─────────────────────────────────────────────────────
+  - { screenshot: timetrials, tell: timetrials }
+
+  - { press: A, duration: 0.3, wait: 3.0 }
+
+  # ── Character select ──────────────────────────────────────────────────────────
+  - { screenshot: character_screen, tell: character_screen }
+
+  # ── Characters and costumes ───────────────────────────────────────────────────
+  # Navigation: DPAD_RIGHT moves to the next character; DPAD_DOWN moves to the
+  # next row. Blank grid slots have no char/costume fields.
+  # The runner deduplicates: if a char or costume name has already been saved
+  # this language pass, the capture is skipped.
+
+  # ·· Row 1 ····································································
+  - { char: "Mario" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Luigi" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Peach" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Daisy" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Baby Mario" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Baby Luigi" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Baby Peach" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Baby Daisy" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Nabbit" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Piranha Plant" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Hammer Bro" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Monty Mole" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Mario",      costume: "Touring" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Luigi",      costume: "Touring" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Peach",      costume: "Touring" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Daisy",      costume: "Touring" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Mario",      costume: "Pro Racer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Luigi",      costume: "Pro Racer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Peach",      costume: "Pro Racer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Daisy",      costume: "Pro Racer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Baby Mario", costume: "Pro Racer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Baby Luigi", costume: "Pro Racer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Baby Peach", costume: "Pro Racer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Baby Daisy", costume: "Pro Racer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Mario",      costume: "Dune Rider" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Luigi",      costume: "Oasis" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Daisy",      costume: "Oasis" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Pokey" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Mario",      costume: "Cowboy" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Luigi",      costume: "Farmer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Peach",      costume: "Farmer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Cow" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Mario",      costume: "Sightseeing" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Peach",      costume: "Sightseeing" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Toad",       costume: "Burger Bud" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Yoshi",      costume: "Biker" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Mario",      costume: "Aviator" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Peach",      costume: "Aviator" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Wario",      costume: "Pirate" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "King Boo",   costume: "Pirate" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Mario",      costume: "Happi" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Luigi",      costume: "Happi" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Peach",      costume: "Yukata" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Yoshi",      costume: "Matsuri" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Mario",      costume: "All-Terrain" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Luigi",      costume: "All-Terrain" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Peach",      costume: "Aero" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Daisy",      costume: "Aero" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Luigi",      costume: "Gondolier" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Peach",      costume: "Vacation" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Daisy",      costume: "Vacation" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0 }   # blank — end of row 1
+
+  # ·· Row 2 ····································································
+  - { press: DPAD_DOWN,  wait: 1.5, char: "Yoshi" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Toad" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Koopa Troopa" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Bowser" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Lakitu" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Toadette" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Bowser Jr." }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Baby Rosalina" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Goomba" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Spike" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Sidestepper" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Cheep Cheep" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Yoshi",         costume: "Touring" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Baby Peach",    costume: "Touring" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Baby Daisy",    costume: "Touring" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Baby Rosalina", costume: "Touring" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Yoshi",         costume: "Pro Racer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Toad",          costume: "Pro Racer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Toadette",      costume: "Pro Racer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Koopa Troopa",  costume: "Pro Racer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Baby Rosalina", costume: "Pro Racer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Bowser Jr.",    costume: "Pro Racer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Birdo",         costume: "Pro Racer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "King Boo",      costume: "Pro Racer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Wario",         costume: "Oasis" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Yoshi",         costume: "Aristocrat" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "King Boo",      costume: "Aristocrat" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Peepa" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Wario",         costume: "Wicked Wasp" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Stingby" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Toadette",      costume: "Soft Server" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Yoshi",         costume: "Soft Server" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Wario",         costume: "Biker" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Waluigi",       costume: "Biker" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Bowser",        costume: "Biker" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Bowser Jr.",    costume: "Biker Jr." }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Baby Peach",    costume: "Sailor" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Baby Daisy",    costume: "Sailor" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Baby Rosalina", costume: "Sailor" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Koopa Troopa",  costume: "Sailor" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Lakitu",        costume: "Fisherman" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Para-Biddybud" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Toad",          costume: "Explorer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Toadette",      costume: "Explorer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Donkey Kong",   costume: "All-Terrain" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Bowser",        costume: "All-Terrain" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Pauline",       costume: "Aero" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Rosalina",      costume: "Aero" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Baby Mario",    costume: "Work Crew" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Baby Luigi",    costume: "Work Crew" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Birdo",         costume: "Vacation" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0 }   # blank — end of row 2
+
+  # ·· Row 3 ····················5···············································
+  - { press: DPAD_DOWN,  wait: 1.5, char: "Wario" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Waluigi" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Rosalina" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Pauline" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Birdo" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "King Boo" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Shy Guy" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Donkey Kong" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Dry Bones" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Wiggler" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Cataquack" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Pianta" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Rosalina",      costume: "Touring" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Koopa Troopa",  costume: "Runner" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Rocky Wrench" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Conkdor" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Wario",         costume: "Pro Racer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Waluigi",       costume: "Pro Racer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Rosalina",      costume: "Pro Racer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Bowser",        costume: "Pro Racer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Shy Guy",       costume: "Pit Crew" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Lakitu",        costume: "Pit Crew" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Mario",         costume: "Mechanic" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Luigi",         costume: "Mechanic" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Waluigi",       costume: "Wampire" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Swoop" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Toadette",      costume: "Conductor" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Toad",          costume: "Engineer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Waluigi",       costume: "Mariachi" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Fish Bone" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Coin Coffer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Bowser",        costume: "Supercharged" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Rosalina",      costume: "Aurora" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Shy Guy",       costume: "Slope Styler" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Snowman" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Penguin" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Daisy",         costume: "Swimwear" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Yoshi",         costume: "Swimwear" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Baby Mario",    costume: "Swimwear" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Dolphin" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Baby Peach",    costume: "Explorer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Baby Daisy",    costume: "Explorer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Baby Rosalina", costume: "Explorer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Bowser Jr.",    costume: "Explorer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Koopa Troopa",  costume: "All-Terrain" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Wario",         costume: "Road Ruffian" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Waluigi",       costume: "Road Ruffian" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Chargin' Chuck" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Wario",         costume: "Work Crew" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Koopa Troopa",  costume: "Work Crew" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, char: "Yoshi",         costume: "Food Slinger" }
+
+  # Navigate to end of row 3 and into kart select
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0 }   # blank — end of row 3
+  - { press: DPAD_DOWN,  wait: 1.5 }
+  - { press: A, duration: 0.3, wait: 5.0, _marker: confirm_char }   # confirm character → kart select
+
+  # ── Kart select ───────────────────────────────────────────────────────────────
+  - { screenshot: kart_screen, tell: kart_screen }
+
+  # ·· Kart row 1 ···············································
+  - { kart: "Standard Kart" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Plushbuggy" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Zoom Buggy" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Hot Rod" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Roadster Royale" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Buggybud" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Reel Racer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Carpet Flyer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Big Horn" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Pipe Frame" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0 }   # blank — end of row 1
+
+  # ·· Kart row 2 ···············································
+  - { press: DPAD_DOWN,  wait: 1.5, kart: "Rally Kart" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Baby Blooper" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Chargin' Truck" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Ribbit Revster" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "B Dasher" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Rally Romper" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Bumble V" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Cloud 9" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Li'l Dumpy" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Billdozer" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0 }   # blank — end of row 2
+
+  # ·· Bike row 3 ···············································
+  - { press: DPAD_DOWN,  wait: 1.5, kart: "Standard Bike" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Cute Scoot" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Hyper Pipe" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Tune Thumper" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "W-Twin Chopper" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Dread Sled" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Fin Twin" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Dolphin Dasher" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Loco Moto" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Rallygator" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0 }   # blank — end of row 3
+
+  # ·· Rally bike row 4 ·········································
+  - { press: DPAD_DOWN,  wait: 1.5, kart: "Rally Bike" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Mach Rocket" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Funky Dorrie" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Junkyard Hog" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Lobster Roller" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Stellar Sled" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "R.O.B. H.O.G." }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Blastronaut III" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Mecha Trike" }
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0, kart: "Bowser Bruiser" }
+
+  # Navigate to course select
+  - { press: DPAD_RIGHT, duration: 0.1, wait: 2.0 }   # blank — end of row 4
+  - { press: DPAD_DOWN,  wait: 1.5 }
+  - { press: A, duration: 0.3, wait: 5.5, _marker: confirm_kart }   # confirm kart → course select
+
+  # ── Course select ─────────────────────────────────────────────────────────────
+  # After the kart confirm, the map loads with a random course pre-selected.
+  # Press A on it immediately to capture the COURSE_SELECT tell template for this
+  # language (no course name capture needed — we don't know which course it is).
+  # Then go back and reset to the corner before running the course replays.
+  #
+  # Each course: replay JSON → press A → runner retries (reset + replay) until the
+  # COURSE_SELECT tell scores ≥ 0.900 using the freshly saved per-lang template.
+  # All intermediate courses: press B → reset cursor before the next replay.
+  # Last course (Whistlestop Summit): do NOT press B — continue from here.
+
+  - { press: A, duration: 0.3, wait: 2.0, tell: course_select }   # capture tell from random default course
+  - { exit_course_select: true }
+
+  - { replay: "acorn_heights.json",    wait: 2.0 }
+  - { press: A, duration: 0.3, wait: 2.0, course: "Acorn Heights" }
+  - { exit_course_select: true }
+
+  - { replay: "airship_fortress.json", wait: 2.0 }
+  - { press: A, duration: 0.3, wait: 2.0, course: "Airship Fortress" }
+  - { exit_course_select: true }
+
+  - { replay: "boo_cinema.json",       wait: 2.0 }
+  - { press: A, duration: 0.3, wait: 2.0, course: "Boo Cinema" }
+  - { exit_course_select: true }
+
+  - { replay: "bowsers_castle.json",   wait: 2.0 }
+  - { press: A, duration: 0.3, wait: 2.0, course: "Bowser's Castle" }
+  - { exit_course_select: true }
+
+  - { replay: "cheep_cheep_falls.json", wait: 2.0 }
+  - { press: A, duration: 0.3, wait: 2.0, course: "Cheep Cheep Falls" }
+  - { exit_course_select: true }
+
+  - { replay: "choco_mountain.json",   wait: 2.0 }
+  - { press: A, duration: 0.3, wait: 2.0, course: "Choco Mountain" }
+  - { exit_course_select: true }
+
+  - { replay: "crown_city.json",       wait: 2.0 }
+  - { press: A, duration: 0.3, wait: 2.0, course: "Crown City" }
+  - { exit_course_select: true }
+
+  - { replay: "dandelion_depths.json", wait: 2.0 }
+  - { press: A, duration: 0.3, wait: 2.0, course: "Dandelion Depths" }
+  - { exit_course_select: true }
+
+  - { replay: "desert_hills.json",     wait: 2.0 }
+  - { press: A, duration: 0.3, wait: 2.0, course: "Desert Hills" }
+  - { exit_course_select: true }
+
+  - { replay: "dino_dino_jungle.json", wait: 2.0 }
+  - { press: A, duration: 0.3, wait: 2.0, course: "Dino Dino Jungle" }
+  - { exit_course_select: true }
+
+  - { replay: "dk_pass.json",          wait: 2.0 }
+  - { press: A, duration: 0.3, wait: 2.0, course: "DK Pass" }
+  - { exit_course_select: true }
+
+  - { replay: "dk_spaceport.json",     wait: 2.0 }
+  - { press: A, duration: 0.3, wait: 2.0, course: "DK Spaceport" }
+  - { exit_course_select: true }
+
+  - { replay: "dry_bones_burnout.json", wait: 2.0 }
+  - { press: A, duration: 0.3, wait: 2.0, course: "Dry Bones Burnout" }
+  - { exit_course_select: true }
+
+  - { replay: "faraway_oasis.json",    wait: 2.0 }
+  - { press: A, duration: 0.3, wait: 2.0, course: "Faraway Oasis" }
+  - { exit_course_select: true }
+
+  - { replay: "great_block_ruins.json", wait: 2.0 }
+  - { press: A, duration: 0.3, wait: 2.0, course: "Great Block Ruins" }
+  - { exit_course_select: true }
+
+  - { replay: "koopa_troopa_beach.json", wait: 2.0 }
+  - { press: A, duration: 0.3, wait: 2.0, course: "Koopa Troopa Beach" }
+  - { exit_course_select: true }
+
+  - { replay: "mario_bros_circuit.json", wait: 2.0 }
+  - { press: A, duration: 0.3, wait: 2.0, course: "Mario Bros. Circuit" }
+  - { exit_course_select: true }
+
+  - { replay: "mario_circuit.json",    wait: 2.0 }
+  - { press: A, duration: 0.3, wait: 2.0, course: "Mario Circuit" }
+  - { exit_course_select: true }
+
+  - { replay: "moo_moo_meadows.json",  wait: 2.0 }
+  - { press: A, duration: 0.3, wait: 2.0, course: "Moo Moo Meadows" }
+  - { exit_course_select: true }
+
+  - { replay: "peach_beach.json",      wait: 2.0 }
+  - { press: A, duration: 0.3, wait: 2.0, course: "Peach Beach" }
+  - { exit_course_select: true }
+
+  - { replay: "peach_stadium.json",    wait: 2.0 }
+  - { press: A, duration: 0.3, wait: 2.0, course: "Peach Stadium" }
+  - { exit_course_select: true }
+
+  - { replay: "rainbow_road.json",     wait: 2.0 }
+  - { press: A, duration: 0.3, wait: 2.0, course: "Rainbow Road" }
+  - { exit_course_select: true }
+
+  - { replay: "salty_salty_speedway.json", wait: 2.0 }
+  - { press: A, duration: 0.3, wait: 2.0, course: "Salty Salty Speedway" }
+  - { exit_course_select: true }
+
+  - { replay: "shy_guy_bazaar.json",   wait: 2.0 }
+  - { press: A, duration: 0.3, wait: 2.0, course: "Shy Guy Bazaar" }
+  - { exit_course_select: true }
+
+  - { replay: "sky-high_sundae.json",  wait: 2.0 }
+  - { press: A, duration: 0.3, wait: 2.0, course: "Sky-High Sundae" }
+  - { exit_course_select: true }
+
+  - { replay: "starview_peak.json",    wait: 2.0 }
+  - { press: A, duration: 0.3, wait: 2.0, course: "Starview Peak" }
+  - { exit_course_select: true }
+
+  - { replay: "toads_factory.json",    wait: 2.0 }
+  - { press: A, duration: 0.3, wait: 2.0, course: "Toad's Factory" }
+  - { exit_course_select: true }
+
+  - { replay: "wario_stadium.json",    wait: 2.0 }
+  - { press: A, duration: 0.3, wait: 2.0, course: "Wario Stadium" }
+  - { exit_course_select: true }
+
+  - { replay: "warios_galleon.json",   wait: 2.0 }
+  - { press: A, duration: 0.3, wait: 2.0, course: "Wario's Galleon" }
+  - { exit_course_select: true }
+
+  # Last course — no B press after capture
+  - { replay: "whistlestop_summit.json", wait: 2.0 }
+  - { press: A, duration: 0.3, wait: 2.0, course: "Whistlestop Summit" }
+  - { wait: 1.0 }
+  # Continue directly into time trial flow from here
+
+  # ── Start Time Trial ──────────────────────────────────────────────────────────
+  - { press: A, duration: 0.3, wait: 1.0 }
+  - { press: A, duration: 0.3, wait: 2.0 }
+  - { screenshot: starttimetrial, tell: starttimetrial }
+
+  # Navigate back to Start Replay option
+  - { press: B, wait: 1.0 }
+  - { press: B, wait: 1.0 }
+  - { press: DPAD_DOWN, wait: 1.0 }
+  - { press: A, duration: 0.3, wait: 1.0 }
+  - { press: A, duration: 0.3, wait: 2.0 }
+  - { screenshot: startreplay, tell: startreplay }
+  - { press: A, duration: 0.3, wait: 1.0 }
+
+  # ── In-race captures (replay is running) ──────────────────────────────────────
+  - { wait: 17.0 }
+  - { screenshot: racing_coin, roi: racing-coin }
+  - { roi: racing-flag }
+
+  # Open pause / ghost menu
+  - { press: PLUS, wait: 1.0 }
+  - { screenshot: ghostmenu, roi: ghostmenu }
+
+  # Navigate to Race Against Ghost option (2 downs)
+  - { press: DPAD_DOWN, wait: 1.0 }
+  - { press: DPAD_DOWN, wait: 2.0 }
+  - { screenshot: ghostmenu_red, roi: ghostmenu-red }
+
+  # Confirm → Reset screen
+  - { press: A, duration: 0.3, wait: 2.0 }
+  - { screenshot: reset, roi: reset }
+
+  # Wait for race to finish running, then open race menu
+  - { wait: 20.0 }
+  - { press: PLUS, wait: 1.0 }
+  - { screenshot: racemenu, roi: racemenu }
+
+  # ── Home screen ───────────────────────────────────────────────────────────────
+  - { press: HOME, wait: 2.0 }
+  - { screenshot: home, roi: home2 }
+
+  # Close MKW
+  - { press: X,    wait: 1.0 }
+  - { press: A, duration: 0.3,    wait: 5.0 }
+
+  # ── Gallery ───────────────────────────────────────────────────────────────────
+  # Navigate from MKW icon on home row to the Album / Gallery (down, right×4, A)
+  - { press: DPAD_DOWN,  wait: 1.0 }
+  - { press: DPAD_RIGHT, wait: 1.0 }
+  - { press: DPAD_RIGHT, wait: 1.0 }
+  - { press: DPAD_RIGHT, wait: 1.0 }
+  - { press: DPAD_RIGHT, wait: 1.0 }
+  - { press: A, duration: 0.3,          wait: 10.0 }
+  - { screenshot: gallery, roi: gallery }
+
+  - { press: B, wait: 10.0 }
+
+  # End of flow — HOME screen, GALLERY hovered
+  # Runner executes change_language then repeats flow (if more languages remain)

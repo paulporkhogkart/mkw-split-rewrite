@@ -1,0 +1,50 @@
+# Mushroom count template capture
+#
+# Prerequisites: you need to be in an active time trial race for each count.
+# The easiest way: pick a course, select 3 mushrooms, capture, then quit,
+# re-enter with 2, capture, quit, re-enter with 1.
+#
+# Fill in `preamble` for however you navigate from title → racing screen
+# with 3 mushrooms. Then set up items to navigate back and do 2 and 1.
+#
+# NOTE: mushroom_roi (top-left area) must be visible — you need to be in
+# RACING state, not on a menu.
+
+name: "Mushroom Counts"
+category: mushrooms
+
+preamble: []
+# Example preamble (Time Trials, 3 mushrooms, already in race):
+# preamble:
+#   - { wait: 2.0 }   # just wait for race to settle
+
+items:
+  - name: "3 Mushrooms"
+    file: 3mush
+    before: []
+    capture_wait: 1.0
+
+  # After capturing 3mush, quit race, re-enter with 2 mushrooms
+  # These steps depend entirely on your menu navigation — fill them in.
+  - name: "2 Mushrooms"
+    file: 2mush
+    before:
+      - { PLUS: 0.1 }         # open pause menu
+      - { wait: 0.5 }
+      - { B: 0.1 }            # quit race (exact steps depend on game)
+      - { wait: 2.0 }
+      # ... navigate back to time trial with 2 mushrooms selected
+      # ... and confirm race start
+      - { wait: 3.0 }         # wait for race to begin
+    capture_wait: 1.0
+
+  - name: "1 Mushroom"
+    file: 1mush
+    before:
+      - { PLUS: 0.1 }
+      - { wait: 0.5 }
+      - { B: 0.1 }
+      - { wait: 2.0 }
+      # ... navigate to 1 mushroom and start race
+      - { wait: 3.0 }
+    capture_wait: 1.0

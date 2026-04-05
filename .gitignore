@@ -48,3 +48,6 @@ src-tauri/binaries/
 .vscode/
 .idea/
 *.swp
+
+# Tool .venv
+tools/autotemplate/.venv/

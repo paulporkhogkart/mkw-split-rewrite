@@ -167,3 +167,14 @@ def emit_camera_resumed() -> str:
 
 def emit_roi_preview(data: Optional[str]) -> str:
     return _emit("roi_preview", data=data)
+
+
+def emit_asset_preview(category: str, item_name: str,
+                       template_img: Optional[str],
+                       live_crop: Optional[str]) -> str:
+    return _emit("asset_preview", category=category, item_name=item_name,
+                 template_img=template_img, live_crop=live_crop)
+
+
+def emit_asset_saved(category: str, item_name: str) -> str:
+    return _emit("asset_saved", category=category, item_name=item_name)

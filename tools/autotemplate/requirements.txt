@@ -1,0 +1,8 @@
+# dbus-python must come from the system package manager, NOT pip.
+# Create venv with: python3 -m venv --system-site-packages ~/autotemplate-venv
+# Then: sudo apt install -y python3-dbus
+nxbt>=0.0.9
+opencv-python>=4.8.0
+numpy>=1.24.0
+pyyaml>=6.0
+websockets>=10.0
