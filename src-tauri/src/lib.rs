@@ -1,6 +1,5 @@
 use std::sync::Mutex;
 use tauri::{Emitter, Manager};
-use tauri_plugin_shell::{process::CommandEvent, ShellExt};
 
 /// Silently grant camera and microphone permissions to the webview so getUserMedia
 /// works without native permission popups. Must be called after the window is
@@ -39,21 +38,21 @@ fn grant_media_permissions(window: &tauri::WebviewWindow) {
 }
 
 /// Holds the Python sidecar child process once started. None until start_tracker is called.
-struct SidecarState(Mutex<Option<tauri_plugin_shell::process::CommandChild>>);
+struct SidecarState(Mutex<Option<std::process::Child>>);
 
 /// Spawn (or re-spawn) the tracker sidecar and wire up its stdout listener.
 fn do_spawn_sidecar(app: tauri::AppHandle, state: &SidecarState) {
-    let shell = app.shell();
-
     #[cfg(debug_assertions)]
     let spawn_result = {
         let project_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("project root");
-        shell
-            .command("python")
+        std::process::Command::new("python")
             .args(["-m", "mkw_tracker", "--ws-port", "8765", "--no-display"])
             .current_dir(project_root)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
             .spawn()
     };
 
@@ -64,37 +63,41 @@ fn do_spawn_sidecar(app: tauri::AppHandle, state: &SidecarState) {
             .parent()
             .expect("exe parent dir")
             .to_path_buf();
-        shell
-            .command(exe_dir.join("bin/mkw-tracker-engine.exe").to_string_lossy().as_ref())
+        std::process::Command::new(exe_dir.join("bin/mkw-tracker-engine.exe"))
             .args(["--ws-port", "8765", "--no-display"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
             .spawn()
     };
 
     match spawn_result {
-        Ok((mut rx, child)) => {
-            *state.0.lock().unwrap() = Some(child);
-
-            let handle = app.clone();
-            tauri::async_runtime::spawn(async move {
-                while let Some(event) = rx.recv().await {
-                    match event {
-                        CommandEvent::Stdout(line) => {
-                            let msg = String::from_utf8_lossy(&line);
-                            let _ = handle.emit("tracker-event", msg.as_ref());
+        Ok(mut child) => {
+            // Drain stdout in a background thread, emitting each line as a Tauri event.
+            if let Some(stdout) = child.stdout.take() {
+                let handle = app.clone();
+                std::thread::spawn(move || {
+                    use std::io::BufRead;
+                    for line in std::io::BufReader::new(stdout).lines() {
+                        match line {
+                            Ok(msg) if !msg.is_empty() => {
+                                let _ = handle.emit("tracker-event", &msg);
+                            }
+                            _ => {}
                         }
-                        CommandEvent::Stderr(line) => {
-                            eprintln!("[tracker stderr] {}", String::from_utf8_lossy(&line));
-                        }
-                        CommandEvent::Error(e) => {
-                            eprintln!("[tracker error] {e}");
-                        }
-                        CommandEvent::Terminated(status) => {
-                            eprintln!("[tracker] exited with {status:?}");
-                        }
-                        _ => {}
                     }
-                }
-            });
+                });
+            }
+            // Drain stderr so the pipe buffer never fills and blocks the sidecar.
+            if let Some(stderr) = child.stderr.take() {
+                std::thread::spawn(move || {
+                    use std::io::BufRead;
+                    for line in std::io::BufReader::new(stderr).lines().flatten() {
+                        eprintln!("[tracker] {line}");
+                    }
+                });
+            }
+            *state.0.lock().unwrap() = Some(child);
         }
         Err(e) => eprintln!("Failed to spawn tracker: {e}"),
     }
@@ -115,7 +118,7 @@ fn start_tracker(app: tauri::AppHandle, state: tauri::State<SidecarState>) {
 #[tauri::command]
 fn stop_tracker(state: tauri::State<SidecarState>) {
     if let Ok(mut guard) = state.0.lock() {
-        if let Some(child) = guard.take() {
+        if let Some(mut child) = guard.take() {
             let _ = child.kill();
         }
     }
@@ -125,7 +128,7 @@ fn stop_tracker(state: tauri::State<SidecarState>) {
 #[tauri::command]
 fn restart_tracker(app: tauri::AppHandle, state: tauri::State<SidecarState>) {
     if let Ok(mut guard) = state.0.lock() {
-        if let Some(child) = guard.take() {
+        if let Some(mut child) = guard.take() {
             let _ = child.kill();
         }
     }
@@ -145,16 +148,17 @@ fn open_url(url: String) -> Result<(), String> {
 /// Write a newline-delimited JSON message to the tracker's stdin.
 #[tauri::command]
 fn send_to_tracker(state: tauri::State<SidecarState>, message: String) -> Result<(), String> {
+    use std::io::Write;
     let mut guard = state.0.lock().map_err(|e| e.to_string())?;
     let child = guard.as_mut().ok_or("Tracker not running")?;
+    let stdin = child.stdin.as_mut().ok_or("Tracker stdin not available")?;
     let mut data = message.into_bytes();
     data.push(b'\n');
-    child.write(&data).map_err(|e| e.to_string())
+    stdin.write_all(&data).map_err(|e| e.to_string())
 }
 
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![start_tracker, stop_tracker, restart_tracker, send_to_tracker, open_url])
@@ -170,7 +174,7 @@ pub fn run() {
             if let tauri::RunEvent::Exit = event {
                 if let Some(state) = app_handle.try_state::<SidecarState>() {
                     if let Ok(mut guard) = state.0.lock() {
-                        if let Some(child) = guard.take() {
+                        if let Some(mut child) = guard.take() {
                             let _ = child.kill();
                         }
                     }
