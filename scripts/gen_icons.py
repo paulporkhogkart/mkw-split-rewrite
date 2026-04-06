@@ -57,14 +57,20 @@ def main() -> None:
     }
     for name, size in sizes_png.items():
         path = os.path.join(ICON_DIR, name)
+        if os.path.exists(path):
+            print(f"  skipped {path} (already exists)")
+            continue
         with open(path, "wb") as f:
             f.write(_png_bytes(size, size, R, G, B))
         print(f"  wrote {path}")
 
     ico_path = os.path.join(ICON_DIR, "icon.ico")
-    with open(ico_path, "wb") as f:
-        f.write(_ico_bytes(32, R, G, B))
-    print(f"  wrote {ico_path}")
+    if os.path.exists(ico_path):
+        print(f"  skipped {ico_path} (already exists)")
+    else:
+        with open(ico_path, "wb") as f:
+            f.write(_ico_bytes(32, R, G, B))
+        print(f"  wrote {ico_path}")
 
     print("Icons generated. Commit src-tauri/icons/ to the repo.")
 
