@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, Optional
 
 from ..detection.screen import Screen
-from ..utils.paths import resource_path
+from ..utils.paths import resource_path, data_dir
 
 FINISH_ROI = (1290, 410, 1290 + 90, 410 + 90)
 FINISH_MATCH_THRESHOLD = 0.60
@@ -22,17 +22,29 @@ _FINISH_TEMPLATE_SPECS: list = [
 FINISH_TEMPLATES: Dict[str, tuple] = {}
 
 
-def load_finish_templates():
-    """Load finish overlay templates. Call once at startup."""
-    for path_str, thresh in _FINISH_TEMPLATE_SPECS:
-        name = os.path.splitext(os.path.basename(path_str))[0]
-        tmpl = cv2.imread(resource_path(path_str), cv2.IMREAD_GRAYSCALE)
+def load_finish_templates(switch2_language: str = "en_uk"):
+    """Load finish overlay templates for the given language."""
+    FINISH_TEMPLATES.clear()
+    lang = switch2_language or "en_uk"
+    for base_path, thresh in _FINISH_TEMPLATE_SPECS:
+        # Always resolve through the language directory.
+        prefix = "images/screens/"
+        rest = base_path[len(prefix):]
+        lang_path = f"{prefix}{lang}/{rest}"
+        name = os.path.splitext(os.path.basename(base_path))[0]
+        # Check user data dir first, then resource path.
+        tmpl = None
+        user_path = str(data_dir() / lang_path)
+        if os.path.exists(user_path):
+            tmpl = cv2.imread(user_path, cv2.IMREAD_GRAYSCALE)
         if tmpl is None:
-            print(f"[WARN] FinishDetector: could not load {path_str}")
+            tmpl = cv2.imread(resource_path(lang_path), cv2.IMREAD_GRAYSCALE)
+        if tmpl is None:
+            print(f"[WARN] FinishDetector: could not load {lang_path}")
             continue
         _, binary = cv2.threshold(tmpl, thresh, 255, cv2.THRESH_BINARY)
         FINISH_TEMPLATES[name] = (binary, thresh)
-    print(f"[FinishDetector] {len(FINISH_TEMPLATES)} finish templates loaded")
+    print(f"[FinishDetector] {len(FINISH_TEMPLATES)} finish templates loaded (lang={lang!r})")
 
 
 @dataclass

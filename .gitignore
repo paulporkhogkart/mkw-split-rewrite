@@ -51,3 +51,4 @@ src-tauri/binaries/
 
 # Tool .venv
 tools/autotemplate/.venv/
+old_assets/

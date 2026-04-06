@@ -121,7 +121,13 @@ class EventBroadcaster:
     def attach(self, loop: asyncio.AbstractEventLoop) -> None:
         """Schedule the WS server startup inside an already-running asyncio loop."""
         self._loop = loop
-        loop.create_task(self._serve())
+        self._serve_task = loop.create_task(self._serve())
+
+    def stop(self) -> None:
+        """Cancel the server task so the socket is closed and the port released."""
+        task = getattr(self, "_serve_task", None)
+        if task is not None and not task.done() and self._loop is not None:
+            self._loop.call_soon_threadsafe(task.cancel)
 
     def enable_autotemplate(self, current_frame: list, settings,
                             detector, base_path: str) -> None:
@@ -160,11 +166,20 @@ class EventBroadcaster:
             return
 
         try:
-            async with websockets.serve(self._handler, "0.0.0.0", self._port):
+            async with websockets.serve(self._handler, "0.0.0.0", self._port) as server:
                 logger.info("Event broadcaster listening on ws://localhost:%d", self._port)
-                await asyncio.Future()  # run until the loop is stopped
+                try:
+                    await asyncio.Future()  # run until cancelled
+                except asyncio.CancelledError:
+                    pass
+                finally:
+                    server.close()
+                    await server.wait_closed()
+                    logger.info("Event broadcaster closed (port %d released)", self._port)
         except OSError as exc:
             logger.error("Event broadcaster failed to bind on port %d: %s", self._port, exc)
+        except asyncio.CancelledError:
+            pass
 
     async def _handler(self, websocket) -> None:
         self._clients.add(websocket)

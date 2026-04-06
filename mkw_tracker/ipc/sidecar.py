@@ -39,9 +39,33 @@ class IpcServer:
         writer = threading.Thread(target=self._writer, daemon=True, name="ipc-writer")
         writer.start()
 
-    def stop(self):
-        if self._loop is not None:
-            self._loop.call_soon_threadsafe(self._loop.stop)
+    def stop(self, timeout: float = 3.0):
+        """Gracefully cancel all tasks (closes WS server / port), stop the loop, join thread."""
+        if self._broadcaster is not None:
+            self._broadcaster.stop()
+
+        loop = self._loop
+        if loop is None or not loop.is_running():
+            return
+
+        # Cancel every task still running in the loop (includes _serve / _handler).
+        async def _cancel_all():
+            tasks = [t for t in asyncio.all_tasks(loop) if not t.done()]
+            for t in tasks:
+                t.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+        future = asyncio.run_coroutine_threadsafe(_cancel_all(), loop)
+        try:
+            future.result(timeout=timeout)
+        except Exception:
+            pass
+
+        loop.call_soon_threadsafe(loop.stop)
+
+        if self._thread is not None:
+            self._thread.join(timeout=timeout)
 
     # ── Emit from main thread ────────────────────────────────────────────────
 

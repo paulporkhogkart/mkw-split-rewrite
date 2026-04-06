@@ -15,33 +15,25 @@ MUSHROOM_TEMPLATES: Dict[int, np.ndarray] = {}
 
 
 def load_mushroom_templates(switch2_language: str = None):
-    """Load mushroom quantity templates. Call once at startup."""
+    """Load mushroom quantity templates for the given language."""
     import os
     from ..utils.paths import data_dir
-    lang = switch2_language or ""
+    lang = switch2_language or "en_uk"
     MUSHROOM_TEMPLATES.clear()
 
     def _load_mush(count: int, filename: str) -> bool:
-        # Try language-specific path first
-        if lang:
-            lang_rel  = f"images/mushrooms/{lang}/{filename}"
-            user_path = str(data_dir() / lang_rel)
-            if os.path.exists(user_path):
-                tmpl = cv2.imread(user_path, cv2.IMREAD_GRAYSCALE)
-                if tmpl is not None:
-                    _, binary = cv2.threshold(tmpl, 170, 255, cv2.THRESH_BINARY)
-                    MUSHROOM_TEMPLATES[count] = binary
-                    return True
-            tmpl = cv2.imread(resource_path(lang_rel), cv2.IMREAD_GRAYSCALE)
+        # Always resolve through the language directory.
+        lang_rel  = f"images/mushrooms/{lang}/{filename}"
+        user_path = str(data_dir() / lang_rel)
+        if os.path.exists(user_path):
+            tmpl = cv2.imread(user_path, cv2.IMREAD_GRAYSCALE)
             if tmpl is not None:
                 _, binary = cv2.threshold(tmpl, 170, 255, cv2.THRESH_BINARY)
                 MUSHROOM_TEMPLATES[count] = binary
                 return True
-        # Fall back to base path
-        base_rel = f"images/mushrooms/{filename}"
-        tmpl = cv2.imread(resource_path(base_rel), cv2.IMREAD_GRAYSCALE)
+        tmpl = cv2.imread(resource_path(lang_rel), cv2.IMREAD_GRAYSCALE)
         if tmpl is None:
-            print(f"[WARN] MushroomTracker: could not load {base_rel}")
+            print(f"[WARN] MushroomTracker: could not load {lang_rel}")
             return False
         _, binary = cv2.threshold(tmpl, 170, 255, cv2.THRESH_BINARY)
         MUSHROOM_TEMPLATES[count] = binary

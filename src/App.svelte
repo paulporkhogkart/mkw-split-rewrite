@@ -94,6 +94,7 @@
   let setupComplete = true;
   let wizardOpen = false;
   let wizardStep = "language";
+  let resetConfirmPending = false;
   let screenIdx = 0, selectionIdx = 0, hudIdx = 0;
 
   let tells = [];
@@ -153,7 +154,7 @@
   $: if (_gainNode) _gainNode.gain.value = feedMuted ? 0 : feedVolume;
 
   // ── Wizard step definitions ───────────────────────────────────────────────────
-  const FIRST_TIME_STEPS = ["language", "done"];
+  const FIRST_TIME_STEPS = ["language", "camera", "done"];
   const RERUN_STEPS      = ["language", "camera", "screens", "selection", "hud", "templates", "done"];
   const STEP_LABELS = {
     language: "Language", camera: "Camera", screens: "Screens",
@@ -890,7 +891,7 @@
   function closeWizard() {
     stopRoiPoll();
     if (trackerCameraPaused) { send({type:"resume_camera"}); trackerCameraPaused=false; }
-    wizardOpen=false;
+    wizardOpen=false; resetConfirmPending=false;
   }
   function completeSetup() {
     send({type:"mark_setup_complete"}); setupComplete=true; closeWizard();
@@ -900,7 +901,7 @@
     templateCategory="characters"; templateItemIdx=0;
     currentScore=null; templateImg=null; liveCropImg=null;
     liveRoiCrop=null; assetTemplateImg=null; assetLiveCrop=null;
-    hoveredHandle=null; activeRoiKey="primary"; syncThreshToScreen();
+    hoveredHandle=null; activeRoiKey="primary"; resetConfirmPending=false; syncThreshToScreen();
     if (step==="camera") {
       // Ask Python to open its camera if not already open
       if (pythonCameraStatus!=="ok") {
@@ -1506,39 +1507,6 @@
   </div><!-- /main-grid -->
 </div><!-- /app -->
 
-<!-- ═══════════════════════════════════════════════════════════════════════════ -->
-<!--  FIRST-TIME SETUP MODAL (simplified: language only)                        -->
-<!-- ═══════════════════════════════════════════════════════════════════════════ -->
-
-{#if !setupComplete && !wizardOpen}
-  <div class="modal-backdrop">
-    <div class="ftmodal">
-      <div class="ftm-icon">🏁</div>
-      <h2 class="ftm-title">Welcome to MKW Tracker</h2>
-      <p class="ftm-desc">Choose your languages before we begin. You can change these anytime via Setup.</p>
-
-      <div class="ftm-form">
-        <div class="ftm-row">
-          <label class="ftm-label" for="ft-app-lang">Application Language</label>
-          <select id="ft-app-lang" bind:value={appLanguage} on:change={onAppLanguageChange}>
-            {#each LANGUAGES as l}<option value={l.id}>{l.name}</option>{/each}
-          </select>
-        </div>
-        <div class="ftm-row">
-          <label class="ftm-label" for="ft-sw2-lang">Switch 2 System Language</label>
-          <select id="ft-sw2-lang" bind:value={switch2Language} on:change={onSwitch2LanguageChange}>
-            {#each LANGUAGES as l}<option value={l.id}>{l.name}</option>{/each}
-          </select>
-          <p class="ftm-hint">Determines which image templates are used for detection.</p>
-        </div>
-      </div>
-
-      <button class="btn-primary btn-lg ftm-continue" on:click={() => { send({type:"mark_setup_complete"}); setupComplete=true; }}>
-        Continue →
-      </button>
-    </div>
-  </div>
-{/if}
 
 <!-- ═══════════════════════════════════════════════════════════════════════════ -->
 <!--  WIZARD DIALOG (re-run setup: camera, screens, selection, hud, templates)  -->
@@ -1582,11 +1550,7 @@
                 <p class="hint lang-hint">{tr("lang.sw2_hint")}</p>
               </div>
             </div>
-            {#if setupComplete}
-              <button class="btn-primary btn-lg" on:click={()=>goStep("camera")}>{tr("lang.continue")}</button>
-            {:else}
-              <button class="btn-primary btn-lg" on:click={()=>goStep("done")}>{tr("lang.continue")}</button>
-            {/if}
+            <button class="btn-primary btn-lg" on:click={()=>goStep("camera")}>{tr("lang.continue")}</button>
           </div>
 
         <!-- ── CAMERA step ──────────────────────────────────────────────── -->
@@ -1663,6 +1627,22 @@
                 </div>
               {/if}
 
+              {#if !setupComplete}
+                <div class="cam-prereq">
+                  <span class="cam-prereq-title">Required — enable Windows camera sharing</span>
+                  <p class="cam-prereq-body">MKW Tracker needs simultaneous access to the same capture card as the app preview. Windows blocks this by default. Do this once before continuing:</p>
+                  <ol class="cam-steps">
+                    <li>Click <strong>Open Windows Camera Settings →</strong> below</li>
+                    <li>Find your capture card → <strong>Advanced camera options</strong> → <strong>Edit</strong></li>
+                    <li>Turn on <strong>"Allow multiple apps to use camera at the same time"</strong></li>
+                    <li>Return here</li>
+                  </ol>
+                  <div class="cam-prereq-actions">
+                    <button class="btn-primary" on:click={() => invoke("open_url",{url:"ms-settings:camera"}).catch(()=>{})}>Open Windows Camera Settings →</button>
+                  </div>
+                </div>
+              {/if}
+
               {#if pythonCameraOk && cameraStatus === "busy"}
                 <div class="cam-troubleshoot">
                   <span class="cam-troubleshoot-title">Your capture card is blocking simultaneous access</span>
@@ -1699,9 +1679,15 @@
                 <p class="hint">Both feeds must show your capture card output before you can continue.</p>
                 <div class="cam-nav">
                   <button class="btn-nav" on:click={()=>goStep("language")}>← Back</button>
-                  <button class="btn-primary" disabled={!bothCamerasOk} on:click={()=>goStep("screens")}>
-                    Next: Screen Detection →
-                  </button>
+                  {#if setupComplete}
+                    <button class="btn-primary" disabled={!bothCamerasOk} on:click={()=>goStep("screens")}>
+                      Next: Screen Detection →
+                    </button>
+                  {:else}
+                    <button class="btn-primary" disabled={!bothCamerasOk} on:click={completeSetup}>
+                      Finish Setup →
+                    </button>
+                  {/if}
                 </div>
               </div>
             </div>
@@ -1947,6 +1933,22 @@
             <p>Your templates are saved and ready. The tracker will use them for screen detection immediately.</p>
             <p>Re-run Setup anytime if detection quality degrades.</p>
             <button class="btn-primary btn-lg" on:click={completeSetup}>Close Setup</button>
+
+            <div class="reset-defaults-section">
+              {#if !resetConfirmPending}
+                <button class="btn-reset-defaults" on:click={() => resetConfirmPending = true}>
+                  Reset all ROIs &amp; thresholds to defaults
+                </button>
+              {:else}
+                <p class="reset-confirm-label">This will clear all custom ROIs and thresholds. Are you sure?</p>
+                <div class="reset-confirm-row">
+                  <button class="btn-reset-confirm" on:click={() => { send({type:"reset_to_defaults"}); resetConfirmPending = false; }}>
+                    Yes, reset to defaults
+                  </button>
+                  <button class="btn-nav" on:click={() => resetConfirmPending = false}>Cancel</button>
+                </div>
+              {/if}
+            </div>
           </div>
         {/if}
 
@@ -2250,20 +2252,6 @@
   }
   .wiz-backdrop { align-items: stretch; padding: 32px; }
 
-  /* ── First-time modal ─────────────────────────────────────────── */
-  .ftmodal {
-    background: #06060e; border: 1px solid #1e1e2e; border-radius: 8px;
-    padding: 2rem; max-width: 460px; width: 100%; text-align: center;
-    display: flex; flex-direction: column; align-items: center; gap: 1rem;
-  }
-  .ftm-icon  { font-size: 2.5rem; }
-  .ftm-title { font-size: 1.1rem; color: #7eb8f7; }
-  .ftm-desc  { font-size: .78rem; color: #777; line-height: 1.6; }
-  .ftm-form  { width: 100%; display: flex; flex-direction: column; gap: .9rem; text-align: left; }
-  .ftm-row   { display: flex; flex-direction: column; gap: .3rem; }
-  .ftm-label { font-size: .72rem; color: #888; }
-  .ftm-hint  { font-size: .65rem; color: #555; margin-top: 2px; }
-  .ftm-continue { margin-top: .5rem; }
 
   /* ── Wizard dialog ────────────────────────────────────────────── */
   .wiz-dialog {
@@ -2307,6 +2295,13 @@
   .step-centred h2 { color: #7eb8f7; font-size: 1.05rem; }
   .step-centred p  { font-size: .78rem; color: #777; line-height: 1.65; }
   .done-check { font-size: 2.2rem; color: #4caf50; }
+  .reset-defaults-section { margin-top: .5rem; padding-top: .75rem; border-top: 1px solid #1a1a2e; display: flex; flex-direction: column; align-items: center; gap: .45rem; }
+  .btn-reset-defaults { background: none; border: 1px solid #3a2020; color: #7a4040; font-size: .7rem; padding: .3rem .75rem; border-radius: 4px; cursor: pointer; transition: color .12s, border-color .12s; }
+  .btn-reset-defaults:hover { color: #ef4444; border-color: rgba(239,68,68,.4); }
+  .reset-confirm-label { font-size: .72rem; color: #999; margin: 0; }
+  .reset-confirm-row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; justify-content: center; }
+  .btn-reset-confirm { background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.35); color: #ef4444; font-size: .72rem; padding: .3rem .75rem; border-radius: 4px; cursor: pointer; }
+  .btn-reset-confirm:hover { background: rgba(239,68,68,.2); }
 
   /* Step: two-column */
   .step-two-col { display: flex; gap: 1rem; align-items: flex-start; }
@@ -2347,6 +2342,14 @@
   .cam-below   { display: flex; flex-direction: column; gap: .65rem; }
   .cam-actions { display: flex; flex-direction: column; gap: .3rem; }
   .cam-nav     { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+  .cam-prereq {
+    padding: .55rem .7rem; border-radius: 4px;
+    background: rgba(126,184,247,.07); border: 1px solid rgba(126,184,247,.25);
+    display: flex; flex-direction: column; gap: .3rem;
+  }
+  .cam-prereq-title   { font-size: .72rem; color: #7eb8f7; font-weight: 600; }
+  .cam-prereq-body    { font-size: .68rem; color: #666; margin: 0; line-height: 1.55; }
+  .cam-prereq-actions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-top: .15rem; }
   .cam-troubleshoot {
     padding: .55rem .7rem; border-radius: 4px;
     background: rgba(239,68,68,.05); border: 1px solid rgba(239,68,68,.2);

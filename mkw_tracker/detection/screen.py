@@ -1,4 +1,5 @@
 """Screen enum, TRANSITIONS graph, Tell dataclass, and ScreenDetector."""
+import copy
 import time
 import cv2
 import numpy as np
@@ -159,19 +160,17 @@ class Tell:
         import os
 
         def _load_one(rel_path: str) -> Optional[np.ndarray]:
-            # Try language-specific path first (screens only)
             if switch2_language:
+                # Always resolve through the language directory — no fallback to
+                # base path, so stale/non-language templates are never silently used.
                 lang_path = _inject_language(rel_path, switch2_language)
-                if lang_path != rel_path:
-                    user_lang = str(data_dir() / lang_path)
-                    if os.path.exists(user_lang):
-                        img = cv2.imread(user_lang, cv2.IMREAD_GRAYSCALE)
-                        if img is not None:
-                            return img
-                    img = cv2.imread(resource_path(lang_path), cv2.IMREAD_GRAYSCALE)
+                user_lang = str(data_dir() / lang_path)
+                if os.path.exists(user_lang):
+                    img = cv2.imread(user_lang, cv2.IMREAD_GRAYSCALE)
                     if img is not None:
                         return img
-            # Fall back to base path
+                return cv2.imread(resource_path(lang_path), cv2.IMREAD_GRAYSCALE)
+            # No language configured — load from base path
             user = str(data_dir() / rel_path)
             if os.path.exists(user):
                 img = cv2.imread(user, cv2.IMREAD_GRAYSCALE)
@@ -363,9 +362,13 @@ class ScreenDetector:
         self.on_screen_change = on_screen_change
         self.unknown_recheck_interval = unknown_recheck_interval
         self._switch2_language = switch2_language
-
-        self._tells_by_screen: Dict[Screen, Tell] = {t.screen: t for t in tells}
-        for tell in tells:
+        # Keep the original tell list so reset_to_defaults() can rebuild from
+        # pristine copies.  Never mutate _tells_spec items directly.
+        self._tells_spec = tells
+        # Work on deep copies so module-level TELLS objects stay unmodified.
+        _copies = [copy.deepcopy(t) for t in tells]
+        self._tells_by_screen: Dict[Screen, Tell] = {t.screen: t for t in _copies}
+        for tell in _copies:
             tell.load(switch2_language)
 
         self.current_screen: Screen = Screen.UNKNOWN
@@ -498,6 +501,16 @@ class ScreenDetector:
         for tell in self._tells_by_screen.values():
             tell.load(switch2_language)
         print(f"[ScreenDetector] reloaded templates for lang={switch2_language!r}")
+
+    # ------------------------------------------------------------------
+    def reset_to_defaults(self):
+        """Discard all user ROI/threshold edits and rebuild tells from the
+        hardcoded TELLS defaults, reloading templates for the current language."""
+        _copies = [copy.deepcopy(t) for t in self._tells_spec]
+        self._tells_by_screen = {t.screen: t for t in _copies}
+        for tell in _copies:
+            tell.load(self._switch2_language)
+        print(f"[ScreenDetector] reset tells to defaults (lang={self._switch2_language!r})")
 
     # ------------------------------------------------------------------
     def force_screen(self, screen: Screen):

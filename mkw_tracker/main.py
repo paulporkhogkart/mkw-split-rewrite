@@ -9,10 +9,11 @@ import cv2
 import numpy as np
 
 from .database.connection import get_connection, close_connection
-from .database.config_repo import get_config as _get_config_direct
+from .database.config_repo import get_config as _get_config_direct, delete_configs_like
 from .database.migrations import apply_migrations
 from .database.replay_repo import export_mkwreplay
 from .config.settings import get_settings
+from .config.defaults import Defaults
 from .detection.screen import ScreenDetector
 from .detection.selection import SelectionTracker
 from .race.laps import LapTracker
@@ -75,6 +76,7 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
             detector.reload_language(_lang)
             if tracker is not None:
                 tracker.reload_language(_lang)
+            load_finish_templates(switch2_language=_lang)
             load_mushroom_templates(switch2_language=_lang)
 
     elif t == "get_state":
@@ -122,6 +124,47 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
     elif t == "mark_setup_complete":
         settings.update("setup_complete", 1)
         setup_mode[0] = False
+
+    elif t == "reset_to_defaults":
+        # 1. Wipe all persisted tell overrides from the DB.
+        for _pat in ("tell_roi_%", "tell_thresh_%", "tell_req_also_%",
+                     "tell_alt_%", "tell_and_thresh_%", "tell_alt_thresh_%"):
+            delete_configs_like(_pat)
+        # 2. Reset all ROI and detection constants to Defaults (keep language /
+        #    camera_device / setup_complete untouched).
+        _d = Defaults()
+        _roi_and_numeric_keys = [
+            "lap_current_roi", "lap_total_roi",
+            "coin_left_roi", "coin_right_roi",
+            "finish_roi", "mushroom_roi", "minimap_roi",
+            "char_name_roi", "costume_roi", "kart_name_roi", "course_name_roi",
+            "selection_match_threshold", "char_confirm_frames", "costume_loss_frames",
+            "lap_digit_threshold", "coin_digit_threshold",
+            "timestamp_digit_threshold", "finish_match_threshold", "finish_confirm_frames",
+            "mushroom_match_threshold", "mushroom_loss_frames", "mushroom_gain_frames",
+            "confirm_loss_frames",
+        ]
+        _defaults_dict = _d.as_dict()
+        for _k in _roi_and_numeric_keys:
+            if _k in _defaults_dict:
+                settings.update(_k, _defaults_dict[_k])
+        settings.reload()
+        # 3. Rebuild in-memory tells from hardcoded defaults.
+        detector.reset_to_defaults()
+        # 4. Emit updated state to the frontend.
+        ipc.emit(emit_tells_list(detector.get_tells_config()))
+        ipc.emit(emit_rois_list({
+            "char_name":   settings.get("char_name_roi"),
+            "costume":     settings.get("costume_roi"),
+            "kart_name":   settings.get("kart_name_roi"),
+            "course_name": settings.get("course_name_roi"),
+            "lap_current": settings.get("lap_current_roi"),
+            "lap_total":   settings.get("lap_total_roi"),
+            "coin_left":   settings.get("coin_left_roi"),
+            "coin_right":  settings.get("coin_right_roi"),
+            "finish":      settings.get("finish_roi"),
+            "mushroom":    settings.get("mushroom_roi"),
+        }))
 
     elif t == "list_devices":
         from .utils.camera import list_dshow_video_devices
@@ -409,6 +452,38 @@ def _persist_tell_structure(settings, screen_name: str, detector) -> None:
         settings.update(f"tell_alt_thresh_{sn}", alt_thresh)
 
 
+_cleanup_done = False
+
+
+def _do_cleanup(ctypes_lib, cap, ipc):
+    """Release all resources. Safe to call more than once."""
+    global _cleanup_done
+    if _cleanup_done:
+        return
+    _cleanup_done = True
+    try:
+        ctypes_lib.windll.winmm.timeEndPeriod(1)
+    except Exception:
+        pass
+    try:
+        if cap is not None:
+            cap.release()
+    except Exception:
+        pass
+    try:
+        cv2.destroyAllWindows()
+    except Exception:
+        pass
+    try:
+        ipc.stop()          # cancels WS server task → releases port 8765
+    except Exception:
+        pass
+    try:
+        close_connection()
+    except Exception:
+        pass
+
+
 def run(args):
     # ── Database setup ───────────────────────────────────────────────────────
     apply_migrations()
@@ -419,7 +494,7 @@ def run(args):
     switch2_language = settings.get("switch2_language", "en_uk") or "en_uk"
 
     # ── Template loading ─────────────────────────────────────────────────────
-    load_finish_templates()
+    load_finish_templates(switch2_language=switch2_language)
     load_mushroom_templates(switch2_language=switch2_language)
 
     # ── Tracker construction ─────────────────────────────────────────────────
@@ -463,9 +538,10 @@ def run(args):
             _tell.alt_roi        = None
         if _alt_thresh_ov is not None:
             _tell.alt_binary_thresh = int(_alt_thresh_ov)
-    # Re-load templates now that required_also / alt paths may have changed
+    # Re-load templates now that required_also / alt paths may have changed.
+    # Must pass switch2_language so _inject_language fires correctly.
     for _tell in detector._tells_by_screen.values():
-        _tell.load()
+        _tell.load(switch2_language)
 
     tracker   = SelectionTracker(purge_tight=args.purge_tight,
                                   switch2_language=switch2_language)
@@ -486,6 +562,18 @@ def run(args):
     ipc = IpcServer(broadcaster=broadcaster)
     if not args.no_ipc:
         ipc.start()
+
+    import ctypes as _ctypes
+    import atexit as _atexit
+
+    # Register cleanup so the WS port is released even on unexpected exits.
+    # cap is None here but gets updated via _cap_ref before the loop runs.
+    _cap_ref = [None]
+
+    def _atexit_cleanup():
+        _do_cleanup(_ctypes, _cap_ref[0], ipc)
+
+    _atexit.register(_atexit_cleanup)
 
     lifecycle = RaceLifecycle(
         selection=tracker,
@@ -512,7 +600,6 @@ def run(args):
     # Set Windows timer resolution to 1ms for the lifetime of this process.
     # The default is 15.6ms, which makes cv2.waitKey(1) / Event.wait(0.001)
     # sleep for up to 15.6ms — the primary cause of variable input lag.
-    import ctypes as _ctypes
     _ctypes.windll.winmm.timeBeginPeriod(1)
 
     configured_device = settings.get("camera_device", "") or None
@@ -534,6 +621,7 @@ def run(args):
             cap = None
             ipc.emit(emit_camera_status(ok=False, error=str(_e)))
             print(f"[Camera] Failed to open: {_e}")
+    _cap_ref[0] = cap   # atexit cleanup reads this
 
     ipc.emit(emit_ready(
         version="dev" if args.no_ipc else "sidecar",
@@ -603,6 +691,7 @@ def run(args):
                     except Exception as _e:
                         cap = None
                         ipc.emit(emit_camera_status(ok=False, error=str(_e)))
+                    _cap_ref[0] = cap
                     cam_paused[0] = False
                     ipc.emit(emit_camera_resumed())
                 else:
@@ -667,6 +756,7 @@ def run(args):
                     cap = None
                     ipc.emit(emit_camera_status(ok=False, error=str(_e)))
                     print(f"[Camera] open_camera failed: {_e}")
+                _cap_ref[0] = cap
             else:
                 _handle_ipc_command(msg, ipc, detector, settings,
                                      minimap, lifecycle, show_debug, cap,
@@ -901,12 +991,7 @@ def run(args):
             if key == ord("d"):
                 _debug_dump(frame, laps, coins, ts, mush)
 
-    _ctypes.windll.winmm.timeEndPeriod(1)
-    if cap is not None:
-        cap.release()
-    cv2.destroyAllWindows()
-    close_connection()
-    import os as _os; _os._exit(0)
+    _do_cleanup(_ctypes, cap, ipc)
 
 
 def _debug_dump(frame, laps, coins, ts, mush):

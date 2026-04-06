@@ -41,6 +41,13 @@ def get_all_config() -> dict:
     return result
 
 
+def delete_configs_like(pattern: str):
+    """Delete all config rows whose key matches a SQL LIKE pattern (e.g. 'tell_roi_%')."""
+    conn = get_connection()
+    conn.execute("DELETE FROM config WHERE key LIKE ?", (pattern,))
+    conn.commit()
+
+
 def ensure_defaults(defaults: dict):
     """Insert default values for any keys not already in the DB."""
     conn = get_connection()

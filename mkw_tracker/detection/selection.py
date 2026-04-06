@@ -71,12 +71,9 @@ COURSE_NAME_ROI = (163,  387, 647,  462)
 SELECTION_MATCH_THRESHOLD = 0.7
 
 
-def _load_lang_dir(lang_dir: str, base_dir: str, **kwargs) -> dict:
-    """Load templates from lang_dir; fall back to base_dir if empty."""
-    templates = load_template_dir(lang_dir, **kwargs)
-    if not templates and lang_dir != base_dir:
-        templates = load_template_dir(base_dir, **kwargs)
-    return templates
+def _load_lang_dir(lang_dir: str, **kwargs) -> dict:
+    """Load templates from the language-specific directory. No base-path fallback."""
+    return load_template_dir(lang_dir, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -133,10 +130,10 @@ class SelectionTracker:
             for d in (char_dir, costume_dir, kart_dir, course_dir):
                 purge_tight_pngs(d)
 
-        self._char_templates    = _load_lang_dir(char_dir,    "images/characters")
-        self._costume_templates = _load_lang_dir(costume_dir, "images/costumes", white_text=True)
-        self._kart_templates    = _load_lang_dir(kart_dir,    "images/karts")
-        self._course_templates  = _load_lang_dir(course_dir,  "images/courses")
+        self._char_templates    = _load_lang_dir(char_dir)
+        self._costume_templates = _load_lang_dir(costume_dir, white_text=True)
+        self._kart_templates    = _load_lang_dir(kart_dir)
+        self._course_templates  = _load_lang_dir(course_dir)
 
         # ROIs — read from settings so wizard edits take effect after restart
         from ..config.settings import get_settings as _gs
@@ -297,10 +294,10 @@ class SelectionTracker:
         costume_dir = f"images/costumes/{lang}"   if lang else "images/costumes"
         kart_dir    = f"images/karts/{lang}"      if lang else "images/karts"
         course_dir  = f"images/courses/{lang}"    if lang else "images/courses"
-        self._char_templates    = _load_lang_dir(char_dir,    "images/characters")
-        self._costume_templates = _load_lang_dir(costume_dir, "images/costumes", white_text=True)
-        self._kart_templates    = _load_lang_dir(kart_dir,    "images/karts")
-        self._course_templates  = _load_lang_dir(course_dir,  "images/courses")
+        self._char_templates    = _load_lang_dir(char_dir)
+        self._costume_templates = _load_lang_dir(costume_dir, white_text=True)
+        self._kart_templates    = _load_lang_dir(kart_dir)
+        self._course_templates  = _load_lang_dir(course_dir)
         if self.state.character:
             self._rebuild_costume_subset(self.state.character)
         print(f"[SelectionTracker] reloaded for lang={lang!r}: "
