@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "MKW Split",
+  "productName": "mkw-tracker",
   "version": "0.2.4",
   "identifier": "com.paulporkhogkart.mkw-tracker",
   "build": {
