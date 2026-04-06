@@ -65,7 +65,7 @@ fn do_spawn_sidecar(app: tauri::AppHandle, state: &SidecarState) {
             .expect("exe parent dir")
             .to_path_buf();
         shell
-            .command(exe_dir.join("bin/mkw-tracker-x86_64-pc-windows-msvc.exe").to_string_lossy().as_ref())
+            .command(exe_dir.join("bin/mkw-tracker-engine.exe").to_string_lossy().as_ref())
             .args(["--ws-port", "8765", "--no-display"])
             .spawn()
     };

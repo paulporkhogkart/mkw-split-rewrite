@@ -696,6 +696,7 @@ def run(args):
                     if cap is not None:
                         cap.release()
                         cap = None
+                    current_frame[0] = None
                     try:
                         cap = build_camera_source(device_name=_dev)
                         _ret, _frame = cap.read()
@@ -754,6 +755,7 @@ def run(args):
                 if cap is not None:
                     cap.release()
                     cap = None
+                current_frame[0] = None
                 try:
                     _dev = settings.get("camera_device", "") or None
                     cap = build_camera_source(device_name=_dev)

@@ -915,11 +915,35 @@
     if (step==="camera") {
       // Ask Python to open its camera if not already open
       if (pythonCameraStatus!=="ok") {
-        pythonCameraStatus="idle"; engineFrame=null; send({type:"open_camera"});
+        pythonCameraStatus="idle"; engineFrame=null;
+        if (!setupComplete) {
+          // First-time setup: browser picks a device first, pre-configures Python to
+          // match it, then both open simultaneously. This prevents them auto-selecting
+          // different devices. The camera_status handler still acts as a fallback sync
+          // (and now browserDevices is guaranteed populated when it fires).
+          (async () => {
+            await loadBrowserDevices();
+            startCamera(selectedBrowserDeviceId || undefined);
+            if (selectedBrowserDeviceId && devices.length > 0) {
+              const chosen = browserDevices.find(d => d.deviceId === selectedBrowserDeviceId);
+              if (chosen) {
+                const cleanLabel = chosen.label.replace(/\s*\([0-9a-f:]+\)\s*$/i, "").trim();
+                const match = devices.find(d =>
+                  d.toLowerCase() === cleanLabel.toLowerCase() ||
+                  d.toLowerCase().includes(cleanLabel.toLowerCase()) ||
+                  cleanLabel.toLowerCase().includes(d.toLowerCase())
+                );
+                send({ type: "update_config", key: "camera_device", value: match ?? cleanLabel });
+              }
+            }
+            send({ type: "open_camera" });
+          })();
+        } else {
+          send({type:"open_camera"});
+        }
       }
-      // During first-time setup, wait for Python's camera_status to report which device
-      // it opened, then start the browser with the matching device. On re-run setup the
-      // browser camera is already live from the main feed; only restart if it stopped.
+      // Re-run setup: browser camera is already live from the main feed;
+      // only restart it if it stopped.
       if (setupComplete && cameraStatus==="idle") startCamera(selectedBrowserDeviceId||undefined);
     }
   }
@@ -1647,25 +1671,26 @@
                   {:else}
                     <span class="cam-prereq-title">Required — enable Windows camera sharing</span>
                     <p class="cam-prereq-body">MKW Tracker needs simultaneous access to the same capture card as the app preview. Windows blocks this by default. Do this once before continuing:</p>
-                    {#if pythonCameraStatus === "error" || cameraStatus === "error"}
+                    {#if trackerCameraPaused}
+                      <div class="cam-release-bar cam-release-bar-released">
+                        <span class="cam-release-dot"></span>
+                        <span class="cam-release-msg">App feeds released — also close OBS, Discord, and any other apps currently using the camera before proceeding.</span>
+                        <button class="btn-sm" on:click={retryNow}>Re-enable feeds</button>
+                      </div>
+                    {:else if pythonCameraStatus === "error" || cameraStatus === "error"}
                       <div class="cam-release-bar cam-release-bar-error">
                         <span class="cam-release-dot"></span>
-                        <span class="cam-release-msg">Can't access capture card — check it's connected and not in use by another app. {#if pythonCameraError}{pythonCameraError}{/if}</span>
-                        <button class="btn-sm" on:click={retryNow}>Retry</button>
+                        <span class="cam-release-msg">Can't access capture card — check it's connected and not in use by another app.{#if pythonCameraError} {pythonCameraError}{/if}</span>
+                        <div style="display:flex;gap:.4rem;flex-shrink:0">
+                          <button class="btn-sm" on:click={releaseForSettings}>Release feeds</button>
+                          <button class="btn-sm" on:click={retryNow}>Retry</button>
+                        </div>
                       </div>
                     {:else}
-                      <div class="cam-release-bar" class:cam-release-bar-released={trackerCameraPaused}>
+                      <div class="cam-release-bar">
                         <span class="cam-release-dot"></span>
-                        <span class="cam-release-msg">
-                          {#if trackerCameraPaused}
-                            App feeds released — also close OBS, Discord, and any other apps currently using the camera before proceeding.
-                          {:else}
-                            Release this app's feeds and close OBS, Discord, and any other apps currently using the camera before changing this setting.
-                          {/if}
-                        </span>
-                        <button class="btn-sm" on:click={trackerCameraPaused ? retryNow : releaseForSettings}>
-                          {trackerCameraPaused ? "Re-enable feeds" : "Release feeds"}
-                        </button>
+                        <span class="cam-release-msg">Release this app's feeds and close OBS, Discord, and any other apps currently using the camera before changing this setting.</span>
+                        <button class="btn-sm" on:click={releaseForSettings}>Release feeds</button>
                       </div>
                     {/if}
                     <ol class="cam-steps">

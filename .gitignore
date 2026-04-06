@@ -43,6 +43,7 @@ test_stream.bin
 
 # Tauri sidecar binaries (built by CI)
 src-tauri/binaries/
+src-tauri/sidecar/
 
 # IDEs
 .vscode/

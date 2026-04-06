@@ -100,19 +100,19 @@ jobs:
         with:
           name: python-bundle
 
-      - name: Extract sidecar into src-tauri/binaries/
+      - name: Extract sidecar into src-tauri/sidecar/
         shell: bash
         run: |
           VERSION=${{ needs.build-python.outputs.version }}
           7z x "mkw-tracker-v${VERSION}-windows-x64.zip" -o"sidecar_tmp/"
-          mkdir -p src-tauri/binaries
-          cp sidecar_tmp/mkw-tracker/mkw-tracker.exe \
-             src-tauri/binaries/mkw-tracker-x86_64-pc-windows-msvc.exe
-          cp -r sidecar_tmp/mkw-tracker/_internal src-tauri/binaries/_internal
+          mkdir -p src-tauri/sidecar
+          cp sidecar_tmp/mkw-tracker/mkw-tracker-engine.exe \
+             src-tauri/sidecar/mkw-tracker-engine.exe
+          cp -r sidecar_tmp/mkw-tracker/_internal src-tauri/sidecar/_internal
 
       - name: Verify sidecar binary present
         shell: bash
-        run: ls -lh src-tauri/binaries/
+        run: ls -lh src-tauri/sidecar/
 
       - name: Stamp version into tauri.conf.json
         shell: bash

@@ -135,7 +135,7 @@ INSERT OR IGNORE INTO minimap_rois (course, x, y, w, h) VALUES
 """
 
 
-def apply_migrations(db_path: str = "mkw_tracker.db"):
+def apply_migrations(db_path: str | None = None):
     """Apply pending schema migrations. Safe to call on every startup."""
     conn = get_connection(db_path)
     cur = conn.cursor()
