@@ -63,6 +63,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name='mkw-tracker-engine',
+    icon='src-tauri/icons/icon.ico',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

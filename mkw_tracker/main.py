@@ -1,4 +1,4 @@
-"""Entry point — wires all components; runs cv2 capture loop + asyncio IPC thread."""
+"""Entry point  - wires all components; runs cv2 capture loop + asyncio IPC thread."""
 import argparse
 import os
 import time
@@ -29,9 +29,9 @@ cv2.ocl.setUseOpenCL(True)
 _ocl_available = cv2.ocl.haveOpenCL() and cv2.ocl.useOpenCL()
 if _ocl_available:
     dev = cv2.ocl.Device.getDefault()
-    print(f"[GPU] OpenCL enabled — {dev.name()} ({dev.vendorName()})")
+    print(f"[GPU] OpenCL enabled  - {dev.name()} ({dev.vendorName()})")
 else:
-    print("[GPU] OpenCL not available — running on CPU")
+    print("[GPU] OpenCL not available  - running on CPU")
 from .detection.selection import SelectionTracker
 from .race.laps import LapTracker
 from .race.coins import CoinTracker
@@ -102,7 +102,7 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
             load_mushroom_templates(switch2_language=_lang)
 
     elif t == "get_state":
-        # Full snapshot emitted on next frame — just mark as needed
+        # Full snapshot emitted on next frame  - just mark as needed
         pass
 
     elif t == "force_screen":
@@ -434,7 +434,7 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
         _save_path = str(_dd() / f"{_img_dir}/{item_name}.png")
         os.makedirs(os.path.dirname(_save_path), exist_ok=True)
         if category == "costumes":
-            # Save raw colour — load_template_dir applies edge processing at load time
+            # Save raw colour  - load_template_dir applies edge processing at load time
             cv2.imwrite(_save_path, _crop)
         else:
             # Binarise before saving so the on-disk template matches the live crop space
@@ -615,12 +615,12 @@ def run(args):
     # ── Setup mode ───────────────────────────────────────────────────────────
     setup_mode = [not bool(settings.get("setup_complete", 0))]
     if setup_mode[0]:
-        print("[Setup] First-time setup required — running in setup mode.")
+        print("[Setup] First-time setup required  - running in setup mode.")
 
     # ── Camera ───────────────────────────────────────────────────────────────
     # Set Windows timer resolution to 1ms for the lifetime of this process.
     # The default is 15.6ms, which makes cv2.waitKey(1) / Event.wait(0.001)
-    # sleep for up to 15.6ms — the primary cause of variable input lag.
+    # sleep for up to 15.6ms  - the primary cause of variable input lag.
     _ctypes.windll.winmm.timeBeginPeriod(1)
 
     configured_device = settings.get("camera_device", "") or None
@@ -629,7 +629,7 @@ def run(args):
         # First-time setup: don't open camera yet. It will be opened on demand
         # when the frontend sends open_camera from the Camera wizard step.
         cap = None
-        print("[Setup] Camera deferred — waiting for open_camera command.")
+        print("[Setup] Camera deferred  - waiting for open_camera command.")
     else:
         try:
             cap = build_camera_source(device_name=configured_device)
@@ -922,7 +922,7 @@ def run(args):
 
         # Arm the deferred finish emit when finish is first detected.
         # The timestamp burst starts on this same frame, so total_time / splits
-        # won't be ready yet — defer until ts.total_time is populated.
+        # won't be ready yet  - defer until ts.total_time is populated.
         if finish_just_detected and not _prev_finish and not _want_finish_emit:
             _want_finish_emit = True
             _finish_result    = finish_state.result
@@ -1006,7 +1006,7 @@ def run(args):
             key = (cap.waitKey(1) if cap is not None else cv2.waitKey(1)) & 0xFF
             if key == ord("q"):
                 break
-            if key == 9:   # Tab — toggle debug overlay
+            if key == 9:   # Tab  - toggle debug overlay
                 show_debug[0] = not show_debug[0]
             if key == ord("m"):
                 minimap.debug_log = not minimap.debug_log
@@ -1043,7 +1043,7 @@ def _debug_dump(frame, laps, coins, ts, mush):
             print(f"  {count}mush: template not loaded")
             continue
         if tmpl.shape[0] > processed.shape[0] or tmpl.shape[1] > processed.shape[1]:
-            print(f"  {count}mush: SKIP — tmpl {tmpl.shape} > roi {processed.shape}")
+            print(f"  {count}mush: SKIP  - tmpl {tmpl.shape} > roi {processed.shape}")
             continue
         result = cv2.matchTemplate(processed, tmpl, cv2.TM_CCOEFF_NORMED)
         score  = float(cv2.minMaxLoc(result)[1])

@@ -111,11 +111,11 @@ class TimestampTracker:
             return
         prior_ms = [self._to_ms(s) for s in self.splits.values()]
         if any(v is None for v in prior_ms):
-            print("  [WARN] Some splits unparseable — final lap time unreliable")
+            print("  [WARN] Some splits unparseable - final lap time unreliable")
             return
         final_ms = total_ms - sum(prior_ms)
         if final_ms < 0:
-            print("  [WARN] Final lap time negative — split data unreliable")
+            print("  [WARN] Final lap time negative - split data unreliable")
             return
         self.final_lap_time = self._from_ms(final_ms)
         self.splits[lap]    = self.final_lap_time

@@ -143,9 +143,9 @@ def _probe_device_size(device_name: str) -> tuple[int, int, int]:
         fps_raw = max(1, round(float(num) / max(1, float(den))))
         fps = min(fps_raw, _MAX_FPS)
         if fps_raw != fps:
-            print(f"[Camera] probe: {device_name!r} → {w}x{h} @ {fps_raw}fps (capped to {fps}fps)")
+            print(f"[Camera] probe: {device_name!r} -> {w}x{h} @ {fps_raw}fps (capped to {fps}fps)")
         else:
-            print(f"[Camera] probe: {device_name!r} → {w}x{h} @ {fps}fps")
+            print(f"[Camera] probe: {device_name!r} -> {w}x{h} @ {fps}fps")
         return w, h, fps
     except Exception as e:
         print(f"[Camera] probe failed ({e}), defaulting to 1920x1080@60")
@@ -378,9 +378,9 @@ def build_camera_source(
     print("[Camera] Probing DirectShow devices for P010 (HDR)...")
     p010_device = _find_p010_device()
     if p010_device:
-        print(f"[Camera] P010 device found: {p010_device!r} — using ffmpeg HDR path")
+        print(f"[Camera] P010 device found: {p010_device!r} - using ffmpeg HDR path")
         return FfmpegCameraSource(p010_device)
 
-    print("[Camera] No P010 device — falling back to SDR (cv2.VideoCapture)")
+    print("[Camera] No P010 device - falling back to SDR (cv2.VideoCapture)")
     obs_idx, obs_name = _find_obs_device()
     return VideoCaptureSource(obs_idx, device_name=obs_name)

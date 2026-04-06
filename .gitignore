@@ -9,6 +9,7 @@ build/
 # Node
 node_modules/
 dist-ui/
+*.timestamp-*.mjs
 
 # Rust / Tauri
 src-tauri/target/

@@ -12,6 +12,7 @@
     "updater:default",
     "process:allow-restart",
     "shell:allow-spawn",
-    "shell:allow-execute"
+    "shell:allow-execute",
+    "log:default"
   ]
 }

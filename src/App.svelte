@@ -2,6 +2,7 @@
   import { onMount, onDestroy, afterUpdate } from "svelte";
   import { check } from "@tauri-apps/plugin-updater";
   import { listen } from "@tauri-apps/api/event";
+  import { attachLogger } from "@tauri-apps/plugin-log";
   import { getVersion } from "@tauri-apps/api/app";
   import { invoke } from "@tauri-apps/api/core";
   import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -15,6 +16,7 @@
   // ── Core state ────────────────────────────────────────────────────────────────
   let version = "";
   let trackerConnected = false;
+  let trackerSpawned = false;   // process launched but not yet ready
   let logs = [];
   let logEl;
   let unlisten;
@@ -29,6 +31,7 @@
   let _tick = 0;
   $: backendAlive = trackerConnected && _tick >= 0 && (Date.now() - lastHeartbeatTs) < 4000;
   $: statusDot = !trackerConnected ? "#444" : backendAlive ? "#4caf50" : "#f59e0b";
+  $: view = setupComplete === null ? "startup" : setupComplete === false ? "setup" : "main";
 
   // ── Selection state ───────────────────────────────────────────────────────────
   let selChar = null, selCharConf = 0;
@@ -91,7 +94,7 @@
   let graphOpen = true;
 
   // ── Wizard state ──────────────────────────────────────────────────────────────
-  let setupComplete = true;
+  let setupComplete = null;  // null = unknown (waiting for ready), false = needs setup, true = done
   let wizardOpen = false;
   let wizardStep = "language";
   let resetConfirmPending = false;
@@ -121,7 +124,7 @@
   let trackerCameraPaused = false;
   let browserDevices = [], selectedBrowserDeviceId = "";
   let audioDevices = [];
-  let selectedAudioDeviceId = localStorage.getItem("selectedAudioDeviceId") ?? "";
+  let selectedAudioDeviceId = "";
   let pythonCameraStatus = "idle", pythonCameraError = "";
   let engineFrame = null;
   let _feedPollTimer = null;
@@ -412,14 +415,33 @@
     setTimeout(() => { if (logEl) logEl.scrollTop = logEl.scrollHeight; }, 0);
   }
 
+  // Forward browser console output to the log pane so everything visible in the
+  // VS Code / Tauri devtools console is also visible here.
+  (function _interceptConsole() {
+    const _fmt = (args) => args.map(a =>
+      (a instanceof Error) ? `${a.message}` :
+      (typeof a === 'object' && a !== null) ? JSON.stringify(a) : String(a)
+    ).join(' ');
+    for (const [level, prefix] of [['log','[js]'],['warn','[warn]'],['error','[error]']]) {
+      const _orig = console[level].bind(console);
+      console[level] = (...args) => { _orig(...args); pushLog(`${prefix} ${_fmt(args)}`); };
+    }
+  })();
+
   function handleMsg(msg) {
     switch (msg.type) {
       case "stderr":
         pushLog(`[err] ${msg.line}`);
         break;
+      case "spawned":
+        trackerSpawned = true;
+        pushLog(`[app] engine process launched ${_elapsed()} — waiting for Python to initialise (Windows may be scanning files)`);
+        break;
       case "ready":
+        trackerSpawned = true;
         trackerConnected = true;
         lastHeartbeatTs = Date.now();
+        pushLog(`[app] tracker connected ${_elapsed()} — setup_complete=${msg.setup_complete}`);
         if (_pendingDeviceSwitchTimeout) {
           clearTimeout(_pendingDeviceSwitchTimeout);
           _pendingDeviceSwitchTimeout = null;
@@ -430,14 +452,22 @@
         send({ type: "list_devices" });
         send({ type: "list_tells" });
         send({ type: "list_rois" });
-        if (!msg.setup_complete) { setupComplete = false; openWizard(); }
-        // Auto-start browser camera for the main feed — only when already set up
-        if (msg.setup_complete && cameraStatus === "idle")
-          loadBrowserDevices().then(() => startCamera(selectedBrowserDeviceId || undefined));
+        if (msg.setup_complete) {
+          setupComplete = true;
+          // Auto-start browser camera for the main feed
+          if (cameraStatus === "idle")
+            loadBrowserDevices().then(() => startCamera(selectedBrowserDeviceId || undefined));
+        } else {
+          setupComplete = false;
+          pushLog("[app] first-time setup required");
+        }
         break;
       case "camera_status":
         pythonCameraStatus = msg.ok ? "ok" : "error";
         pythonCameraError  = msg.error ?? "";
+        pushLog(msg.ok
+          ? `[cam] opened: ${msg.device || "unknown"} ${msg.width}x${msg.height}`
+          : `[cam] failed: ${msg.error}`);
         if (msg.ok) {
           if (msg.width  > 0) pythonFrameW = msg.width;
           if (msg.height > 0) pythonFrameH = msg.height;
@@ -518,6 +548,7 @@
       case "devices_list":
         devices = msg.devices ?? [];
         configuredDevice = msg.configured ?? "";
+        pushLog(`[devices] found ${devices.length}: ${devices.join(", ") || "none"}`);
         break;
       case "screen_change":
         pushLog(`[screen] ${msg.from} → ${msg.to}`);
@@ -576,10 +607,10 @@
       ? { deviceId:{ exact:deviceId }, width:{ ideal:1920 }, height:{ ideal:1080 } }
       : { width:{ ideal:1920 }, height:{ ideal:1080 } };
     try {
-      // Resolve which audio device to capture, in priority order:
-      //   1. Explicitly selected audio device (user's choice, saved to localStorage)
+      // Resolve which audio device to request, in priority order:
+      //   1. Explicitly selected by the user this session
       //   2. Audio input sharing a groupId with the chosen video device (capture card pairing)
-      //   3. No audio — never fall back to the default mic
+      //   3. No specific device — still request audio to grant permission & populate labels
       let resolvedAudioId = selectedAudioDeviceId || null;
       if (!resolvedAudioId && deviceId) {
         try {
@@ -587,35 +618,27 @@
           const vid = all.find(d => d.kind === "videoinput" && d.deviceId === deviceId);
           const aud = vid && all.find(d => d.kind === "audioinput" && d.groupId === vid.groupId);
           if (aud) resolvedAudioId = aud.deviceId;
-        } catch { /* no audio */ }
+        } catch { /* no audio pairing */ }
       }
-      if (resolvedAudioId) {
-        // Disable all browser processing so we get the clean capture card signal.
-        const rawAudio = {
-          deviceId:         { exact: resolvedAudioId },
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl:  false,
-        };
-        try {
-          videoStream = await navigator.mediaDevices.getUserMedia({ video:vc, audio: rawAudio });
-        } catch {
-          videoStream = await navigator.mediaDevices.getUserMedia({ video:vc });
-        }
-      } else {
-        // No associated audio resolved — open video only, don't grab a random mic.
+      // Always attempt audio — this grants the browser permission which populates
+      // device labels in enumerateDevices(). Fall back to video-only if it fails.
+      const rawAudio = {
+        ...(resolvedAudioId ? { deviceId: { exact: resolvedAudioId } } : {}),
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl:  false,
+      };
+      try {
+        videoStream = await navigator.mediaDevices.getUserMedia({ video:vc, audio: rawAudio });
+      } catch {
         videoStream = await navigator.mediaDevices.getUserMedia({ video:vc });
       }
       cameraStatus = "ok";
       await loadBrowserDevices();
-      // Sync the audio dropdown to whatever was actually captured — covers the case
-      // where groupId matching resolved an audio device that the user didn't explicitly pick.
+      // Sync dropdown to whatever was actually captured.
       const audioTracks = videoStream.getAudioTracks();
       const capturedAudioId = audioTracks.length > 0 ? (audioTracks[0].getSettings().deviceId ?? "") : "";
-      if (capturedAudioId !== selectedAudioDeviceId) {
-        selectedAudioDeviceId = capturedAudioId;
-        localStorage.setItem("selectedAudioDeviceId", capturedAudioId);
-      }
+      if (capturedAudioId) selectedAudioDeviceId = capturedAudioId;
       _setupAudio();
     } catch (err) {
       videoStream = null;
@@ -1065,7 +1088,6 @@
     // associated audio (e.g. OBS Virtual Camera). groupId matching in startCamera
     // will pick up the right audio if one exists, otherwise no audio is used.
     selectedAudioDeviceId = "";
-    localStorage.setItem("selectedAudioDeviceId", "");
 
     // Match a browser device by label so the preview swaps too
     if (browserDevices.length > 0) {
@@ -1081,7 +1103,7 @@
     // Give Python a moment to process the update_config message and write to SQLite
     // before we kill it — otherwise it restarts reading the old device value.
     deviceSwitching = true;
-    trackerConnected = false;
+    trackerConnected = false; trackerSpawned = false;
     await new Promise(r => setTimeout(r, 300));
     await invoke("restart_tracker");
 
@@ -1115,9 +1137,8 @@
         send({type:"update_config",key:"camera_device",value:pythonDevice});
       }
     }
-    // Reset audio to auto — new device may have no associated audio.
+    // Reset audio to auto — new device may have different associated audio.
     selectedAudioDeviceId = "";
-    localStorage.setItem("selectedAudioDeviceId", "");
     if (!setupComplete&&wizardStep==="camera") {
       stopCamera(); pythonCameraStatus="idle"; engineFrame=null; send({type:"open_camera"});
     } else {
@@ -1126,12 +1147,11 @@
   }
   async function handleAudioDeviceChange(e) {
     selectedAudioDeviceId = e.target.value;
-    localStorage.setItem("selectedAudioDeviceId", selectedAudioDeviceId);
     // Restart the camera stream so the new audio device takes effect.
     if (videoStream) await startCamera(selectedBrowserDeviceId || undefined);
   }
   async function restartTracker() {
-    restartNeeded=false; devices=[]; trackerConnected=false; await invoke("restart_tracker");
+    restartNeeded=false; devices=[]; trackerConnected=false; trackerSpawned=false; await invoke("restart_tracker");
   }
   async function applyUpdate() {
     if (pendingUpdate) { await invoke("stop_tracker"); await pendingUpdate.install(); }
@@ -1151,18 +1171,41 @@
   // ── Lifecycle ─────────────────────────────────────────────────────────────────
   let sidecarStartupError = false;
 
+  const _t0 = Date.now();
+  function _elapsed() { return `+${((Date.now()-_t0)/1000).toFixed(1)}s`; }
+
   onMount(async () => {
     appWindow=getCurrentWindow();
     version=await getVersion();
+    pushLog(`[app] v${version} starting… ${_elapsed()}`);
     await invoke("start_tracker");
+    pushLog(`[app] tracker spawn requested ${_elapsed()}`);
     unlisten=await listen("tracker-event", ev=>{
       sidecarStartupError = false;
       try { handleMsg(JSON.parse(ev.payload)); }
       catch { pushLog(String(ev.payload)); }
     });
-    // If no event arrives within 60 s the sidecar likely failed to start.
-    // First-run can be slow while Windows Defender scans the _internal/ DLLs.
-    setTimeout(() => { if (!trackerConnected) sidecarStartupError = true; }, 60000);
+    pushLog(`[app] listening for tracker events ${_elapsed()}`);
+    // Warn periodically if the tracker hasn't connected yet.
+    // First-run can be slow (60-90s) while Windows Defender scans _internal/ DLLs.
+    const _startupTimer = setInterval(() => {
+      if (trackerConnected) { clearInterval(_startupTimer); return; }
+      const secs = Math.round((Date.now()-_t0)/1000);
+      if (!trackerSpawned) {
+        pushLog(`[app] engine process has not spawned yet… (${secs}s elapsed) — antivirus may be blocking launch`);
+      } else {
+        pushLog(`[app] engine launched but Python not ready yet… (${secs}s elapsed) — Windows Defender may still be scanning DLLs`);
+      }
+      if (secs >= 120) { sidecarStartupError = true; clearInterval(_startupTimer); }
+    }, 10000);
+    // Forward Rust log::* records to the log pane, skipping tauri plugin noise.
+    const _levelPrefix = { error:"[rust/err]", warn:"[rust/warn]", info:"[rust]", debug:"[rust/dbg]", trace:null };
+    attachLogger(record => {
+      if (record.target?.startsWith("tauri")) return;
+      if (record.message?.includes("[tauri_")) return;  // pre-formatted plugin records
+      const prefix = _levelPrefix[record.level] ?? "[rust]";
+      if (prefix) pushLog(`${prefix} ${record.message}`);
+    }).catch(() => {});
     setInterval(()=>{ _tick++; },1000);
     checkForUpdate();
     window.addEventListener("mouseup",onWindowMouseUp);
@@ -1178,7 +1221,7 @@
 
   $: if (mainVideoEl) mainVideoEl.srcObject=setupComplete ? (videoStream??null) : null;
   $: if (wizVideoEl)  wizVideoEl.srcObject =videoStream??null;
-  afterUpdate(()=>{ if (wizardOpen) drawRoi(); });
+  afterUpdate(()=>{ if (wizardOpen || view === "setup") drawRoi(); });
 
   // ── Reactive computeds ────────────────────────────────────────────────────────
   $: currentScreenName  = SCREEN_NAMES[screenIdx]??"";;
@@ -1192,7 +1235,7 @@
   $: assetItem = ASSET_ITEMS[templateCategory]?.[templateItemIdx];
   $: currentTell = tells.find(t=>t.screen===SCREEN_NAMES[screenIdx])??null;
 
-  $: if (wizardOpen&&["screens","selection","hud","templates"].includes(wizardStep)) {
+  $: if ((wizardOpen || view === "setup")&&["screens","selection","hud","templates"].includes(wizardStep)) {
     startRoiPoll();
   } else { stopRoiPoll(); }
 
@@ -1263,8 +1306,10 @@
         <span class="hb-fps">{backendFps} fps</span>
       {:else if trackerConnected}
         <span class="hb-warn">backend stalled</span>
+      {:else if trackerSpawned}
+        <span class="hb-idle">engine starting…</span>
       {:else}
-        <span class="hb-idle">connecting…</span>
+        <span class="hb-idle">launching…</span>
       {/if}
     </div>
 
@@ -1279,10 +1324,12 @@
           {/if}
         </div>
       {/if}
-      {#if wizardOpen && setupComplete}
-        <button class="btn-hdr btn-close-wiz" on:click={closeWizard}>✕ Close Setup</button>
-      {:else if !wizardOpen}
-        <button class="btn-hdr btn-setup" on:click={openWizard}>⚙ Setup</button>
+      {#if view === "main"}
+        {#if wizardOpen}
+          <button class="btn-hdr btn-close-wiz" on:click={closeWizard}>✕ Close Setup</button>
+        {:else}
+          <button class="btn-hdr btn-setup" on:click={openWizard}>⚙ Setup</button>
+        {/if}
       {/if}
     </div>
 
@@ -1292,6 +1339,9 @@
       <button class="win-btn win-btn-close" on:click={winClose} title="Close">&#x2715;</button>
     </div>
   </header>
+
+  <!-- ── View router ───────────────────────────────────────────────────────── -->
+  {#if view === "main"}
 
   <!-- ── Main grid: feed | sidebar, with graph footer below ─────────────────── -->
   <div class="main-grid">
@@ -1604,6 +1654,253 @@
     </div>
 
   </div><!-- /main-grid -->
+
+  {:else if view === "setup"}
+
+  <!-- ── First-time setup view (full screen, no modal) ──────────────────────── -->
+  <div class="setup-view">
+    <div class="setup-wiz">
+      <nav class="wiz-tabs setup-wiz-tabs">
+        {#each STEPS as s}
+          <button class="wiz-tab" class:active={wizardStep===s} tabindex="-1" on:click={()=>goStep(s)}>
+            {STEP_LABELS[s]}
+          </button>
+        {/each}
+      </nav>
+
+      <div class="wiz-body setup-wiz-body">
+        <!-- language / camera / done steps — identical content to the modal wizard -->
+        {#if wizardStep === "language"}
+          <div class="step-centred">
+            <h2>{tr("lang.title")}</h2>
+            <p>{tr("lang.desc")}</p>
+            <div class="lang-form">
+              <div class="lang-row">
+                <label for="sv-app-lang">{tr("lang.app_label")}</label>
+                <select id="sv-app-lang" bind:value={appLanguage} on:change={onAppLanguageChange}>
+                  {#each LANGUAGES as l}<option value={l.id}>{l.name}</option>{/each}
+                </select>
+              </div>
+              <div class="lang-row">
+                <label for="sv-sw2-lang">{tr("lang.sw2_label")}</label>
+                <select id="sv-sw2-lang" bind:value={switch2Language} on:change={onSwitch2LanguageChange}>
+                  {#each LANGUAGES as l}<option value={l.id}>{l.name}</option>{/each}
+                </select>
+                <p class="hint lang-hint">{tr("lang.sw2_hint")}</p>
+              </div>
+            </div>
+            <button class="btn-primary btn-lg" on:click={()=>goStep("camera")}>{tr("lang.continue")}</button>
+          </div>
+
+        {:else if wizardStep === "camera"}
+          <div class="cam-setup">
+            <div class="cam-dual">
+              <div class="cam-pane">
+                <div class="cam-pane-label">Browser / App Input</div>
+                <div class="preview-wrapper">
+                  {#if cameraOk}
+                    <video bind:this={wizVideoEl} autoplay playsinline muted class="preview-video"></video>
+                  {:else if cameraStatus === "requesting"}
+                    <div class="preview-placeholder"><span class="spin">◌</span><span>Opening…</span></div>
+                  {:else if cameraStatus === "busy"}
+                    <div class="preview-placeholder">
+                      <span class="preview-icon">⊗</span>
+                      <span class="cam-pane-err-label">Blocked — device in exclusive use</span>
+                    </div>
+                  {:else if cameraStatus === "error"}
+                    <div class="preview-placeholder">
+                      <span class="preview-icon">⊗</span><span class="cam-pane-err-label">Camera error</span>
+                    </div>
+                  {:else}
+                    <div class="preview-placeholder"><span class="spin">◌</span><span>Waiting…</span></div>
+                  {/if}
+                </div>
+                <div class="cam-pane-status" class:cam-status-ok={cameraOk} class:cam-status-err={cameraStatus==="busy"||cameraStatus==="error"}>
+                  <span class="cam-dot"></span>
+                  {cameraOk?"Connected":cameraStatus==="requesting"?"Opening…":cameraStatus==="busy"?"Blocked":cameraStatus==="error"?"Error":"Waiting"}
+                </div>
+              </div>
+
+              <div class="cam-pane">
+                <div class="cam-pane-label">Python Engine Input</div>
+                <div class="preview-wrapper">
+                  {#if engineFrame && !trackerCameraPaused}
+                    <img src={engineFrame} alt="Engine feed" class="preview-video" style="object-fit:contain"/>
+                  {:else if trackerCameraPaused}
+                    <div class="preview-placeholder">
+                      <span class="preview-icon" style="color:#888">○</span>
+                      <span class="cam-pane-err-label">Camera released</span>
+                    </div>
+                  {:else if pythonCameraStatus === "error"}
+                    <div class="preview-placeholder">
+                      <span class="preview-icon">⊗</span>
+                      <span class="cam-pane-err-label">Can't access device{pythonCameraError?`: ${pythonCameraError}`:""}</span>
+                    </div>
+                  {:else}
+                    <div class="preview-placeholder">
+                      <span class="spin">◌</span>
+                      <span>{pythonCameraStatus==="opening"?"Opening and verifying…":!trackerConnected?"Connecting to engine…":"Waiting for camera…"}</span>
+                    </div>
+                  {/if}
+                </div>
+                <div class="cam-pane-status" class:cam-status-ok={pythonCameraOk} class:cam-status-err={pythonCameraStatus==="error"} class:cam-status-warn={trackerCameraPaused}>
+                  <span class="cam-dot"></span>
+                  {pythonCameraOk?"Connected":trackerCameraPaused?"Released":pythonCameraStatus==="error"?"Error":pythonCameraStatus==="opening"?"Opening…":"Waiting"}
+                </div>
+              </div>
+            </div>
+
+            <div class="cam-below">
+              {#if browserDevices.length > 0}
+                <div class="device-row">
+                  <label for="sv-cam">Camera</label>
+                  <select id="sv-cam" on:change={handleCameraDeviceChange}>
+                    {#each browserDevices as d}
+                      <option value={d.deviceId} selected={d.deviceId===selectedBrowserDeviceId}>
+                        {d.label||`Camera ${d.deviceId.slice(0,6)}…`}
+                      </option>
+                    {/each}
+                  </select>
+                  {#if restartNeeded}<button class="btn-sm" on:click={restartTracker}>Restart</button>{/if}
+                </div>
+              {/if}
+
+              <div class="cam-prereq" class:cam-prereq-ok={bothCamerasOk}>
+                {#if bothCamerasOk}
+                  <span class="cam-prereq-title cam-prereq-title-ok">Camera sharing is working</span>
+                  <p class="cam-prereq-body">Both feeds are connected to the same device. You're good to continue.</p>
+                {:else}
+                  <span class="cam-prereq-title">Required — enable Windows camera sharing</span>
+                  <p class="cam-prereq-body">MKW Tracker needs simultaneous access to the same capture card as the app preview. Windows blocks this by default. Do this once before continuing:</p>
+                  {#if trackerCameraPaused}
+                    <div class="cam-release-bar cam-release-bar-released">
+                      <span class="cam-release-dot"></span>
+                      <span class="cam-release-msg">App feeds released — also close OBS, Discord, and any other apps currently using the camera before proceeding.</span>
+                      <button class="btn-sm" on:click={retryNow}>Re-enable feeds</button>
+                    </div>
+                  {:else if pythonCameraStatus === "error" || cameraStatus === "error"}
+                    <div class="cam-release-bar cam-release-bar-error">
+                      <span class="cam-release-dot"></span>
+                      <span class="cam-release-msg">Can't access capture card — check it's connected and not in use by another app.{#if pythonCameraError} {pythonCameraError}{/if}</span>
+                      <div style="display:flex;gap:.4rem;flex-shrink:0">
+                        <button class="btn-sm" on:click={releaseForSettings}>Release feeds</button>
+                        <button class="btn-sm" on:click={retryNow}>Retry</button>
+                      </div>
+                    </div>
+                  {:else}
+                    <div class="cam-release-bar">
+                      <span class="cam-release-dot"></span>
+                      <span class="cam-release-msg">Release this app's feeds and close OBS, Discord, and any other apps currently using the camera before changing this setting.</span>
+                      <button class="btn-sm" on:click={releaseForSettings}>Release feeds</button>
+                    </div>
+                  {/if}
+                  <ol class="cam-steps">
+                    <li>Click <strong>Open Windows Camera Settings</strong> below</li>
+                    <li>Find your capture card → <strong>Advanced camera options</strong> → <strong>Edit</strong></li>
+                    <li>Turn on <strong>"Allow multiple apps to use camera at the same time"</strong></li>
+                    <li>Return here and re-enable feeds above, then <button class="btn-sm" on:click={retryNow}>Retry</button></li>
+                  </ol>
+                  <div class="cam-prereq-actions">
+                    <button class="btn-primary" on:click={() => invoke("open_url",{url:"ms-settings:camera"}).catch(()=>{})}>Open Windows Camera Settings →</button>
+                  </div>
+                {/if}
+              </div>
+
+              <div class="cam-actions">
+                <p class="hint">Both feeds must show your capture card output before you can continue.</p>
+                <div class="cam-nav">
+                  <button class="btn-nav" on:click={()=>goStep("language")}>← Back</button>
+                  <button class="btn-primary" disabled={!bothCamerasOk} on:click={completeSetup}>
+                    Finish Setup →
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        {:else if wizardStep === "done"}
+          <div class="step-centred">
+            <div class="done-check">✓</div>
+            <h2>Setup Complete</h2>
+            <p>Your templates are saved and ready.</p>
+            <button class="btn-primary btn-lg" on:click={completeSetup}>Start Tracking →</button>
+          </div>
+        {/if}
+      </div>
+    </div>
+
+    <!-- Engine log sidebar — always visible during first-time setup -->
+    <div class="setup-log-side">
+      <div class="setup-log-hdr">
+        <span class="hb-dot" style="background:{statusDot}; flex-shrink:0"></span>
+        {#if trackerConnected}
+          <span class="setup-log-status">Engine ready</span>
+        {:else if trackerSpawned}
+          <span class="setup-log-status">Starting — Windows may be scanning files…</span>
+        {:else}
+          <span class="setup-log-status">Launching engine…</span>
+        {/if}
+      </div>
+      <div class="setup-log-body" bind:this={logEl}>
+        {#each logs as line}
+          <div class="log-line">{line}</div>
+        {/each}
+        {#if logs.length === 0}
+          <div class="log-empty">Waiting for events…</div>
+        {/if}
+      </div>
+    </div>
+  </div><!-- /setup-view -->
+
+  {:else}
+
+  <!-- ── Startup view: shown while waiting for first ready message ───────────── -->
+  <div class="startup-view">
+    <div class="startup-main">
+      <div class="startup-status">
+        <span class="hb-dot startup-dot" style="background:{statusDot}"></span>
+        {#if trackerConnected}
+          <span class="startup-status-text">Engine connected</span>
+        {:else if trackerSpawned}
+          <div>
+            <span class="startup-status-text">Engine starting…</span>
+            <div class="startup-status-sub">Windows may be scanning files on first run. This can take up to 2 minutes.</div>
+          </div>
+        {:else}
+          <span class="startup-status-text">Launching engine…</span>
+        {/if}
+      </div>
+      <p class="startup-note">On first launch, Windows Defender may scan the engine files before they can run. This is normal and should take under a few minutes.</p>
+    </div>
+    <div class="setup-log-side">
+      <div class="setup-log-hdr">
+        <span class="hb-dot" style="background:{statusDot}; flex-shrink:0"></span>
+        {#if trackerConnected}
+          <span class="setup-log-status">Engine ready</span>
+        {:else if trackerSpawned}
+          <span class="setup-log-status">Starting — Windows may be scanning files…</span>
+        {:else}
+          <span class="setup-log-status">Launching engine…</span>
+        {/if}
+      </div>
+      <div class="setup-log-body" bind:this={logEl}>
+        {#each logs as line}
+          <div class="log-line">{line}</div>
+        {/each}
+        {#if sidecarStartupError}
+          <div class="log-empty log-error">
+            Engine failed to start after 2 minutes. Check that your antivirus isn't blocking
+            <code>bin\mkw-tracker-engine.exe</code>, then restart the app.
+          </div>
+        {:else if logs.length === 0}
+          <div class="log-empty">Waiting for events…</div>
+        {/if}
+      </div>
+    </div>
+  </div><!-- /startup-view -->
+
+  {/if}<!-- /view router -->
+
 </div><!-- /app -->
 
 
@@ -2338,6 +2635,59 @@
   .hud-total-row { margin-top: 2px; }
   .hud-total    { font-size: .82rem; color: #a8d8a8; font-weight: bold; font-variant-numeric: tabular-nums; }
   .mush-val { font-size: .75rem; }
+
+  /* ── Startup view ─────────────────────────────────────────────── */
+  .startup-view {
+    flex: 1; display: flex; flex-direction: row; min-height: 0; overflow: hidden;
+  }
+  .startup-main {
+    flex: 1; display: flex; flex-direction: column; min-height: 0;
+    padding: 2rem 2.5rem 1.5rem; justify-content: center;
+  }
+  .startup-status {
+    display: flex; align-items: flex-start; gap: .6rem;
+  }
+  .startup-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 3px; }
+  .startup-status-text { font-size: .85rem; color: #888; }
+  .startup-status-sub  { font-size: .72rem; color: #555; margin-top: .2rem; }
+  .startup-note { font-size: .7rem; color: #3a3a52; line-height: 1.6; max-width: 340px; padding-left: calc(8px + .6rem); }
+
+  /* ── Setup view (first-time wizard, full-screen) ───────────────── */
+  .setup-view {
+    flex: 1; display: flex; flex-direction: row; min-height: 0; overflow: hidden;
+  }
+  .setup-wiz {
+    flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+    border-right: 1px solid #111120;
+  }
+  /* Centre content vertically and horizontally; no scrollbar — content must fit */
+  .setup-wiz-body {
+    flex: 1; min-height: 0; padding: 1.25rem 1.5rem;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden; scrollbar-gutter: stable both-edges;
+  }
+  /* Constrain camera step width — aspect-ratio on preview-wrapper does the rest */
+  .setup-wiz-body .cam-setup { width: 100%; max-width: 560px; }
+  /* Cover-crop in setup preview — source may not be 16:9, bars aren't useful here */
+  .setup-wiz-body .preview-video { object-fit: cover; }
+  /* Step indicator tabs are display-only in setup view — not keyboard or mouse navigable */
+  .setup-wiz-tabs { pointer-events: none; }
+
+  /* Log sidebar shared by setup and startup views */
+  .setup-log-side {
+    width: 300px; flex-shrink: 0; display: flex; flex-direction: column;
+    border-left: 1px solid #111120; background: #04040a;
+  }
+  .setup-log-hdr {
+    display: flex; align-items: center; gap: .45rem;
+    padding: 5px 8px; background: #04040a; border-bottom: 1px solid #0d0d1c;
+    flex-shrink: 0;
+  }
+  .setup-log-status { font-size: .65rem; color: #555; line-height: 1.3; min-width: 0; }
+  .setup-log-body {
+    flex: 1; overflow-y: auto; padding: 4px 8px; min-height: 0;
+    scrollbar-width: thin; scrollbar-color: #1a1a2e #04040a;
+  }
 
   /* ── Modal backdrop ───────────────────────────────────────────── */
   .modal-backdrop {

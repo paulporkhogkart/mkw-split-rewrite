@@ -1,5 +1,7 @@
 use std::sync::Mutex;
 use tauri::{Emitter, Manager};
+use log::{error, info, warn};
+use tauri_plugin_shell::{process::CommandEvent, ShellExt};
 
 /// Silently grant camera and microphone permissions to the webview so getUserMedia
 /// works without native permission popups. Must be called after the window is
@@ -38,74 +40,91 @@ fn grant_media_permissions(window: &tauri::WebviewWindow) {
 }
 
 /// Holds the Python sidecar child process once started. None until start_tracker is called.
-struct SidecarState(Mutex<Option<std::process::Child>>);
+struct SidecarState(Mutex<Option<tauri_plugin_shell::process::CommandChild>>);
 
 /// Spawn (or re-spawn) the tracker sidecar and wire up its stdout listener.
 fn do_spawn_sidecar(app: tauri::AppHandle, state: &SidecarState) {
+    let shell = app.shell();
+
     #[cfg(debug_assertions)]
     let spawn_result = {
         let project_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("project root");
-        std::process::Command::new("python")
+        shell
+            .command("python")
             .args(["-m", "mkw_tracker", "--ws-port", "8765", "--no-display"])
             .current_dir(project_root)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
             .spawn()
     };
 
     #[cfg(not(debug_assertions))]
     let spawn_result = {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let exe_dir = std::env::current_exe()
             .expect("current_exe")
             .parent()
             .expect("exe parent dir")
             .to_path_buf();
-        std::process::Command::new(exe_dir.join("bin/mkw-tracker-engine.exe"))
+        shell
+            .command(exe_dir.join("bin/mkw-tracker-engine.exe").to_string_lossy().as_ref())
             .args(["--ws-port", "8765", "--no-display"])
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .creation_flags(CREATE_NO_WINDOW)
             .spawn()
     };
 
     match spawn_result {
-        Ok(mut child) => {
-            // Drain stdout in a background thread, emitting each line as a Tauri event.
-            if let Some(stdout) = child.stdout.take() {
-                let handle = app.clone();
-                std::thread::spawn(move || {
-                    use std::io::BufRead;
-                    for line in std::io::BufReader::new(stdout).lines() {
-                        match line {
-                            Ok(msg) if !msg.is_empty() => {
-                                let _ = handle.emit("tracker-event", &msg);
-                            }
-                            _ => {}
-                        }
-                    }
-                });
-            }
-            // Forward stderr to the frontend event log so crashes are visible.
-            if let Some(stderr) = child.stderr.take() {
-                let handle = app.clone();
-                std::thread::spawn(move || {
-                    use std::io::BufRead;
-                    for line in std::io::BufReader::new(stderr).lines().flatten() {
-                        eprintln!("[tracker stderr] {line}");
-                        let msg = format!("{{\"type\":\"stderr\",\"line\":{}}}", serde_json::to_string(&line).unwrap_or_default());
-                        let _ = handle.emit("tracker-event", &msg);
-                    }
-                });
-            }
+        Ok((mut rx, child)) => {
             *state.0.lock().unwrap() = Some(child);
+            // Notify the frontend immediately so it knows the process launched
+            // and is just slow to produce output (e.g. Windows Defender scanning
+            // _internal/ DLLs on first run).
+            let _ = app.emit("tracker-event", "{\"type\":\"spawned\"}");
+
+            let handle = app.clone();
+            tauri::async_runtime::spawn(async move {
+                while let Some(event) = rx.recv().await {
+                    match event {
+                        CommandEvent::Stdout(line) => {
+                            let msg = String::from_utf8_lossy(&line);
+                            let _ = handle.emit("tracker-event", msg.as_ref());
+                        }
+                        CommandEvent::Stderr(line) => {
+                            let text = String::from_utf8_lossy(&line);
+                            log::error!("[tracker stderr] {text}");
+                            let msg = format!(
+                                "{{\"type\":\"stderr\",\"line\":{}}}",
+                                serde_json::to_string(text.as_ref()).unwrap_or_default()
+                            );
+                            let _ = handle.emit("tracker-event", &msg);
+                        }
+                        CommandEvent::Error(e) => {
+                            log::error!("[tracker error] {e}");
+                            let msg = format!(
+                                "{{\"type\":\"stderr\",\"line\":{}}}",
+                                serde_json::to_string(&format!("[spawn error] {e}")).unwrap_or_default()
+                            );
+                            let _ = handle.emit("tracker-event", &msg);
+                        }
+                        CommandEvent::Terminated(status) => {
+                            log::error!("[tracker] exited with {status:?}");
+                            let msg = format!(
+                                "{{\"type\":\"stderr\",\"line\":{}}}",
+                                serde_json::to_string(&format!("[tracker exited: {status:?}]")).unwrap_or_default()
+                            );
+                            let _ = handle.emit("tracker-event", &msg);
+                        }
+                        _ => {}
+                    }
+                }
+            });
         }
-        Err(e) => eprintln!("Failed to spawn tracker: {e}"),
+        Err(e) => {
+            log::error!("Failed to spawn tracker: {e}");
+            let msg = format!(
+                "{{\"type\":\"stderr\",\"line\":{}}}",
+                serde_json::to_string(&format!("[failed to spawn tracker] {e}")).unwrap_or_default()
+            );
+            let _ = app.emit("tracker-event", &msg);
+        }
     }
 }
 
@@ -124,7 +143,7 @@ fn start_tracker(app: tauri::AppHandle, state: tauri::State<SidecarState>) {
 #[tauri::command]
 fn stop_tracker(state: tauri::State<SidecarState>) {
     if let Ok(mut guard) = state.0.lock() {
-        if let Some(mut child) = guard.take() {
+        if let Some(child) = guard.take() {
             let _ = child.kill();
         }
     }
@@ -134,7 +153,7 @@ fn stop_tracker(state: tauri::State<SidecarState>) {
 #[tauri::command]
 fn restart_tracker(app: tauri::AppHandle, state: tauri::State<SidecarState>) {
     if let Ok(mut guard) = state.0.lock() {
-        if let Some(mut child) = guard.take() {
+        if let Some(child) = guard.take() {
             let _ = child.kill();
         }
     }
@@ -154,17 +173,23 @@ fn open_url(url: String) -> Result<(), String> {
 /// Write a newline-delimited JSON message to the tracker's stdin.
 #[tauri::command]
 fn send_to_tracker(state: tauri::State<SidecarState>, message: String) -> Result<(), String> {
-    use std::io::Write;
     let mut guard = state.0.lock().map_err(|e| e.to_string())?;
     let child = guard.as_mut().ok_or("Tracker not running")?;
-    let stdin = child.stdin.as_mut().ok_or("Tracker stdin not available")?;
     let mut data = message.into_bytes();
     data.push(b'\n');
-    stdin.write_all(&data).map_err(|e| e.to_string())
+    child.write(&data).map_err(|e| e.to_string())
 }
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .target(tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::Webview,
+                ))
+                .build(),
+        )
+        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![start_tracker, stop_tracker, restart_tracker, send_to_tracker, open_url])
@@ -180,7 +205,7 @@ pub fn run() {
             if let tauri::RunEvent::Exit = event {
                 if let Some(state) = app_handle.try_state::<SidecarState>() {
                     if let Ok(mut guard) = state.0.lock() {
-                        if let Some(mut child) = guard.take() {
+                        if let Some(child) = guard.take() {
                             let _ = child.kill();
                         }
                     }

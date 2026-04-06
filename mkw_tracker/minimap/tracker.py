@@ -197,7 +197,7 @@ class MinimapTracker:
             return self._confident_score
         n = len(self._calib_scores)
         if n < 30:
-            print(f"  [MinimapTracker] calibration skipped — only {n} scores")
+            print(f"  [MinimapTracker] calibration skipped - only {n} scores")
             self._calibrated = True
             return self._confident_score
         trimmed = sorted(self._calib_scores)[max(1, int(n * 0.15)):]
