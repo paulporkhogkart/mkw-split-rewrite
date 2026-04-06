@@ -1146,14 +1146,20 @@
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────────
+  let sidecarStartupError = false;
+
   onMount(async () => {
     appWindow=getCurrentWindow();
     version=await getVersion();
     await invoke("start_tracker");
     unlisten=await listen("tracker-event", ev=>{
+      sidecarStartupError = false;
       try { handleMsg(JSON.parse(ev.payload)); }
       catch { pushLog(String(ev.payload)); }
     });
+    // If no event arrives within 15 s the sidecar likely failed to start
+    // (e.g. blocked by antivirus, binary missing, or crash before first emit).
+    setTimeout(() => { if (!trackerConnected) sidecarStartupError = true; }, 15000);
     setInterval(()=>{ _tick++; },1000);
     checkForUpdate();
     window.addEventListener("mouseup",onWindowMouseUp);
@@ -1511,7 +1517,15 @@
               <div class="log-line">{line}</div>
             {/each}
             {#if logs.length === 0}
-              <div class="log-empty">Waiting for events…</div>
+              {#if sidecarStartupError}
+                <div class="log-empty log-error">
+                  Tracker failed to start. Check that your antivirus isn't blocking
+                  <code>bin\mkw-tracker-engine.exe</code> in the install folder,
+                  then restart the app.
+                </div>
+              {:else}
+                <div class="log-empty">Waiting for events…</div>
+              {/if}
             {/if}
           </div>
         {/if}
@@ -2270,6 +2284,7 @@
   }
   .log-line  { font-size: .65rem; color: #5a8ab0; white-space: pre-wrap; word-break: break-all; line-height: 1.5; padding: 0 2px; }
   .log-empty { font-size: .65rem; color: #222; font-style: italic; padding: 4px 2px; }
+  .log-error { color: #d9534f; font-style: normal; }
 
   /* Detection panel */
   .det-screen { display: flex; align-items: baseline; gap: 6px; }

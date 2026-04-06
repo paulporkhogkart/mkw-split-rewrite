@@ -24,7 +24,9 @@ Why bgr24 via ffmpeg rather than keeping P010 in Python:
 import ctypes
 import ctypes.wintypes
 import msvcrt
+import os
 import subprocess
+import sys
 import threading
 from typing import Optional, Tuple
 
@@ -33,6 +35,16 @@ import numpy as np
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
+
+def _bundled_bin(name: str) -> str:
+    """Return the path to a bundled binary (ffmpeg/ffprobe) when frozen,
+    or just the bare name (resolved via PATH) in development."""
+    if getattr(sys, 'frozen', False):
+        candidate = os.path.join(sys._MEIPASS, name + '.exe')
+        if os.path.isfile(candidate):
+            return candidate
+    return name
+
 
 def _run(*args, **kwargs):
     return subprocess.run(*args, capture_output=True, text=True, **kwargs)
@@ -71,7 +83,7 @@ def _fill_frame(raw_io, mv: memoryview, n: int) -> bool:
 
 def list_dshow_video_devices() -> list[str]:
     """Return friendly names of all DirectShow video devices via ffmpeg."""
-    r = _run(["ffmpeg", "-f", "dshow", "-list_devices", "true", "-i", "dummy"])
+    r = _run([_bundled_bin("ffmpeg"), "-f", "dshow", "-list_devices", "true", "-i", "dummy"])
     names = []
     for line in r.stderr.splitlines():
         if "(video)" in line and '"' in line:
@@ -81,7 +93,7 @@ def list_dshow_video_devices() -> list[str]:
 
 def _device_has_p010(device_name: str) -> bool:
     """Return True if the device advertises the P010 FourCC (10-bit HDR) via dshow."""
-    r = _run(["ffmpeg", "-f", "dshow", "-list_options", "true",
+    r = _run([_bundled_bin("ffmpeg"), "-f", "dshow", "-list_options", "true",
               "-i", f"video={device_name}"])
     return "0x30313050" in r.stderr   # P010 little-endian FourCC
 
@@ -115,7 +127,7 @@ def _probe_device_size(device_name: str) -> tuple[int, int, int]:
     import json as _json
     try:
         r = subprocess.run(
-            ["ffprobe", "-v", "quiet", "-f", "dshow",
+            [_bundled_bin("ffprobe"), "-v", "quiet", "-f", "dshow",
              "-i", f"video={device_name}",
              "-show_streams", "-select_streams", "v:0",
              "-of", "json"],
@@ -183,7 +195,7 @@ class FfmpegCameraSource:
         self._drain_mv  = memoryview(self._drain_buf)
 
         cmd = [
-            "ffmpeg",
+            _bundled_bin("ffmpeg"),
             "-fflags",            "nobuffer",
             "-flags",             "low_delay",
             "-loglevel",          "error",

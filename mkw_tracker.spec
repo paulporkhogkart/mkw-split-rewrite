@@ -10,10 +10,24 @@
 
 block_cipher = None
 
+import shutil as _shutil
+
+# Include ffmpeg/ffprobe if they are on PATH at build time.
+# On the CI runner (windows-latest) ffmpeg is pre-installed.
+# Locally, install ffmpeg and ensure it's on PATH before running pyinstaller.
+_ffmpeg_path  = _shutil.which('ffmpeg')
+_ffprobe_path = _shutil.which('ffprobe')
+if not _ffmpeg_path or not _ffprobe_path:
+    raise SystemExit(
+        "ERROR: ffmpeg/ffprobe not found in PATH — cannot build a working bundle.\n"
+        "  Windows: choco install ffmpeg   or download a static build and add to PATH."
+    )
+_ffmpeg_bins = [(_ffmpeg_path, '.'), (_ffprobe_path, '.')]
+
 a = Analysis(
     ['mkw_tracker/__main__.py'],
     pathex=[],
-    binaries=[],
+    binaries=_ffmpeg_bins,
     datas=[
         # Bundle the entire images/ directory alongside the exe.
         # resource_path() in utils/paths.py resolves these via sys._MEIPASS.
@@ -52,7 +66,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,      # UPX-packed PyInstaller exes trigger Windows Defender false positives
     console=True,   # Must be True: sidecar communicates over stdio
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -68,7 +82,7 @@ coll = COLLECT(
     a.zipfiles,
     a.datas,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     name='mkw-tracker',
 )

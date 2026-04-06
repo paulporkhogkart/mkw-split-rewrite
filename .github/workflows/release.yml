@@ -47,6 +47,9 @@ jobs:
       - name: Install runtime + build deps
         run: pip install -r requirements.txt pyinstaller
 
+      - name: Verify ffmpeg is available for bundling
+        run: ffmpeg -version
+
       - name: Build with PyInstaller
         run: pyinstaller mkw_tracker.spec --noconfirm
 
