@@ -47,8 +47,8 @@ jobs:
       - name: Install runtime + build deps
         run: pip install -r requirements.txt pyinstaller
 
-      - name: Verify ffmpeg is available for bundling
-        run: ffmpeg -version
+      - name: Install ffmpeg (for bundling into sidecar)
+        run: choco install ffmpeg --no-progress -y
 
       - name: Build with PyInstaller
         run: pyinstaller mkw_tracker.spec --noconfirm
