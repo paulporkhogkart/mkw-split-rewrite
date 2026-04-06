@@ -120,6 +120,8 @@
   let cameraStatus = "idle";
   let trackerCameraPaused = false;
   let browserDevices = [], selectedBrowserDeviceId = "";
+  let audioDevices = [];
+  let selectedAudioDeviceId = localStorage.getItem("selectedAudioDeviceId") ?? "";
   let pythonCameraStatus = "idle", pythonCameraError = "";
   let engineFrame = null;
   let _feedPollTimer = null;
@@ -559,6 +561,7 @@
     try {
       const all = await navigator.mediaDevices.enumerateDevices();
       browserDevices = all.filter(d => d.kind === "videoinput");
+      audioDevices   = all.filter(d => d.kind === "audioinput");
       if (!selectedBrowserDeviceId && browserDevices.length > 0)
         selectedBrowserDeviceId = browserDevices[0].deviceId;
     } catch { /* ignore */ }
@@ -570,32 +573,46 @@
       ? { deviceId:{ exact:deviceId }, width:{ ideal:1920 }, height:{ ideal:1080 } }
       : { width:{ ideal:1920 }, height:{ ideal:1080 } };
     try {
-      // Find the audio input that shares a groupId with the selected video device.
-      // This ensures we grab the capture card's own audio, not a random microphone.
-      let ac = false;
-      if (deviceId) {
+      // Resolve which audio device to capture, in priority order:
+      //   1. Explicitly selected audio device (user's choice, saved to localStorage)
+      //   2. Audio input sharing a groupId with the chosen video device (capture card pairing)
+      //   3. No audio — never fall back to the default mic
+      let resolvedAudioId = selectedAudioDeviceId || null;
+      if (!resolvedAudioId && deviceId) {
         try {
           const all = await navigator.mediaDevices.enumerateDevices();
           const vid = all.find(d => d.kind === "videoinput" && d.deviceId === deviceId);
           const aud = vid && all.find(d => d.kind === "audioinput" && d.groupId === vid.groupId);
-          if (aud) ac = { deviceId:{ exact: aud.deviceId } };
-        } catch { /* fall through to generic audio */ }
+          if (aud) resolvedAudioId = aud.deviceId;
+        } catch { /* no audio */ }
       }
-      // Raw audio constraints — disable all browser processing so we get the
-      // clean capture card signal without noise suppression / echo cancellation.
-      const rawAudio = {
-        ...(ac || {}),
-        echoCancellation:  false,
-        noiseSuppression:  false,
-        autoGainControl:   false,
-      };
-      try {
-        videoStream = await navigator.mediaDevices.getUserMedia({ video:vc, audio: rawAudio });
-      } catch {
+      if (resolvedAudioId) {
+        // Disable all browser processing so we get the clean capture card signal.
+        const rawAudio = {
+          deviceId:         { exact: resolvedAudioId },
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl:  false,
+        };
+        try {
+          videoStream = await navigator.mediaDevices.getUserMedia({ video:vc, audio: rawAudio });
+        } catch {
+          videoStream = await navigator.mediaDevices.getUserMedia({ video:vc });
+        }
+      } else {
+        // No associated audio resolved — open video only, don't grab a random mic.
         videoStream = await navigator.mediaDevices.getUserMedia({ video:vc });
       }
       cameraStatus = "ok";
       await loadBrowserDevices();
+      // Sync the audio dropdown to whatever was actually captured — covers the case
+      // where groupId matching resolved an audio device that the user didn't explicitly pick.
+      const audioTracks = videoStream.getAudioTracks();
+      const capturedAudioId = audioTracks.length > 0 ? (audioTracks[0].getSettings().deviceId ?? "") : "";
+      if (capturedAudioId !== selectedAudioDeviceId) {
+        selectedAudioDeviceId = capturedAudioId;
+        localStorage.setItem("selectedAudioDeviceId", capturedAudioId);
+      }
       _setupAudio();
     } catch (err) {
       videoStream = null;
@@ -933,7 +950,9 @@
                   d.toLowerCase().includes(cleanLabel.toLowerCase()) ||
                   cleanLabel.toLowerCase().includes(d.toLowerCase())
                 );
-                send({ type: "update_config", key: "camera_device", value: match ?? cleanLabel });
+                const pyDevice = match ?? cleanLabel;
+                configuredDevice = pyDevice;
+                send({ type: "update_config", key: "camera_device", value: pyDevice });
               }
             }
             send({ type: "open_camera" });
@@ -1039,6 +1058,11 @@
     const prevBrowserId = selectedBrowserDeviceId;
     configuredDevice = e.target.value;
     send({type:"update_config",key:"camera_device",value:configuredDevice});
+    // Reset audio to auto when video device changes — new device may have no
+    // associated audio (e.g. OBS Virtual Camera). groupId matching in startCamera
+    // will pick up the right audio if one exists, otherwise no audio is used.
+    selectedAudioDeviceId = "";
+    localStorage.setItem("selectedAudioDeviceId", "");
 
     // Match a browser device by label so the preview swaps too
     if (browserDevices.length > 0) {
@@ -1088,11 +1112,20 @@
         send({type:"update_config",key:"camera_device",value:pythonDevice});
       }
     }
+    // Reset audio to auto — new device may have no associated audio.
+    selectedAudioDeviceId = "";
+    localStorage.setItem("selectedAudioDeviceId", "");
     if (!setupComplete&&wizardStep==="camera") {
       stopCamera(); pythonCameraStatus="idle"; engineFrame=null; send({type:"open_camera"});
     } else {
       await startCamera(selectedBrowserDeviceId);
     }
+  }
+  async function handleAudioDeviceChange(e) {
+    selectedAudioDeviceId = e.target.value;
+    localStorage.setItem("selectedAudioDeviceId", selectedAudioDeviceId);
+    // Restart the camera stream so the new audio device takes effect.
+    if (videoStream) await startCamera(selectedBrowserDeviceId || undefined);
   }
   async function restartTracker() {
     restartNeeded=false; devices=[]; trackerConnected=false; await invoke("restart_tracker");
@@ -1350,6 +1383,19 @@
                 {#if deviceSwitching}
                   <span class="det-switching">switching…</span>
                 {/if}
+              </div>
+            {/if}
+            {#if audioDevices.length > 0}
+              <div class="det-device-row">
+                <label class="det-lbl" for="main-aud">Audio</label>
+                <select id="main-aud" class="det-select" on:change={handleAudioDeviceChange}>
+                  <option value="" selected={!selectedAudioDeviceId}>— none —</option>
+                  {#each audioDevices as d}
+                    <option value={d.deviceId} selected={d.deviceId===selectedAudioDeviceId}>
+                      {d.label || `Audio ${d.deviceId.slice(0,6)}…`}
+                    </option>
+                  {/each}
+                </select>
               </div>
             {/if}
           </div>
