@@ -58,6 +58,8 @@ fn do_spawn_sidecar(app: tauri::AppHandle, state: &SidecarState) {
 
     #[cfg(not(debug_assertions))]
     let spawn_result = {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let exe_dir = std::env::current_exe()
             .expect("current_exe")
             .parent()
@@ -68,6 +70,7 @@ fn do_spawn_sidecar(app: tauri::AppHandle, state: &SidecarState) {
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
+            .creation_flags(CREATE_NO_WINDOW)
             .spawn()
     };
 
@@ -88,12 +91,15 @@ fn do_spawn_sidecar(app: tauri::AppHandle, state: &SidecarState) {
                     }
                 });
             }
-            // Drain stderr so the pipe buffer never fills and blocks the sidecar.
+            // Forward stderr to the frontend event log so crashes are visible.
             if let Some(stderr) = child.stderr.take() {
+                let handle = app.clone();
                 std::thread::spawn(move || {
                     use std::io::BufRead;
                     for line in std::io::BufReader::new(stderr).lines().flatten() {
-                        eprintln!("[tracker] {line}");
+                        eprintln!("[tracker stderr] {line}");
+                        let msg = format!("{{\"type\":\"stderr\",\"line\":{}}}", serde_json::to_string(&line).unwrap_or_default());
+                        let _ = handle.emit("tracker-event", &msg);
                     }
                 });
             }

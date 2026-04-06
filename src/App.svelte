@@ -414,6 +414,9 @@
 
   function handleMsg(msg) {
     switch (msg.type) {
+      case "stderr":
+        pushLog(`[err] ${msg.line}`);
+        break;
       case "ready":
         trackerConnected = true;
         lastHeartbeatTs = Date.now();
@@ -1157,9 +1160,9 @@
       try { handleMsg(JSON.parse(ev.payload)); }
       catch { pushLog(String(ev.payload)); }
     });
-    // If no event arrives within 15 s the sidecar likely failed to start
-    // (e.g. blocked by antivirus, binary missing, or crash before first emit).
-    setTimeout(() => { if (!trackerConnected) sidecarStartupError = true; }, 15000);
+    // If no event arrives within 60 s the sidecar likely failed to start.
+    // First-run can be slow while Windows Defender scans the _internal/ DLLs.
+    setTimeout(() => { if (!trackerConnected) sidecarStartupError = true; }, 60000);
     setInterval(()=>{ _tick++; },1000);
     checkForUpdate();
     window.addEventListener("mouseup",onWindowMouseUp);
