@@ -136,6 +136,7 @@
   function _setupAudio() {
     _teardownAudio();
     if (!videoStream) return;
+    if (!setupComplete) return;
     _hasAudio = videoStream.getAudioTracks().length > 0;
     if (!_hasAudio) return;
     _audioCtx = new AudioContext();
@@ -425,8 +426,8 @@
         send({ type: "list_tells" });
         send({ type: "list_rois" });
         if (!msg.setup_complete) { setupComplete = false; openWizard(); }
-        // Auto-start browser camera for the main feed
-        if (cameraStatus === "idle")
+        // Auto-start browser camera for the main feed — only when already set up
+        if (msg.setup_complete && cameraStatus === "idle")
           loadBrowserDevices().then(() => startCamera(selectedBrowserDeviceId || undefined));
         break;
       case "camera_status":
@@ -442,11 +443,16 @@
               const clean = d.label.replace(/\s*\([0-9a-f:]+\)\s*$/i,"").trim().toLowerCase();
               return clean === pyDev || clean.includes(pyDev) || pyDev.includes(clean);
             });
-            if (match && match.deviceId !== selectedBrowserDeviceId)
+            if (match && match.deviceId !== selectedBrowserDeviceId) {
+              // Python opened a different device — force the browser to match it
               selectedBrowserDeviceId = match.deviceId;
-          }
-          if (wizardStep === "camera" && cameraStatus === "idle")
+              if (wizardStep === "camera") startCamera(match.deviceId);
+            } else if (wizardStep === "camera" && cameraStatus === "idle") {
+              startCamera(selectedBrowserDeviceId || undefined);
+            }
+          } else if (wizardStep === "camera" && cameraStatus === "idle") {
             startCamera(selectedBrowserDeviceId || undefined);
+          }
         }
         break;
       case "frame_data":
@@ -832,6 +838,10 @@
     invoke("open_url",{url:"ms-settings:camera"}).catch(()=>{});
   }
 
+  function releaseForSettings() {
+    stopCamera(); trackerCameraPaused=true; send({type:"pause_camera"});
+  }
+
   async function retryNow() {
     stopCamera(); pythonCameraStatus="opening"; engineFrame=null;
     send({type:"open_camera"});
@@ -894,7 +904,7 @@
     wizardOpen=false; resetConfirmPending=false;
   }
   function completeSetup() {
-    send({type:"mark_setup_complete"}); setupComplete=true; closeWizard();
+    send({type:"mark_setup_complete"}); setupComplete=true; closeWizard(); _setupAudio();
   }
   function goStep(step) {
     wizardStep=step; screenIdx=0; selectionIdx=0; hudIdx=0;
@@ -907,8 +917,10 @@
       if (pythonCameraStatus!=="ok") {
         pythonCameraStatus="idle"; engineFrame=null; send({type:"open_camera"});
       }
-      // Browser camera is already running from auto-start; only start if it somehow stopped
-      if (cameraStatus==="idle") startCamera(selectedBrowserDeviceId||undefined);
+      // During first-time setup, wait for Python's camera_status to report which device
+      // it opened, then start the browser with the matching device. On re-run setup the
+      // browser camera is already live from the main feed; only restart if it stopped.
+      if (setupComplete && cameraStatus==="idle") startCamera(selectedBrowserDeviceId||undefined);
     }
   }
 
@@ -1098,7 +1110,7 @@
     if (trackerCameraPaused) send({type:"resume_camera"});
   });
 
-  $: if (mainVideoEl) mainVideoEl.srcObject=videoStream??null;
+  $: if (mainVideoEl) mainVideoEl.srcObject=setupComplete ? (videoStream??null) : null;
   $: if (wizVideoEl)  wizVideoEl.srcObject =videoStream??null;
   afterUpdate(()=>{ if (wizardOpen) drawRoi(); });
 
@@ -1514,7 +1526,7 @@
 
 {#if wizardOpen}
   <div class="modal-backdrop wiz-backdrop" on:click|self={setupComplete ? closeWizard : undefined}>
-    <div class="wiz-dialog">
+    <div class="wiz-dialog" class:wiz-dialog-narrow={wizardStep === "language"}>
 
       <!-- Wizard tabs -->
       <nav class="wiz-tabs">
@@ -1628,50 +1640,44 @@
               {/if}
 
               {#if !setupComplete}
-                <div class="cam-prereq">
-                  <span class="cam-prereq-title">Required — enable Windows camera sharing</span>
-                  <p class="cam-prereq-body">MKW Tracker needs simultaneous access to the same capture card as the app preview. Windows blocks this by default. Do this once before continuing:</p>
-                  <ol class="cam-steps">
-                    <li>Click <strong>Open Windows Camera Settings →</strong> below</li>
-                    <li>Find your capture card → <strong>Advanced camera options</strong> → <strong>Edit</strong></li>
-                    <li>Turn on <strong>"Allow multiple apps to use camera at the same time"</strong></li>
-                    <li>Return here</li>
-                  </ol>
-                  <div class="cam-prereq-actions">
-                    <button class="btn-primary" on:click={() => invoke("open_url",{url:"ms-settings:camera"}).catch(()=>{})}>Open Windows Camera Settings →</button>
-                  </div>
-                </div>
-              {/if}
-
-              {#if pythonCameraOk && cameraStatus === "busy"}
-                <div class="cam-troubleshoot">
-                  <span class="cam-troubleshoot-title">Your capture card is blocking simultaneous access</span>
-                  <p class="cam-troubleshoot-body">The engine feed confirms the device works. Windows is preventing the app from opening it at the same time. One-time fix:</p>
-                  <ol class="cam-steps">
-                    <li>Click <strong>Release engine &amp; open settings →</strong> below</li>
-                    <li>Find your capture card → <strong>Advanced camera options</strong> → <strong>Edit</strong></li>
-                    <li>Turn on <strong>"Allow multiple apps to use camera at the same time"</strong></li>
-                    <li>Return here and click <strong>Retry</strong></li>
-                  </ol>
-                  <div class="cam-troubleshoot-actions">
-                    <button class="btn-primary" on:click={releaseAndOpenSettings}>Release engine &amp; open settings →</button>
-                  </div>
-                </div>
-              {:else if trackerCameraPaused}
-                <div class="cam-troubleshoot cam-troubleshoot-neutral">
-                  <span class="cam-troubleshoot-title">Engine camera released</span>
-                  <p class="cam-troubleshoot-body">Change the Windows setting if you haven't yet, then click <strong>Retry</strong>.</p>
-                  <div class="cam-troubleshoot-actions">
-                    <button class="btn-primary" on:click={retryNow}>Retry</button>
-                  </div>
-                </div>
-              {:else if pythonCameraStatus === "error" || cameraStatus === "error"}
-                <div class="cam-troubleshoot">
-                  <span class="cam-troubleshoot-title">Can't access capture card</span>
-                  <p class="cam-troubleshoot-body">Check that your capture card is connected and not in use by another app.{#if pythonCameraError} <span class="cam-err-detail">{pythonCameraError}</span>{/if}</p>
-                  <div class="cam-troubleshoot-actions">
-                    <button class="btn-primary" on:click={retryNow}>Retry</button>
-                  </div>
+                <div class="cam-prereq" class:cam-prereq-ok={bothCamerasOk}>
+                  {#if bothCamerasOk}
+                    <span class="cam-prereq-title cam-prereq-title-ok">Camera sharing is working</span>
+                    <p class="cam-prereq-body">Both feeds are connected to the same device. You're good to continue.</p>
+                  {:else}
+                    <span class="cam-prereq-title">Required — enable Windows camera sharing</span>
+                    <p class="cam-prereq-body">MKW Tracker needs simultaneous access to the same capture card as the app preview. Windows blocks this by default. Do this once before continuing:</p>
+                    {#if pythonCameraStatus === "error" || cameraStatus === "error"}
+                      <div class="cam-release-bar cam-release-bar-error">
+                        <span class="cam-release-dot"></span>
+                        <span class="cam-release-msg">Can't access capture card — check it's connected and not in use by another app. {#if pythonCameraError}{pythonCameraError}{/if}</span>
+                        <button class="btn-sm" on:click={retryNow}>Retry</button>
+                      </div>
+                    {:else}
+                      <div class="cam-release-bar" class:cam-release-bar-released={trackerCameraPaused}>
+                        <span class="cam-release-dot"></span>
+                        <span class="cam-release-msg">
+                          {#if trackerCameraPaused}
+                            App feeds released — also close OBS, Discord, and any other apps currently using the camera before proceeding.
+                          {:else}
+                            Release this app's feeds and close OBS, Discord, and any other apps currently using the camera before changing this setting.
+                          {/if}
+                        </span>
+                        <button class="btn-sm" on:click={trackerCameraPaused ? retryNow : releaseForSettings}>
+                          {trackerCameraPaused ? "Re-enable feeds" : "Release feeds"}
+                        </button>
+                      </div>
+                    {/if}
+                    <ol class="cam-steps">
+                      <li>Click <strong>Open Windows Camera Settings</strong> below</li>
+                      <li>Find your capture card → <strong>Advanced camera options</strong> → <strong>Edit</strong></li>
+                      <li>Turn on <strong>"Allow multiple apps to use camera at the same time"</strong></li>
+                      <li>Return here and re-enable feeds above, then <button class="btn-sm" on:click={retryNow}>Retry</button></li>
+                    </ol>
+                    <div class="cam-prereq-actions">
+                      <button class="btn-primary" on:click={() => invoke("open_url",{url:"ms-settings:camera"}).catch(()=>{})}>Open Windows Camera Settings →</button>
+                    </div>
+                  {/if}
                 </div>
               {/if}
 
@@ -2258,7 +2264,9 @@
     background: #06060e; border: 1px solid #1e1e2e; border-radius: 6px;
     display: flex; flex-direction: column; overflow: hidden;
     width: 100%; max-width: 960px; max-height: 100%; align-self: center; margin: auto;
+    transition: max-width .2s ease;
   }
+  .wiz-dialog-narrow { max-width: 480px; }
   .wiz-tabs {
     display: flex; flex-shrink: 0; background: #04040a;
     border-bottom: 1px solid #111120; overflow-x: auto; scrollbar-width: none;
@@ -2347,7 +2355,9 @@
     background: rgba(126,184,247,.07); border: 1px solid rgba(126,184,247,.25);
     display: flex; flex-direction: column; gap: .3rem;
   }
-  .cam-prereq-title   { font-size: .72rem; color: #7eb8f7; font-weight: 600; }
+  .cam-prereq-title        { font-size: .72rem; color: #7eb8f7; font-weight: 600; }
+  .cam-prereq-title-ok     { color: #4caf50; }
+  .cam-prereq-ok           { background: rgba(76,175,80,.05); border-color: rgba(76,175,80,.2); }
   .cam-prereq-body    { font-size: .68rem; color: #666; margin: 0; line-height: 1.55; }
   .cam-prereq-actions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-top: .15rem; }
   .cam-troubleshoot {
@@ -2360,7 +2370,28 @@
   .cam-troubleshoot-body    { font-size: .68rem; color: #666; margin: 0; line-height: 1.55; }
   .cam-troubleshoot-actions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-top: .15rem; }
   .cam-err-detail { display: block; font-size: .65rem; color: #555; margin-top: .2rem; font-style: italic; }
-  .cam-steps { margin: .2rem 0 .1rem; padding-left: 1.2rem; font-size: .68rem; color: #666; line-height: 1.8; }
+  .cam-release-bar {
+    display: flex; align-items: center; gap: .55rem;
+    padding: .38rem .55rem; border-radius: 3px;
+    background: rgba(251,191,36,.05); border: 1px solid rgba(251,191,36,.18);
+    transition: background .25s, border-color .25s;
+  }
+  .cam-release-bar-released {
+    background: rgba(76,175,80,.05); border-color: rgba(76,175,80,.2);
+  }
+  .cam-release-dot {
+    width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+    background: #8a6a10; transition: background .25s;
+  }
+  .cam-release-bar-released .cam-release-dot { background: #4caf50; }
+  .cam-release-msg { flex: 1; font-size: .66rem; color: #6a6040; line-height: 1.45; transition: color .25s; }
+  .cam-release-bar-released .cam-release-msg { color: #4a6a4a; }
+  .cam-release-bar-error {
+    background: rgba(239,68,68,.05); border-color: rgba(239,68,68,.2);
+  }
+  .cam-release-bar-error .cam-release-dot { background: #ef4444; }
+  .cam-release-bar-error .cam-release-msg { color: #7a3a3a; }
+  .cam-steps { margin: .15rem 0 .05rem; padding-left: 1.2rem; font-size: .68rem; color: #666; line-height: 1.8; }
   .cam-steps strong { color: #9ab; }
 
   /* ROI tabs */

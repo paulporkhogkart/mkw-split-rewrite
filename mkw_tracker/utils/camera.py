@@ -103,10 +103,14 @@ def _find_obs_device() -> tuple[int, str]:
     return 0, ""
 
 
+_MAX_FPS = 60   # cap all sources to this; Windows camera sharing can inflate fps arbitrarily
+
+
 def _probe_device_size(device_name: str) -> tuple[int, int, int]:
     """
     Query the device's current output resolution and framerate via ffprobe.
     Falls back to 1920×1080@60 if the probe times out or fails.
+    The reported fps is capped at _MAX_FPS regardless of what the device advertises.
     """
     import json as _json
     try:
@@ -124,8 +128,12 @@ def _probe_device_size(device_name: str) -> tuple[int, int, int]:
         w = int(s["width"])
         h = int(s["height"])
         num, den = (s.get("r_frame_rate") or "60/1").split("/")
-        fps = max(1, round(float(num) / max(1, float(den))))
-        print(f"[Camera] probe: {device_name!r} → {w}x{h} @ {fps}fps")
+        fps_raw = max(1, round(float(num) / max(1, float(den))))
+        fps = min(fps_raw, _MAX_FPS)
+        if fps_raw != fps:
+            print(f"[Camera] probe: {device_name!r} → {w}x{h} @ {fps_raw}fps (capped to {fps}fps)")
+        else:
+            print(f"[Camera] probe: {device_name!r} → {w}x{h} @ {fps}fps")
         return w, h, fps
     except Exception as e:
         print(f"[Camera] probe failed ({e}), defaulting to 1920x1080@60")
@@ -185,6 +193,7 @@ class FfmpegCameraSource:
             "-i", f"video={device_name}",
             "-f", "rawvideo", "-pix_fmt", "bgr24",
             "-s", f"{width}x{height}",    # scale output to probed size for consistent buffer layout
+            "-r", str(_MAX_FPS),          # hard cap output rate; Windows sharing can inflate device fps
             "pipe:1",
         ]
         self.device_name = device_name
@@ -315,10 +324,11 @@ class VideoCaptureSource:
 
     def __init__(self, index: int, device_name: str = "") -> None:
         self._cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
+        self._cap.set(cv2.CAP_PROP_FPS, _MAX_FPS)
         # Read back what the device actually delivers — don't force a resolution.
         self.width       = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.height      = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        self.fps         = self._cap.get(cv2.CAP_PROP_FPS)
+        self.fps         = min(self._cap.get(cv2.CAP_PROP_FPS), _MAX_FPS)
         self.device_name = device_name or f"index:{index}"
         print(f"[Camera] DSHOW SDR: {self.device_name!r} "
               f"{self.width}x{self.height} @ {self.fps}fps")

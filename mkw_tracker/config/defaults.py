@@ -119,17 +119,17 @@ class Defaults:
         if self.finish_roi is None:
             self.finish_roi = [1290/W, 410/H, 1380/W, 500/H]
         if self.mushroom_roi is None:
-            self.mushroom_roi = [50/W, 50/H, 240/W, 240/H]
+            self.mushroom_roi = [50, 134, 240, 226]
         if self.minimap_roi is None:
             self.minimap_roi = [1442/W, 251/H, 466/W, 796/H]
         if self.char_name_roi is None:
-            self.char_name_roi = [1210/W, 830/H, 1770/W, 894/H]
+            self.char_name_roi = [1210, 816, 1770, 900]
         if self.costume_roi is None:
-            self.costume_roi = [1210/W, 916/H, 1770/W, 958/H]
+            self.costume_roi = [1210, 916, 1770, 961]
         if self.kart_name_roi is None:
-            self.kart_name_roi = [1240/W, 830/H, 1740/W, 894/H]
+            self.kart_name_roi = [1240, 822, 1729, 891]
         if self.course_name_roi is None:
-            self.course_name_roi = [163/W, 387/H, 647/W, 462/H]
+            self.course_name_roi = [175, 390, 639, 450]
 
     def as_dict(self) -> dict:
         return asdict(self)

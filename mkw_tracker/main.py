@@ -14,7 +14,24 @@ from .database.migrations import apply_migrations
 from .database.replay_repo import export_mkwreplay
 from .config.settings import get_settings
 from .config.defaults import Defaults
-from .detection.screen import ScreenDetector
+from .detection.screen import Screen, ScreenDetector
+
+# Per-screen frame rate budgets.
+# The main loop sleeps at the end of each iteration to enforce these caps,
+# regardless of how fast the camera source or OS scheduler delivers frames.
+_FULL_RATE_SCREENS    = {Screen.RACING, Screen.GHOST, Screen.UNKNOWN_RACE_ACTIVE}
+_RACE_FRAME_INTERVAL  = 1.0 / 30.0   # 30 fps during races
+_MENU_FRAME_INTERVAL  = 1.0 / 15.0   # 15 fps on menus / selection screens
+
+# OpenCL (GPU) acceleration via OpenCV T-API.
+# Enabled automatically if the driver supports it; falls back silently to CPU.
+cv2.ocl.setUseOpenCL(True)
+_ocl_available = cv2.ocl.haveOpenCL() and cv2.ocl.useOpenCL()
+if _ocl_available:
+    dev = cv2.ocl.Device.getDefault()
+    print(f"[GPU] OpenCL enabled — {dev.name()} ({dev.vendorName()})")
+else:
+    print("[GPU] OpenCL not available — running on CPU")
 from .detection.selection import SelectionTracker
 from .race.laps import LapTracker
 from .race.coins import CoinTracker
@@ -56,6 +73,11 @@ def _norm(frame):
     h, w = frame.shape[:2]
     if w == _REF_W and h == _REF_H:
         return frame
+    if _ocl_available:
+        # Upload → resize on GPU → download.  Worth it for large source frames
+        # (e.g. 2560×1440) where the resize dominates per-frame cost.
+        return cv2.resize(cv2.UMat(frame), (_REF_W, _REF_H),
+                          interpolation=cv2.INTER_LINEAR).get()
     return cv2.resize(frame, (_REF_W, _REF_H), interpolation=cv2.INTER_LINEAR)
 
 
@@ -85,7 +107,6 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
 
     elif t == "force_screen":
         screen_name = msg.get("screen", "")
-        from .detection.screen import Screen
         try:
             detector.force_screen(Screen[screen_name])
         except KeyError:
@@ -990,6 +1011,14 @@ def run(args):
                 print(f"  [mm debug] per-frame logging {'ON' if minimap.debug_log else 'OFF'}")
             if key == ord("d"):
                 _debug_dump(frame, laps, coins, ts, mush)
+
+        # ── Frame rate cap ────────────────────────────────────────────────────
+        # Sleep for the remainder of the target frame budget so the loop never
+        # spins faster than intended regardless of camera or OS delivery rate.
+        _target = _RACE_FRAME_INTERVAL if screen in _FULL_RATE_SCREENS else _MENU_FRAME_INTERVAL
+        _spare  = _target - (time.perf_counter() - t_frame)
+        if _spare > 0:
+            time.sleep(_spare)
 
     _do_cleanup(_ctypes, cap, ipc)
 
