@@ -31,7 +31,7 @@ from .overlay.panels import draw_screen_badge, draw_legend, draw_state_panel
 from .lifecycle.race import RaceLifecycle
 from .ipc.sidecar import IpcServer
 from .ipc.protocol import (parse_inbound, emit_ready, emit_screen_change, emit_selection_update,
-                            emit_lap_update, emit_coin_update, emit_mush_update, emit_finish,
+                            emit_lap_update, emit_coin_update, emit_mush_update, emit_finish, emit_split_recorded,
                             emit_pb_achieved, emit_pb_export, emit_state, emit_devices_list,
                             emit_error, emit_heartbeat, emit_frame_data, emit_template_score,
                             emit_template_saved, emit_template_images, emit_tells_list, emit_rois_list,
@@ -61,7 +61,7 @@ def _norm(frame):
 def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
                         minimap: MinimapTracker, lifecycle: RaceLifecycle,
                         show_debug: list, cap, current_frame: list,
-                        setup_mode: list):
+                        setup_mode: list, tracker=None):
     """Dispatch a single inbound IPC command."""
     t = msg.get("type", "")
 
@@ -70,6 +70,12 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
         value = msg.get("value")
         settings.update(key, value)
         settings.reload([key])
+        if key == "switch2_language":
+            _lang = str(value) if value else "en_uk"
+            detector.reload_language(_lang)
+            if tracker is not None:
+                tracker.reload_language(_lang)
+            load_mushroom_templates(switch2_language=_lang)
 
     elif t == "get_state":
         # Full snapshot emitted on next frame — just mark as needed
@@ -287,6 +293,7 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
         frame = current_frame[0]
         category  = msg.get("category", "")
         item_name = msg.get("item_name", "")
+        _lang = settings.get("switch2_language", "en_uk") or "en_uk"
         _roi_map = {
             "characters": settings.get("char_name_roi"),
             "karts":      settings.get("kart_name_roi"),
@@ -295,18 +302,21 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
             "mushrooms":  settings.get("mushroom_roi"),
         }
         _dir_map = {
-            "characters": "images/characters",
-            "karts":      "images/karts",
-            "courses":    "images/courses",
-            "costumes":   "images/costumes",
-            "mushrooms":  "images/mushrooms",
+            "characters": f"images/characters/{_lang}",
+            "karts":      f"images/karts/{_lang}",
+            "courses":    f"images/courses/{_lang}",
+            "costumes":   f"images/costumes/{_lang}",
+            "mushrooms":  f"images/mushrooms/{_lang}",
         }
         _roi = _roi_map.get(category)
         _img_dir = _dir_map.get(category)
         if not _roi or not _img_dir or not item_name:
             return
-        from .utils.paths import resource_path as _rp
-        _tmpl_path = _rp(f"{_img_dir}/{item_name}.png")
+        from .utils.paths import resource_path as _rp, data_dir as _dd
+        # Check user data dir first, then resource path
+        _tmpl_path = str(_dd() / f"{_img_dir}/{item_name}.png")
+        if not os.path.exists(_tmpl_path):
+            _tmpl_path = _rp(f"{_img_dir}/{item_name}.png")
         _template_img = None
         if os.path.exists(_tmpl_path):
             _tmpl = cv2.imread(_tmpl_path)
@@ -333,6 +343,7 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
         frame = current_frame[0]
         category  = msg.get("category", "")
         item_name = msg.get("item_name", "")
+        _lang = settings.get("switch2_language", "en_uk") or "en_uk"
         _roi_map = {
             "characters": settings.get("char_name_roi"),
             "karts":      settings.get("kart_name_roi"),
@@ -341,11 +352,11 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
             "mushrooms":  settings.get("mushroom_roi"),
         }
         _dir_map = {
-            "characters": "images/characters",
-            "karts":      "images/karts",
-            "courses":    "images/courses",
-            "costumes":   "images/costumes",
-            "mushrooms":  "images/mushrooms",
+            "characters": f"images/characters/{_lang}",
+            "karts":      f"images/karts/{_lang}",
+            "courses":    f"images/courses/{_lang}",
+            "costumes":   f"images/costumes/{_lang}",
+            "mushrooms":  f"images/mushrooms/{_lang}",
         }
         _roi = _roi_map.get(category)
         _img_dir = _dir_map.get(category)
@@ -355,8 +366,9 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
         _crop = frame[_y1:_y2, _x1:_x2]
         if _crop.size == 0:
             return
-        from .utils.paths import resource_path as _rp
-        _save_path = _rp(f"{_img_dir}/{item_name}.png")
+        from .utils.paths import data_dir as _dd
+        _save_path = str(_dd() / f"{_img_dir}/{item_name}.png")
+        os.makedirs(os.path.dirname(_save_path), exist_ok=True)
         if category == "costumes":
             # Save raw colour — load_template_dir applies edge processing at load time
             cv2.imwrite(_save_path, _crop)
@@ -403,14 +415,17 @@ def run(args):
     settings = get_settings()
     display_enabled = not args.no_display
 
+    # ── Language ─────────────────────────────────────────────────────────────
+    switch2_language = settings.get("switch2_language", "en_uk") or "en_uk"
+
     # ── Template loading ─────────────────────────────────────────────────────
     load_finish_templates()
-    load_mushroom_templates()
+    load_mushroom_templates(switch2_language=switch2_language)
 
     # ── Tracker construction ─────────────────────────────────────────────────
     transition_count = [0]
 
-    detector  = ScreenDetector(on_screen_change=None)
+    detector  = ScreenDetector(on_screen_change=None, switch2_language=switch2_language)
 
     # Apply any persisted tell overrides from the wizard.
     # These keys are not in Defaults so settings.get() would never find them
@@ -452,7 +467,8 @@ def run(args):
     for _tell in detector._tells_by_screen.values():
         _tell.load()
 
-    tracker   = SelectionTracker(purge_tight=args.purge_tight)
+    tracker   = SelectionTracker(purge_tight=args.purge_tight,
+                                  switch2_language=switch2_language)
     laps      = LapTracker()
     coins     = CoinTracker()
     ts        = TimestampTracker()
@@ -519,8 +535,12 @@ def run(args):
             ipc.emit(emit_camera_status(ok=False, error=str(_e)))
             print(f"[Camera] Failed to open: {_e}")
 
-    ipc.emit(emit_ready(version="dev" if args.no_ipc else "sidecar",
-                        setup_complete=not setup_mode[0]))
+    ipc.emit(emit_ready(
+        version="dev" if args.no_ipc else "sidecar",
+        setup_complete=not setup_mode[0],
+        app_language=settings.get("app_language", "en_uk") or "en_uk",
+        switch2_language=switch2_language,
+    ))
     print("Screen detector running. Press 'q' to quit.\n")
 
     # ── Per-loop state ───────────────────────────────────────────────────────
@@ -541,8 +561,12 @@ def run(args):
     _prev_sel    = (None, None, None, None)   # (character, costume, kart, course)
     _prev_lap    = (None, None)               # (current_lap, total_laps)
     _prev_coins  = None
-    _prev_mush   = 0
-    _prev_finish = False
+    _prev_mush        = 0
+    _prev_finish      = False
+    _want_finish_emit = False   # True once finish detected; held until ts burst completes
+    _finish_result    = None    # cached result string while waiting for ts burst
+    _finish_wait      = 0       # frames waited (timeout fallback)
+    _emitted_splits: dict = {}  # lap → time already sent via split_recorded
 
     _last_heartbeat = 0.0
 
@@ -553,7 +577,7 @@ def run(args):
         while cam_paused[0]:
             time.sleep(0.02)
             t_now = time.perf_counter()
-            if t_now - _last_heartbeat >= 1.0:
+            if t_now - _last_heartbeat >= 0.2:
                 ipc.emit(emit_heartbeat(0.0, "PAUSED", False))
                 _last_heartbeat = t_now
             while not ipc.inbound_queue.empty():
@@ -584,7 +608,7 @@ def run(args):
                 else:
                     _handle_ipc_command(_msg, ipc, detector, settings,
                                          minimap, lifecycle, show_debug, cap,
-                                         current_frame, setup_mode)
+                                         current_frame, setup_mode, tracker)
 
         # ── Read frame ───────────────────────────────────────────────────────
         if cap is not None:
@@ -646,11 +670,11 @@ def run(args):
             else:
                 _handle_ipc_command(msg, ipc, detector, settings,
                                      minimap, lifecycle, show_debug, cap,
-                                     current_frame, setup_mode)
+                                     current_frame, setup_mode, tracker)
 
         # ── Setup mode: emit heartbeat and skip all tracking ─────────────────
         if setup_mode[0]:
-            if t_frame - _last_heartbeat >= 1.0:
+            if t_frame - _last_heartbeat >= 0.2:
                 ipc.emit(emit_heartbeat(0.0, "SETUP", False))
                 _last_heartbeat = t_frame
             if display_enabled and frame is not None:
@@ -724,6 +748,15 @@ def run(args):
         else:
             ts_state = ts.state
 
+        # ── Emit any newly-recorded splits ───────────────────────────────────
+        # ts.splits is populated incrementally as burst scans complete.
+        # Emit each new entry as soon as it appears so the UI updates in real time.
+        for lap, split_time in ts.splits.items():
+            if lap not in _emitted_splits:
+                is_final = (ts.total_time is not None and lap == max(ts.splits))
+                ipc.emit(emit_split_recorded(lap, split_time, is_final=is_final))
+                _emitted_splits[lap] = split_time
+
         # ── Perf metrics ─────────────────────────────────────────────────────
         update_ms_buf.append(perf.update_ms)
         tells_buf.append(perf.tells_evaluated)
@@ -737,16 +770,26 @@ def run(args):
         avg_tells = sum(tells_buf)     / len(tells_buf)
         peak_ms   = max(update_ms_buf)
 
-        # ── Heartbeat ────────────────────────────────────────────────────────
-        if t_frame - _last_heartbeat >= 1.0:
-            ipc.emit(emit_heartbeat(avg_fps, screen.name, mm_state.tracking))
+        # ── Heartbeat (5 Hz) ─────────────────────────────────────────────────
+        if t_frame - _last_heartbeat >= 0.2:
+            ipc.emit(emit_heartbeat(
+                avg_fps, screen.name, mm_state.tracking,
+                current_score=perf.current_score,
+                candidate_scores={k.name: v for k, v in perf.candidate_scores.items()},
+            ))
             _last_heartbeat = t_frame
 
         # ── IPC on-change events ─────────────────────────────────────────────
         sel_key = (selection.character, selection.costume,
                    selection.kart, selection.course)
         if sel_key != _prev_sel and any(sel_key):
-            ipc.emit(emit_selection_update(*sel_key))
+            ipc.emit(emit_selection_update(
+                *sel_key,
+                char_conf=selection.character_conf,
+                costume_conf=selection.costume_conf,
+                kart_conf=selection.kart_conf,
+                course_conf=selection.course_conf,
+            ))
             _prev_sel = sel_key
 
         lap_key = (lap_state.current_lap, lap_state.total_laps)
@@ -764,20 +807,31 @@ def run(args):
             ipc.emit(emit_mush_update(mush_state.count))
             _prev_mush = mush_state.count
 
-        if finish_just_detected and not _prev_finish:
-            ipc.emit(emit_finish(
-                finish_state.result,
-                ts.total_time,
-                dict(ts.splits),
-            ))
-            _prev_finish = True
+        # Arm the deferred finish emit when finish is first detected.
+        # The timestamp burst starts on this same frame, so total_time / splits
+        # won't be ready yet — defer until ts.total_time is populated.
+        if finish_just_detected and not _prev_finish and not _want_finish_emit:
+            _want_finish_emit = True
+            _finish_result    = finish_state.result
+            _finish_wait      = 0
+
+        if _want_finish_emit:
+            _finish_wait += 1
+            if ts.total_time is not None or _finish_wait > 90:  # ~3 s timeout at 30 fps
+                ipc.emit(emit_finish(_finish_result, ts.total_time, dict(ts.splits)))
+                _want_finish_emit = False
+                _prev_finish      = True
 
         # Reset race-specific prev-state when the lap tracker clears (new race)
         if lap_key == (None, None) and _prev_lap != (None, None):
-            _prev_lap    = (None, None)
-            _prev_coins  = None
-            _prev_mush   = 0
-            _prev_finish = False
+            _prev_lap         = (None, None)
+            _prev_coins       = None
+            _prev_mush        = 0
+            _prev_finish      = False
+            _want_finish_emit = False
+            _finish_result    = None
+            _finish_wait      = 0
+            _emitted_splits   = {}
 
         # ── Draw ─────────────────────────────────────────────────────────────
         if display_enabled:

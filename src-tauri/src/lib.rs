@@ -2,16 +2,17 @@ use std::sync::Mutex;
 use tauri::{Emitter, Manager};
 use tauri_plugin_shell::{process::CommandEvent, ShellExt};
 
-/// Silently grant camera permission to the webview so getUserMedia works without
-/// the native "localhost wants to use your camera" popup. Must be called after
-/// the window is created (i.e. inside the setup closure).
+/// Silently grant camera and microphone permissions to the webview so getUserMedia
+/// works without native permission popups. Must be called after the window is
+/// created (i.e. inside the setup closure).
 #[cfg(target_os = "windows")]
-fn grant_camera_permission(window: &tauri::WebviewWindow) {
+fn grant_media_permissions(window: &tauri::WebviewWindow) {
     let _ = window.with_webview(|webview| {
         use webview2_com::{
             Microsoft::Web::WebView2::Win32::{
                 COREWEBVIEW2_PERMISSION_KIND,
                 COREWEBVIEW2_PERMISSION_KIND_CAMERA,
+                COREWEBVIEW2_PERMISSION_KIND_MICROPHONE,
                 COREWEBVIEW2_PERMISSION_STATE_ALLOW,
             },
             PermissionRequestedEventHandler,
@@ -23,7 +24,9 @@ fn grant_camera_permission(window: &tauri::WebviewWindow) {
                 if let Some(args) = args {
                     let mut kind = COREWEBVIEW2_PERMISSION_KIND(0);
                     args.PermissionKind(&mut kind)?;
-                    if kind == COREWEBVIEW2_PERMISSION_KIND_CAMERA {
+                    if kind == COREWEBVIEW2_PERMISSION_KIND_CAMERA
+                        || kind == COREWEBVIEW2_PERMISSION_KIND_MICROPHONE
+                    {
                         args.SetState(COREWEBVIEW2_PERMISSION_STATE_ALLOW)?;
                     }
                 }
@@ -158,7 +161,7 @@ pub fn run() {
         .setup(|app| {
             app.manage(SidecarState(Mutex::new(None)));
             #[cfg(target_os = "windows")]
-            grant_camera_permission(&app.get_webview_window("main").expect("main window"));
+            grant_media_permissions(&app.get_webview_window("main").expect("main window"));
             Ok(())
         })
         .build(tauri::generate_context!())

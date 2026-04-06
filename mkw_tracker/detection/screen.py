@@ -14,6 +14,16 @@ from ..utils.paths import resource_path
 # Image encoding helpers (used for IPC template comparison)
 # ---------------------------------------------------------------------------
 
+def _inject_language(path: str, lang: str) -> str:
+    """Convert images/screens/foo.png → images/screens/{lang}/foo.png (no-op if already injected)."""
+    prefix = "images/screens/"
+    if path and lang and path.startswith(prefix):
+        rest = path[len(prefix):]
+        if not rest.startswith(lang + "/"):
+            return f"{prefix}{lang}/{rest}"
+    return path
+
+
 def _encode_img(img: Optional[np.ndarray]) -> Optional[str]:
     """Encode a numpy image as a base64 PNG string, or None if img is None."""
     if img is None:
@@ -144,11 +154,24 @@ class Tell:
     alt_template: Optional[np.ndarray] = field(default=None, repr=False)
     required_also_templates: list = field(default_factory=list, repr=False)
 
-    def load(self):
+    def load(self, switch2_language: str = None):
         from ..utils.paths import data_dir, resource_path
         import os
 
         def _load_one(rel_path: str) -> Optional[np.ndarray]:
+            # Try language-specific path first (screens only)
+            if switch2_language:
+                lang_path = _inject_language(rel_path, switch2_language)
+                if lang_path != rel_path:
+                    user_lang = str(data_dir() / lang_path)
+                    if os.path.exists(user_lang):
+                        img = cv2.imread(user_lang, cv2.IMREAD_GRAYSCALE)
+                        if img is not None:
+                            return img
+                    img = cv2.imread(resource_path(lang_path), cv2.IMREAD_GRAYSCALE)
+                    if img is not None:
+                        return img
+            # Fall back to base path
             user = str(data_dir() / rel_path)
             if os.path.exists(user):
                 img = cv2.imread(user, cv2.IMREAD_GRAYSCALE)
@@ -334,14 +357,16 @@ class ScreenDetector:
         transitions: Dict[Screen, Set[Screen]] = TRANSITIONS,
         on_screen_change: Optional[Callable[[Screen, Screen], None]] = None,
         unknown_recheck_interval: float = 0.5,
+        switch2_language: str = None,
     ):
         self.transitions = transitions
         self.on_screen_change = on_screen_change
         self.unknown_recheck_interval = unknown_recheck_interval
+        self._switch2_language = switch2_language
 
         self._tells_by_screen: Dict[Screen, Tell] = {t.screen: t for t in tells}
         for tell in tells:
-            tell.load()
+            tell.load(switch2_language)
 
         self.current_screen: Screen = Screen.UNKNOWN
         self._last_unknown_check: float = 0.0
@@ -356,7 +381,11 @@ class ScreenDetector:
             if self._pre_home_screen is None:
                 base |= self.transitions.get(Screen.UNKNOWN, set())
             else:
+                # Add the pre-home screen itself AND all its neighbours — we may
+                # have been mid-transition when HOME was pressed, so any screen
+                # reachable from the last known state is a valid landing point.
                 base.add(self._pre_home_screen)
+                base |= self.transitions.get(self._pre_home_screen, set())
             return base
         return self.transitions.get(self.current_screen, set())
 
@@ -461,6 +490,14 @@ class ScreenDetector:
         self.current_screen = new
         if self.on_screen_change:
             self.on_screen_change(old, new)
+
+    # ------------------------------------------------------------------
+    def reload_language(self, switch2_language: str):
+        """Hot-reload all tell templates for a new Switch 2 language."""
+        self._switch2_language = switch2_language
+        for tell in self._tells_by_screen.values():
+            tell.load(switch2_language)
+        print(f"[ScreenDetector] reloaded templates for lang={switch2_language!r}")
 
     # ------------------------------------------------------------------
     def force_screen(self, screen: Screen):
@@ -660,12 +697,14 @@ class ScreenDetector:
 
         from ..utils.paths import data_dir
         import os
-        save_path = str(data_dir() / image_path)
+        # Save to language-specific path if a language is configured
+        save_rel = _inject_language(image_path, self._switch2_language or "")
+        save_path = str(data_dir() / save_rel)
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         cv2.imwrite(save_path, processed)
 
         # Reload and re-score this ROI specifically
-        tell.load()
+        tell.load(self._switch2_language)
         tmpl, _, thresh = self._roi_key_parts(tell, roi_key)
         score = _match_tell(frame, roi, tmpl, thresh)
         return {
@@ -727,7 +766,9 @@ class ScreenDetector:
         if tell is None or len(tell.required_also) >= 1:
             return None
         sn_lower = screen_name.lower()
-        new_path = f"images/screens/{sn_lower}-and-0.png"
+        lang = self._switch2_language or ""
+        _pfx = f"images/screens/{lang}/" if lang else "images/screens/"
+        new_path = f"{_pfx}{sn_lower}-and-0.png"
         new_roi  = tuple(int(v) for v in roi) if roi and len(roi) >= 4 else tell.roi
         tell.required_also.append((new_path, new_roi))
         tell.required_also_templates.append(None)
@@ -762,7 +803,9 @@ class ScreenDetector:
         if tell is None or tell.alt_image_path is not None:
             return None
         sn_lower = screen_name.lower()
-        tell.alt_image_path = f"images/screens/{sn_lower}-alt.png"
+        lang = self._switch2_language or ""
+        _pfx = f"images/screens/{lang}/" if lang else "images/screens/"
+        tell.alt_image_path = f"{_pfx}{sn_lower}-alt.png"
         tell.alt_roi = tuple(int(v) for v in roi) if roi and len(roi) >= 4 else tell.roi
         tell.alt_template = None
         self._propagate_structure(screen, tell)

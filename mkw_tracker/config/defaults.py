@@ -96,6 +96,10 @@ class Defaults:
     camera_fps: int = 60
     camera_device: str = ""   # empty = auto-detect
 
+    # ── Language ──────────────────────────────────────────────────────────────
+    app_language:    str = 'en_uk'   # UI display language
+    switch2_language: str = 'en_uk'  # Nintendo Switch 2 system language (determines template dirs)
+
     # ── Setup ─────────────────────────────────────────────────────────────────
     setup_complete: int = 0   # 0 = first-time setup required, 1 = done
 

@@ -110,6 +110,33 @@ def prepare_roi(
     return thresh
 
 
+def match_top_n(
+    roi_bgr: np.ndarray,
+    templates: Dict[str, np.ndarray],
+    n: int = 5,
+    binary_thresh: int = 170,
+    thresh_type: int = cv2.THRESH_BINARY,
+    _prepared: Optional[np.ndarray] = None,
+) -> list:
+    """Return top-N [(name, score)] sorted by score descending (no threshold filter)."""
+    if _prepared is not None:
+        processed = _prepared
+    else:
+        processed = prepare_roi(roi_bgr, binary_thresh, thresh_type)
+        if processed is None:
+            return []
+
+    def _score(tmpl: np.ndarray) -> float:
+        if tmpl.shape[0] > processed.shape[0] or tmpl.shape[1] > processed.shape[1]:
+            return 0.0
+        result = cv2.matchTemplate(processed, tmpl, cv2.TM_CCOEFF_NORMED)
+        return float(cv2.minMaxLoc(result)[1])
+
+    scores = [(name, _score(tmpl)) for name, tmpl in templates.items()]
+    scores.sort(key=lambda x: x[1], reverse=True)
+    return scores[:n]
+
+
 def match_best(
     roi_bgr: np.ndarray,
     templates: Dict[str, np.ndarray],

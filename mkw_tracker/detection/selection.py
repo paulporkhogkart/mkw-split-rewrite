@@ -71,6 +71,14 @@ COURSE_NAME_ROI = (163,  387, 647,  462)
 SELECTION_MATCH_THRESHOLD = 0.7
 
 
+def _load_lang_dir(lang_dir: str, base_dir: str, **kwargs) -> dict:
+    """Load templates from lang_dir; fall back to base_dir if empty."""
+    templates = load_template_dir(lang_dir, **kwargs)
+    if not templates and lang_dir != base_dir:
+        templates = load_template_dir(base_dir, **kwargs)
+    return templates
+
+
 # ---------------------------------------------------------------------------
 # SelectionState
 # ---------------------------------------------------------------------------
@@ -99,14 +107,24 @@ class SelectionTracker:
 
     def __init__(
         self,
-        char_dir:    str = 'images/characters',
-        costume_dir: str = 'images/costumes',
-        kart_dir:    str = 'images/karts',
-        course_dir:  str = 'images/courses',
+        char_dir:    str = None,
+        costume_dir: str = None,
+        kart_dir:    str = None,
+        course_dir:  str = None,
+        switch2_language: str = None,
         on_selection_change: Optional[Callable[[SelectionState], None]] = None,
         scan_interval: float = 0.1,
         purge_tight: bool = False,
     ):
+        lang = switch2_language or ""
+        if char_dir is None:
+            char_dir    = f"images/characters/{lang}" if lang else "images/characters"
+        if costume_dir is None:
+            costume_dir = f"images/costumes/{lang}"   if lang else "images/costumes"
+        if kart_dir is None:
+            kart_dir    = f"images/karts/{lang}"      if lang else "images/karts"
+        if course_dir is None:
+            course_dir  = f"images/courses/{lang}"    if lang else "images/courses"
         self.on_selection_change = on_selection_change
         self.scan_interval = scan_interval
         self.state = SelectionState()
@@ -115,10 +133,10 @@ class SelectionTracker:
             for d in (char_dir, costume_dir, kart_dir, course_dir):
                 purge_tight_pngs(d)
 
-        self._char_templates    = load_template_dir(char_dir)
-        self._costume_templates = load_template_dir(costume_dir, white_text=True)
-        self._kart_templates    = load_template_dir(kart_dir)
-        self._course_templates  = load_template_dir(course_dir)
+        self._char_templates    = _load_lang_dir(char_dir,    "images/characters")
+        self._costume_templates = _load_lang_dir(costume_dir, "images/costumes", white_text=True)
+        self._kart_templates    = _load_lang_dir(kart_dir,    "images/karts")
+        self._course_templates  = _load_lang_dir(course_dir,  "images/courses")
 
         # ROIs — read from settings so wizard edits take effect after restart
         from ..config.settings import get_settings as _gs
@@ -270,3 +288,21 @@ class SelectionTracker:
         elif name:
             self.state.course_conf = conf
         return False
+
+    # ------------------------------------------------------------------
+    def reload_language(self, switch2_language: str):
+        """Hot-reload all template directories for a new Switch 2 language."""
+        lang = switch2_language or ""
+        char_dir    = f"images/characters/{lang}" if lang else "images/characters"
+        costume_dir = f"images/costumes/{lang}"   if lang else "images/costumes"
+        kart_dir    = f"images/karts/{lang}"      if lang else "images/karts"
+        course_dir  = f"images/courses/{lang}"    if lang else "images/courses"
+        self._char_templates    = _load_lang_dir(char_dir,    "images/characters")
+        self._costume_templates = _load_lang_dir(costume_dir, "images/costumes", white_text=True)
+        self._kart_templates    = _load_lang_dir(kart_dir,    "images/karts")
+        self._course_templates  = _load_lang_dir(course_dir,  "images/courses")
+        if self.state.character:
+            self._rebuild_costume_subset(self.state.character)
+        print(f"[SelectionTracker] reloaded for lang={lang!r}: "
+              f"{len(self._char_templates)} chars, {len(self._costume_templates)} costumes, "
+              f"{len(self._kart_templates)} karts, {len(self._course_templates)} courses")

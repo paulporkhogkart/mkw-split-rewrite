@@ -54,8 +54,11 @@ def _emit(type_: str, **payload) -> str:
     return json.dumps({"type": type_, **payload})
 
 
-def emit_ready(version: str, setup_complete: bool = True) -> str:
-    return _emit("ready", version=version, setup_complete=setup_complete)
+def emit_ready(version: str, setup_complete: bool = True,
+               app_language: str = "en_uk",
+               switch2_language: str = "en_uk") -> str:
+    return _emit("ready", version=version, setup_complete=setup_complete,
+                 app_language=app_language, switch2_language=switch2_language)
 
 
 def emit_camera_status(ok: bool, error: str = "",
@@ -70,14 +73,22 @@ def emit_screen_change(from_screen: str, to_screen: str) -> str:
 
 
 def emit_selection_update(character: Optional[str], costume: Optional[str],
-                          kart: Optional[str], course: Optional[str]) -> str:
+                          kart: Optional[str], course: Optional[str],
+                          char_conf: float = 0.0, costume_conf: float = 0.0,
+                          kart_conf: float = 0.0, course_conf: float = 0.0) -> str:
     return _emit("selection_update",
-                 character=character, costume=costume, kart=kart, course=course)
+                 character=character, costume=costume, kart=kart, course=course,
+                 char_conf=round(char_conf, 3), costume_conf=round(costume_conf, 3),
+                 kart_conf=round(kart_conf, 3), course_conf=round(course_conf, 3))
 
 
 def emit_lap_update(current: Optional[int], total: Optional[int],
                     split: Optional[str] = None) -> str:
     return _emit("lap_update", current=current, total=total, split=split)
+
+
+def emit_split_recorded(lap: int, time: str, is_final: bool = False) -> str:
+    return _emit("split_recorded", lap=lap, time=time, is_final=is_final)
 
 
 def emit_coin_update(coins: Optional[int]) -> str:
@@ -114,8 +125,12 @@ def emit_error(message: str) -> str:
     return _emit("error", message=message)
 
 
-def emit_heartbeat(fps: float, screen: str, tracking: bool) -> str:
-    return _emit("heartbeat", fps=round(fps, 1), screen=screen, tracking=tracking)
+def emit_heartbeat(fps: float, screen: str, tracking: bool,
+                   current_score: float = 0.0,
+                   candidate_scores: Optional[Dict[str, float]] = None) -> str:
+    return _emit("heartbeat", fps=round(fps, 1), screen=screen, tracking=tracking,
+                 current_score=round(current_score, 4),
+                 candidate_scores={k: round(v, 4) for k, v in (candidate_scores or {}).items()})
 
 
 def emit_frame_data(data: str, width: int, height: int, label: str = "") -> str:
