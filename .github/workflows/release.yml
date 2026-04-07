@@ -50,6 +50,18 @@ jobs:
       - name: Install ffmpeg (for bundling into sidecar)
         run: choco install ffmpeg-full --no-progress -y
 
+      - name: Add real ffmpeg binary to PATH
+        shell: pwsh
+        run: |
+          # Chocolatey installs a shim at bin\ffmpeg.exe; the .shim file points to the real binary.
+          # PyInstaller must find the real exe (not the shim) so it bundles the actual binary.
+          $shim = "C:\ProgramData\chocolatey\bin\ffmpeg.exe.shim"
+          $line = Get-Content $shim | Where-Object { $_ -match "^path" }
+          $realFfmpeg = ($line -split "=", 2)[1].Trim().Trim('"')
+          $dir = Split-Path -Parent $realFfmpeg
+          Write-Host "Real ffmpeg directory: $dir"
+          $dir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
       - name: Build with PyInstaller
         run: pyinstaller mkw_tracker.spec --noconfirm
 
