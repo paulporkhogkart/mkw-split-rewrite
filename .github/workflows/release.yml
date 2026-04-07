@@ -53,14 +53,19 @@ jobs:
       - name: Add real ffmpeg binary to PATH
         shell: pwsh
         run: |
-          # Chocolatey installs a shim at bin\ffmpeg.exe; the .shim file points to the real binary.
-          # PyInstaller must find the real exe (not the shim) so it bundles the actual binary.
-          $shim = "C:\ProgramData\chocolatey\bin\ffmpeg.exe.shim"
-          $line = Get-Content $shim | Where-Object { $_ -match "^path" }
-          $realFfmpeg = ($line -split "=", 2)[1].Trim().Trim('"')
-          $dir = Split-Path -Parent $realFfmpeg
-          Write-Host "Real ffmpeg directory: $dir"
-          $dir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          # Find the real ffmpeg.exe under the choco lib directory (not the bin\ shim).
+          $real = Get-ChildItem "C:\ProgramData\chocolatey\lib" -Filter "ffmpeg.exe" -Recurse -ErrorAction SilentlyContinue |
+                  Where-Object { $_.DirectoryName -notlike "*\bin*" } |
+                  Sort-Object Length -Descending |
+                  Select-Object -First 1
+          if (-not $real) {
+            # Fallback: any ffmpeg.exe, largest wins (shims are tiny, real binary is ~100 MB)
+            $real = Get-ChildItem "C:\ProgramData\chocolatey" -Filter "ffmpeg.exe" -Recurse -ErrorAction SilentlyContinue |
+                    Sort-Object Length -Descending |
+                    Select-Object -First 1
+          }
+          Write-Host "Real ffmpeg: $($real.FullName) ($($real.Length) bytes)"
+          $real.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
       - name: Build with PyInstaller
         run: pyinstaller mkw_tracker.spec --noconfirm
