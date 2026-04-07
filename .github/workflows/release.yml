@@ -48,7 +48,7 @@ jobs:
         run: pip install -r requirements.txt pyinstaller
 
       - name: Install ffmpeg (for bundling into sidecar)
-        run: choco install ffmpeg --no-progress -y
+        run: choco install ffmpeg-full --no-progress -y
 
       - name: Build with PyInstaller
         run: pyinstaller mkw_tracker.spec --noconfirm
