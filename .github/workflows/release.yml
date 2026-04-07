@@ -53,6 +53,21 @@ jobs:
       - name: Build with PyInstaller
         run: pyinstaller mkw_tracker.spec --noconfirm
 
+      - name: Debug bundle contents
+        shell: bash
+        run: |
+          echo "=== ffmpeg path and version ==="
+          where ffmpeg || echo "ffmpeg not in PATH"
+          ffmpeg -version 2>&1 | head -3
+          echo "=== ffprobe path ==="
+          where ffprobe || echo "ffprobe not in PATH"
+          echo "=== pip packages ==="
+          pip list
+          echo "=== _internal size ==="
+          du -sh dist/mkw-tracker/_internal
+          echo "=== _internal top-level contents (sorted by size) ==="
+          du -sh dist/mkw-tracker/_internal/* | sort -rh | head -30
+
       - name: Extract version from tag
         id: version
         shell: bash
