@@ -94,7 +94,8 @@ class Defaults:
     camera_width: int = 1920
     camera_height: int = 1080
     camera_fps: int = 60
-    camera_device: str = ""   # empty = auto-detect
+    camera_device: str = ""       # empty = auto-detect
+    audio_device_label: str = ""  # empty = auto (group-paired); "none" = video-only
 
     # ── Language ──────────────────────────────────────────────────────────────
     app_language:    str = 'en_uk'   # UI display language

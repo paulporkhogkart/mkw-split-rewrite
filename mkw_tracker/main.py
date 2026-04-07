@@ -190,9 +190,10 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
     elif t == "list_devices":
         from .utils.camera import list_dshow_video_devices
         devices    = list_dshow_video_devices()
-        configured = settings.get("camera_device", "")
-        active     = getattr(cap, "device_name", "")
-        ipc.emit(emit_devices_list(devices, configured, active))
+        configured   = settings.get("camera_device", "")
+        active       = getattr(cap, "device_name", "")
+        audio_label  = settings.get("audio_device_label", "")
+        ipc.emit(emit_devices_list(devices, configured, active, audio_label))
 
     elif t == "capture_frame":
         import base64 as _b64
@@ -623,26 +624,11 @@ def run(args):
     # sleep for up to 15.6ms  - the primary cause of variable input lag.
     _ctypes.windll.winmm.timeBeginPeriod(1)
 
-    configured_device = settings.get("camera_device", "") or None
-
-    if setup_mode[0]:
-        # First-time setup: don't open camera yet. It will be opened on demand
-        # when the frontend sends open_camera from the Camera wizard step.
-        cap = None
-        print("[Setup] Camera deferred  - waiting for open_camera command.")
-    else:
-        try:
-            cap = build_camera_source(device_name=configured_device)
-            print(f"Camera: {cap.width}x{cap.height} @ {cap.fps} fps"
-                  + (f" (normalised to {_REF_W}x{_REF_H})"
-                     if cap.width != _REF_W or cap.height != _REF_H else ""))
-            ipc.emit(emit_camera_status(ok=True, width=_REF_W, height=_REF_H,
-                                         device=getattr(cap, "device_name", "")))
-        except Exception as _e:
-            cap = None
-            ipc.emit(emit_camera_status(ok=False, error=str(_e)))
-            print(f"[Camera] Failed to open: {_e}")
-    _cap_ref[0] = cap   # atexit cleanup reads this
+    # Camera is always deferred — the frontend picks the device after enumerating
+    # both browser and Python sources, then sends open_camera with the matched name.
+    # This guarantees both feeds always use the same physical device.
+    cap = None
+    _cap_ref[0] = cap
 
     ipc.emit(emit_ready(
         version="dev" if args.no_ipc else "sidecar",

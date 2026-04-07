@@ -454,9 +454,8 @@
         send({ type: "list_rois" });
         if (msg.setup_complete) {
           setupComplete = true;
-          // Auto-start browser camera for the main feed
-          if (cameraStatus === "idle")
-            loadBrowserDevices().then(() => startCamera(selectedBrowserDeviceId || undefined));
+          // Camera open is deferred until devices_list arrives so both browser
+          // and Python always open the same physical device.
         } else {
           setupComplete = false;
           pushLog("[app] first-time setup required");
@@ -468,6 +467,7 @@
         pushLog(msg.ok
           ? `[cam] opened: ${msg.device || "unknown"} ${msg.width}x${msg.height}`
           : `[cam] failed: ${msg.error}`);
+        if (!msg.ok) engineFrame = null;   // clear stale frame so error state shows immediately
         if (msg.ok) {
           if (msg.width  > 0) pythonFrameW = msg.width;
           if (msg.height > 0) pythonFrameH = msg.height;
@@ -491,7 +491,8 @@
         }
         break;
       case "frame_data":
-        engineFrame = `data:image/jpeg;base64,${msg.data}`;
+        // Discard frames that arrive while Python is mid-switch — they belong to the old camera.
+        if (pythonCameraStatus !== "opening") engineFrame = `data:image/jpeg;base64,${msg.data}`;
         break;
       case "heartbeat":
         backendFps      = msg.fps    ?? 0;
@@ -548,7 +549,24 @@
       case "devices_list":
         devices = msg.devices ?? [];
         configuredDevice = msg.configured ?? "";
+        // Restore saved audio device preference by label-matching against current devices.
+        // audioDevices is already populated from onMount's loadBrowserDevices() call.
+        if (msg.audio_label) {
+          if (msg.audio_label === "none") {
+            selectedAudioDeviceId = "none";
+          } else {
+            const savedAud = audioDevices.find(d =>
+              d.label && d.label.toLowerCase() === msg.audio_label.toLowerCase()
+            );
+            if (savedAud) selectedAudioDeviceId = savedAud.deviceId;
+          }
+        }
         pushLog(`[devices] found ${devices.length}: ${devices.join(", ") || "none"}`);
+        // On a normal (post-setup) launch, now that we have both the Python device
+        // list and the browser device list (loadBrowserDevices runs next), pick a
+        // matching pair and open both simultaneously.
+        if (setupComplete === true && cameraStatus === "idle")
+          _openMatchedCameras();
         break;
       case "screen_change":
         pushLog(`[screen] ${msg.from} → ${msg.to}`);
@@ -591,6 +609,45 @@
   }
 
   // ── Camera ────────────────────────────────────────────────────────────────────
+  // Open the browser camera and Python camera on the same physical device.
+  // Called once on every normal (post-setup) launch after devices_list arrives.
+  async function _openMatchedCameras() {
+    await loadBrowserDevices();
+    // Only auto-select a browser device when none is explicitly chosen yet.
+    // If selectedBrowserDeviceId is already set (e.g. user picked from dropdown),
+    // honour it — don't override with a configuredDevice name match.
+    if (!selectedBrowserDeviceId && browserDevices.length > 0) {
+      if (configuredDevice) {
+        const lower = configuredDevice.toLowerCase();
+        const match = browserDevices.find(d => {
+          const clean = d.label.replace(/\s*\([0-9a-f:]+\)\s*$/i, "").trim().toLowerCase();
+          return clean === lower || clean.includes(lower) || lower.includes(clean);
+        });
+        selectedBrowserDeviceId = match ? match.deviceId : browserDevices[0].deviceId;
+      } else {
+        selectedBrowserDeviceId = browserDevices[0].deviceId;
+      }
+    }
+    // Start the browser camera first so permission is granted before Python opens.
+    await startCamera(selectedBrowserDeviceId || undefined);
+    // Now resolve the Python device name from the browser label we actually got.
+    const chosen = browserDevices.find(d => d.deviceId === selectedBrowserDeviceId);
+    if (chosen && devices.length > 0) {
+      const cleanLabel = chosen.label.replace(/\s*\([0-9a-f:]+\)\s*$/i, "").trim();
+      const match = devices.find(d =>
+        d.toLowerCase() === cleanLabel.toLowerCase() ||
+        cleanLabel.toLowerCase().includes(d.toLowerCase()) ||
+        d.toLowerCase().includes(cleanLabel.toLowerCase())
+      );
+      const pyDevice = match ?? configuredDevice;
+      if (pyDevice && pyDevice !== configuredDevice) {
+        configuredDevice = pyDevice;
+        send({ type:"update_config", key:"camera_device", value:pyDevice });
+      }
+    }
+    send({ type:"open_camera" });
+  }
+
   async function loadBrowserDevices() {
     try {
       const all = await navigator.mediaDevices.enumerateDevices();
@@ -607,35 +664,55 @@
       ? { deviceId:{ exact:deviceId }, width:{ ideal:1920 }, height:{ ideal:1080 } }
       : { width:{ ideal:1920 }, height:{ ideal:1080 } };
     try {
-      // Resolve which audio device to request, in priority order:
-      //   1. Explicitly selected by the user this session
-      //   2. Audio input sharing a groupId with the chosen video device (capture card pairing)
-      //   3. No specific device — still request audio to grant permission & populate labels
-      let resolvedAudioId = selectedAudioDeviceId || null;
-      if (!resolvedAudioId && deviceId) {
+      // Resolve audio device in priority order:
+      //   1. "none" sentinel — user explicitly wants video-only, skip all audio logic
+      //   2. Specific device ID chosen by user this session
+      //   3. Audio input sharing a non-empty groupId with the chosen video device
+      //   4. Video-only fallback — never grab the default mic
+      const audioExplicitNone = selectedAudioDeviceId === "none";
+      let resolvedAudioId = (!audioExplicitNone && selectedAudioDeviceId) ? selectedAudioDeviceId : null;
+      if (!resolvedAudioId && !audioExplicitNone && deviceId) {
         try {
           const all = await navigator.mediaDevices.enumerateDevices();
           const vid = all.find(d => d.kind === "videoinput" && d.deviceId === deviceId);
-          const aud = vid && all.find(d => d.kind === "audioinput" && d.groupId === vid.groupId);
-          if (aud) resolvedAudioId = aud.deviceId;
+          // groupId is "" when permissions haven't been granted yet — skip in that case
+          // to avoid accidentally matching unrelated devices that also have groupId "".
+          if (vid && vid.groupId) {
+            const aud = all.find(d => d.kind === "audioinput" && d.groupId === vid.groupId);
+            if (aud) resolvedAudioId = aud.deviceId;
+          }
         } catch { /* no audio pairing */ }
       }
-      // Always attempt audio — this grants the browser permission which populates
-      // device labels in enumerateDevices(). Fall back to video-only if it fails.
-      const rawAudio = {
-        ...(resolvedAudioId ? { deviceId: { exact: resolvedAudioId } } : {}),
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl:  false,
-      };
-      try {
-        videoStream = await navigator.mediaDevices.getUserMedia({ video:vc, audio: rawAudio });
-      } catch {
+      if (resolvedAudioId) {
+        const rawAudio = {
+          deviceId:         { exact: resolvedAudioId },
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl:  false,
+        };
+        try {
+          videoStream = await navigator.mediaDevices.getUserMedia({ video:vc, audio: rawAudio });
+        } catch {
+          videoStream = await navigator.mediaDevices.getUserMedia({ video:vc });
+        }
+      } else {
+        // No paired audio found — video only. Never grab a random mic.
         videoStream = await navigator.mediaDevices.getUserMedia({ video:vc });
       }
       cameraStatus = "ok";
       await loadBrowserDevices();
-      // Sync dropdown to whatever was actually captured.
+      // If audio labels are blank (mic permission not yet granted), make a brief
+      // audio-only request purely to unlock enumerateDevices labels, then stop it.
+      // This never keeps a mic stream open — it's discarded immediately.
+      if (audioDevices.some(d => !d.label)) {
+        try {
+          const tmp = await navigator.mediaDevices.getUserMedia({ audio: true });
+          tmp.getTracks().forEach(t => t.stop());
+          await loadBrowserDevices();
+        } catch { /* mic denied — labels stay blank */ }
+      }
+      // Sync selectedAudioDeviceId to whatever was actually captured so the
+      // Audio dropdown in Detection reflects the current state.
       const audioTracks = videoStream.getAudioTracks();
       const capturedAudioId = audioTracks.length > 0 ? (audioTracks[0].getSettings().deviceId ?? "") : "";
       if (capturedAudioId) selectedAudioDeviceId = capturedAudioId;
@@ -886,7 +963,14 @@
   }
 
   async function retryNow() {
-    stopCamera(); pythonCameraStatus="opening"; engineFrame=null;
+    // Reset paused state immediately so both panes show "Opening…" right away.
+    trackerCameraPaused = false;
+    pythonCameraStatus = "opening";
+    engineFrame = null;
+    // Start both simultaneously — same pattern as the initial camera step open.
+    // Don't wait for Python's camera_status to trigger the browser restart;
+    // if Python fails the browser would be stuck idle indefinitely.
+    startCamera(selectedBrowserDeviceId || undefined);
     send({type:"open_camera"});
   }
 
@@ -958,31 +1042,11 @@
     if (step==="camera") {
       // Ask Python to open its camera if not already open
       if (pythonCameraStatus!=="ok") {
-        pythonCameraStatus="idle"; engineFrame=null;
+        pythonCameraStatus="opening"; engineFrame=null;
         if (!setupComplete) {
-          // First-time setup: browser picks a device first, pre-configures Python to
-          // match it, then both open simultaneously. This prevents them auto-selecting
-          // different devices. The camera_status handler still acts as a fallback sync
-          // (and now browserDevices is guaranteed populated when it fires).
-          (async () => {
-            await loadBrowserDevices();
-            startCamera(selectedBrowserDeviceId || undefined);
-            if (selectedBrowserDeviceId && devices.length > 0) {
-              const chosen = browserDevices.find(d => d.deviceId === selectedBrowserDeviceId);
-              if (chosen) {
-                const cleanLabel = chosen.label.replace(/\s*\([0-9a-f:]+\)\s*$/i, "").trim();
-                const match = devices.find(d =>
-                  d.toLowerCase() === cleanLabel.toLowerCase() ||
-                  d.toLowerCase().includes(cleanLabel.toLowerCase()) ||
-                  cleanLabel.toLowerCase().includes(d.toLowerCase())
-                );
-                const pyDevice = match ?? cleanLabel;
-                configuredDevice = pyDevice;
-                send({ type: "update_config", key: "camera_device", value: pyDevice });
-              }
-            }
-            send({ type: "open_camera" });
-          })();
+          // First-time setup: _openMatchedCameras coordinates both feeds opening on the
+          // same physical device simultaneously.
+          _openMatchedCameras();
         } else {
           send({type:"open_camera"});
         }
@@ -1079,6 +1143,7 @@
   }
 
   // ── Device / update ───────────────────────────────────────────────────────────
+
   async function handleDeviceChange(e) {
     const prevDevice = configuredDevice;
     const prevBrowserId = selectedBrowserDeviceId;
@@ -1125,28 +1190,50 @@
     _pendingDeviceSwitchTimeout = switchTimeout;
   }
   async function handleCameraDeviceChange(e) {
-    selectedBrowserDeviceId=e.target.value;
-    const chosen=browserDevices.find(d=>d.deviceId===selectedBrowserDeviceId);
-    if (chosen&&devices.length>0) {
-      const cleanLabel=chosen.label.replace(/\s*\([0-9a-f:]+\)\s*$/i,"").trim();
-      const match=devices.find(d=>d.toLowerCase()===cleanLabel.toLowerCase()||
-        d.toLowerCase().includes(cleanLabel.toLowerCase())||cleanLabel.toLowerCase().includes(d.toLowerCase()));
-      const pythonDevice=match??cleanLabel;
-      if (pythonDevice!==configuredDevice) {
-        configuredDevice=pythonDevice;
-        send({type:"update_config",key:"camera_device",value:pythonDevice});
-      }
+    // Guard against rapid switches during an in-progress open. The `disabled`
+    // attribute handles the normal case but has a Svelte reactivity timing gap;
+    // this synchronous check is the true gate.
+    if (pythonCameraStatus==="opening" || cameraStatus==="requesting") {
+      e.target.value = selectedBrowserDeviceId; // snap visual selection back
+      return;
     }
+    selectedBrowserDeviceId=e.target.value;
     // Reset audio to auto — new device may have different associated audio.
     selectedAudioDeviceId = "";
+    // Clear stale frame and show "opening" immediately.
+    engineFrame = null; pythonCameraStatus = "opening";
     if (!setupComplete&&wizardStep==="camera") {
-      stopCamera(); pythonCameraStatus="idle"; engineFrame=null; send({type:"open_camera"});
+      // First-time setup: user explicitly chose a device — sync Python to match it
+      // directly (no auto-select logic needed), then open both simultaneously.
+      stopCamera();
+      const chosen = browserDevices.find(d => d.deviceId === selectedBrowserDeviceId);
+      if (chosen) {
+        const cleanLabel = chosen.label.replace(/\s*\([0-9a-f:]+\)\s*$/i, "").trim();
+        const match = devices.find(d =>
+          d.toLowerCase() === cleanLabel.toLowerCase() ||
+          d.toLowerCase().includes(cleanLabel.toLowerCase()) ||
+          cleanLabel.toLowerCase().includes(d.toLowerCase())
+        );
+        const pyDevice = match ?? cleanLabel;
+        if (pyDevice !== configuredDevice) {
+          configuredDevice = pyDevice;
+          send({ type:"update_config", key:"camera_device", value:pyDevice });
+        }
+      }
+      send({ type:"open_camera" });
+      startCamera(selectedBrowserDeviceId);
     } else {
+      send({type:"open_camera"});
       await startCamera(selectedBrowserDeviceId);
     }
   }
   async function handleAudioDeviceChange(e) {
     selectedAudioDeviceId = e.target.value;
+    // Persist the choice by label (not ID — IDs change between sessions).
+    const label = selectedAudioDeviceId === "none"
+      ? "none"
+      : (audioDevices.find(d => d.deviceId === selectedAudioDeviceId)?.label ?? "");
+    send({ type:"update_config", key:"audio_device_label", value:label });
     // Restart the camera stream so the new audio device takes effect.
     if (videoStream) await startCamera(selectedBrowserDeviceId || undefined);
   }
@@ -1180,6 +1267,10 @@
     pushLog(`[app] v${version} starting… ${_elapsed()}`);
     await invoke("start_tracker");
     pushLog(`[app] tracker spawn requested ${_elapsed()}`);
+    // Pre-populate browser device lists now — Tauri grants camera+mic permissions
+    // before the webview loads, so labels and groupIds are available immediately.
+    // This ensures the Detection > Audio dropdown shows real names from the start.
+    loadBrowserDevices();
     unlisten=await listen("tracker-event", ev=>{
       sidecarStartupError = false;
       try { handleMsg(JSON.parse(ev.payload)); }
@@ -1448,7 +1539,7 @@
               <div class="det-device-row">
                 <label class="det-lbl" for="main-aud">Audio</label>
                 <select id="main-aud" class="det-select" on:change={handleAudioDeviceChange}>
-                  <option value="" selected={!selectedAudioDeviceId}>— none —</option>
+                  <option value="none" selected={!selectedAudioDeviceId||selectedAudioDeviceId==="none"}>— none —</option>
                   {#each audioDevices as d}
                     <option value={d.deviceId} selected={d.deviceId===selectedAudioDeviceId}>
                       {d.label || `Audio ${d.deviceId.slice(0,6)}…`}
@@ -1711,13 +1802,18 @@
                     <div class="preview-placeholder">
                       <span class="preview-icon">⊗</span><span class="cam-pane-err-label">Camera error</span>
                     </div>
+                  {:else if trackerCameraPaused}
+                    <div class="preview-placeholder">
+                      <span class="preview-icon" style="color:#888">○</span>
+                      <span class="cam-pane-err-label">Camera released</span>
+                    </div>
                   {:else}
                     <div class="preview-placeholder"><span class="spin">◌</span><span>Waiting…</span></div>
                   {/if}
                 </div>
-                <div class="cam-pane-status" class:cam-status-ok={cameraOk} class:cam-status-err={cameraStatus==="busy"||cameraStatus==="error"}>
+                <div class="cam-pane-status" class:cam-status-ok={cameraOk} class:cam-status-err={cameraStatus==="busy"||cameraStatus==="error"} class:cam-status-warn={trackerCameraPaused&&!cameraOk}>
                   <span class="cam-dot"></span>
-                  {cameraOk?"Connected":cameraStatus==="requesting"?"Opening…":cameraStatus==="busy"?"Blocked":cameraStatus==="error"?"Error":"Waiting"}
+                  {cameraOk?"Connected":cameraStatus==="requesting"?"Opening…":cameraStatus==="busy"?"Blocked":cameraStatus==="error"?"Error":trackerCameraPaused?"Released":"Waiting"}
                 </div>
               </div>
 
@@ -1754,17 +1850,20 @@
               {#if browserDevices.length > 0}
                 <div class="device-row">
                   <label for="sv-cam">Camera</label>
-                  <select id="sv-cam" on:change={handleCameraDeviceChange}>
+                  <select id="sv-cam" on:change={handleCameraDeviceChange}
+                    disabled={pythonCameraStatus==="opening"||cameraStatus==="requesting"}>
                     {#each browserDevices as d}
                       <option value={d.deviceId} selected={d.deviceId===selectedBrowserDeviceId}>
                         {d.label||`Camera ${d.deviceId.slice(0,6)}…`}
                       </option>
                     {/each}
                   </select>
+                  {#if pythonCameraStatus==="opening"||cameraStatus==="requesting"}
+                    <span class="spin select-spin">◌</span>
+                  {/if}
                   {#if restartNeeded}<button class="btn-sm" on:click={restartTracker}>Restart</button>{/if}
                 </div>
               {/if}
-
               <div class="cam-prereq" class:cam-prereq-ok={bothCamerasOk}>
                 {#if bothCamerasOk}
                   <span class="cam-prereq-title cam-prereq-title-ok">Camera sharing is working</span>
@@ -1776,29 +1875,22 @@
                     <div class="cam-release-bar cam-release-bar-released">
                       <span class="cam-release-dot"></span>
                       <span class="cam-release-msg">App feeds released — also close OBS, Discord, and any other apps currently using the camera before proceeding.</span>
-                      <button class="btn-sm" on:click={retryNow}>Re-enable feeds</button>
-                    </div>
-                  {:else if pythonCameraStatus === "error" || cameraStatus === "error"}
-                    <div class="cam-release-bar cam-release-bar-error">
-                      <span class="cam-release-dot"></span>
-                      <span class="cam-release-msg">Can't access capture card — check it's connected and not in use by another app.{#if pythonCameraError} {pythonCameraError}{/if}</span>
-                      <div style="display:flex;gap:.4rem;flex-shrink:0">
-                        <button class="btn-sm" on:click={releaseForSettings}>Release feeds</button>
-                        <button class="btn-sm" on:click={retryNow}>Retry</button>
-                      </div>
                     </div>
                   {:else}
                     <div class="cam-release-bar">
                       <span class="cam-release-dot"></span>
                       <span class="cam-release-msg">Release this app's feeds and close OBS, Discord, and any other apps currently using the camera before changing this setting.</span>
-                      <button class="btn-sm" on:click={releaseForSettings}>Release feeds</button>
+                      <div style="display:flex;gap:.4rem;flex-shrink:0">
+                        <button class="btn-sm" on:click={releaseForSettings}>Release feeds</button>
+                        <button class="btn-sm" on:click={retryNow}>Retry</button>
+                      </div>
                     </div>
                   {/if}
                   <ol class="cam-steps">
                     <li>Click <strong>Open Windows Camera Settings</strong> below</li>
                     <li>Find your capture card → <strong>Advanced camera options</strong> → <strong>Edit</strong></li>
                     <li>Turn on <strong>"Allow multiple apps to use camera at the same time"</strong></li>
-                    <li>Return here and re-enable feeds above, then <button class="btn-sm" on:click={retryNow}>Retry</button></li>
+                    <li>Return here, then <button class="btn-sm" on:click={retryNow}>Retry</button></li>
                   </ol>
                   <div class="cam-prereq-actions">
                     <button class="btn-primary" on:click={() => invoke("open_url",{url:"ms-settings:camera"}).catch(()=>{})}>Open Windows Camera Settings →</button>
@@ -1969,13 +2061,18 @@
                     <div class="preview-placeholder">
                       <span class="preview-icon">⊗</span><span class="cam-pane-err-label">Camera error</span>
                     </div>
+                  {:else if trackerCameraPaused}
+                    <div class="preview-placeholder">
+                      <span class="preview-icon" style="color:#888">○</span>
+                      <span class="cam-pane-err-label">Camera released</span>
+                    </div>
                   {:else}
                     <div class="preview-placeholder"><span class="spin">◌</span><span>Waiting…</span></div>
                   {/if}
                 </div>
-                <div class="cam-pane-status" class:cam-status-ok={cameraOk} class:cam-status-err={cameraStatus==="busy"||cameraStatus==="error"}>
+                <div class="cam-pane-status" class:cam-status-ok={cameraOk} class:cam-status-err={cameraStatus==="busy"||cameraStatus==="error"} class:cam-status-warn={trackerCameraPaused&&!cameraOk}>
                   <span class="cam-dot"></span>
-                  {cameraOk?"Connected":cameraStatus==="requesting"?"Opening…":cameraStatus==="busy"?"Blocked":cameraStatus==="error"?"Error":"Waiting"}
+                  {cameraOk?"Connected":cameraStatus==="requesting"?"Opening…":cameraStatus==="busy"?"Blocked":cameraStatus==="error"?"Error":trackerCameraPaused?"Released":"Waiting"}
                 </div>
               </div>
 
@@ -2012,13 +2109,20 @@
               {#if browserDevices.length > 0}
                 <div class="device-row">
                   <label for="wiz-cam">Camera</label>
-                  <select id="wiz-cam" on:change={handleCameraDeviceChange}>
-                    {#each browserDevices as d}
-                      <option value={d.deviceId} selected={d.deviceId===selectedBrowserDeviceId}>
-                        {d.label||`Camera ${d.deviceId.slice(0,6)}…`}
-                      </option>
-                    {/each}
-                  </select>
+                  {#if pythonCameraStatus==="opening"||cameraStatus==="requesting"}
+                    <div class="select-loading">
+                      <span class="spin">◌</span>
+                      <span>{browserDevices.find(d=>d.deviceId===selectedBrowserDeviceId)?.label||"Opening…"}</span>
+                    </div>
+                  {:else}
+                    <select id="wiz-cam" on:change={handleCameraDeviceChange}>
+                      {#each browserDevices as d}
+                        <option value={d.deviceId} selected={d.deviceId===selectedBrowserDeviceId}>
+                          {d.label||`Camera ${d.deviceId.slice(0,6)}…`}
+                        </option>
+                      {/each}
+                    </select>
+                  {/if}
                   {#if restartNeeded}<button class="btn-sm" on:click={restartTracker}>Restart</button>{/if}
                 </div>
               {/if}
@@ -2035,29 +2139,22 @@
                       <div class="cam-release-bar cam-release-bar-released">
                         <span class="cam-release-dot"></span>
                         <span class="cam-release-msg">App feeds released — also close OBS, Discord, and any other apps currently using the camera before proceeding.</span>
-                        <button class="btn-sm" on:click={retryNow}>Re-enable feeds</button>
-                      </div>
-                    {:else if pythonCameraStatus === "error" || cameraStatus === "error"}
-                      <div class="cam-release-bar cam-release-bar-error">
-                        <span class="cam-release-dot"></span>
-                        <span class="cam-release-msg">Can't access capture card — check it's connected and not in use by another app.{#if pythonCameraError} {pythonCameraError}{/if}</span>
-                        <div style="display:flex;gap:.4rem;flex-shrink:0">
-                          <button class="btn-sm" on:click={releaseForSettings}>Release feeds</button>
-                          <button class="btn-sm" on:click={retryNow}>Retry</button>
-                        </div>
                       </div>
                     {:else}
                       <div class="cam-release-bar">
                         <span class="cam-release-dot"></span>
                         <span class="cam-release-msg">Release this app's feeds and close OBS, Discord, and any other apps currently using the camera before changing this setting.</span>
-                        <button class="btn-sm" on:click={releaseForSettings}>Release feeds</button>
+                        <div style="display:flex;gap:.4rem;flex-shrink:0">
+                          <button class="btn-sm" on:click={releaseForSettings}>Release feeds</button>
+                          <button class="btn-sm" on:click={retryNow}>Retry</button>
+                        </div>
                       </div>
                     {/if}
                     <ol class="cam-steps">
                       <li>Click <strong>Open Windows Camera Settings</strong> below</li>
                       <li>Find your capture card → <strong>Advanced camera options</strong> → <strong>Edit</strong></li>
                       <li>Turn on <strong>"Allow multiple apps to use camera at the same time"</strong></li>
-                      <li>Return here and re-enable feeds above, then <button class="btn-sm" on:click={retryNow}>Retry</button></li>
+                      <li>Return here, then <button class="btn-sm" on:click={retryNow}>Retry</button></li>
                     </ol>
                     <div class="cam-prereq-actions">
                       <button class="btn-primary" on:click={() => invoke("open_url",{url:"ms-settings:camera"}).catch(()=>{})}>Open Windows Camera Settings →</button>
@@ -2770,6 +2867,7 @@
     width: 100%; height: 100%; position: absolute; inset: 0;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: .35rem; font-size: .75rem; color: #333;
+    padding: 0 .75rem; box-sizing: border-box; text-align: center;
   }
   .preview-icon { font-size: 1.4rem; line-height: 1; }
   .spin { animation: spin 1.2s linear infinite; }
@@ -2927,8 +3025,13 @@
     border: 1px solid #1a1a2e; border-radius: 3px;
     padding: .18rem .3rem; font-family: inherit; font-size: .7rem;
   }
+  select:disabled {
+    opacity: .35; cursor: not-allowed; pointer-events: none;
+  }
   .device-row { display: flex; align-items: center; gap: .4rem; font-size: .72rem; flex-shrink: 0; }
   .device-row label { color: #555; flex-shrink: 0; }
+  .select-loading { display: flex; align-items: center; gap: .3rem; color: #888; font-size: .72rem; font-style: italic; }
+  .select-spin { color: #888; font-size: .85rem; }
 
   .hint { font-size: .7rem; color: #666; margin: 0; line-height: 1.55; }
   .lang-form { display: flex; flex-direction: column; gap: 1rem; width: 100%; max-width: 400px; margin: .5rem auto; }
