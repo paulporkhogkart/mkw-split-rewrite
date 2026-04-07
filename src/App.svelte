@@ -1032,6 +1032,10 @@
   }
   function completeSetup() {
     send({type:"mark_setup_complete"}); setupComplete=true; closeWizard(); _setupAudio();
+    // During setup, mic permission wasn't granted when the camera first opened so
+    // groupId pairing fell back to video-only. Now permission exists — restart the
+    // stream so grouped audio is picked up automatically, matching reboot behaviour.
+    if (!selectedAudioDeviceId) startCamera(selectedBrowserDeviceId || undefined);
   }
   function goStep(step) {
     wizardStep=step; screenIdx=0; selectionIdx=0; hudIdx=0;
