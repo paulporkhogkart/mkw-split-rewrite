@@ -133,7 +133,7 @@ jobs:
         run: python scripts/gen_icons.py
 
       - name: Install npm dependencies
-        run: npm install
+        run: npm ci
 
       - name: Build Tauri NSIS installer
         run: npm run tauri build -- --bundles nsis
