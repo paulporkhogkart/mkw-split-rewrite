@@ -38,6 +38,14 @@ class SetRoiCmd:
     w: int
     h: int
 
+@dataclass
+class CalibrateCmd:
+    reset_tell_overrides: bool = False
+
+@dataclass
+class ResetCalibrationCmd:
+    pass
+
 
 def parse_inbound(raw: str) -> Optional[dict]:
     """Parse a raw JSON line from stdin. Returns None on error."""
@@ -193,3 +201,28 @@ def emit_asset_preview(category: str, item_name: str,
 
 def emit_asset_saved(category: str, item_name: str) -> str:
     return _emit("asset_saved", category=category, item_name=item_name)
+
+
+def emit_calib_capture(slot: int, captured: bool, error: str = "") -> str:
+    """Outbound. Tells the wizard which calibration slots have a cached frame
+    on the backend (used to enable/disable the Solve button)."""
+    return _emit("calib_capture", slot=int(slot), captured=bool(captured), error=error)
+
+
+def emit_calibration_result(gain_r: float, gain_g: float, gain_b: float,
+                            offset_r: int, offset_g: int, offset_b: int,
+                            gamma: float, fit_quality: float,
+                            ok: bool = True, error: str = "",
+                            is_echo: bool = False) -> str:
+    """Outbound. is_echo=True signals 'this is a state echo from get_calibration,
+    not the result of a fresh auto-fit' so the UI doesn't show fit-quality readouts."""
+    return _emit("calibration_result",
+                 ok=ok, error=error, is_echo=is_echo,
+                 gain_r=round(float(gain_r), 4),
+                 gain_g=round(float(gain_g), 4),
+                 gain_b=round(float(gain_b), 4),
+                 offset_r=int(offset_r),
+                 offset_g=int(offset_g),
+                 offset_b=int(offset_b),
+                 gamma=round(float(gamma), 3),
+                 fit_quality=round(float(fit_quality), 3))

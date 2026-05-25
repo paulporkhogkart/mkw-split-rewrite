@@ -118,6 +118,20 @@
   let activeRoiKey = "primary";
   const HANDLE_HIT_RADIUS = 9;
 
+  // ── Calibration state ─────────────────────────────────────────────────────────
+  let calibStatus = "idle";        // "idle" | "running" | "done" | "error"
+  let calibFitQuality = null;       // RMSE 0-255 scale (lower = better)
+  let calibError = "";
+  let calibResetTellOverrides = false;
+  // 7 slots, one per Switch HDR test pattern.
+  const CALIB_SLOTS = [1, 2, 3, 4, 5, 6, 7];
+  let calibCapturedSlots = Object.fromEntries(CALIB_SLOTS.map(s => [s, false]));
+  let calibValues = {
+    gain_r: 1.0, gain_g: 1.0, gain_b: 1.0,
+    offset_r: 0, offset_g: 0, offset_b: 0,
+    gamma: 1.0,
+  };
+
   // ── Camera ────────────────────────────────────────────────────────────────────
   let mainVideoEl = null, wizVideoEl = null, canvasEl = null, videoStream = null;
   let cameraStatus = "idle";
@@ -160,10 +174,10 @@
   $: if (_gainNode) _gainNode.gain.value = feedMuted ? 0 : feedVolume;
 
   // ── Wizard step definitions ───────────────────────────────────────────────────
-  const FIRST_TIME_STEPS = ["language", "camera", "done"];
-  const RERUN_STEPS      = ["language", "camera", "screens", "selection", "hud", "templates", "done"];
+  const FIRST_TIME_STEPS = ["language", "camera", "calibration", "done"];
+  const RERUN_STEPS      = ["language", "camera", "calibration", "screens", "selection", "hud", "templates", "done"];
   const STEP_LABELS = {
-    language: "Language", camera: "Camera", screens: "Screens",
+    language: "Language", camera: "Camera", calibration: "Calibration", screens: "Screens",
     selection: "Selection", hud: "HUD", templates: "Templates", done: "Done",
   };
   $: STEPS = setupComplete ? RERUN_STEPS : FIRST_TIME_STEPS;
@@ -603,6 +617,33 @@
         raceFinishTime = msg.total_time ?? raceFinishTime;
         if (msg.splits) raceSplits = { ...raceSplits, ...msg.splits };
         pushLog(`[finish] ${msg.result}  ${msg.total_time ?? "—"}`);
+        break;
+      case "calib_capture":
+        if (msg.error) {
+          calibError = msg.error; calibStatus = "error";
+          pushLog(`[calib] capture slot ${msg.slot}: ${msg.error}`);
+        } else {
+          calibCapturedSlots = {...calibCapturedSlots, [msg.slot]: msg.captured};
+          if (msg.captured) pushLog(`[calib] captured slot ${msg.slot}`);
+        }
+        break;
+      case "calibration_result":
+        calibValues = {
+          gain_r: msg.gain_r, gain_g: msg.gain_g, gain_b: msg.gain_b,
+          offset_r: msg.offset_r, offset_g: msg.offset_g, offset_b: msg.offset_b,
+          gamma: msg.gamma,
+        };
+        if (msg.is_echo) {
+          // Initial state echo from get_calibration — don't show "done" until user calibrates
+        } else if (msg.ok) {
+          calibStatus = "done"; calibError = ""; calibFitQuality = msg.fit_quality;
+          pushLog(`[calib] gain=${msg.gain_r.toFixed(2)}/${msg.gain_g.toFixed(2)}/${msg.gain_b.toFixed(2)}`
+                 + ` offset=${msg.offset_r}/${msg.offset_g}/${msg.offset_b}`
+                 + ` gamma=${msg.gamma.toFixed(2)} fit=${msg.fit_quality.toFixed(1)}`);
+        } else {
+          calibStatus = "error"; calibError = msg.error || "Calibration failed";
+          pushLog(`[calib] ERROR: ${msg.error}`);
+        }
         break;
       case "error":  pushLog(`[ERR] ${msg.message}`); break;
     }
@@ -1059,6 +1100,39 @@
       // only restart it if it stopped.
       if (setupComplete && cameraStatus==="idle") startCamera(selectedBrowserDeviceId||undefined);
     }
+    if (step==="calibration") {
+      // Reset transient status; fetch current calib_* values + cached capture slots.
+      calibStatus = "idle"; calibFitQuality = null; calibError = "";
+      send({type:"get_calibration"});
+    }
+  }
+
+  // ── Calibration inbound: capture-slot status update ────────────────────────────
+  // (handled in handleMsg's calib_capture case)
+
+  // ── Calibration handlers ──────────────────────────────────────────────────────
+  function doCaptureCalibFrame(slot) {
+    // Backend snapshots current_frame[0] into a slot cache; replies via calib_capture event.
+    send({type:"capture_calib_frame", slot});
+  }
+  function doSolveCalibration() {
+    calibStatus = "running"; calibError = "";
+    send({type:"solve_calibration", reset_tell_overrides: calibResetTellOverrides});
+  }
+  function doClearCalibFrames() {
+    send({type:"clear_calib_frames"});
+    calibStatus = "idle"; calibError = ""; calibFitQuality = null;
+  }
+  function doResetCalibration() {
+    calibStatus = "running"; calibError = "";
+    send({type:"reset_calibration"});
+  }
+  function onCalibChange(key) {
+    const v = key.startsWith("offset_") ? Math.round(calibValues[key]) : Number(calibValues[key]);
+    calibValues[key] = v;
+    send({type:"update_config", key:`calib_${key}`, value:v});
+    // A manual edit invalidates any prior auto-fit quality readout
+    calibStatus = "idle"; calibFitQuality = null;
   }
 
   function addRequiredAlso() {
@@ -1094,7 +1168,7 @@
     currentScore=null; liveCropImg=null; liveRoiCrop=null;
     assetTemplateImg=null; assetLiveCrop=null; hoveredHandle=null; activeRoiKey="primary";
     if (wizardStep==="camera") goStep("language");
-    else if (wizardStep==="screens") { if (screenIdx>0) screenIdx--; else goStep("camera"); }
+    else if (wizardStep==="screens") { if (screenIdx>0) screenIdx--; else goStep("calibration"); }
     else if (wizardStep==="selection") { if (selectionIdx>0) selectionIdx--; else goStep("screens"); }
     else if (wizardStep==="hud") { if (hudIdx>0) hudIdx--; else goStep("selection"); }
     else if (wizardStep==="templates") {
@@ -1906,10 +1980,103 @@
                 <p class="hint">Both feeds must show your capture card output before you can continue.</p>
                 <div class="cam-nav">
                   <button class="btn-nav" on:click={()=>goStep("language")}>← Back</button>
-                  <button class="btn-primary" disabled={!bothCamerasOk} on:click={completeSetup}>
-                    Finish Setup →
+                  <button class="btn-primary" disabled={!bothCamerasOk} on:click={()=>goStep("calibration")}>
+                    Next: Calibration →
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+
+        {:else if wizardStep === "calibration"}
+          <div class="step-two-col calib-step">
+            <div class="preview-col">
+              <div class="preview-wrapper">
+                {#if engineFrame && !trackerCameraPaused}
+                  <img src={engineFrame} alt="Engine feed" class="preview-video" style="object-fit:contain"/>
+                {:else}
+                  <div class="preview-placeholder">
+                    <span>Camera unavailable</span>
+                    <button class="btn-secondary" style="margin-top:.5rem" on:click={()=>goStep("camera")}>← Fix Camera</button>
+                  </div>
+                {/if}
+              </div>
+              <p class="preview-cap">Live engine feed (calibration applied in real time)</p>
+            </div>
+
+            <div class="info-col">
+              <div class="item-header"><h3>Image Calibration</h3></div>
+              <p class="hint">
+                Different capture cards produce subtly different colors and brightness. Calibration corrects for this once, globally, so the per-screen detection thresholds work without retuning. You can skip this and use defaults if your detection already looks accurate.
+              </p>
+
+              <div class="calib-section">
+                <h4 class="calib-section-title">Auto-fit against Switch HDR test patterns</h4>
+                <p class="calib-instruct">
+                  Walk through the Switch HDR calibration flow (<strong>System Settings → TV/Display → HDR Calibration</strong>) — there are 7 test patterns.  For each screen on the Switch, click the matching number below.  Click <strong>Solve</strong> once at least one slot is captured (more = better fit).
+                </p>
+
+                <div class="calib-pills" role="group" aria-label="HDR test pattern slots">
+                  {#each CALIB_SLOTS as slot}
+                    <button class="calib-pill"
+                            class:calib-pill-ready={calibCapturedSlots[slot]}
+                            on:click={()=>doCaptureCalibFrame(slot)}
+                            disabled={!pythonCameraOk || calibStatus==="running"}
+                            title={calibCapturedSlots[slot] ? `Recapture HDR test ${slot}` : `Capture HDR test ${slot}`}>
+                      <span class="calib-pill-num">{slot}</span>
+                      <span class="calib-pill-state">{calibCapturedSlots[slot] ? "✓" : "○"}</span>
+                    </button>
+                  {/each}
+                </div>
+
+                <label class="calib-checkbox">
+                  <input type="checkbox" bind:checked={calibResetTellOverrides}/>
+                  <span>Also reset my per-tell threshold overrides
+                    <small>Recommended if you previously tuned thresholds against the un-normalized image.</small>
+                  </span>
+                </label>
+
+                <div class="btn-row">
+                  <button class="btn-primary" on:click={doSolveCalibration}
+                          disabled={!Object.values(calibCapturedSlots).some(v=>v) || calibStatus==="running"}>
+                    {calibStatus==="running" ? "Solving…" : "Solve Calibration"}
+                  </button>
+                  <button class="btn-secondary" on:click={doClearCalibFrames} disabled={calibStatus==="running"}>
+                    Clear captures
+                  </button>
+                  <button class="btn-secondary" on:click={doResetCalibration} disabled={calibStatus==="running"}>
+                    Reset to defaults
+                  </button>
+                </div>
+
+                {#if calibStatus==="done" && calibFitQuality !== null}
+                  <div class="calib-result" class:good={calibFitQuality<10} class:warn={calibFitQuality>=10&&calibFitQuality<20} class:bad={calibFitQuality>=20}>
+                    <strong>Fit quality:</strong> {calibFitQuality.toFixed(1)}
+                    {#if calibFitQuality<10}<span class="calib-result-tag">(great)</span>
+                    {:else if calibFitQuality<20}<span class="calib-result-tag">(ok)</span>
+                    {:else}<span class="calib-result-tag">(poor — try manual sliders)</span>{/if}
+                  </div>
+                {:else if calibStatus==="error"}
+                  <div class="calib-result bad">{calibError}</div>
+                {/if}
+              </div>
+
+              <details class="calib-manual">
+                <summary>Manual sliders (advanced)</summary>
+                <div class="calib-sliders">
+                  <div class="slider-row"><label>Gain R</label><input type="range" min="0.3" max="3.0" step="0.01" bind:value={calibValues.gain_r} on:input={()=>onCalibChange("gain_r")}/><span class="slider-val">{calibValues.gain_r.toFixed(2)}</span></div>
+                  <div class="slider-row"><label>Gain G</label><input type="range" min="0.3" max="3.0" step="0.01" bind:value={calibValues.gain_g} on:input={()=>onCalibChange("gain_g")}/><span class="slider-val">{calibValues.gain_g.toFixed(2)}</span></div>
+                  <div class="slider-row"><label>Gain B</label><input type="range" min="0.3" max="3.0" step="0.01" bind:value={calibValues.gain_b} on:input={()=>onCalibChange("gain_b")}/><span class="slider-val">{calibValues.gain_b.toFixed(2)}</span></div>
+                  <div class="slider-row"><label>Offset R</label><input type="range" min="-100" max="100" step="1" bind:value={calibValues.offset_r} on:input={()=>onCalibChange("offset_r")}/><span class="slider-val">{calibValues.offset_r}</span></div>
+                  <div class="slider-row"><label>Offset G</label><input type="range" min="-100" max="100" step="1" bind:value={calibValues.offset_g} on:input={()=>onCalibChange("offset_g")}/><span class="slider-val">{calibValues.offset_g}</span></div>
+                  <div class="slider-row"><label>Offset B</label><input type="range" min="-100" max="100" step="1" bind:value={calibValues.offset_b} on:input={()=>onCalibChange("offset_b")}/><span class="slider-val">{calibValues.offset_b}</span></div>
+                  <div class="slider-row"><label>Gamma</label><input type="range" min="0.5" max="2.0" step="0.01" bind:value={calibValues.gamma} on:input={()=>onCalibChange("gamma")}/><span class="slider-val">{calibValues.gamma.toFixed(2)}</span></div>
+                </div>
+              </details>
+
+              <div class="cam-nav">
+                <button class="btn-nav" on:click={()=>goStep("camera")}>← Back</button>
+                <button class="btn-primary" on:click={()=>goStep("done")}>Next →</button>
               </div>
             </div>
           </div>
@@ -2171,16 +2338,108 @@
                 <p class="hint">Both feeds must show your capture card output before you can continue.</p>
                 <div class="cam-nav">
                   <button class="btn-nav" on:click={()=>goStep("language")}>← Back</button>
-                  {#if setupComplete}
-                    <button class="btn-primary" disabled={!bothCamerasOk} on:click={()=>goStep("screens")}>
-                      Next: Screen Detection →
-                    </button>
-                  {:else}
-                    <button class="btn-primary" disabled={!bothCamerasOk} on:click={completeSetup}>
-                      Finish Setup →
-                    </button>
-                  {/if}
+                  <button class="btn-primary" disabled={!bothCamerasOk} on:click={()=>goStep("calibration")}>
+                    Next: Calibration →
+                  </button>
                 </div>
+              </div>
+            </div>
+          </div>
+
+        <!-- ── CALIBRATION step ────────────────────────────────────────────── -->
+        {:else if wizardStep === "calibration"}
+          <div class="step-two-col calib-step">
+            <div class="preview-col">
+              <div class="preview-wrapper">
+                {#if engineFrame && !trackerCameraPaused}
+                  <img src={engineFrame} alt="Engine feed" class="preview-video" style="object-fit:contain"/>
+                {:else}
+                  <div class="preview-placeholder">
+                    <span>Camera unavailable</span>
+                    <button class="btn-secondary" style="margin-top:.5rem" on:click={()=>goStep("camera")}>← Fix Camera</button>
+                  </div>
+                {/if}
+              </div>
+              <p class="preview-cap">Live engine feed (calibration applied in real time)</p>
+            </div>
+
+            <div class="info-col">
+              <div class="item-header"><h3>Image Calibration</h3></div>
+              <p class="hint">
+                Different capture cards produce subtly different colors and brightness. Calibration corrects for this once, globally, so the per-screen detection thresholds work without retuning. You can skip this and use defaults if your detection already looks accurate.
+              </p>
+
+              <div class="calib-section">
+                <h4 class="calib-section-title">Auto-fit against Switch HDR test patterns</h4>
+                <p class="calib-instruct">
+                  Walk through the Switch HDR calibration flow (<strong>System Settings → TV/Display → HDR Calibration</strong>) — there are 7 test patterns.  For each screen on the Switch, click the matching number below.  Click <strong>Solve</strong> once at least one slot is captured (more = better fit).
+                </p>
+
+                <div class="calib-pills" role="group" aria-label="HDR test pattern slots">
+                  {#each CALIB_SLOTS as slot}
+                    <button class="calib-pill"
+                            class:calib-pill-ready={calibCapturedSlots[slot]}
+                            on:click={()=>doCaptureCalibFrame(slot)}
+                            disabled={!pythonCameraOk || calibStatus==="running"}
+                            title={calibCapturedSlots[slot] ? `Recapture HDR test ${slot}` : `Capture HDR test ${slot}`}>
+                      <span class="calib-pill-num">{slot}</span>
+                      <span class="calib-pill-state">{calibCapturedSlots[slot] ? "✓" : "○"}</span>
+                    </button>
+                  {/each}
+                </div>
+
+                <label class="calib-checkbox">
+                  <input type="checkbox" bind:checked={calibResetTellOverrides}/>
+                  <span>Also reset my per-tell threshold overrides
+                    <small>Recommended if you previously tuned thresholds against the un-normalized image.</small>
+                  </span>
+                </label>
+
+                <div class="btn-row">
+                  <button class="btn-primary" on:click={doSolveCalibration}
+                          disabled={!Object.values(calibCapturedSlots).some(v=>v) || calibStatus==="running"}>
+                    {calibStatus==="running" ? "Solving…" : "Solve Calibration"}
+                  </button>
+                  <button class="btn-secondary" on:click={doClearCalibFrames} disabled={calibStatus==="running"}>
+                    Clear captures
+                  </button>
+                  <button class="btn-secondary" on:click={doResetCalibration} disabled={calibStatus==="running"}>
+                    Reset to defaults
+                  </button>
+                </div>
+
+                {#if calibStatus==="done" && calibFitQuality !== null}
+                  <div class="calib-result" class:good={calibFitQuality<10} class:warn={calibFitQuality>=10&&calibFitQuality<20} class:bad={calibFitQuality>=20}>
+                    <strong>Fit quality:</strong> {calibFitQuality.toFixed(1)}
+                    {#if calibFitQuality<10}<span class="calib-result-tag">(great)</span>
+                    {:else if calibFitQuality<20}<span class="calib-result-tag">(ok)</span>
+                    {:else}<span class="calib-result-tag">(poor — try manual sliders)</span>{/if}
+                  </div>
+                {:else if calibStatus==="error"}
+                  <div class="calib-result bad">{calibError}</div>
+                {/if}
+              </div>
+
+              <details class="calib-manual">
+                <summary>Manual sliders (advanced)</summary>
+                <div class="calib-sliders">
+                  <div class="slider-row"><label>Gain R</label><input type="range" min="0.3" max="3.0" step="0.01" bind:value={calibValues.gain_r} on:input={()=>onCalibChange("gain_r")}/><span class="slider-val">{calibValues.gain_r.toFixed(2)}</span></div>
+                  <div class="slider-row"><label>Gain G</label><input type="range" min="0.3" max="3.0" step="0.01" bind:value={calibValues.gain_g} on:input={()=>onCalibChange("gain_g")}/><span class="slider-val">{calibValues.gain_g.toFixed(2)}</span></div>
+                  <div class="slider-row"><label>Gain B</label><input type="range" min="0.3" max="3.0" step="0.01" bind:value={calibValues.gain_b} on:input={()=>onCalibChange("gain_b")}/><span class="slider-val">{calibValues.gain_b.toFixed(2)}</span></div>
+                  <div class="slider-row"><label>Offset R</label><input type="range" min="-100" max="100" step="1" bind:value={calibValues.offset_r} on:input={()=>onCalibChange("offset_r")}/><span class="slider-val">{calibValues.offset_r}</span></div>
+                  <div class="slider-row"><label>Offset G</label><input type="range" min="-100" max="100" step="1" bind:value={calibValues.offset_g} on:input={()=>onCalibChange("offset_g")}/><span class="slider-val">{calibValues.offset_g}</span></div>
+                  <div class="slider-row"><label>Offset B</label><input type="range" min="-100" max="100" step="1" bind:value={calibValues.offset_b} on:input={()=>onCalibChange("offset_b")}/><span class="slider-val">{calibValues.offset_b}</span></div>
+                  <div class="slider-row"><label>Gamma</label><input type="range" min="0.5" max="2.0" step="0.01" bind:value={calibValues.gamma} on:input={()=>onCalibChange("gamma")}/><span class="slider-val">{calibValues.gamma.toFixed(2)}</span></div>
+                </div>
+              </details>
+
+              <div class="cam-nav">
+                <button class="btn-nav" on:click={()=>goStep("camera")}>← Back</button>
+                {#if setupComplete}
+                  <button class="btn-primary" on:click={()=>goStep("screens")}>Next: Screens →</button>
+                {:else}
+                  <button class="btn-primary" on:click={completeSetup}>Finish Setup →</button>
+                {/if}
               </div>
             </div>
           </div>
@@ -3069,4 +3328,36 @@
   .ldlg-actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: 1rem; }
 
   /* ── First-time modal ─────────────────────────────────────────── */
+
+  /* ── Calibration step ─────────────────────────────────────────── */
+  .calib-step .info-col           { gap: .8rem; }
+  .calib-section                  { background: #06060e; border: 1px solid #1a1a2e; border-radius: 4px; padding: .7rem .8rem; }
+  .calib-section-title            { font-size: .72rem; color: #7eb8f7; margin: 0 0 .5rem; font-weight: 600; }
+  .calib-instruct                 { font-size: .68rem; color: #888; margin: 0 0 .55rem; line-height: 1.5; }
+  .calib-instruct strong          { color: #c8d8ea; font-weight: 500; }
+  .calib-pills                    { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: .55rem; }
+  .calib-pill                     { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .15rem; min-width: 3rem; padding: .45rem .55rem; background: #08081a; border: 1px solid #1a1a2e; border-radius: 4px; color: #888; cursor: pointer; font-family: inherit; transition: border-color .2s, background .2s, color .2s; }
+  .calib-pill:hover:not(:disabled){ border-color: #2a3a5a; color: #c8d8ea; }
+  .calib-pill:disabled            { cursor: not-allowed; opacity: .45; }
+  .calib-pill-ready               { border-color: #1e4030; background: #0a1612; color: #c8d8ea; }
+  .calib-pill-ready:hover:not(:disabled) { border-color: #2e6048; }
+  .calib-pill-num                 { font-size: .85rem; font-weight: 600; color: #7eb8f7; line-height: 1; }
+  .calib-pill-ready .calib-pill-num { color: #7adea2; }
+  .calib-pill-state               { font-size: .7rem; opacity: .8; line-height: 1; }
+  .calib-checkbox                 { display: flex; gap: .45rem; align-items: flex-start; font-size: .7rem; color: #c8d8ea; margin: .35rem 0 .6rem; cursor: pointer; line-height: 1.35; }
+  .calib-checkbox input           { margin-top: 3px; accent-color: #7eb8f7; cursor: pointer; }
+  .calib-checkbox small           { display: block; font-size: .62rem; color: #666; margin-top: 2px; }
+  .calib-result                   { font-size: .72rem; padding: .45rem .6rem; border-radius: 3px; margin-top: .55rem; border: 1px solid; }
+  .calib-result.good              { background: #0b1a14; border-color: #1e4030; color: #7adea2; }
+  .calib-result.warn              { background: #1c1808; border-color: #4a3a10; color: #e0c060; }
+  .calib-result.bad               { background: #1a0a0a; border-color: #4a1818; color: #e07878; }
+  .calib-result-tag               { color: inherit; opacity: .75; margin-left: .25rem; }
+  .calib-manual                   { background: #06060e; border: 1px solid #1a1a2e; border-radius: 4px; padding: .55rem .7rem; }
+  .calib-manual summary           { cursor: pointer; font-size: .7rem; color: #888; outline: none; user-select: none; }
+  .calib-manual[open] summary     { color: #7eb8f7; margin-bottom: .55rem; }
+  .calib-sliders                  { display: flex; flex-direction: column; gap: .3rem; }
+  .calib-sliders .slider-row      { display: grid; grid-template-columns: 4.5rem 1fr 2.3rem; align-items: center; gap: .5rem; font-size: .68rem; color: #aaa; }
+  .calib-sliders .slider-row label { color: #888; }
+  .calib-sliders .slider-row input[type=range] { accent-color: #7eb8f7; cursor: pointer; height: 3px; }
+  .calib-sliders .slider-val      { text-align: right; color: #c8d8ea; font-variant-numeric: tabular-nums; }
 </style>

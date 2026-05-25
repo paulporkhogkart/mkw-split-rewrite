@@ -92,3 +92,38 @@ All constants are stored in the `config` SQLite table (JSON-encoded values). The
 | `camera_width` | `1920` | Capture width |
 | `camera_height` | `1080` | Capture height |
 | `camera_fps` | `60` | Capture FPS |
+
+## Capture normalization
+
+Per-channel `gain` + `offset` + shared `gamma` LUT applied to every frame
+after resize, before any detector sees it.  Identity transform by default;
+auto-fitted by the calibration wizard against up to 7 shipped reference frames
+(`images/calibration/switch_hdr_test_1.png` … `..._7.png`, one per Switch HDR
+test pattern) or manually tuned via sliders.
+
+Patches are sampled from a fixed sub-region of every frame —
+`(482, 162)` size `956×532` — covering just the test pattern itself and
+ignoring the surrounding system UI chrome, which varies across capture cards
+and locales.  See `PATTERN_ROI` and `DEFAULT_PATCHES` in
+`mkw_tracker/utils/calibrate.py`.
+
+Capture fresh references from the current capture-card setup with the dev
+script — it accepts any number of slots and captures them sequentially in one
+preview window:
+
+```
+python scripts/capture_calibration_ref.py 1 2 3 4 5 6 7
+```
+
+See `mkw_tracker/utils/normalize.py` and `mkw_tracker/utils/calibrate.py`.
+
+| Key | Default | Description |
+|---|---|---|
+| `calib_enabled`  | `1`   | `1` apply the LUT to every frame, `0` pass-through (identity) |
+| `calib_gain_r`   | `1.0` | Red-channel multiplier (typical range 0.5–2.0) |
+| `calib_gain_g`   | `1.0` | Green-channel multiplier |
+| `calib_gain_b`   | `1.0` | Blue-channel multiplier |
+| `calib_offset_r` | `0`   | Red-channel offset in pixel units (range -100..+100) |
+| `calib_offset_g` | `0`   | Green-channel offset |
+| `calib_offset_b` | `0`   | Blue-channel offset |
+| `calib_gamma`    | `1.0` | Shared gamma exponent applied before gain/offset (range 0.5–2.0) |

@@ -97,6 +97,20 @@ class Defaults:
     camera_device: str = ""       # empty = auto-detect
     audio_device_label: str = ""  # empty = auto (group-paired); "none" = video-only
 
+    # ── Capture normalization ────────────────────────────────────────────────
+    # Per-channel linear+gamma transform applied to every captured frame before
+    # any detector sees it.  Identity by default (gain=1, offset=0, gamma=1).
+    # Auto-fitted by the calibration wizard against a shipped Switch HDR test-
+    # pattern reference, or manually tuned via sliders.  See utils/normalize.py.
+    calib_enabled:  int   = 1
+    calib_gain_r:   float = 1.0
+    calib_gain_g:   float = 1.0
+    calib_gain_b:   float = 1.0
+    calib_offset_r: int   = 0
+    calib_offset_g: int   = 0
+    calib_offset_b: int   = 0
+    calib_gamma:    float = 1.0
+
     # ── Language ──────────────────────────────────────────────────────────────
     app_language:    str = 'en_uk'   # UI display language
     switch2_language: str = 'en_uk'  # Nintendo Switch 2 system language (determines template dirs)

@@ -54,8 +54,10 @@ from .ipc.protocol import (parse_inbound, emit_ready, emit_screen_change, emit_s
                             emit_error, emit_heartbeat, emit_frame_data, emit_template_score,
                             emit_template_saved, emit_template_images, emit_tells_list, emit_rois_list,
                             emit_camera_paused, emit_camera_resumed, emit_camera_status,
-                            emit_roi_preview, emit_asset_preview, emit_asset_saved)
+                            emit_roi_preview, emit_asset_preview, emit_asset_saved,
+                            emit_calibration_result, emit_calib_capture)
 from .utils.camera import build_camera_source
+from .utils.normalize import Normalizer
 
 
 _WINDOW = 60   # rolling-average window size (frames)
@@ -65,20 +67,40 @@ _WINDOW = 60   # rolling-average window size (frames)
 # after reading so every downstream component works at a fixed resolution.
 _REF_W, _REF_H = 1920, 1080
 
+# Capture-normalization LUT (per-channel gain+offset+gamma).  Set in run()
+# once settings has loaded; _norm() reads it on every frame.  Pass-through
+# until initialised, so import-time callers see no behaviour change.
+_normalizer: Normalizer = None
+
+# Calibration slot cache.  Maps slot (1..7) to a copied frame snapshot
+# captured via capture_calib_frame IPC.  solve_calibration pairs each cached
+# slot with its matching shipped reference and runs solve_transform on the
+# pooled patches.  Cleared via clear_calib_frames or successful solve.
+_calib_capture_slots: dict = {}
+
+# Mirrors mkw_tracker.utils.calibrate.NUM_SLOTS.  Kept here as a literal so
+# the IPC dispatch stays cheap (no per-message import) and aligned with the
+# wizard's slot pills.
+_CALIB_SLOTS: tuple = (1, 2, 3, 4, 5, 6, 7)
+
 
 def _norm(frame):
-    """Resize frame to the 1920×1080 reference resolution if needed."""
+    """Resize to 1920×1080 if needed, then apply the capture-normalization LUT."""
     if frame is None:
         return None
     h, w = frame.shape[:2]
-    if w == _REF_W and h == _REF_H:
-        return frame
-    if _ocl_available:
-        # Upload → resize on GPU → download.  Worth it for large source frames
-        # (e.g. 2560×1440) where the resize dominates per-frame cost.
-        return cv2.resize(cv2.UMat(frame), (_REF_W, _REF_H),
-                          interpolation=cv2.INTER_LINEAR).get()
-    return cv2.resize(frame, (_REF_W, _REF_H), interpolation=cv2.INTER_LINEAR)
+    if not (w == _REF_W and h == _REF_H):
+        if _ocl_available:
+            # Upload → resize on GPU → download.  Worth it for large source frames
+            # (e.g. 2560×1440) where the resize dominates per-frame cost.
+            frame = cv2.resize(cv2.UMat(frame), (_REF_W, _REF_H),
+                               interpolation=cv2.INTER_LINEAR).get()
+        else:
+            frame = cv2.resize(frame, (_REF_W, _REF_H),
+                               interpolation=cv2.INTER_LINEAR)
+    if _normalizer is not None:
+        frame = _normalizer.apply(frame)
+    return frame
 
 
 def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
@@ -100,6 +122,8 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
                 tracker.reload_language(_lang)
             load_finish_templates(switch2_language=_lang)
             load_mushroom_templates(switch2_language=_lang)
+        elif key.startswith("calib_") and _normalizer is not None:
+            _normalizer.mark_dirty()
 
     elif t == "get_state":
         # Full snapshot emitted on next frame  - just mark as needed
@@ -186,6 +210,105 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
             "finish":      settings.get("finish_roi"),
             "mushroom":    settings.get("mushroom_roi"),
         }))
+
+    elif t == "get_calibration":
+        # Echo current calib_* values and any cached capture slots so the wizard
+        # can populate its sliders and capture badges without guessing.
+        if _normalizer is not None:
+            _c = _normalizer.current()
+            ipc.emit(emit_calibration_result(
+                _c["gain_r"], _c["gain_g"], _c["gain_b"],
+                _c["offset_r"], _c["offset_g"], _c["offset_b"],
+                _c["gamma"], 0.0, ok=True, is_echo=True))
+        # Always send every slot's status (captured or not) so the UI can hydrate.
+        for _slot in _CALIB_SLOTS:
+            ipc.emit(emit_calib_capture(_slot, _slot in _calib_capture_slots))
+
+    elif t == "capture_calib_frame":
+        _slot = int(msg.get("slot", 0))
+        if _slot not in _CALIB_SLOTS:
+            ipc.emit(emit_calib_capture(_slot, False,
+                error=f"Invalid slot {_slot} (expected 1..{_CALIB_SLOTS[-1]})"))
+            return
+        frame = current_frame[0]
+        if frame is None:
+            ipc.emit(emit_calib_capture(_slot, False, error="No camera frame available"))
+            return
+        # Copy so the cached frame is not aliased to the rolling capture buffer.
+        _calib_capture_slots[_slot] = frame.copy()
+        ipc.emit(emit_calib_capture(_slot, True))
+
+    elif t == "clear_calib_frames":
+        _calib_capture_slots.clear()
+        for _slot in _CALIB_SLOTS:
+            ipc.emit(emit_calib_capture(_slot, False))
+
+    elif t == "solve_calibration":
+        from .utils.calibrate import solve_transform, load_reference_frames
+        refs = load_reference_frames()
+        if not refs:
+            ipc.emit(emit_calibration_result(
+                1.0, 1.0, 1.0, 0, 0, 0, 1.0, 0.0, ok=False,
+                error="No reference images shipped. Use scripts/capture_calibration_ref.py "
+                      "to save images/calibration/switch_hdr_test_1.png and ..._2.png."))
+            return
+        if not _calib_capture_slots:
+            ipc.emit(emit_calibration_result(
+                1.0, 1.0, 1.0, 0, 0, 0, 1.0, 0.0, ok=False,
+                error="No frames captured. Use the Capture Test 1/2 buttons first."))
+            return
+        pairs = [(live, refs[slot]) for slot, live in _calib_capture_slots.items() if slot in refs]
+        if not pairs:
+            ipc.emit(emit_calibration_result(
+                1.0, 1.0, 1.0, 0, 0, 0, 1.0, 0.0, ok=False,
+                error=f"Captured slots {sorted(_calib_capture_slots)} don't match "
+                      f"any shipped reference (have {sorted(refs)})."))
+            return
+        result = solve_transform(pairs)
+        _apply_calibration_result(settings, detector, ipc, result,
+                                  reset_tell_overrides=bool(msg.get("reset_tell_overrides", False)))
+        # Captures consumed; clear so a fresh pass requires fresh captures.
+        _calib_capture_slots.clear()
+        for _slot in _CALIB_SLOTS:
+            ipc.emit(emit_calib_capture(_slot, False))
+
+    elif t == "calibrate_now":
+        # Legacy single-shot path: grab current frame and solve against whichever
+        # single reference is shipped.  The wizard uses solve_calibration instead.
+        frame = current_frame[0]
+        if frame is None:
+            ipc.emit(emit_calibration_result(
+                1.0, 1.0, 1.0, 0, 0, 0, 1.0, 0.0,
+                ok=False, error="No camera frame available — open the camera first."))
+            return
+        from .utils.calibrate import solve_transform, load_reference_frames
+        refs = load_reference_frames()
+        if not refs:
+            ipc.emit(emit_calibration_result(
+                1.0, 1.0, 1.0, 0, 0, 0, 1.0, 0.0,
+                ok=False,
+                error="No reference images shipped. Use the two-step capture flow in the wizard, "
+                      "or drop PNGs at images/calibration/switch_hdr_test_{1,2}.png."))
+            return
+        # Use whichever slot is available (prefer slot 1).
+        _slot = 1 if 1 in refs else next(iter(refs))
+        result = solve_transform([(frame, refs[_slot])])
+        _apply_calibration_result(settings, detector, ipc, result,
+                                  reset_tell_overrides=bool(msg.get("reset_tell_overrides", False)))
+
+    elif t == "reset_calibration":
+        _d  = Defaults().as_dict()
+        _keys = ["calib_enabled", "calib_gain_r", "calib_gain_g", "calib_gain_b",
+                 "calib_offset_r", "calib_offset_g", "calib_offset_b", "calib_gamma"]
+        for _k in _keys:
+            settings.update(_k, _d[_k])
+        settings.reload(_keys)
+        if _normalizer is not None:
+            _normalizer.mark_dirty()
+        ipc.emit(emit_calibration_result(
+            _d["calib_gain_r"], _d["calib_gain_g"], _d["calib_gain_b"],
+            _d["calib_offset_r"], _d["calib_offset_g"], _d["calib_offset_b"],
+            _d["calib_gamma"], 0.0, ok=True))
 
     elif t == "list_devices":
         from .utils.camera import list_dshow_video_devices
@@ -474,6 +597,39 @@ def _persist_tell_structure(settings, screen_name: str, detector) -> None:
         settings.update(f"tell_alt_thresh_{sn}", alt_thresh)
 
 
+def _apply_calibration_result(settings, detector, ipc, result: dict,
+                               reset_tell_overrides: bool) -> None:
+    """Persist a solver result, hot-reload the normalizer, optionally wipe
+    per-tell threshold overrides, and emit the result to the wizard."""
+    for _k in ("gain_r", "gain_g", "gain_b"):
+        settings.update(f"calib_{_k}", float(result[_k]))
+    for _k in ("offset_r", "offset_g", "offset_b"):
+        settings.update(f"calib_{_k}", int(result[_k]))
+    settings.update("calib_gamma", float(result["gamma"]))
+    settings.reload(["calib_gain_r", "calib_gain_g", "calib_gain_b",
+                     "calib_offset_r", "calib_offset_g", "calib_offset_b",
+                     "calib_gamma"])
+    if _normalizer is not None:
+        _normalizer.mark_dirty()
+    if reset_tell_overrides:
+        for _pat in ("tell_thresh_%", "tell_alt_thresh_%", "tell_and_thresh_%"):
+            delete_configs_like(_pat)
+        from .detection.screen import TELLS as _SPEC_TELLS
+        _spec = {_t.screen: _t for _t in _SPEC_TELLS}
+        for _se, _tell in detector._tells_by_screen.items():
+            _sp = _spec.get(_se)
+            if _sp is None:
+                continue
+            _tell.binary_thresh        = _sp.binary_thresh
+            _tell.alt_binary_thresh    = _sp.alt_binary_thresh
+            _tell.required_also_thresh = list(_sp.required_also_thresh)
+        ipc.emit(emit_tells_list(detector.get_tells_config()))
+    ipc.emit(emit_calibration_result(
+        result["gain_r"], result["gain_g"], result["gain_b"],
+        result["offset_r"], result["offset_g"], result["offset_b"],
+        result["gamma"], result["fit_quality"], ok=True))
+
+
 _cleanup_done = False
 
 
@@ -511,6 +667,12 @@ def run(args):
     apply_migrations()
     settings = get_settings()
     display_enabled = not args.no_display
+
+    # ── Capture normalization ───────────────────────────────────────────────
+    # Initialised after settings so _norm() can apply the LUT on every frame.
+    # Hot-reloaded via mark_dirty() from the update_config IPC handler below.
+    global _normalizer
+    _normalizer = Normalizer(settings)
 
     # ── Language ─────────────────────────────────────────────────────────────
     switch2_language = settings.get("switch2_language", "en_uk") or "en_uk"
