@@ -2082,7 +2082,7 @@ dependencies = [
 
 [[package]]
 name = "mkw-tracker"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "log",
  "serde",

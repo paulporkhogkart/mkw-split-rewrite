@@ -235,20 +235,21 @@ TELLS: list = [
          roi=(671, 312, 1267, 359), binary_thresh=199),
     Tell(screen=Screen.START_REPLAY, image_path="images/screens/startreplay.png",
          roi=(726, 317, 1209, 356), binary_thresh=222),
-    # RESET family stays on the binary/Otsu path: it's a large region (acutance
-    # differences average out, so it's not fragile across setups) and Otsu has no
-    # faithful grayscale-template equivalent.
+    # RESET family: grayscale+slack like the other screens.  reset.png reference
+    # screenshots exist for every language, so all are regenerated.
     Tell(screen=Screen.RESET, image_path="images/screens/reset.png",
-         roi=(0, 589, 527, 1080), binary_thresh=None, grayscale=False),
+         roi=(0, 589, 527, 1080), binary_thresh=None),
     Tell(screen=Screen.GHOST_RESET, image_path="images/screens/reset.png",
-         roi=(0, 589, 527, 1080), binary_thresh=None, grayscale=False),
+         roi=(0, 589, 527, 1080), binary_thresh=None),
     Tell(screen=Screen.UNKNOWN_RESET, image_path="images/screens/reset.png",
-         roi=(0, 589, 527, 1080), binary_thresh=None, grayscale=False),
-    # POST_TIME_TRIAL stays binary: no reference screenshot exists to cut a
-    # grayscale template from.  Add screenshots/<lang>/posttimetrial.png and flip
-    # to grayscale (+ regen) if it proves fragile across capture setups.
+         roi=(0, 589, 527, 1080), binary_thresh=None),
+    # POST_TIME_TRIAL: grayscale+slack.  Only an en_uk reference exists
+    # (old_assets/posttimetrial.png), seeded as a PLACEHOLDER into every
+    # screenshots/<lang>/posttimetrial.png — non-en_uk matches en_uk text until
+    # real per-language screenshots are captured + regenerated.  binary_thresh is
+    # retained only for DB-override compatibility (unused on the grayscale path).
     Tell(screen=Screen.POST_TIME_TRIAL, image_path="images/screens/posttimetrial.png",
-         roi=(1364, 798, 1458, 825), binary_thresh=190, grayscale=False,
+         roi=(1364, 798, 1458, 825), binary_thresh=190,
          alt_image_path="images/screens/posttimetrial2.png",
          alt_roi=(1209, 664, 1618, 691), alt_binary_thresh=190),
     Tell(screen=Screen.MAIN_MENU, image_path="images/screens/mainmenu.png",
@@ -297,8 +298,9 @@ TELLS: list = [
 # are cut from.  Filenames are relative to screenshots/<lang>/.  All of a tell's
 # ROIs (primary + alt + required_also) are cut from this one screenshot.  Used by
 # scripts/gen_grayscale_templates.py; validated to reproduce every shipped
-# template at >=99.8% pixel agreement.  Screens absent here (POST_TIME_TRIAL)
-# have no screenshot and stay on the binary path.
+# template at >=99.8% pixel agreement.  POST_TIME_TRIAL uses an en_uk PLACEHOLDER
+# (old_assets/posttimetrial.png) seeded into every language's screenshot dir for
+# now — replace per-language and regen later.
 # ---------------------------------------------------------------------------
 
 SCREENSHOT_FILES: Dict[Screen, str] = {
@@ -319,6 +321,10 @@ SCREENSHOT_FILES: Dict[Screen, str] = {
     Screen.GALLERY:             "gallery.png",
     Screen.SINGLEPLAYER_MENU:   "singleplayer.png",
     Screen.TIME_TRIALS:         "timetrials.png",
+    Screen.RESET:               "reset.png",
+    Screen.GHOST_RESET:         "reset.png",
+    Screen.UNKNOWN_RESET:       "reset.png",
+    Screen.POST_TIME_TRIAL:     "posttimetrial.png",
 }
 
 

@@ -85,7 +85,11 @@ _CALIB_SLOTS: tuple = (1, 2, 3, 4, 5, 6, 7)
 
 
 def _norm(frame):
-    """Resize to 1920×1080 if needed, then apply the capture-normalization LUT."""
+    """Resize to 1920×1080 if needed.
+
+    NOTE: the capture-normalization LUT (global gain/offset/gamma) is
+    intentionally DISABLED for this patch — see the commented block below.
+    """
     if frame is None:
         return None
     h, w = frame.shape[:2]
@@ -98,8 +102,14 @@ def _norm(frame):
         else:
             frame = cv2.resize(frame, (_REF_W, _REF_H),
                                interpolation=cv2.INTER_LINEAR)
-    if _normalizer is not None:
-        frame = _normalizer.apply(frame)
+    # --- TEMP DISABLED (this patch): global capture-calibration offsets --------
+    # The per-channel gain/offset/gamma LUT is intentionally NOT applied, so the
+    # calibration sliders AND auto-calibration have zero effect on detection —
+    # even if non-identity values are saved in the DB.  Left commented (not
+    # deleted) for easy restore: just uncomment the two lines below.  The
+    # Normalizer object, calibration IPC, and wizard are all left intact.
+    # if _normalizer is not None:
+    #     frame = _normalizer.apply(frame)
     return frame
 
 
