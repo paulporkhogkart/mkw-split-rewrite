@@ -163,6 +163,13 @@ class Tell:
     grayscale: bool = True
     search_pad: int = 6
 
+    # dark_loading: detect a near-black loading/reset screen by its crush-invariant
+    # signature (uniformly dark roi + a bright mascot in icon_roi) instead of
+    # template matching — needed where a capture card clips the screen's faint
+    # pattern to pure black, leaving no variance for a template to match.
+    dark_loading: bool = False
+    icon_roi: Optional[tuple] = None
+
     alt_image_path: Optional[str] = None
     alt_roi: Optional[tuple] = None
     alt_binary_thresh: int = 170          # independent thresh for the OR-alt ROI
@@ -175,6 +182,8 @@ class Tell:
     required_also_templates: list = field(default_factory=list, repr=False)
 
     def load(self, switch2_language: str = None):
+        if self.dark_loading:
+            return   # statistical detector — no template to load
         from ..utils.paths import data_dir, resource_path
         import os
 
@@ -235,14 +244,16 @@ TELLS: list = [
          roi=(671, 312, 1267, 359), binary_thresh=199),
     Tell(screen=Screen.START_REPLAY, image_path="images/screens/startreplay.png",
          roi=(726, 317, 1209, 356), binary_thresh=222),
-    # RESET family: grayscale+slack like the other screens.  reset.png reference
-    # screenshots exist for every language, so all are regenerated.
+    # RESET family = the dark LOADING screen.  Detected by its crush-invariant
+    # signature (near-uniform darkness in roi + a bright mascot in icon_roi), NOT
+    # by template matching: some capture cards clip the faint 19-26 shadow pattern
+    # to pure black, destroying the only thing a template could match.
     Tell(screen=Screen.RESET, image_path="images/screens/reset.png",
-         roi=(0, 589, 527, 1080), binary_thresh=None),
+         roi=(0, 589, 527, 1080), dark_loading=True, icon_roi=(1700, 920, 1870, 1030)),
     Tell(screen=Screen.GHOST_RESET, image_path="images/screens/reset.png",
-         roi=(0, 589, 527, 1080), binary_thresh=None),
+         roi=(0, 589, 527, 1080), dark_loading=True, icon_roi=(1700, 920, 1870, 1030)),
     Tell(screen=Screen.UNKNOWN_RESET, image_path="images/screens/reset.png",
-         roi=(0, 589, 527, 1080), binary_thresh=None),
+         roi=(0, 589, 527, 1080), dark_loading=True, icon_roi=(1700, 920, 1870, 1030)),
     # POST_TIME_TRIAL: grayscale+slack.  Only an en_uk reference exists
     # (old_assets/posttimetrial.png), seeded as a PLACEHOLDER into every
     # screenshots/<lang>/posttimetrial.png — non-en_uk matches en_uk text until
@@ -321,10 +332,8 @@ SCREENSHOT_FILES: Dict[Screen, str] = {
     Screen.GALLERY:             "gallery.png",
     Screen.SINGLEPLAYER_MENU:   "singleplayer.png",
     Screen.TIME_TRIALS:         "timetrials.png",
-    Screen.RESET:               "reset.png",
-    Screen.GHOST_RESET:         "reset.png",
-    Screen.UNKNOWN_RESET:       "reset.png",
     Screen.POST_TIME_TRIAL:     "posttimetrial.png",
+    # RESET family is NOT here: it uses dark_loading detection, not a template.
 }
 
 
@@ -342,6 +351,42 @@ TELL_ALIAS_GROUPS: Dict[Screen, list] = {
 # ---------------------------------------------------------------------------
 # Detection helpers
 # ---------------------------------------------------------------------------
+
+# Dark-loading (RESET) detection thresholds — see _detect_dark_loading.
+_DARK_MAX_MEAN: float = 40.0    # ROI brightness ceiling (dev loading ~20, aiden ~1)
+_DARK_MAX_STD:  float = 15.0    # ROI flatness ceiling (dev ~2.3, aiden ~0.3; menus >> this)
+_DARK_ICON_MIN_MAX: int = 150   # a bright mascot must be present (guards vs fade-to-black)
+
+
+def _detect_dark_loading(frame: np.ndarray, roi: tuple,
+                         icon_roi: Optional[tuple]) -> tuple:
+    """Detect a dark loading/reset screen by a crush-invariant signature instead
+    of template matching: a near-uniformly dark `roi` (low mean AND low std) plus
+    a bright mascot in `icon_roi`.
+
+    Some capture cards clip the loading screen's faint shadow pattern (values
+    ~19-26) to pure black, leaving zero variance for a template to correlate
+    against — but "dark and flat" stays dark and flat regardless of black levels,
+    and the bright mascot survives too.  The icon check guards against plain
+    fade-to-black (dark, but no icon).  Returns (detected, score).
+    """
+    x1, y1, x2, y2 = roi
+    crop = frame[y1:y2, x1:x2]
+    if crop.size == 0:
+        return False, 0.0
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop
+    if float(gray.mean()) >= _DARK_MAX_MEAN or float(gray.std()) >= _DARK_MAX_STD:
+        return False, 0.0
+    if icon_roi is not None:
+        ix1, iy1, ix2, iy2 = icon_roi
+        icon = frame[iy1:iy2, ix1:ix2]
+        if icon.size == 0:
+            return False, 0.0
+        ig = cv2.cvtColor(icon, cv2.COLOR_BGR2GRAY) if len(icon.shape) == 3 else icon
+        if int(ig.max()) <= _DARK_ICON_MIN_MAX:
+            return False, 0.0
+    return True, 1.0
+
 
 def _match_tell(frame: np.ndarray, roi: tuple, template: np.ndarray,
                 binary_thresh: Optional[int],
@@ -384,6 +429,9 @@ def _match_tell(frame: np.ndarray, roi: tuple, template: np.ndarray,
 
 def detect_tell(frame: np.ndarray, tell: Tell) -> tuple:
     """Return (detected: bool, best_score: float)."""
+    if tell.dark_loading:
+        return _detect_dark_loading(frame, tell.roi, tell.icon_roi)
+
     primary_score = _match_tell(frame, tell.roi, tell.template, tell.binary_thresh,
                                 tell.grayscale, tell.search_pad)
 
@@ -635,6 +683,18 @@ class ScreenDetector:
         tell = self._tells_by_screen.get(screen)
         if tell is None or frame is None:
             return None
+        if tell.dark_loading:
+            detected, score = _detect_dark_loading(frame, tell.roi, tell.icon_roi)
+            return {
+                "screen":       screen_name,
+                "roi_key":      roi_key,
+                "score":        round(score, 4),
+                "threshold":    1.0,
+                "matched":      detected,
+                "roi":          list(tell.roi),
+                "template_img": None,
+                "live_crop":    _encode_crop_roi(frame, tell.roi, None, grayscale=True),
+            }
         tmpl, roi, thresh = self._roi_key_parts(tell, roi_key)
         if roi is None:
             return None
@@ -684,6 +744,8 @@ class ScreenDetector:
                 "binary_thresh": tell.binary_thresh,
                 "grayscale": tell.grayscale,
                 "search_pad": tell.search_pad,
+                "dark_loading": tell.dark_loading,
+                "icon_roi": list(tell.icon_roi) if tell.icon_roi else None,
             }
             if tell.alt_image_path:
                 entry["alt_image_path"] = tell.alt_image_path
@@ -830,6 +892,8 @@ class ScreenDetector:
             "binary_thresh":   tell.binary_thresh,
             "grayscale":       tell.grayscale,
             "search_pad":      tell.search_pad,
+            "dark_loading":    tell.dark_loading,
+            "icon_roi":        list(tell.icon_roi) if tell.icon_roi else None,
         }
         if tell.alt_image_path:
             entry["alt_image_path"] = tell.alt_image_path
