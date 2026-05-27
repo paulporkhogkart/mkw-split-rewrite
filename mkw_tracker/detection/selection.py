@@ -103,6 +103,14 @@ COURSE_NAME_ROI = (163,  387, 647,  462)
 
 SELECTION_MATCH_THRESHOLD = 0.7
 
+# Costume name templates are full-ROI-width (the white_text path preserves letter
+# spacing), so matchTemplate has no room to slide and a few-px positional offset
+# between capture setups collapses the score — the same trap the screen tells had
+# before grayscale+slack.  Pad the live costume crop so the template can slide
+# +/- this many px.  (Character/kart/course templates are tight-cropped, so they
+# already slide within their ROI and don't need this.)
+COSTUME_SEARCH_PAD = 8
+
 
 def _load_lang_dir(lang_dir: str, **kwargs) -> dict:
     """Load templates from the language-specific directory. No base-path fallback."""
@@ -200,6 +208,15 @@ class SelectionTracker:
         x1, y1, x2, y2 = roi
         return frame[y1:y2, x1:x2]
 
+    def _crop_padded(self, frame: np.ndarray, roi: tuple, pad: int) -> np.ndarray:
+        """Crop roi expanded by `pad` px on each side (clamped to frame bounds),
+        giving matchTemplate room to slide a full-width template so a small
+        capture-setup positional offset doesn't tank the score."""
+        x1, y1, x2, y2 = roi
+        h, w = frame.shape[:2]
+        return frame[max(0, y1 - pad):min(h, y2 + pad),
+                     max(0, x1 - pad):min(w, x2 + pad)]
+
     # ------------------------------------------------------------------
     def update(self, frame: np.ndarray, screen: Screen,
                current_score: float = 1.0) -> SelectionState:
@@ -263,7 +280,8 @@ class SelectionTracker:
             self._char_confirm_streak  = 0
 
         if self.state.character and self._relevant_costumes:
-            cos_crop = prepare_text_edges(self._crop(frame, self._costume_roi))
+            cos_crop = prepare_text_edges(
+                self._crop_padded(frame, self._costume_roi, COSTUME_SEARCH_PAD))
             cname, cconf = match_best(
                 None, self._relevant_costumes,
                 threshold=0.3, reconfirm_threshold=0.5,

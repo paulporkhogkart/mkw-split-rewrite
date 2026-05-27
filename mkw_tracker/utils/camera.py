@@ -355,6 +355,91 @@ class VideoCaptureSource:
         self._cap.release()
 
 
+class VideoFileSource:
+    """Dev/test source: play a video file in place of a capture device.
+
+    Conforms to the same interface as the live sources (read/waitKey/release +
+    width/height/fps/device_name), so the main loop is unchanged.  Frames are
+    returned at the file's native resolution; main._norm() resizes them to
+    1920x1080 like any other source.
+
+    Playback tracks wall-clock time (real time): the frame returned is chosen
+    from elapsed_time x fps, and any frames we're too slow to decode are dropped
+    via grab() — exactly like a live capture card always handing back its newest
+    frame.  This keeps the video at true speed regardless of its fps or how heavy
+    per-frame processing is, and the wall-clock tracker rate limits (10Hz scans,
+    timestamp bursts, EMA) behave as they do live.  Loops at EOF unless loop=False.
+
+    target_fps:  None -> play at the file's own fps (true real time).
+                 >0   -> play at this fps instead (e.g. 30 -> half-speed slow-mo).
+                 0    -> no pacing and no dropping: decode every frame as fast as
+                         possible (offline batch analysis).
+    """
+
+    def __init__(self, path: str, loop: bool = True,
+                 target_fps: Optional[float] = None) -> None:
+        if not os.path.isfile(path):
+            raise RuntimeError(f"Video file not found: {path}")
+        self._cap = cv2.VideoCapture(path)
+        if not self._cap.isOpened():
+            raise RuntimeError(f"Could not open video file: {path}")
+        self.width   = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        self.height  = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        file_fps     = self._cap.get(cv2.CAP_PROP_FPS) or float(_MAX_FPS)
+        # Playback clock.  None -> the file's own fps (true real time); a given
+        # value overrides it; 0 disables pacing entirely (decode every frame).
+        self._play_fps = file_fps if target_fps is None else float(target_fps)
+        self.fps       = self._play_fps if self._play_fps > 0 else file_fps
+        self._loop      = loop
+        self._t0:        Optional[float] = None   # wall time of first delivered frame
+        self._delivered  = 0                       # frames consumed (read + grabbed)
+        self.device_name = f"video:{os.path.basename(path)}"
+        _mode = ("unpaced (every frame, max speed)" if self._play_fps <= 0
+                 else f"real time @ {self._play_fps:.0f}fps (drops frames to stay synced)")
+        print(f"[Camera] DEV video source: {path!r} {self.width}x{self.height} "
+              f"@ file {file_fps:.0f}fps -> {_mode}, loop={loop}")
+
+    def _read_one(self) -> Tuple[bool, Optional[np.ndarray]]:
+        ok, frame = self._cap.read()
+        if not ok and self._loop and self._rewind():
+            ok, frame = self._cap.read()
+        if ok:
+            self._delivered += 1
+            return True, frame
+        return False, None
+
+    def _rewind(self) -> bool:
+        self._cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        self._t0 = None          # restart the real-time clock after wrapping
+        self._delivered = 0
+        return True
+
+    def read(self) -> Tuple[bool, Optional[np.ndarray]]:
+        import time as _time
+        if self._play_fps <= 0:                    # unpaced: decode every frame
+            return self._read_one()
+
+        now = _time.monotonic()
+        if self._t0 is None:
+            self._t0 = now
+        scheduled = self._t0 + self._delivered / self._play_fps
+        if now < scheduled:
+            _time.sleep(scheduled - now)           # ahead of schedule: wait
+        else:                                      # behind: drop the missed frames
+            behind = int((now - scheduled) * self._play_fps)
+            for _ in range(behind):
+                if not self._cap.grab():           # EOF mid-skip -> let _read_one wrap
+                    break
+                self._delivered += 1
+        return self._read_one()
+
+    def waitKey(self, delay: int = 1) -> int:
+        return cv2.waitKey(delay)
+
+    def release(self) -> None:
+        self._cap.release()
+
+
 # ── Factory ───────────────────────────────────────────────────────────────────
 
 def build_camera_source(

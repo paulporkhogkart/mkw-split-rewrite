@@ -792,6 +792,23 @@ def run(args):
     cap = None
     _cap_ref[0] = cap
 
+    # ── DEV test video source ────────────────────────────────────────────────
+    # --video replaces the capture device with a (looping) video file so screen
+    # detection / selection can be tested against recorded footage.  Skips the
+    # setup wizard (no camera to pick) and camera-control IPC is ignored below
+    # so the file source is never torn down by the frontend.
+    _video_mode = bool(getattr(args, "video", None))
+    if _video_mode:
+        from .utils.camera import VideoFileSource
+        try:
+            cap = VideoFileSource(args.video, loop=not args.video_once,
+                                  target_fps=args.video_fps)
+            _cap_ref[0] = cap
+            setup_mode[0] = False
+        except Exception as _e:
+            print(f"[Camera] --video failed: {_e}")
+            return
+
     ipc.emit(emit_ready(
         version="dev" if args.no_ipc else "sidecar",
         setup_complete=not setup_mode[0],
@@ -892,13 +909,13 @@ def run(args):
         # ── Drain IPC queue ──────────────────────────────────────────────────
         while not ipc.inbound_queue.empty():
             msg = ipc.inbound_queue.get_nowait()
-            if msg.get("type") == "pause_camera":
+            if msg.get("type") == "pause_camera" and not _video_mode:
                 if cap is not None:
                     cap.release()
                     cap = None
                 cam_paused[0] = True
                 ipc.emit(emit_camera_paused())
-            elif msg.get("type") == "open_camera":
+            elif msg.get("type") == "open_camera" and not _video_mode:
                 # Close any existing capture first (handles device changes)
                 if cap is not None:
                     cap.release()
@@ -1211,6 +1228,14 @@ def main():
                         help="Broadcast all events on a local WebSocket (e.g. 8765).")
     parser.add_argument("--no-display", action="store_true",
                         help="Suppress OpenCV window (headless mode for Tauri).")
+    parser.add_argument("--video", metavar="PATH", default=None,
+                        help="DEV TEST: read frames from a video file instead of the "
+                             "capture device (skips the camera setup wizard).")
+    parser.add_argument("--video-fps", type=float, default=None, metavar="FPS",
+                        help="Playback rate for --video. Default: file fps capped at 60. "
+                             "0 = as fast as possible (no real-time pacing).")
+    parser.add_argument("--video-once", action="store_true",
+                        help="With --video, stop at end of file instead of looping.")
     args = parser.parse_args()
     run(args)
 
