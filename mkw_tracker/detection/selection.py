@@ -1,4 +1,5 @@
 """SelectionTracker, SelectionState, KNOWN_COURSES, KNOWN_COSTUMES."""
+import re
 import time
 import cv2
 import numpy as np
@@ -61,6 +62,38 @@ KNOWN_COSTUMES: Dict[str, list] = {
     "Wiggler": [],
     "Yoshi":         ['Touring', 'Pro Racer', 'Aristocrat', 'Soft Server', 'Biker', 'Swimwear', 'Matsuri', 'Food Slinger'],
 }
+
+
+# ---------------------------------------------------------------------------
+# Costume name canonicalisation
+# ---------------------------------------------------------------------------
+# Costume template keys are derived from filenames via `_`->space + .title()
+# (templates.load_template_dir), which can't reproduce a literal hyphen: e.g.
+# all_terrain.png -> "All Terrain", but KNOWN_COSTUMES lists "All-Terrain".
+# _rebuild_costume_subset filters by exact membership in KNOWN_COSTUMES, so the
+# mismatch silently drops the costume and it can never be detected.  Remapping
+# each loaded key to its canonical KNOWN_COSTUMES name fixes detection and makes
+# the reported name canonical.  (Characters/courses share this latent issue but
+# are intentionally left alone for now — they need a DB migration first.)
+
+def _norm_name(s: str) -> str:
+    """Lowercase + strip non-alphanumerics for separator/case-insensitive name
+    comparison ('All Terrain' == 'All-Terrain' == 'all_terrain')."""
+    return re.sub(r'[^a-z0-9]', '', s.lower())
+
+
+_COSTUME_CANON: Dict[str, str] = {
+    _norm_name(c): c
+    for costumes in KNOWN_COSTUMES.values()
+    for c in costumes
+}
+
+
+def _canonicalize_costumes(templates: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+    """Remap filename-derived costume keys to their canonical KNOWN_COSTUMES name.
+    Keys with no canonical match are kept unchanged."""
+    return {_COSTUME_CANON.get(_norm_name(k), k): tmpl for k, tmpl in templates.items()}
+
 
 # ROIs for selection screen scanning (full 1080p coords)
 CHAR_NAME_ROI   = (1210, 830, 1770, 894)
@@ -131,7 +164,7 @@ class SelectionTracker:
                 purge_tight_pngs(d)
 
         self._char_templates    = _load_lang_dir(char_dir)
-        self._costume_templates = _load_lang_dir(costume_dir, white_text=True)
+        self._costume_templates = _canonicalize_costumes(_load_lang_dir(costume_dir, white_text=True))
         self._kart_templates    = _load_lang_dir(kart_dir)
         self._course_templates  = _load_lang_dir(course_dir)
 
@@ -295,7 +328,7 @@ class SelectionTracker:
         kart_dir    = f"images/karts/{lang}"      if lang else "images/karts"
         course_dir  = f"images/courses/{lang}"    if lang else "images/courses"
         self._char_templates    = _load_lang_dir(char_dir)
-        self._costume_templates = _load_lang_dir(costume_dir, white_text=True)
+        self._costume_templates = _canonicalize_costumes(_load_lang_dir(costume_dir, white_text=True))
         self._kart_templates    = _load_lang_dir(kart_dir)
         self._course_templates  = _load_lang_dir(course_dir)
         if self.state.character:

@@ -83,9 +83,13 @@ def _basename(path: str) -> str:
     return os.path.splitext(os.path.basename(path))[0]
 
 
-def _crop_and_process(frame: np.ndarray, roi: tuple, thresh) -> np.ndarray:
+def _crop_and_process(frame: np.ndarray, roi: tuple, thresh,
+                      grayscale: bool = False) -> np.ndarray:
     x1, y1, x2, y2 = [int(v) for v in roi]
     crop = frame[y1:y2, x1:x2]
+    if grayscale:
+        # Save the continuous-tone crop — grayscale tells match it directly.
+        return cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop
     if thresh is not None:
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop
         _, out = cv2.threshold(gray, int(thresh), 255, cv2.THRESH_BINARY)
@@ -375,9 +379,11 @@ class EventBroadcaster:
         if frame is None:
             return {"type": "at_error", "message": "No frame available"}
 
+        _tell, _ = self._resolve_tell(screen)
+        gray = bool(getattr(_tell, "grayscale", False))
         paths = []
         for roi, thresh, filename in entries:
-            img  = _crop_and_process(frame, roi, thresh)
+            img  = _crop_and_process(frame, roi, thresh, gray)
             path = self._out("images", "screens", lang, f"{filename}.png")
             _save(img, path)
             paths.append(path)
@@ -400,9 +406,11 @@ class EventBroadcaster:
         if frame is None:
             return {"type": "at_error", "message": "No frame available"}
 
+        _tell, _ = self._resolve_tell(screen)
+        gray = bool(getattr(_tell, "grayscale", False))
         paths = []
         for roi, thresh, filename in entries:
-            img  = _crop_and_process(frame, roi, thresh)
+            img  = _crop_and_process(frame, roi, thresh, gray)
             path = self._out("images", "screens", lang, f"{filename}.png")
             _save(img, path)
             paths.append(path)
@@ -438,7 +446,8 @@ class EventBroadcaster:
             return {"type": "at_error", "message": f"Failed to load template: {template_path}"}
 
         from ..detection.screen import _match_tell
-        score = _match_tell(frame, tell.roi, template, tell.binary_thresh)
+        score = _match_tell(frame, tell.roi, template, tell.binary_thresh,
+                            getattr(tell, "grayscale", False), getattr(tell, "search_pad", 0))
         logger.debug("at_check_tell_score: %s lang=%s score=%.4f", screen, lang, score)
         return {"type": "at_tell_score", "screen": screen, "score": score}
 

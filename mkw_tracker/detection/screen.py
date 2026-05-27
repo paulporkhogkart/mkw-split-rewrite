@@ -35,14 +35,22 @@ def _encode_img(img: Optional[np.ndarray]) -> Optional[str]:
 
 
 def _encode_crop_roi(frame: np.ndarray, roi: tuple,
-                     binary_thresh: Optional[int]) -> Optional[str]:
-    """Crop frame to roi, binarise with the given threshold, return as base64 PNG."""
+                     binary_thresh: Optional[int],
+                     grayscale: bool = False) -> Optional[str]:
+    """Crop frame to roi and return as base64 PNG.
+
+    grayscale=True returns the continuous-tone crop (what a grayscale tell
+    actually matches); otherwise the crop is binarised with the given threshold
+    (or Otsu when binary_thresh is None) to mirror the legacy binary match.
+    """
     x1, y1, x2, y2 = roi
     crop = frame[y1:y2, x1:x2]
     if crop.size == 0:
         return None
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop
-    if binary_thresh is not None:
+    if grayscale:
+        processed = gray
+    elif binary_thresh is not None:
         _, processed = cv2.threshold(gray, binary_thresh, 255, cv2.THRESH_BINARY)
     else:
         _, processed = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -50,8 +58,8 @@ def _encode_crop_roi(frame: np.ndarray, roi: tuple,
 
 
 def _encode_crop(frame: np.ndarray, tell) -> Optional[str]:
-    """Convenience wrapper: crop frame to tell.roi with tell's binary_thresh."""
-    return _encode_crop_roi(frame, tell.roi, tell.binary_thresh)
+    """Convenience wrapper: crop frame to tell.roi in the tell's match mode."""
+    return _encode_crop_roi(frame, tell.roi, tell.binary_thresh, tell.grayscale)
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +152,17 @@ class Tell:
     match_threshold: float = 0.9
     binary_thresh: Optional[int] = 170
 
+    # Matching mode.  grayscale=True (default) skips binarisation and matches the
+    # continuous-tone template with TM_CCOEFF_NORMED over a +/- search_pad px
+    # translation window.  This is robust to the per-capture-card acutance (edge
+    # softness) and sub-pixel offset differences that wreck a fixed-threshold
+    # binary match — see docs/screen-detection.md.  grayscale=False keeps the
+    # legacy binary path for tells with no clean reference screenshot to cut a
+    # grayscale template from (RESET/POST_TIME_TRIAL).  binary_thresh is retained
+    # in both modes for DB-override compatibility and the binary path.
+    grayscale: bool = True
+    search_pad: int = 6
+
     alt_image_path: Optional[str] = None
     alt_roi: Optional[tuple] = None
     alt_binary_thresh: int = 170          # independent thresh for the OR-alt ROI
@@ -216,14 +235,20 @@ TELLS: list = [
          roi=(671, 312, 1267, 359), binary_thresh=199),
     Tell(screen=Screen.START_REPLAY, image_path="images/screens/startreplay.png",
          roi=(726, 317, 1209, 356), binary_thresh=222),
+    # RESET family stays on the binary/Otsu path: it's a large region (acutance
+    # differences average out, so it's not fragile across setups) and Otsu has no
+    # faithful grayscale-template equivalent.
     Tell(screen=Screen.RESET, image_path="images/screens/reset.png",
-         roi=(0, 589, 527, 1080), binary_thresh=None),
+         roi=(0, 589, 527, 1080), binary_thresh=None, grayscale=False),
     Tell(screen=Screen.GHOST_RESET, image_path="images/screens/reset.png",
-         roi=(0, 589, 527, 1080), binary_thresh=None),
+         roi=(0, 589, 527, 1080), binary_thresh=None, grayscale=False),
     Tell(screen=Screen.UNKNOWN_RESET, image_path="images/screens/reset.png",
-         roi=(0, 589, 527, 1080), binary_thresh=None),
+         roi=(0, 589, 527, 1080), binary_thresh=None, grayscale=False),
+    # POST_TIME_TRIAL stays binary: no reference screenshot exists to cut a
+    # grayscale template from.  Add screenshots/<lang>/posttimetrial.png and flip
+    # to grayscale (+ regen) if it proves fragile across capture setups.
     Tell(screen=Screen.POST_TIME_TRIAL, image_path="images/screens/posttimetrial.png",
-         roi=(1364, 798, 1458, 825), binary_thresh=190,
+         roi=(1364, 798, 1458, 825), binary_thresh=190, grayscale=False,
          alt_image_path="images/screens/posttimetrial2.png",
          alt_roi=(1209, 664, 1618, 691), alt_binary_thresh=190),
     Tell(screen=Screen.MAIN_MENU, image_path="images/screens/mainmenu.png",
@@ -268,6 +293,36 @@ TELLS: list = [
 
 
 # ---------------------------------------------------------------------------
+# Provenance: the clean reference screenshot each grayscale tell's template(s)
+# are cut from.  Filenames are relative to screenshots/<lang>/.  All of a tell's
+# ROIs (primary + alt + required_also) are cut from this one screenshot.  Used by
+# scripts/gen_grayscale_templates.py; validated to reproduce every shipped
+# template at >=99.8% pixel agreement.  Screens absent here (POST_TIME_TRIAL)
+# have no screenshot and stay on the binary path.
+# ---------------------------------------------------------------------------
+
+SCREENSHOT_FILES: Dict[Screen, str] = {
+    Screen.TITLE:               "title.png",
+    Screen.HOME:                "home.png",
+    Screen.START_TIME_TRIAL:    "starttimetrial.png",
+    Screen.START_REPLAY:        "startreplay.png",
+    Screen.MAIN_MENU:           "mainmenu.png",
+    Screen.CHARACTER_SELECT:    "character_screen.png",
+    Screen.KART_SELECT:         "kart_screen.png",
+    Screen.COURSE_SELECT:       "course_select.png",
+    Screen.RACING:              "racing_coin.png",
+    Screen.GHOST:               "racing_coin.png",
+    Screen.UNKNOWN_RACE_ACTIVE: "racing_coin.png",
+    Screen.RACE_MENU:           "racemenu.png",
+    Screen.REPLAY_MENU:         "ghostmenu.png",
+    Screen.REPLAY_RACE_AGAINST: "ghostmenu_red.png",
+    Screen.GALLERY:             "gallery.png",
+    Screen.SINGLEPLAYER_MENU:   "singleplayer.png",
+    Screen.TIME_TRIALS:         "timetrials.png",
+}
+
+
+# ---------------------------------------------------------------------------
 # Alias groups: canonical screen → screens that share the same tell.
 # Editing the canonical screen's ROI/thresh propagates to all aliases.
 # ---------------------------------------------------------------------------
@@ -283,18 +338,37 @@ TELL_ALIAS_GROUPS: Dict[Screen, list] = {
 # ---------------------------------------------------------------------------
 
 def _match_tell(frame: np.ndarray, roi: tuple, template: np.ndarray,
-                binary_thresh: Optional[int]) -> float:
+                binary_thresh: Optional[int],
+                grayscale: bool = False, search_pad: int = 0) -> float:
     if template is None:
         return 0.0
     x1, y1, x2, y2 = roi
-    crop = frame[y1:y2, x1:x2]
-    if crop.size == 0:
-        return 0.0
-    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop
-    if binary_thresh is not None:
-        _, processed = cv2.threshold(gray, binary_thresh, 255, cv2.THRESH_BINARY)
+
+    if grayscale:
+        # Continuous-tone match.  Pad the crop (clamped to frame bounds) so
+        # matchTemplate can slide the roi-sized template +/- search_pad px and
+        # take the best correlation — this absorbs the small positional offset
+        # between capture setups.  TM_CCOEFF_NORMED is already mean/contrast
+        # normalised, so no binarisation (and no calibration LUT) is needed to
+        # tolerate exposure differences.  The original roi is always within the
+        # frame, so the padded crop is never smaller than the template.
+        h, w = frame.shape[:2]
+        px1, py1 = max(0, x1 - search_pad), max(0, y1 - search_pad)
+        px2, py2 = min(w, x2 + search_pad), min(h, y2 + search_pad)
+        crop = frame[py1:py2, px1:px2]
+        if crop.size == 0:
+            return 0.0
+        processed = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop
     else:
-        _, processed = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        crop = frame[y1:y2, x1:x2]
+        if crop.size == 0:
+            return 0.0
+        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop
+        if binary_thresh is not None:
+            _, processed = cv2.threshold(gray, binary_thresh, 255, cv2.THRESH_BINARY)
+        else:
+            _, processed = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
     if template.shape[0] > processed.shape[0] or template.shape[1] > processed.shape[1]:
         return 0.0
     result = cv2.matchTemplate(processed, template, cv2.TM_CCOEFF_NORMED)
@@ -304,13 +378,14 @@ def _match_tell(frame: np.ndarray, roi: tuple, template: np.ndarray,
 
 def detect_tell(frame: np.ndarray, tell: Tell) -> tuple:
     """Return (detected: bool, best_score: float)."""
-    primary_score = _match_tell(frame, tell.roi, tell.template, tell.binary_thresh)
+    primary_score = _match_tell(frame, tell.roi, tell.template, tell.binary_thresh,
+                                tell.grayscale, tell.search_pad)
 
     if tell.required_also:
         scores = [primary_score]
         for i, ((_, roi), tmpl) in enumerate(zip(tell.required_also, tell.required_also_templates)):
             thresh = tell.required_also_thresh[i] if i < len(tell.required_also_thresh) else 170
-            scores.append(_match_tell(frame, roi, tmpl, thresh))
+            scores.append(_match_tell(frame, roi, tmpl, thresh, tell.grayscale, tell.search_pad))
         min_score = min(scores)
         return min_score >= tell.match_threshold, min_score
 
@@ -318,7 +393,8 @@ def detect_tell(frame: np.ndarray, tell: Tell) -> tuple:
         return True, primary_score
 
     if tell.alt_template is not None and tell.alt_roi is not None:
-        alt_score = _match_tell(frame, tell.alt_roi, tell.alt_template, tell.alt_binary_thresh)
+        alt_score = _match_tell(frame, tell.alt_roi, tell.alt_template, tell.alt_binary_thresh,
+                                tell.grayscale, tell.search_pad)
         if alt_score >= tell.match_threshold:
             return True, alt_score
 
@@ -556,7 +632,7 @@ class ScreenDetector:
         tmpl, roi, thresh = self._roi_key_parts(tell, roi_key)
         if roi is None:
             return None
-        score = _match_tell(frame, roi, tmpl, thresh)
+        score = _match_tell(frame, roi, tmpl, thresh, tell.grayscale, tell.search_pad)
         detected = score >= tell.match_threshold
         return {
             "screen":       screen_name,
@@ -566,7 +642,7 @@ class ScreenDetector:
             "matched":      detected,
             "roi":          list(roi),
             "template_img": _encode_img(tmpl),
-            "live_crop":    _encode_crop_roi(frame, roi, thresh),
+            "live_crop":    _encode_crop_roi(frame, roi, thresh, tell.grayscale),
         }
 
     def get_template_images(self, frame: Optional[np.ndarray], screen_name: str,
@@ -586,7 +662,7 @@ class ScreenDetector:
             "screen":       screen_name,
             "roi_key":      roi_key,
             "template_img": _encode_img(tmpl),
-            "live_crop":    _encode_crop_roi(frame, roi, thresh) if frame is not None else None,
+            "live_crop":    _encode_crop_roi(frame, roi, thresh, tell.grayscale) if frame is not None else None,
         }
 
     # ------------------------------------------------------------------
@@ -600,6 +676,8 @@ class ScreenDetector:
                 "roi": list(tell.roi),
                 "match_threshold": tell.match_threshold,
                 "binary_thresh": tell.binary_thresh,
+                "grayscale": tell.grayscale,
+                "search_pad": tell.search_pad,
             }
             if tell.alt_image_path:
                 entry["alt_image_path"] = tell.alt_image_path
@@ -708,7 +786,9 @@ class ScreenDetector:
             return None
 
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop.copy()
-        if thresh is not None:
+        if tell.grayscale:
+            processed = gray
+        elif thresh is not None:
             _, processed = cv2.threshold(gray, thresh, 255, cv2.THRESH_BINARY)
         else:
             _, processed = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -724,7 +804,7 @@ class ScreenDetector:
         # Reload and re-score this ROI specifically
         tell.load(self._switch2_language)
         tmpl, _, thresh = self._roi_key_parts(tell, roi_key)
-        score = _match_tell(frame, roi, tmpl, thresh)
+        score = _match_tell(frame, roi, tmpl, thresh, tell.grayscale, tell.search_pad)
         return {
             "screen":    screen_name,
             "roi_key":   roi_key,
@@ -742,6 +822,8 @@ class ScreenDetector:
             "roi":             list(tell.roi),
             "match_threshold": tell.match_threshold,
             "binary_thresh":   tell.binary_thresh,
+            "grayscale":       tell.grayscale,
+            "search_pad":      tell.search_pad,
         }
         if tell.alt_image_path:
             entry["alt_image_path"] = tell.alt_image_path
