@@ -19,6 +19,10 @@ python -m mkw_tracker --purge-tight   # Force-regenerate _tight.png template cac
 python -m mkw_tracker --history       # Load "last 100 runs" history replay mode
 python -m mkw_tracker --no-ipc        # Disable stdin/stdout IPC (standalone mode)
 
+# DEV TEST: play a recorded video instead of the capture feed (skips setup wizard)
+python -m mkw_tracker --video temp/aiden.mp4                       # loops, paced to ~real time, shows overlay window
+python -m mkw_tracker --video temp/aiden.mp4 --video-fps 0 --video-once   # rip through once, as fast as possible
+
 # Legacy monolith (reference only — do not edit)
 python "!!!FINAL-ab-new-bubbles.py"
 ```

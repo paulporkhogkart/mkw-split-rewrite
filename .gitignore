@@ -54,3 +54,7 @@ src-tauri/sidecar/
 # Tool .venv
 tools/autotemplate/.venv/
 old_assets/
+
+# Testing
+*.mp4
+temp/
