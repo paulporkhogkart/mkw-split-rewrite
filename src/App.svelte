@@ -107,6 +107,9 @@
   let selectedNode = null;                      // Screen name currently open in the editor
   let activeTab = "detection";                  // "detection" | "selection" | "hud" | "templates"
   let activeRegion = { group: 0, region: 0 };   // Detection tab: selected region
+  // Detection feed zoom/pan (so small ROIs can be adjusted precisely)
+  let fZoom = 1, fPanX = 0, fPanY = 0;
+  let _fPanning = false, _fStart = null;
 
   // Which extra tabs each node owns (beyond the always-present Detection tab).
   const TAB_LABELS = { detection:"Detection", selection:"Selection", hud:"HUD", templates:"Templates" };
@@ -124,6 +127,7 @@
     selectedNode = screenName;
     activeTab = "detection";
     activeRegion = { group: 0, region: 0 };
+    resetFeedZoom();
     if (!editMode) fitGraph();   // re-fit the graph to width when entering the view
     editMode = true;
     send({ type: "list_tells" });
@@ -893,13 +897,21 @@
   function getTransform() {
     if (!canvasEl) return null;
     const rect = canvasEl.getBoundingClientRect();
-    if (!rect.width || !rect.height) return null;
+    // Base (untransformed) layout size — clientWidth/Height ignore the CSS zoom,
+    // so ROI geometry stays in unscaled canvas px and the zoom is applied on top.
+    const bw = canvasEl.clientWidth, bh = canvasEl.clientHeight;
+    if (!bw || !bh) return null;
+    const z = (view === "edit") ? fZoom : 1;
     const pyw = pythonFrameW||1920, pyh = pythonFrameH||1080;
-    const eAR = rect.width/rect.height, vAR = pyw/pyh;
+    const eAR = bw/bh, vAR = pyw/pyh;
     let rendW, rendH, ox, oy;
-    if (vAR > eAR) { rendW=rect.width; rendH=rect.width/vAR; ox=0; oy=(rect.height-rendH)/2; }
-    else            { rendH=rect.height; rendW=rect.height*vAR; ox=(rect.width-rendW)/2; oy=0; }
-    return { ox, oy, sx:rendW/pyw, sy:rendH/pyh, rect };
+    if (vAR > eAR) { rendW=bw; rendH=bw/vAR; ox=0; oy=(bh-rendH)/2; }
+    else            { rendH=bh; rendW=bh*vAR; ox=(bw-rendW)/2; oy=0; }
+    return { ox, oy, sx:rendW/pyw, sy:rendH/pyh, rect, z };
+  }
+  // Client (screen) coords → unscaled canvas-local coords, undoing the zoom.
+  function _localXY(clientX, clientY, t) {
+    return { lx:(clientX - t.rect.left)/t.z, ly:(clientY - t.rect.top)/t.z };
   }
 
   function getHandlePositions(roi) {
@@ -916,14 +928,14 @@
   function hitTest(clientX, clientY, roi) {
     const t = getTransform();
     if (!t||!roi||roi.length<4) return null;
-    const cx=clientX-t.rect.left, cy=clientY-t.rect.top;
+    const { lx, ly } = _localXY(clientX, clientY, t);
     for (const h of getHandlePositions(roi)) {
-      if (Math.hypot(cx-(t.ox+h.fx*t.sx), cy-(t.oy+h.fy*t.sy)) <= HANDLE_HIT_RADIUS)
+      if (Math.hypot(lx-(t.ox+h.fx*t.sx), ly-(t.oy+h.fy*t.sy)) <= HANDLE_HIT_RADIUS)
         return { handle:h.id, cursor:h.cursor };
     }
     const cx1=t.ox+roi[0]*t.sx, cy1=t.oy+roi[1]*t.sy;
     const cx2=t.ox+roi[2]*t.sx, cy2=t.oy+roi[3]*t.sy;
-    if (cx>=cx1&&cx<=cx2&&cy>=cy1&&cy<=cy2) return { handle:"move", cursor:"move" };
+    if (lx>=cx1&&lx<=cx2&&ly>=cy1&&ly<=cy2) return { handle:"move", cursor:"move" };
     return null;
   }
 
@@ -1005,9 +1017,9 @@
   function onCanvasMouseDown(e) {
     const roi=getCurrentRoi(), hit=roi?hitTest(e.clientX,e.clientY,roi):null;
     if (hit) {
-      const t=getTransform();
+      const t=getTransform(); const { lx, ly } = _localXY(e.clientX,e.clientY,t);
       dragging=true; dragHandle=hit.handle; dragStartRoi=[...roi];
-      dragStartMouse={x:(e.clientX-t.rect.left-t.ox)/t.sx, y:(e.clientY-t.rect.top-t.oy)/t.sy};
+      dragStartMouse={x:(lx-t.ox)/t.sx, y:(ly-t.oy)/t.sy};
       e.preventDefault(); return;
     }
     if (view === "edit" && activeTab === "detection") {
@@ -1018,7 +1030,9 @@
           e.preventDefault(); return;
         }
       }
-      return;
+      // nothing hit → pan the (zoomed) feed
+      _fPanning = true; _fStart = { x:e.clientX, y:e.clientY, px:fPanX, py:fPanY };
+      e.preventDefault(); return;
     }
     if (wizardStep==="screens") {
       const tell=tells.find(t=>t.screen===SCREEN_NAMES[screenIdx]);
@@ -1033,21 +1047,41 @@
   }
 
   function onCanvasMouseMove(e) {
+    if (_fPanning) {
+      fPanX = _fStart.px + (e.clientX - _fStart.x);
+      fPanY = _fStart.py + (e.clientY - _fStart.y);
+      return;
+    }
     const roi=getCurrentRoi();
     if (!dragging) {
       const hit=roi?hitTest(e.clientX,e.clientY,roi):null;
       const nh=hit?.handle??null;
       if (nh!==hoveredHandle) { hoveredHandle=nh; drawRoi(); }
-      if (canvasEl) canvasEl.style.cursor=hit?.cursor??"default";
+      if (canvasEl) canvasEl.style.cursor=hit?.cursor ?? (view==="edit"&&fZoom>1?"grab":"default");
       return;
     }
     const t=getTransform(); if (!t) return;
-    const dx=(e.clientX-t.rect.left-t.ox)/t.sx-dragStartMouse.x;
-    const dy=(e.clientY-t.rect.top-t.oy)/t.sy-dragStartMouse.y;
+    const { lx, ly } = _localXY(e.clientX,e.clientY,t);
+    const dx=(lx-t.ox)/t.sx-dragStartMouse.x;
+    const dy=(ly-t.oy)/t.sy-dragStartMouse.y;
     updateCurrentRoi(applyDrag(dragStartRoi,dragHandle,dx,dy)); drawRoi();
   }
 
+  function onFeedWheel(e) {
+    if (view !== "edit" || !canvasEl) return;
+    e.preventDefault();
+    const r = canvasEl.getBoundingClientRect();
+    const u = e.clientX - r.left, v = e.clientY - r.top;
+    const nz = Math.min(8, Math.max(1, fZoom * (e.deltaY < 0 ? 1.15 : 1/1.15)));
+    fPanX += u * (1 - nz / fZoom);
+    fPanY += v * (1 - nz / fZoom);
+    fZoom = nz;
+    if (nz === 1) { fPanX = 0; fPanY = 0; }   // fully zoomed out → snap back to fit
+  }
+  function resetFeedZoom() { fZoom = 1; fPanX = 0; fPanY = 0; }
+
   function onWindowMouseUp() {
+    if (_fPanning) { _fPanning = false; return; }
     if (!dragging) return;
     dragging=false;
     const roi=getCurrentRoi(); if (roi) saveCurrentRoi(roi);
@@ -1078,7 +1112,7 @@
   function drawRoi() {
     if (!canvasEl) return;
     const t=getTransform(); if (!t) return;
-    canvasEl.width=t.rect.width; canvasEl.height=t.rect.height;
+    canvasEl.width=canvasEl.clientWidth; canvasEl.height=canvasEl.clientHeight;
     const ctx=canvasEl.getContext("2d");
     ctx.clearRect(0,0,canvasEl.width,canvasEl.height);
     if (view === "edit") {
@@ -1995,16 +2029,21 @@
             {#if activeTab === "detection"}
               <div class="det-editor">
                 <div class="det-feed">
-                  <div class="preview-wrapper">
+                  <div class="preview-wrapper det-feed-wrap" on:wheel={onFeedWheel}>
                     {#if cameraOk}
-                      <video bind:this={wizVideoEl} autoplay playsinline muted class="preview-video"></video>
-                      <canvas bind:this={canvasEl} class="preview-canvas roi-canvas"
-                        on:mousedown={onCanvasMouseDown} on:mousemove={onCanvasMouseMove}></canvas>
+                      <div class="det-zoom" style="transform: translate({fPanX}px,{fPanY}px) scale({fZoom}); transform-origin:0 0;">
+                        <video bind:this={wizVideoEl} autoplay playsinline muted class="preview-video"></video>
+                        <canvas bind:this={canvasEl} class="preview-canvas roi-canvas"
+                          on:mousedown={onCanvasMouseDown} on:mousemove={onCanvasMouseMove}></canvas>
+                      </div>
+                      {#if fZoom > 1}
+                        <button class="det-zoom-reset" on:click={resetFeedZoom}>reset {fZoom.toFixed(1)}×</button>
+                      {/if}
                     {:else}
                       <div class="preview-placeholder"><span>Camera unavailable</span></div>
                     {/if}
                   </div>
-                  <p class="preview-cap">Drag the handles to move/resize the selected region. Click another box to select it.</p>
+                  <p class="preview-cap">Drag handles to move/resize · click another box to select · scroll = zoom, drag empty space = pan.</p>
                 </div>
 
                 <div class="det-tree">
@@ -2905,8 +2944,11 @@
   .det-editor { display: flex; gap: 12px; align-items: flex-start; }
   .det-feed { flex: 1.7; min-width: 0; }
   .det-feed .preview-wrapper { position: relative; width: 100%; aspect-ratio: 16/9; background: #000; border: 1px solid #14142a; border-radius: 5px; overflow: hidden; }
+  .det-zoom { position: absolute; inset: 0; will-change: transform; }
   .det-feed .preview-video { width: 100%; height: 100%; object-fit: contain; }
   .det-feed .roi-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .det-zoom-reset { position: absolute; right: 6px; top: 6px; z-index: 2; background: #06060ecc; border: 1px solid #2a3a5a; color: #9cf; border-radius: 3px; font-family: Consolas, monospace; font-size: .6rem; padding: 2px 6px; cursor: pointer; }
+  .det-zoom-reset:hover { background: #0d1f40; }
   .det-feed .preview-cap { margin: 5px 2px 0; font-size: .64rem; color: #566; }
   .det-tree { flex: 1; min-width: 250px; display: flex; flex-direction: column; gap: 6px; }
   .tree-label { font-size: .66rem; text-transform: uppercase; letter-spacing: .08em; color: #8aa; }
