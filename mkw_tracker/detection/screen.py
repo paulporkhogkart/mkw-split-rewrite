@@ -63,6 +63,32 @@ def _encode_crop(frame: np.ndarray, tell) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
+# Region dataclass + score_region (boolean-tree Tell nodes)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Region:
+    """One detectable region inside a Tell's boolean tree."""
+    kind: str = "template"               # "template" | "dark_loading"
+    roi: tuple = (0, 0, 0, 0)
+    image_path: Optional[str] = None     # template kind
+    thresh: int = 170                    # binarisation level (binary path only)
+    grayscale: bool = True
+    search_pad: int = 6
+    icon_roi: Optional[tuple] = None     # dark_loading kind
+    template: Optional[np.ndarray] = field(default=None, repr=False)
+
+
+def score_region(frame: np.ndarray, region: "Region", match_threshold: float) -> float:
+    """Return a region's match score in [0, 1]."""
+    if region.kind == "dark_loading":
+        detected, _ = _detect_dark_loading(frame, region.roi, region.icon_roi)
+        return 1.0 if detected else 0.0
+    return _match_tell(frame, region.roi, region.template,
+                       region.thresh, region.grayscale, region.search_pad)
+
+
+# ---------------------------------------------------------------------------
 # Screen identifiers
 # ---------------------------------------------------------------------------
 
