@@ -31,7 +31,10 @@
   let _tick = 0;
   $: backendAlive = trackerConnected && _tick >= 0 && (Date.now() - lastHeartbeatTs) < 4000;
   $: statusDot = !trackerConnected ? "#444" : backendAlive ? "#4caf50" : "#f59e0b";
-  $: view = setupComplete === null ? "startup" : setupComplete === false ? "setup" : "main";
+  let editMode = false;   // true → "Edit Screens" view is open
+  $: view = setupComplete === null ? "startup"
+          : setupComplete === false ? "setup"
+          : editMode ? "edit" : "main";
 
   // ── Selection state ───────────────────────────────────────────────────────────
   let selChar = null, selCharConf = 0;
@@ -100,6 +103,34 @@
   let resetConfirmPending = false;
   let screenIdx = 0, selectionIdx = 0, hudIdx = 0;
 
+  // ── Edit Screens model ──────────────────────────────────────────────────────────
+  let selectedNode = null;                      // Screen name currently open in the editor
+  let activeTab = "detection";                  // "detection" | "selection" | "hud" | "templates"
+  let activeRegion = { group: 0, region: 0 };   // Detection tab: selected region
+
+  // Which extra tabs each node owns (beyond the always-present Detection tab).
+  const TAB_LABELS = { detection:"Detection", selection:"Selection", hud:"HUD", templates:"Templates" };
+  const NODE_SELECTION = { CHARACTER_SELECT:["char_name","costume"], KART_SELECT:["kart_name"], COURSE_SELECT:["course_name"] };
+  const NODE_HUD       = { RACING:["lap_current","lap_total","coin_left","coin_right","finish","mushroom"] };
+  const NODE_TEMPLATES = { CHARACTER_SELECT:["characters","costumes"], KART_SELECT:["karts"], COURSE_SELECT:["courses"], RACING:["mushrooms"] };
+  function tabsForNode(n) {
+    const t = ["detection"];
+    if (NODE_SELECTION[n]) t.push("selection");
+    if (NODE_HUD[n])       t.push("hud");
+    if (NODE_TEMPLATES[n]) t.push("templates");
+    return t;
+  }
+  function openNode(screenName) {
+    selectedNode = screenName;
+    activeTab = "detection";
+    activeRegion = { group: 0, region: 0 };
+    editMode = true;
+    send({ type: "list_tells" });
+    send({ type: "list_rois" });
+  }
+  function closeEdit() { editMode = false; stopRoiPoll(); }
+  function openSettings() { openWizard(); }   // modal wizard, now limited to Language + Camera
+
   let tells = [];
   let rois = {};
   let currentScore = null;
@@ -161,7 +192,9 @@
 
   // ── Wizard step definitions ───────────────────────────────────────────────────
   const FIRST_TIME_STEPS = ["language", "camera", "done"];
-  const RERUN_STEPS      = ["language", "camera", "screens", "selection", "hud", "templates", "done"];
+  // Post-setup, the ⚙ modal is a slim Settings panel: Language + Camera only.
+  // Screen/tell/HUD/template editing now lives in the Edit Screens view.
+  const RERUN_STEPS      = ["language", "camera"];
   const STEP_LABELS = {
     language: "Language", camera: "Camera", screens: "Screens",
     selection: "Selection", hud: "HUD", templates: "Templates", done: "Done",
@@ -1421,10 +1454,14 @@
       {/if}
       {#if view === "main"}
         {#if wizardOpen}
-          <button class="btn-hdr btn-close-wiz" on:click={closeWizard}>✕ Close Setup</button>
+          <button class="btn-hdr btn-close-wiz" on:click={closeWizard}>✕ Close Settings</button>
         {:else}
-          <button class="btn-hdr btn-setup" on:click={openWizard}>⚙ Setup</button>
+          <button class="btn-hdr btn-edit" on:click={()=>openNode(backendScreen && backendScreen!=="—" && backendScreen!=="UNKNOWN" ? backendScreen : "CHARACTER_SELECT")}>✎ Edit Screens</button>
+          <button class="btn-hdr btn-setup" on:click={openSettings}>⚙ Settings</button>
         {/if}
+      {/if}
+      {#if view === "edit"}
+        <button class="btn-hdr btn-close-wiz" on:click={closeEdit}>← Back</button>
       {/if}
     </div>
 
@@ -1713,7 +1750,8 @@
               {@const isUnknown = node.id === "UNKNOWN"}
               {@const candScore = candidateScores[node.id]}
               {@const dimmed    = isUnknown}
-              <g transform="translate({node.x},{node.y})">
+              <g transform="translate({node.x},{node.y})" style="cursor:pointer"
+                 role="button" tabindex="-1" on:click={()=>openNode(node.id)}>
                 <rect
                   width={NW} height={NH} rx="3" ry="3"
                   fill={isActive ? "#0d1f40" : "#05050e"}
@@ -1749,6 +1787,65 @@
     </div>
 
   </div><!-- /main-grid -->
+
+  {:else if view === "edit"}
+
+  <!-- ── Edit Screens view (interactive graph + per-node editor) ─────────────── -->
+  <div class="edit-view">
+    <div class="edit-split">
+      <!-- left: interactive screen graph -->
+      <div class="edit-graph">
+        <svg viewBox="0 0 860 248" class="graph-svg" xmlns="http://www.w3.org/2000/svg">
+          {#each GRAPH_EDGES as [from, to]}
+            {@const a=graphNodeMap[from]}
+            {@const b=graphNodeMap[to]}
+            {#if a && b}
+              <line x1={a.x+NW/2} y1={a.y+NH/2} x2={b.x+NW/2} y2={b.y+NH/2}
+                stroke="#1a1a2e" stroke-width="1" opacity="0.5" />
+            {/if}
+          {/each}
+          {#each GRAPH_NODES as node}
+            {@const isSel    = node.id === selectedNode}
+            {@const isActive = node.id === backendScreen}
+            <g transform="translate({node.x},{node.y})" style="cursor:pointer"
+               role="button" tabindex="-1" on:click={()=>openNode(node.id)}>
+              <rect width={NW} height={NH} rx="3" ry="3"
+                fill={isSel ? "#0d1f40" : "#05050e"}
+                stroke={isSel ? "#7eb8f7" : (isActive ? "#3a5a7a" : "#1a1a2e")}
+                stroke-width={isSel ? 1.5 : 1} />
+              <text x={NW/2} y={NH/2} text-anchor="middle" dominant-baseline="central"
+                font-size="7" font-family="Consolas, monospace"
+                fill={isSel ? "#7eb8f7" : "#566"}>{node.label}</text>
+            </g>
+          {/each}
+        </svg>
+        <p class="edit-graph-hint">Click a screen node to edit its detection &amp; templates.</p>
+      </div>
+
+      <!-- right: per-node editor pane -->
+      <div class="edit-pane">
+        {#if selectedNode}
+          {@const tabs = tabsForNode(selectedNode)}
+          <div class="edit-pane-hd">
+            <h3>{SCREEN_LABELS[selectedNode] ?? selectedNode}</h3>
+            <span class="edit-screen-id">{selectedNode}</span>
+          </div>
+          {#if tabs.length > 1}
+            <nav class="edit-tabs">
+              {#each tabs as tabKey}
+                <button class:active={activeTab===tabKey} on:click={()=>activeTab=tabKey}>{TAB_LABELS[tabKey]}</button>
+              {/each}
+            </nav>
+          {/if}
+          <div class="edit-tab-body">
+            <p class="hint">Editor for “{TAB_LABELS[activeTab]}” is coming in the next increment.</p>
+          </div>
+        {:else}
+          <div class="edit-pane-empty"><p class="hint">Select a screen node on the left to edit it.</p></div>
+        {/if}
+      </div>
+    </div>
+  </div>
 
   {:else if view === "setup"}
 
@@ -2171,9 +2268,7 @@
                 <p class="hint">Both feeds must show your capture card output before you can continue.</p>
                 <div class="cam-nav">
                   <button class="btn-nav" on:click={()=>goStep("language")}>← Back</button>
-                  <button class="btn-primary" disabled={!bothCamerasOk} on:click={()=>goStep("screens")}>
-                    Next: Screens →
-                  </button>
+                  <button class="btn-primary" on:click={closeWizard}>Done</button>
                 </div>
               </div>
             </div>
@@ -2554,8 +2649,29 @@
   }
   .btn-setup       { color: #7eb8f7; border: 1px solid #1e1e4a; }
   .btn-setup:hover { background: #0d0d22; }
+  .btn-edit        { color: #7ef7b8; border: 1px solid #173a2a; }
+  .btn-edit:hover  { background: #0a1a12; }
   .btn-close-wiz   { color: #666; border: 1px solid #1e1e2e; }
   .btn-close-wiz:hover { color: #bbb; background: #111120; }
+
+  /* ── Edit Screens view ──────────────────────────────────────── */
+  .edit-view { flex: 1; min-height: 0; overflow: auto; padding: 10px; }
+  .edit-split { display: flex; gap: 12px; align-items: flex-start; min-height: 0; }
+  .edit-graph { flex: 1.2; min-width: 0; background: #06060e; border: 1px solid #14142a; border-radius: 6px; padding: 8px; }
+  .edit-graph .graph-svg { height: auto; min-width: 0; }
+  .edit-graph-hint { margin: 6px 2px 0; font-size: .66rem; color: #566; }
+  .edit-pane { flex: 1; min-width: 320px; background: #06060e; border: 1px solid #14142a; border-radius: 6px; padding: 10px 12px; min-height: 300px; }
+  .edit-pane-hd { display: flex; align-items: baseline; gap: 8px; border-bottom: 1px solid #14142a; padding-bottom: 6px; margin-bottom: 8px; }
+  .edit-pane-hd h3 { margin: 0; font-size: .9rem; color: #cde; }
+  .edit-screen-id { font-family: Consolas, monospace; font-size: .62rem; color: #567; }
+  .edit-tabs { display: flex; gap: 4px; margin-bottom: 10px; }
+  .edit-tabs button {
+    background: #08081200; border: none; border-bottom: 2px solid transparent;
+    color: #5a7a9a; font-family: inherit; font-size: .72rem; padding: 4px 8px; cursor: pointer;
+  }
+  .edit-tabs button.active { color: #7eb8f7; border-bottom-color: #7eb8f7; }
+  .edit-tabs button:hover:not(.active) { color: #9ab; }
+  .edit-pane-empty { display: flex; align-items: center; justify-content: center; min-height: 240px; }
 
   .win-controls { display: flex; flex-shrink: 0; margin-left: 0; }
   .win-btn {
