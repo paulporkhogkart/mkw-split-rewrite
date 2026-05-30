@@ -8,41 +8,45 @@ from typing import Dict, Optional
 from ..detection.screen import Screen
 from ..utils.paths import resource_path
 
-MUSHROOM_ROI = (50, 50, 50 + 190, 50 + 190)
+MUSHROOM_ROI = (50, 134, 240, 226)
 MUSHROOM_MATCH_THRESHOLD = 0.55
+
+# Mushroom icons are matched with the same grayscale + slack approach as the
+# screen tells (continuous-tone TM_CCOEFF_NORMED over a +/- search_pad window),
+# which is robust to per-capture-card brightness/contrast differences that a
+# fixed binary threshold collapses under.  Default templates are the packaged
+# continuous-tone crops in old_assets/; a user recapture (saved grayscale to the
+# data dir) takes precedence.
+MUSHROOM_SEARCH_PAD = 6
 
 MUSHROOM_TEMPLATES: Dict[int, np.ndarray] = {}
 
 
 def load_mushroom_templates(switch2_language: str = None):
-    """Load mushroom quantity templates for the given language."""
+    """Load grayscale mushroom quantity templates (user override, then old_assets)."""
     import os
     from ..utils.paths import data_dir
     lang = switch2_language or "en_uk"
     MUSHROOM_TEMPLATES.clear()
 
     def _load_mush(count: int, filename: str) -> bool:
-        # Always resolve through the language directory.
-        lang_rel  = f"images/mushrooms/{lang}/{filename}"
-        user_path = str(data_dir() / lang_rel)
-        if os.path.exists(user_path):
-            tmpl = cv2.imread(user_path, cv2.IMREAD_GRAYSCALE)
-            if tmpl is not None:
-                _, binary = cv2.threshold(tmpl, 170, 255, cv2.THRESH_BINARY)
-                MUSHROOM_TEMPLATES[count] = binary
-                return True
-        tmpl = cv2.imread(resource_path(lang_rel), cv2.IMREAD_GRAYSCALE)
-        if tmpl is None:
-            print(f"[WARN] MushroomTracker: could not load {lang_rel}")
-            return False
-        _, binary = cv2.threshold(tmpl, 170, 255, cv2.THRESH_BINARY)
-        MUSHROOM_TEMPLATES[count] = binary
-        return True
+        candidates = [
+            str(data_dir() / f"images/mushrooms/{lang}/{filename}"),  # user recapture
+            resource_path(f"old_assets/{filename}"),                  # packaged default
+        ]
+        for path in candidates:
+            if os.path.exists(path):
+                tmpl = cv2.imread(path, cv2.IMREAD_GRAYSCALE)   # continuous-tone, no threshold
+                if tmpl is not None:
+                    MUSHROOM_TEMPLATES[count] = tmpl
+                    return True
+        print(f"[WARN] MushroomTracker: could not load {filename}")
+        return False
 
     _load_mush(3, "3mush.png")
     _load_mush(2, "2mush.png")
     _load_mush(1, "1mush.png")
-    print(f"[MushroomTracker] {len(MUSHROOM_TEMPLATES)} mushroom templates loaded")
+    print(f"[MushroomTracker] {len(MUSHROOM_TEMPLATES)} mushroom templates loaded (grayscale)")
 
 
 @dataclass
@@ -59,6 +63,10 @@ class MushroomTracker:
 
     def __init__(self, scan_interval: float = 0.1):
         self.scan_interval   = scan_interval
+        # ROI read from settings so HUD-editor edits take effect (after restart),
+        # matching how SelectionTracker reads its ROIs.
+        from ..config.settings import get_settings as _gs
+        self._roi = tuple(_gs().get('mushroom_roi', list(MUSHROOM_ROI)))
         self.state:          MushroomState = MushroomState()
         self._last_scan:     float         = 0.0
         self._loss_streak:   int           = 0
@@ -85,39 +93,35 @@ class MushroomTracker:
             return self.state
         self._last_scan = now
 
-        x1, y1, x2, y2 = MUSHROOM_ROI
-        crop = frame[y1:y2, x1:x2]
+        # Grayscale crop padded by search_pad so the template can slide +/- a few
+        # px (absorbs small per-setup positional offset); no binarisation.
+        x1, y1, x2, y2 = self._roi
+        h, w = frame.shape[:2]
+        pad = MUSHROOM_SEARCH_PAD
+        crop = frame[max(0, y1 - pad):min(h, y2 + pad), max(0, x1 - pad):min(w, x2 + pad)]
         if crop.size == 0:
             return self.state
-        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop
-        _, processed = cv2.threshold(gray, 170, 255, cv2.THRESH_BINARY)
+        processed = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop
+
+        def _score(tmpl) -> float:
+            if tmpl is None or tmpl.shape[0] > processed.shape[0] or tmpl.shape[1] > processed.shape[1]:
+                return 0.0
+            return float(cv2.minMaxLoc(cv2.matchTemplate(processed, tmpl, cv2.TM_CCOEFF_NORMED))[1])
 
         # Reconfirm fast-path
         if self.state.count > 0:
-            tmpl = MUSHROOM_TEMPLATES.get(self.state.count)
-            if tmpl is not None and (
-                tmpl.shape[0] <= processed.shape[0] and
-                tmpl.shape[1] <= processed.shape[1]
-            ):
-                result = cv2.matchTemplate(processed, tmpl, cv2.TM_CCOEFF_NORMED)
-                score  = float(cv2.minMaxLoc(result)[1])
-                if score >= MUSHROOM_MATCH_THRESHOLD:
-                    self._loss_streak   = 0
-                    self._pending_count = self.state.count
-                    self.state.conf     = score
-                    return self.state
+            score = _score(MUSHROOM_TEMPLATES.get(self.state.count))
+            if score >= MUSHROOM_MATCH_THRESHOLD:
+                self._loss_streak   = 0
+                self._pending_count = self.state.count
+                self.state.conf     = score
+                return self.state
 
         # Full scan (high to low)
         best_count = 0
         best_score = 0.0
         for count in (3, 2, 1):
-            tmpl = MUSHROOM_TEMPLATES.get(count)
-            if tmpl is None:
-                continue
-            if tmpl.shape[0] > processed.shape[0] or tmpl.shape[1] > processed.shape[1]:
-                continue
-            result = cv2.matchTemplate(processed, tmpl, cv2.TM_CCOEFF_NORMED)
-            score  = float(cv2.minMaxLoc(result)[1])
+            score = _score(MUSHROOM_TEMPLATES.get(count))
             if score >= MUSHROOM_MATCH_THRESHOLD and score > best_score:
                 best_score = score
                 best_count = count

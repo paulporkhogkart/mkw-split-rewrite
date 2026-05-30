@@ -484,10 +484,14 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
         if not _roi or not _img_dir or not item_name:
             return
         from .utils.paths import resource_path as _rp, data_dir as _dd
-        # Check user data dir first, then resource path
+        # Check user data dir first, then resource path (mushrooms fall back to the
+        # packaged old_assets grayscale crop the matcher uses, not the binarised copy).
         _tmpl_path = str(_dd() / f"{_img_dir}/{item_name}.png")
         if not os.path.exists(_tmpl_path):
-            _tmpl_path = _rp(f"{_img_dir}/{item_name}.png")
+            if category == "mushrooms":
+                _tmpl_path = _rp(f"old_assets/{item_name}.png")
+            else:
+                _tmpl_path = _rp(f"{_img_dir}/{item_name}.png")
         _template_img = None
         if os.path.exists(_tmpl_path):
             _tmpl = cv2.imread(_tmpl_path)
@@ -507,6 +511,8 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
                 if category == "costumes":
                     from .detection.templates import prepare_text_edges as _pte
                     _processed = _pte(_crop)
+                elif category == "mushrooms":
+                    _processed = cv2.cvtColor(_crop, cv2.COLOR_BGR2GRAY) if len(_crop.shape) == 3 else _crop.copy()
                 else:
                     _gray = cv2.cvtColor(_crop, cv2.COLOR_BGR2GRAY) if len(_crop.shape) == 3 else _crop.copy()
                     _, _processed = cv2.threshold(_gray, 170, 255, cv2.THRESH_BINARY)
@@ -548,6 +554,10 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
         if category == "costumes":
             # Save raw colour  - load_template_dir applies edge processing at load time
             cv2.imwrite(_save_path, _crop)
+        elif category == "mushrooms":
+            # Grayscale (continuous-tone) to match the grayscale mushroom matcher
+            _gray = cv2.cvtColor(_crop, cv2.COLOR_BGR2GRAY) if len(_crop.shape) == 3 else _crop.copy()
+            cv2.imwrite(_save_path, _gray)
         else:
             # Binarise before saving so the on-disk template matches the live crop space
             _gray = cv2.cvtColor(_crop, cv2.COLOR_BGR2GRAY) if len(_crop.shape) == 3 else _crop.copy()
