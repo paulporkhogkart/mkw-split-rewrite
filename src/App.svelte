@@ -138,7 +138,7 @@
   const GRAPH_W = 860;
   let gZoom = 1, gPanX = 0, gPanY = 0, gWrapW = 0, gFitted = false;
   let _gPanning = false, _gMoved = false, _gStart = null;
-  $: if (gWrapW && !gFitted) { gZoom = Math.max(0.4, 0.8 * gWrapW / GRAPH_W); gPanX = 0; gPanY = 0; gFitted = true; }
+  $: if (gWrapW && !gFitted) { gZoom = Math.max(0.4, 0.8 * gWrapW / GRAPH_W); gPanX = (gWrapW - GRAPH_W * gZoom) / 2; gPanY = 0; gFitted = true; }
   function fitGraph() { gFitted = false; }    // re-fit on next measure (called on entering edit)
   function onGraphWheel(e) {
     e.preventDefault();
@@ -1966,8 +1966,8 @@
                   stroke={isSel ? "#7eb8f7" : (isActive ? "#3a5a7a" : "#1a1a2e")}
                   stroke-width={isSel ? 1.5 : 1} />
                 <text x={NW/2} y={NH/2} text-anchor="middle" dominant-baseline="central"
-                  font-size="7" font-family="Consolas, monospace"
-                  fill={isSel ? "#7eb8f7" : "#566"}>{node.label}</text>
+                  font-size="10" font-family="Consolas, monospace"
+                  fill={isSel ? "#7eb8f7" : "#7a93a6"}>{node.label}</text>
               </g>
             {/each}
           </g>
@@ -2047,9 +2047,6 @@
                             <div class="reg-thumb"><span>live crop</span>{#if liveCropImg}<img src={liveCropImg} alt="live"/>{:else}<div class="reg-thumb-empty"></div>{/if}</div>
                             <div class="reg-thumb"><span>template</span>{#if templateImg}<img src={templateImg} alt="template"/>{:else}<div class="reg-thumb-empty"></div>{/if}</div>
                           </div>
-                          <label class="reg-thresh">Binarise threshold <b>{currentBinaryThresh}</b>
-                            <input type="range" min="0" max="255" step="1" bind:value={currentBinaryThresh} on:input={onThreshChange}/>
-                          </label>
                           <button class="btn-secondary reg-recap" on:click={recaptureRegion} disabled={capturingTemplate}>
                             {capturingTemplate ? "Capturing…" : "Recapture this region"}
                           </button>
