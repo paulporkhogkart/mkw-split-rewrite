@@ -434,28 +434,28 @@
   // Screen graph nodes (NW×NH boxes)
   const NW = 88, NH = 24;
   const GRAPH_NODES = [
-    { id:"UNKNOWN",            x:5,   y:218, label:"UNKNOWN"    },
+    { id:"UNKNOWN",            x:5,   y:175, label:"UNKNOWN"    },
     { id:"TITLE",              x:5,   y:5,   label:"TITLE"      },
-    { id:"HOME",               x:5,   y:55,  label:"HOME"       },
-    { id:"GALLERY",            x:5,   y:105, label:"GALLERY"    },
+    { id:"HOME",               x:5,   y:45,  label:"HOME"       },
+    { id:"GALLERY",            x:5,   y:85,  label:"GALLERY"    },
     { id:"MAIN_MENU",          x:115, y:5,   label:"MAIN MENU"  },
     { id:"SINGLEPLAYER_MENU",  x:225, y:5,   label:"SP MENU"    },
-    { id:"TIME_TRIALS",        x:225, y:38,  label:"SP [TT SEL]"},
+    { id:"TIME_TRIALS",        x:225, y:31,  label:"SP [TT SEL]"},
     { id:"CHARACTER_SELECT",   x:335, y:5,   label:"CHAR SEL"   },
     { id:"KART_SELECT",        x:445, y:5,   label:"KART SEL"   },
     { id:"COURSE_SELECT",      x:550, y:5,   label:"COURSE SEL" },
-    { id:"START_TIME_TRIAL",   x:760, y:50,  label:"START TT"   },
-    { id:"START_REPLAY",       x:760, y:100, label:"START RPY"  },
-    { id:"RACING",             x:655, y:125, label:"RACING"     },
-    { id:"GHOST",              x:760, y:150, label:"GHOST"      },
-    { id:"UNKNOWN_RACE_ACTIVE",x:655, y:172, label:"UNK RACE"   },
-    { id:"RACE_MENU",          x:550, y:125, label:"RACE MENU"  },
-    { id:"REPLAY_MENU",        x:550, y:172, label:"REPLAY MENU"},
-    { id:"RESET",              x:445, y:172, label:"RESET"      },
-    { id:"GHOST_RESET",        x:445, y:218, label:"GHOST RST"  },
-    { id:"UNKNOWN_RESET",      x:335, y:172, label:"UNK RESET"  },
-    { id:"REPLAY_RACE_AGAINST",x:550, y:218, label:"REPLAY [RA]"},
-    { id:"POST_TIME_TRIAL",    x:655, y:218, label:"POST TT"    },
+    { id:"START_TIME_TRIAL",   x:760, y:41,  label:"START TT"   },
+    { id:"START_REPLAY",       x:760, y:81,  label:"START RPY"  },
+    { id:"RACING",             x:655, y:101, label:"RACING"     },
+    { id:"GHOST",              x:760, y:121, label:"GHOST"      },
+    { id:"UNKNOWN_RACE_ACTIVE",x:655, y:139, label:"UNK RACE"   },
+    { id:"RACE_MENU",          x:550, y:101, label:"RACE MENU"  },
+    { id:"REPLAY_MENU",        x:550, y:139, label:"REPLAY MENU"},
+    { id:"RESET",              x:445, y:139, label:"RESET"      },
+    { id:"GHOST_RESET",        x:445, y:175, label:"GHOST RST"  },
+    { id:"UNKNOWN_RESET",      x:335, y:139, label:"UNK RESET"  },
+    { id:"REPLAY_RACE_AGAINST",x:550, y:175, label:"REPLAY [RA]"},
+    { id:"POST_TIME_TRIAL",    x:655, y:175, label:"POST TT"    },
   ];
   // HOME edges: HOME↔TITLE and HOME↔GALLERY are constant (full opacity).
   // All other →HOME edges are present but rendered dimmed.
@@ -901,17 +901,29 @@
     // so ROI geometry stays in unscaled canvas px and the zoom is applied on top.
     const bw = canvasEl.clientWidth, bh = canvasEl.clientHeight;
     if (!bw || !bh) return null;
-    const z = (view === "edit") ? fZoom : 1;
+    const isEdit = view === "edit";
+    const z = isEdit ? fZoom : 1, px = isEdit ? fPanX : 0, py = isEdit ? fPanY : 0;
     const pyw = pythonFrameW||1920, pyh = pythonFrameH||1080;
     const eAR = bw/bh, vAR = pyw/pyh;
     let rendW, rendH, ox, oy;
     if (vAR > eAR) { rendW=bw; rendH=bw/vAR; ox=0; oy=(bh-rendH)/2; }
     else            { rendH=bh; rendW=bh*vAR; ox=(bw-rendW)/2; oy=0; }
-    return { ox, oy, sx:rendW/pyw, sy:rendH/pyh, rect, z };
+    return { ox, oy, sx:rendW/pyw, sy:rendH/pyh, rect, z, px, py };
   }
-  // Client (screen) coords → unscaled canvas-local coords, undoing the zoom.
-  function _localXY(clientX, clientY, t) {
-    return { lx:(clientX - t.rect.left)/t.z, ly:(clientY - t.rect.top)/t.z };
+  // The canvas overlay is NOT zoomed (so lines stay crisp); instead the zoom is
+  // folded into the drawing/hit math so boxes track the zoomed video underneath.
+  function frameToCanvas(fx, fy, t) {
+    return { cx: t.px + (t.ox + fx*t.sx)*t.z, cy: t.py + (t.oy + fy*t.sy)*t.z };
+  }
+  function canvasToFrame(clientX, clientY, t) {
+    const mx = clientX - t.rect.left, my = clientY - t.rect.top;
+    return { fx: ((mx - t.px)/t.z - t.ox)/t.sx, fy: ((my - t.py)/t.z - t.oy)/t.sy };
+  }
+  function _clampPan() {
+    if (!canvasEl) return;
+    const W = canvasEl.clientWidth, H = canvasEl.clientHeight, OVER = 100;
+    fPanX = Math.min(OVER, Math.max(W*(1-fZoom) - OVER, fPanX));
+    fPanY = Math.min(OVER, Math.max(H*(1-fZoom) - OVER, fPanY));
   }
 
   function getHandlePositions(roi) {
@@ -928,14 +940,14 @@
   function hitTest(clientX, clientY, roi) {
     const t = getTransform();
     if (!t||!roi||roi.length<4) return null;
-    const { lx, ly } = _localXY(clientX, clientY, t);
+    const mx = clientX - t.rect.left, my = clientY - t.rect.top;
     for (const h of getHandlePositions(roi)) {
-      if (Math.hypot(lx-(t.ox+h.fx*t.sx), ly-(t.oy+h.fy*t.sy)) <= HANDLE_HIT_RADIUS)
+      const c = frameToCanvas(h.fx, h.fy, t);
+      if (Math.hypot(mx-c.cx, my-c.cy) <= HANDLE_HIT_RADIUS)
         return { handle:h.id, cursor:h.cursor };
     }
-    const cx1=t.ox+roi[0]*t.sx, cy1=t.oy+roi[1]*t.sy;
-    const cx2=t.ox+roi[2]*t.sx, cy2=t.oy+roi[3]*t.sy;
-    if (lx>=cx1&&lx<=cx2&&ly>=cy1&&ly<=cy2) return { handle:"move", cursor:"move" };
+    const a = frameToCanvas(roi[0], roi[1], t), b = frameToCanvas(roi[2], roi[3], t);
+    if (mx>=a.cx&&mx<=b.cx&&my>=a.cy&&my<=b.cy) return { handle:"move", cursor:"move" };
     return null;
   }
 
@@ -1017,9 +1029,9 @@
   function onCanvasMouseDown(e) {
     const roi=getCurrentRoi(), hit=roi?hitTest(e.clientX,e.clientY,roi):null;
     if (hit) {
-      const t=getTransform(); const { lx, ly } = _localXY(e.clientX,e.clientY,t);
+      const t=getTransform(); const fr = canvasToFrame(e.clientX,e.clientY,t);
       dragging=true; dragHandle=hit.handle; dragStartRoi=[...roi];
-      dragStartMouse={x:(lx-t.ox)/t.sx, y:(ly-t.oy)/t.sy};
+      dragStartMouse={x:fr.fx, y:fr.fy};
       e.preventDefault(); return;
     }
     if (view === "edit" && activeTab === "detection") {
@@ -1050,6 +1062,7 @@
     if (_fPanning) {
       fPanX = _fStart.px + (e.clientX - _fStart.x);
       fPanY = _fStart.py + (e.clientY - _fStart.y);
+      _clampPan();
       return;
     }
     const roi=getCurrentRoi();
@@ -1061,9 +1074,8 @@
       return;
     }
     const t=getTransform(); if (!t) return;
-    const { lx, ly } = _localXY(e.clientX,e.clientY,t);
-    const dx=(lx-t.ox)/t.sx-dragStartMouse.x;
-    const dy=(ly-t.oy)/t.sy-dragStartMouse.y;
+    const fr = canvasToFrame(e.clientX,e.clientY,t);
+    const dx=fr.fx-dragStartMouse.x, dy=fr.fy-dragStartMouse.y;
     updateCurrentRoi(applyDrag(dragStartRoi,dragHandle,dx,dy)); drawRoi();
   }
 
@@ -1077,6 +1089,8 @@
     fPanY += v * (1 - nz / fZoom);
     fZoom = nz;
     if (nz === 1) { fPanX = 0; fPanY = 0; }   // fully zoomed out → snap back to fit
+    else _clampPan();
+    drawRoi();
   }
   function resetFeedZoom() { fZoom = 1; fPanX = 0; fPanY = 0; }
 
@@ -1092,15 +1106,15 @@
 
   function _drawOneRoi(ctx,t,roi,color,showHandles) {
     if (!roi||roi.length<4) return;
-    const cx1=t.ox+roi[0]*t.sx, cy1=t.oy+roi[1]*t.sy;
-    const cw=(roi[2]-roi[0])*t.sx, ch=(roi[3]-roi[1])*t.sy;
+    const a=frameToCanvas(roi[0],roi[1],t), b=frameToCanvas(roi[2],roi[3],t);
+    const cx1=a.cx, cy1=a.cy, cw=b.cx-a.cx, ch=b.cy-a.cy;
     ctx.strokeStyle="rgba(0,0,0,0.7)"; ctx.lineWidth=4; ctx.setLineDash([]);
     ctx.strokeRect(cx1,cy1,cw,ch);
     ctx.strokeStyle=color; ctx.lineWidth=2; ctx.setLineDash([7,4]);
     ctx.strokeRect(cx1,cy1,cw,ch); ctx.setLineDash([]);
     if (showHandles) {
       for (const h of getHandlePositions(roi)) {
-        const hcx=t.ox+h.fx*t.sx, hcy=t.oy+h.fy*t.sy, r=5;
+        const hc=frameToCanvas(h.fx,h.fy,t), hcx=hc.cx, hcy=hc.cy, r=5;
         const active=hoveredHandle===h.id||(dragging&&dragHandle===h.id);
         ctx.fillStyle=active?"#7eb8f7":color;
         ctx.strokeStyle="rgba(0,0,0,0.85)"; ctx.lineWidth=1.5;
@@ -1908,7 +1922,7 @@
       </button>
       {#if graphOpen}
         <div class="graph-content">
-          <svg viewBox="0 0 860 248" class="graph-svg" xmlns="http://www.w3.org/2000/svg">
+          <svg viewBox="0 0 860 205" class="graph-svg" xmlns="http://www.w3.org/2000/svg">
             <!-- static edges -->
             {#each GRAPH_EDGES as [from, to]}
               {@const a=graphNodeMap[from]}
@@ -2033,9 +2047,9 @@
                     {#if cameraOk}
                       <div class="det-zoom" style="transform: translate({fPanX}px,{fPanY}px) scale({fZoom}); transform-origin:0 0;">
                         <video bind:this={wizVideoEl} autoplay playsinline muted class="preview-video"></video>
-                        <canvas bind:this={canvasEl} class="preview-canvas roi-canvas"
-                          on:mousedown={onCanvasMouseDown} on:mousemove={onCanvasMouseMove}></canvas>
                       </div>
+                      <canvas bind:this={canvasEl} class="preview-canvas roi-canvas"
+                        on:mousedown={onCanvasMouseDown} on:mousemove={onCanvasMouseMove}></canvas>
                       {#if fZoom > 1}
                         <button class="det-zoom-reset" on:click={resetFeedZoom}>reset {fZoom.toFixed(1)}×</button>
                       {/if}
@@ -2922,7 +2936,7 @@
   /* Graph is wide-and-short → keep it as a slim scrollable strip on top at native
      (legible) size; the editor pane below takes all remaining space and dominates. */
   .edit-split { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
-  .edit-graph { flex: none; height: 232px; display: flex; flex-direction: column; background: #06060e; border: 1px solid #14142a; border-radius: 6px; overflow: hidden; }
+  .edit-graph { flex: none; height: 200px; display: flex; flex-direction: column; background: #06060e; border: 1px solid #14142a; border-radius: 6px; overflow: hidden; }
   .edit-graph-vp { flex: 1; min-height: 0; overflow: hidden; }
   .graph-svg-zoom { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
   .graph-svg-zoom.panning { cursor: grabbing; }
@@ -3074,7 +3088,7 @@
   .graph-toggle:hover { color: #888; }
   .graph-chev { color: #333; font-size: .6rem; }
   .graph-content { padding: 4px 8px 8px; overflow-x: auto; }
-  .graph-svg { width: 100%; min-width: 700px; height: 258px; display: block; }
+  .graph-svg { width: 100%; min-width: 700px; height: 215px; display: block; }
 
   /* ── Panel ────────────────────────────────────────────────────── */
   .panel { border-bottom: 1px solid #111120; }
