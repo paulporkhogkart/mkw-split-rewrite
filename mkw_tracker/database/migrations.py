@@ -169,3 +169,13 @@ def apply_migrations(db_path: str | None = None):
         conn.execute("UPDATE schema_version SET version=2")
         conn.commit()
         print("[DB] Seed data v2 applied (minimap seeds + ROIs)")
+
+    cur.execute("SELECT version FROM schema_version")
+    row = cur.fetchone()
+    current = row[0] if row else 0
+    if current < 3:
+        from .tell_repo import migrate_tells_to_tree
+        n = migrate_tells_to_tree()
+        conn.execute("UPDATE schema_version SET version=3")
+        conn.commit()
+        print(f"[DB] Migrated {n} tell override(s) to boolean-tree format (v3)")
