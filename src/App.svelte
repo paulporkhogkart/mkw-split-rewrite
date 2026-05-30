@@ -1147,7 +1147,7 @@
     const t=getTransform(); if (!t) return;
     const fr = canvasToFrame(e.clientX,e.clientY,t);
     const dx=fr.fx-dragStartMouse.x, dy=fr.fy-dragStartMouse.y;
-    updateCurrentRoi(applyDrag(dragStartRoi,dragHandle,dx,dy)); drawRoi();
+    updateCurrentRoi(applyDrag(dragStartRoi,dragHandle,dx,dy)); scheduleDrawRoi();
   }
 
   function onFeedWheel(e) {
@@ -1645,6 +1645,12 @@
               || ((activeTab === "selection" || activeTab === "hud") && ROI_TEMPLATE_CAT[activeRoiName])))) {
     startRoiPoll();
   } else { stopRoiPoll(); }
+
+  // The engine-frame preview (10Hz capture_frame poll) is only shown in the
+  // settings/setup camera step — pause it while editing a node so its 10Hz
+  // component invalidation doesn't compound with drag/pan churn and stall the UI.
+  $: if (editingNode && !wizardOpen) stopFeedPoll();
+     else if (trackerConnected) startFeedPoll();
 
   // Load the stored template + live crop whenever the selected region changes.
   $: if (editingNode && activeTab === "detection" && selectedNode && activeRegion && trackerConnected) {
