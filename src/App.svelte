@@ -31,10 +31,12 @@
   let _tick = 0;
   $: backendAlive = trackerConnected && _tick >= 0 && (Date.now() - lastHeartbeatTs) < 4000;
   $: statusDot = !trackerConnected ? "#444" : backendAlive ? "#4caf50" : "#f59e0b";
-  let editMode = false;   // true → "Edit Screens" view is open
   $: view = setupComplete === null ? "startup"
           : setupComplete === false ? "setup"
-          : editMode ? "edit" : "main";
+          : "main";
+  // Editing a screen = a graph node is selected; the feed pane becomes the editor
+  // in place (no separate view).
+  $: editingNode = view === "main" && selectedNode != null;
 
   // ── Selection state ───────────────────────────────────────────────────────────
   let selChar = null, selCharConf = 0;
@@ -105,6 +107,7 @@
 
   // ── Edit Screens model ──────────────────────────────────────────────────────────
   let selectedNode = null;                      // Screen name currently open in the editor
+  let sidebarOpen = true;                        // collapsible right-hand status sidebar
   let activeTab = "detection";                  // "detection" | "selection" | "hud" | "templates"
   let activeRegion = { group: 0, region: 0 };   // Detection tab: selected region
   let detResetPending = false;                  // confirm gate for "reset detection to defaults"
@@ -132,12 +135,10 @@
     activeRegion = { group: 0, region: 0 };
     detResetPending = false;
     resetFeedZoom();
-    if (!editMode) fitGraph();   // re-fit the graph to width when entering the view
-    editMode = true;
     send({ type: "list_tells" });
     send({ type: "list_rois" });
   }
-  function closeEdit() { editMode = false; stopRoiPoll(); }
+  function closeNodeEditor() { selectedNode = null; stopRoiPoll(); }
   function openSettings() { openWizard(); }   // modal wizard, now limited to Language + Camera
 
   // ── Edit-view graph pan/zoom ────────────────────────────────────────────────────
@@ -925,7 +926,7 @@
   }
 
   function getCurrentRoi() {
-    if (view === "edit") {
+    if (editingNode) {
       if (activeTab === "detection") return activeRegionObj?.roi ?? null;
       if (activeTab === "selection" || activeTab === "hud")
         return activeRoiName ? (rois[activeRoiName] ?? null) : null;
@@ -953,7 +954,7 @@
     // so ROI geometry stays in unscaled canvas px and the zoom is applied on top.
     const bw = canvasEl.clientWidth, bh = canvasEl.clientHeight;
     if (!bw || !bh) return null;
-    const isEdit = view === "edit";
+    const isEdit = editingNode;
     const z = isEdit ? fZoom : 1, px = isEdit ? fPanX : 0, py = isEdit ? fPanY : 0;
     const pyw = pythonFrameW||1920, pyh = pythonFrameH||1080;
     const eAR = bw/bh, vAR = pyw/pyh;
@@ -1021,7 +1022,7 @@
   }
 
   function updateCurrentRoi(roi) {
-    if (view === "edit") {
+    if (editingNode) {
       if (activeTab === "detection" && selectedNode) {
         const g = activeRegion.group, r = activeRegion.region, sn = selectedNode;
         tells = tells.map(t => t.screen !== sn ? t : { ...t,
@@ -1055,7 +1056,7 @@
   }
 
   function saveCurrentRoi(roi) {
-    if (view === "edit") {
+    if (editingNode) {
       if (activeTab === "detection" && selectedNode)
         send({ type:"update_region", screen:selectedNode, group:activeRegion.group, region:activeRegion.region, roi });
       else if (activeTab === "selection" || activeTab === "hud") {
@@ -1092,7 +1093,7 @@
       dragStartMouse={x:fr.fx, y:fr.fy};
       e.preventDefault(); return;
     }
-    if (view === "edit" && activeTab === "detection") {
+    if (editingNode && activeTab === "detection") {
       for (const re of editRois()) {
         if (re.active || !re.roi) continue;
         if (hitTest(e.clientX,e.clientY,re.roi)) {
@@ -1104,7 +1105,7 @@
       _fPanning = true; _fStart = { x:e.clientX, y:e.clientY, px:fPanX, py:fPanY };
       e.preventDefault(); return;
     }
-    if (view === "edit" && (activeTab === "selection" || activeTab === "hud")) {
+    if (editingNode && (activeTab === "selection" || activeTab === "hud")) {
       for (const re of editTabRois()) {
         if (re.active || !re.roi) continue;
         if (hitTest(e.clientX,e.clientY,re.roi)) {
@@ -1139,7 +1140,7 @@
       const hit=roi?hitTest(e.clientX,e.clientY,roi):null;
       const nh=hit?.handle??null;
       if (nh!==hoveredHandle) { hoveredHandle=nh; drawRoi(); }
-      if (canvasEl) canvasEl.style.cursor=hit?.cursor ?? (view==="edit"&&fZoom>1?"grab":"default");
+      if (canvasEl) canvasEl.style.cursor=hit?.cursor ?? (editingNode&&fZoom>1?"grab":"default");
       return;
     }
     const t=getTransform(); if (!t) return;
@@ -1198,7 +1199,7 @@
     canvasEl.width=canvasEl.clientWidth; canvasEl.height=canvasEl.clientHeight;
     const ctx=canvasEl.getContext("2d");
     ctx.clearRect(0,0,canvasEl.width,canvasEl.height);
-    if (view === "edit") {
+    if (editingNode) {
       if (activeTab === "detection") {
         const all = editRois();
         for (const re of all) if (!re.active) _drawOneRoi(ctx,t,re.roi,re.color,false);
@@ -1255,7 +1256,7 @@
     if (_roiPollTimer) return;
     _roiPollTimer=setInterval(()=>{
       if (!trackerConnected) return;
-      if (view === "edit") {
+      if (editingNode) {
         if (activeTab === "detection" && selectedNode)
           send({type:"test_region",screen:selectedNode,group:activeRegion.group,region:activeRegion.region});
         else if ((activeTab === "selection" || activeTab === "hud") && ROI_TEMPLATE_CAT[activeRoiName]) {
@@ -1284,7 +1285,7 @@
   }
 
   function onThreshChange() {
-    if (view === "edit") {
+    if (editingNode) {
       if (activeTab === "detection" && selectedNode && trackerConnected) {
         const g = activeRegion.group, r = activeRegion.region, sn = selectedNode;
         tells = tells.map(t => t.screen !== sn ? t : { ...t,
@@ -1613,7 +1614,7 @@
 
   $: if (mainVideoEl) mainVideoEl.srcObject=setupComplete ? (videoStream??null) : null;
   $: if (wizVideoEl)  wizVideoEl.srcObject =videoStream??null;
-  afterUpdate(()=>{ if (wizardOpen || view === "setup" || view === "edit") drawRoi(); });
+  afterUpdate(()=>{ if (wizardOpen || view === "setup" || editingNode) drawRoi(); });
 
   // ── Reactive computeds ────────────────────────────────────────────────────────
   $: currentScreenName  = SCREEN_NAMES[screenIdx]??"";;
@@ -1628,14 +1629,14 @@
   $: currentTell = tells.find(t=>t.screen===SCREEN_NAMES[screenIdx])??null;
 
   $: if (((wizardOpen || view === "setup")&&["screens","selection","hud","templates"].includes(wizardStep))
-         || (view === "edit" && selectedNode && (
+         || (editingNode && selectedNode && (
               activeTab === "detection"
               || ((activeTab === "selection" || activeTab === "hud") && ROI_TEMPLATE_CAT[activeRoiName])))) {
     startRoiPoll();
   } else { stopRoiPoll(); }
 
   // Load the stored template + live crop whenever the selected region changes.
-  $: if (view === "edit" && activeTab === "detection" && selectedNode && activeRegion && trackerConnected) {
+  $: if (editingNode && activeTab === "detection" && selectedNode && activeRegion && trackerConnected) {
     send({ type:"get_region_images", screen:selectedNode, group:activeRegion.group, region:activeRegion.region });
   }
 
@@ -1643,7 +1644,7 @@
   function tr(key) { return t(key,appLanguage); }
 
   function syncThreshToScreen() {
-    if (view === "edit") {
+    if (editingNode) {
       currentBinaryThresh = activeRegionObj?.thresh ?? 170;
       return;
     }
@@ -1732,12 +1733,8 @@
         {#if wizardOpen}
           <button class="btn-hdr btn-close-wiz" on:click={closeWizard}>✕ Close Settings</button>
         {:else}
-          <button class="btn-hdr btn-edit" on:click={()=>openNode(backendScreen && backendScreen!=="—" && backendScreen!=="UNKNOWN" ? backendScreen : "CHARACTER_SELECT")}>✎ Edit Screens</button>
           <button class="btn-hdr btn-setup" on:click={openSettings}>⚙ Settings</button>
         {/if}
-      {/if}
-      {#if view === "edit"}
-        <button class="btn-hdr btn-close-wiz" on:click={closeEdit}>← Back</button>
       {/if}
     </div>
 
@@ -1752,10 +1749,166 @@
   {#if view === "main"}
 
   <!-- ── Main grid: feed | sidebar, with graph footer below ─────────────────── -->
-  <div class="main-grid">
+  <div class="main-grid" class:sidebar-collapsed={!sidebarOpen}>
 
-    <!-- Left: camera feed (browser getUserMedia — smooth 30/60fps) -->
-    <div class="main-feed">
+    <!-- Left: camera feed, or the in-place per-screen editor when a node is selected -->
+    <div class="main-feed" class:main-feed-editing={selectedNode}>
+      {#if selectedNode}
+        {@const tabs = tabsForNode(selectedNode)}
+        <div class="node-editor-bar">
+          <button class="btn-back-preview" on:click={closeNodeEditor}>← Full preview</button>
+          <span class="node-editor-title">{SCREEN_LABELS[selectedNode] ?? selectedNode}</span>
+          <span class="edit-screen-id">{selectedNode}</span>
+          {#if tabs.length > 1}
+            <nav class="edit-tabs">
+              {#each tabs as tabKey}
+                <button class:active={activeTab===tabKey} on:click={()=>setTab(tabKey)}>{TAB_LABELS[tabKey]}</button>
+              {/each}
+            </nav>
+          {/if}
+        </div>
+        <div class="edit-tab-body">
+              <div class="det-editor">
+                <div class="det-feed">
+                  <div class="preview-wrapper det-feed-wrap" on:wheel={onFeedWheel}>
+                    {#if cameraOk}
+                      <div class="det-zoom" style="transform: translate({fPanX}px,{fPanY}px) scale({fZoom}); transform-origin:0 0; visibility:{feedVideoHidden ? 'hidden' : 'visible'}">
+                        <video bind:this={wizVideoEl} autoplay playsinline muted class="preview-video"></video>
+                      </div>
+                      <canvas bind:this={canvasEl} class="preview-canvas roi-canvas"
+                        on:mousedown={onCanvasMouseDown} on:mousemove={onCanvasMouseMove}></canvas>
+                      {#if fZoom > 1}
+                        <button class="det-zoom-reset" on:click={resetFeedZoom}>reset {fZoom.toFixed(1)}×</button>
+                      {/if}
+                    {:else}
+                      <div class="preview-placeholder"><span>Camera unavailable</span></div>
+                    {/if}
+                  </div>
+                  <p class="preview-cap">Drag handles to move/resize · click another box to select · scroll = zoom, drag empty space = pan.</p>
+                </div>
+
+                <div class="det-tree">
+                  {#if activeTab === "detection"}
+                  {#if editTell}
+                    <div class="tree-label">Detected when ALL groups match:</div>
+                    {#each editTell.groups as group, gi}
+                      {#if gi > 0}<div class="tree-and">— AND —</div>{/if}
+                      <div class="tree-group">
+                        <div class="tree-group-hd">Group {gi+1} · any of</div>
+                        {#each group as region, ri}
+                          <button class="tree-region" class:sel={activeRegion.group===gi && activeRegion.region===ri}
+                                  on:click={()=>selectRegion(gi,ri)}>
+                            <span class="treg-dot" style="background:{activeRegion.group===gi && activeRegion.region===ri ? '#7eb8f7' : (gi===activeRegion.group ? '#00ccff' : '#ffcc00')}"></span>
+                            <span class="treg-name">{region.kind==="dark_loading" ? "dark-loading" : `image ${ri+1}`}</span>
+                            {#if activeRegion.group===gi && activeRegion.region===ri && currentScore}
+                              <span class="treg-score" style="color:{scoreColor(currentScore.score)}">{currentScore.score.toFixed(2)}</span>
+                            {/if}
+                          </button>
+                        {/each}
+                        <button class="tree-add" on:click={()=>addRegion(gi)}>+ OR alternative image</button>
+                      </div>
+                    {/each}
+                    <button class="tree-add tree-add-and" on:click={addGroup}>+ AND condition group</button>
+
+                    {#if activeRegionObj}
+                      <div class="reg-controls">
+                        <div class="reg-row">
+                          <label class="reg-kind">Kind
+                            <select value={activeRegionObj.kind} on:change={(e)=>onKindChange(e.target.value)}>
+                              <option value="template">Template image</option>
+                              <option value="dark_loading">Dark-loading</option>
+                            </select>
+                          </label>
+                          {#if editTell.groups.length > 1 || (editTell.groups[activeRegion.group]?.length ?? 0) > 1}
+                            <button class="reg-del" on:click={removeActiveRegion}>🗑 Delete region</button>
+                          {/if}
+                        </div>
+                        {#if activeRegionObj.kind === "template"}
+                          <div class="reg-thumbs">
+                            <div class="reg-thumb"><span>live crop</span>{#if liveCropImg}<img src={liveCropImg} alt="live"/>{:else}<div class="reg-thumb-empty"></div>{/if}</div>
+                            <div class="reg-thumb"><span>template</span>{#if templateImg}<img src={templateImg} alt="template"/>{:else}<div class="reg-thumb-empty"></div>{/if}</div>
+                          </div>
+                          <button class="btn-secondary reg-recap" on:click={recaptureRegion} disabled={capturingTemplate}>
+                            {capturingTemplate ? "Capturing…" : "Recapture this region"}
+                          </button>
+                        {:else}
+                          <p class="hint">Dark-loading detects a near-black region plus a bright icon. Drag the main ROI on the feed; the icon ROI uses its default position.</p>
+                        {/if}
+                      </div>
+                    {/if}
+
+                    <div class="det-reset">
+                      {#if detResetPending}
+                        <p class="det-reset-q">Reset <b>{selectedNode}</b>’s detection ROIs &amp; groups to defaults? This discards your custom regions for this screen.</p>
+                        <div class="det-reset-row">
+                          <button class="btn-reset-confirm" on:click={resetDetection}>Yes, reset</button>
+                          <button class="btn-nav" on:click={()=>detResetPending=false}>Cancel</button>
+                        </div>
+                      {:else}
+                        <button class="det-reset-btn" on:click={()=>detResetPending=true}>↺ Reset detection to defaults</button>
+                      {/if}
+                    </div>
+                  {:else}
+                    <p class="hint">Loading detection config…</p>
+                  {/if}
+                  {:else}
+                    {@const _keys = activeTab==="selection" ? (NODE_SELECTION[selectedNode]||[]) : (NODE_HUD[selectedNode]||[])}
+                    {@const _cat = activeRoiName ? ROI_TEMPLATE_CAT[activeRoiName] : null}
+                    <div class="sel-cols">
+                      <div class="sel-col sel-col-roi">
+                        <div class="tree-label">{activeTab==="selection" ? "Text ROI" : "HUD ROI"}</div>
+                        <div class="tree-group">
+                          {#each _keys as k}
+                            <button class="tree-region" class:sel={activeRoiName===k} on:click={()=>selectRoiName(k)}>
+                              <span class="treg-dot" style="background:{activeRoiName===k ? '#7eb8f7' : '#ffcc00'}"></span>
+                              <span class="treg-name">{roiMeta(k).label}</span>
+                            </button>
+                          {/each}
+                        </div>
+                        {#if activeRoiName}
+                          <div class="det-reset">
+                            {#if roiResetPending}
+                              <p class="det-reset-q">Reset <b>{roiMeta(activeRoiName).label}</b> to default?</p>
+                              <div class="det-reset-row">
+                                <button class="btn-reset-confirm" on:click={resetActiveRoi}>Yes, reset</button>
+                                <button class="btn-nav" on:click={()=>roiResetPending=false}>Cancel</button>
+                              </div>
+                            {:else}
+                              <button class="det-reset-btn" on:click={()=>roiResetPending=true}>↺ Reset ROI</button>
+                            {/if}
+                          </div>
+                        {/if}
+                      </div>
+                      {#if _cat}
+                        <div class="sel-col sel-col-list">
+                          <div class="tree-label">{catLabel(_cat)}</div>
+                          <div class="tpl-list sel-tpl-list">
+                            {#each ASSET_ITEMS[_cat] || [] as item, i}
+                              <button class="tpl-item" class:sel={templateItemIdx===i} on:click={()=>selectTplItem(i)}>{item.name}</button>
+                            {/each}
+                          </div>
+                        </div>
+                      {/if}
+                    </div>
+                    {#if _cat && assetItem}
+                      <div class="reg-controls">
+                        <p class="hint">{ASSET_HINTS[_cat]?.(assetItem.name)}</p>
+                        <div class="reg-thumbs">
+                          <div class="reg-thumb"><span>live{_cat==="costumes" ? " (edges)" : ""}</span>{#if assetLiveCrop}<img src={assetLiveCrop} alt="live"/>{:else}<div class="reg-thumb-empty"></div>{/if}</div>
+                          <div class="reg-thumb"><span>template</span>{#if assetTemplateImg}<img src={assetTemplateImg} alt="template"/>{:else}<div class="reg-thumb-empty"></div>{/if}</div>
+                        </div>
+                        <button class="btn-secondary reg-recap" on:click={captureAsset} disabled={capturingTemplate}>
+                          {capturingTemplate ? "Capturing…" : `Capture ${assetItem.name}`}
+                        </button>
+                      </div>
+                    {:else if activeRoiName}
+                      <p class="hint" style="margin-top:6px">{roiMeta(activeRoiName).hint}</p>
+                    {/if}
+                  {/if}
+                </div>
+              </div>
+        </div>
+      {:else}
       <div class="feed-area">
         <video bind:this={mainVideoEl} autoplay playsinline muted
           class="feed-video"
@@ -1777,6 +1930,7 @@
           </div>
         {/if}
       </div>
+      {/if}
 
       <!-- Feed controls: audio + video toggle -->
       <div class="feed-controls">
@@ -1814,8 +1968,11 @@
       </div>
     </div>
 
-    <!-- Right: sidebar panels -->
-    <aside class="sidebar">
+    <!-- Right: sidebar panels (collapsible) -->
+    <aside class="sidebar" class:sidebar-collapsed={!sidebarOpen}>
+      <button class="sidebar-toggle" on:click={()=>sidebarOpen=!sidebarOpen}
+        title={sidebarOpen ? "Collapse panels" : "Expand panels"}>{sidebarOpen ? "⟩" : "⟨"}</button>
+      {#if sidebarOpen}
 
       <!-- ── Panel: Detection ──────────────────────────────────────────── -->
       <div class="panel">
@@ -1992,280 +2149,80 @@
         {/if}
       </div>
 
+      {/if}
     </aside>
 
     <!-- Graph footer (spans col 1 only, row 2) -->
     <div class="graph-row">
-      <button class="graph-toggle" on:click={()=>graphOpen=!graphOpen}>
+      <button class="graph-toggle" on:click={()=>{ graphOpen=!graphOpen; if (graphOpen) fitGraph(); }}>
         <span>Screen Graph</span>
         <span class="graph-chev">{graphOpen?'▾':'▸'}</span>
       </button>
       {#if graphOpen}
         <div class="graph-content">
-          <svg viewBox="0 0 860 205" class="graph-svg" xmlns="http://www.w3.org/2000/svg">
-            <!-- static edges -->
-            {#each GRAPH_EDGES as [from, to]}
-              {@const a=graphNodeMap[from]}
-              {@const b=graphNodeMap[to]}
-              {#if a && b}
-                {@const involvesHome = from==="HOME" || to==="HOME"}
-                {@const isConstant   = involvesHome && ((from==="HOME"||to==="HOME") && (from==="TITLE"||to==="TITLE"||from==="GALLERY"||to==="GALLERY"))}
-                {@const onHomeCluster = backendScreen==="HOME" || backendScreen==="GALLERY"}
-                {@const isPrevLink   = involvesHome && onHomeCluster && !!prevBackendScreen && (from===prevBackendScreen||to===prevBackendScreen)}
-                {@const isCtxLink    = involvesHome && (homeContextScreens.has(from) || homeContextScreens.has(to))}
-                {@const dimHome      = involvesHome && !isConstant && !isPrevLink && !isCtxLink}
-                <line x1={a.x+NW/2} y1={a.y+NH/2} x2={b.x+NW/2} y2={b.y+NH/2}
-                  stroke="#1a1a2e" stroke-width="1"
-                  opacity={dimHome ? 0.12 : 1} />
-              {/if}
-            {/each}
-            <!-- nodes -->
-            {#each GRAPH_NODES as node}
-              {@const isActive  = node.id === backendScreen}
-              {@const isHome    = node.id === "HOME"}
-              {@const isUnknown = node.id === "UNKNOWN"}
-              {@const candScore = candidateScores[node.id]}
-              {@const dimmed    = isUnknown}
-              <g transform="translate({node.x},{node.y})" style="cursor:pointer"
-                 role="button" tabindex="-1" on:click={()=>openNode(node.id)}>
-                <rect
-                  width={NW} height={NH} rx="3" ry="3"
-                  fill={isActive ? "#0d1f40" : "#05050e"}
-                  stroke={isActive ? "#7eb8f7" : (candScore ? "#2a3a5a" : "#111120")}
-                  stroke-width={isActive ? 1.5 : 1}
-                  opacity={dimmed ? 0.45 : 1}
-                />
-                <text x={NW/2} y={isActive && isHome && prevBackendScreen ? NH/2-3 : NH/2}
-                  text-anchor="middle" dominant-baseline="central"
-                  font-size="7" font-family="Consolas, monospace"
-                  fill={isActive ? "#7eb8f7" : (candScore ? "#5a7a9a" : (dimmed ? "#222" : "#333"))}
-                  opacity={dimmed ? 0.6 : 1}
-                >
-                  {node.label}
-                </text>
-                {#if isHome && prevBackendScreen}
-                  <text x={NW/2} y={NH/2+4} text-anchor="middle" dominant-baseline="central"
-                    font-size="5" font-family="Consolas, monospace"
-                    fill={isActive ? "#4a7ab0" : "#1e1e30"} opacity={isActive ? 0.9 : 0.7}
-                  >↩ {prevBackendScreen.replace(/_/g," ")}</text>
-                {/if}
-                {#if candScore}
-                  <text x={NW-2} y="3" text-anchor="end" dominant-baseline="hanging"
-                    font-size="5.5" font-family="Consolas, monospace"
-                    fill={scoreColor(candScore)} opacity="0.9"
-                  >{candScore.toFixed(2)}</text>
-                {/if}
-              </g>
-            {/each}
-          </svg>
+          <div class="edit-graph">
+            <div class="edit-graph-vp" bind:clientWidth={gWrapW} bind:clientHeight={gWrapH}>
+              <svg class="graph-svg-zoom" class:panning={_gPanning} xmlns="http://www.w3.org/2000/svg"
+                   on:wheel={onGraphWheel} on:mousedown={onGraphDown}
+                   on:mousemove={onGraphMove} on:mouseup={onGraphUp} on:mouseleave={onGraphUp}>
+                <g transform="translate({gPanX} {gPanY}) scale({gZoom})">
+                  {#each GRAPH_EDGES as [from, to]}
+                    {@const a=graphNodeMap[from]}
+                    {@const b=graphNodeMap[to]}
+                    {#if a && b}
+                      {@const involvesHome = from==="HOME" || to==="HOME"}
+                      {@const isConstant   = involvesHome && (from==="TITLE"||to==="TITLE"||from==="GALLERY"||to==="GALLERY")}
+                      {@const onHomeCluster = backendScreen==="HOME" || backendScreen==="GALLERY"}
+                      {@const isPrevLink   = involvesHome && onHomeCluster && !!prevBackendScreen && (from===prevBackendScreen||to===prevBackendScreen)}
+                      {@const isCtxLink    = involvesHome && (homeContextScreens.has(from) || homeContextScreens.has(to))}
+                      {@const dimHome      = involvesHome && !isConstant && !isPrevLink && !isCtxLink}
+                      <line x1={a.x+NW/2} y1={a.y+NH/2} x2={b.x+NW/2} y2={b.y+NH/2}
+                        stroke="#1a1a2e" stroke-width="1" opacity={dimHome ? 0.12 : 1} />
+                    {/if}
+                  {/each}
+                  {#each GRAPH_NODES as node}
+                    {@const isActive  = node.id === backendScreen}
+                    {@const isSel     = node.id === selectedNode}
+                    {@const isHome    = node.id === "HOME"}
+                    {@const isUnknown = node.id === "UNKNOWN"}
+                    {@const candScore = candidateScores[node.id]}
+                    {@const dimmed    = isUnknown}
+                    <g transform="translate({node.x},{node.y})" style="cursor:pointer"
+                       role="button" tabindex="-1" on:click={()=>nodeClick(node.id)}>
+                      <rect width={NW} height={NH} rx="3" ry="3"
+                        fill={isSel ? "#0d2a1f" : (isActive ? "#0d1f40" : "#05050e")}
+                        stroke={isSel ? "#7ef7b8" : (isActive ? "#7eb8f7" : (candScore ? "#2a3a5a" : "#1a1a2e"))}
+                        stroke-width={isSel || isActive ? 1.5 : 1}
+                        opacity={dimmed ? 0.45 : 1} />
+                      <text x={NW/2} y={isActive && isHome && prevBackendScreen ? NH/2-3 : NH/2}
+                        text-anchor="middle" dominant-baseline="central"
+                        font-size="10" font-family="Consolas, monospace"
+                        fill={isSel ? "#7ef7b8" : (isActive ? "#7eb8f7" : (candScore ? "#7a93a6" : (dimmed ? "#333" : "#566")))}
+                        opacity={dimmed ? 0.6 : 1}>{node.label}</text>
+                      {#if isHome && prevBackendScreen}
+                        <text x={NW/2} y={NH/2+7} text-anchor="middle" dominant-baseline="central"
+                          font-size="6.5" font-family="Consolas, monospace"
+                          fill={isActive ? "#4a7ab0" : "#33506a"} opacity="0.85"
+                        >↩ {prevBackendScreen.replace(/_/g," ")}</text>
+                      {/if}
+                      {#if candScore}
+                        <text x={NW-2} y="3" text-anchor="end" dominant-baseline="hanging"
+                          font-size="7" font-family="Consolas, monospace"
+                          fill={scoreColor(candScore)} opacity="0.9"
+                        >{candScore.toFixed(2)}</text>
+                      {/if}
+                    </g>
+                  {/each}
+                </g>
+              </svg>
+            </div>
+            <div class="edit-graph-foot">scroll = zoom · drag = pan · click a screen to edit it</div>
+          </div>
         </div>
       {/if}
     </div>
 
   </div><!-- /main-grid -->
-
-  {:else if view === "edit"}
-
-  <!-- ── Edit Screens view (interactive graph + per-node editor) ─────────────── -->
-  <div class="edit-view">
-    <div class="edit-split">
-      <!-- left: interactive screen graph (zoom = scroll, pan = drag) -->
-      <div class="edit-graph">
-        <div class="edit-graph-vp" bind:clientWidth={gWrapW} bind:clientHeight={gWrapH}>
-        <svg class="graph-svg-zoom" class:panning={_gPanning} xmlns="http://www.w3.org/2000/svg"
-             on:wheel={onGraphWheel} on:mousedown={onGraphDown}
-             on:mousemove={onGraphMove} on:mouseup={onGraphUp} on:mouseleave={onGraphUp}>
-          <g transform="translate({gPanX} {gPanY}) scale({gZoom})">
-            {#each GRAPH_EDGES as [from, to]}
-              {@const a=graphNodeMap[from]}
-              {@const b=graphNodeMap[to]}
-              {#if a && b}
-                <line x1={a.x+NW/2} y1={a.y+NH/2} x2={b.x+NW/2} y2={b.y+NH/2}
-                  stroke="#1a1a2e" stroke-width="1" opacity="0.5" />
-              {/if}
-            {/each}
-            {#each GRAPH_NODES as node}
-              {@const isSel    = node.id === selectedNode}
-              {@const isActive = node.id === backendScreen}
-              <g transform="translate({node.x},{node.y})" style="cursor:pointer"
-                 role="button" tabindex="-1" on:click={()=>nodeClick(node.id)}>
-                <rect width={NW} height={NH} rx="3" ry="3"
-                  fill={isSel ? "#0d1f40" : "#05050e"}
-                  stroke={isSel ? "#7eb8f7" : (isActive ? "#3a5a7a" : "#1a1a2e")}
-                  stroke-width={isSel ? 1.5 : 1} />
-                <text x={NW/2} y={NH/2} text-anchor="middle" dominant-baseline="central"
-                  font-size="10" font-family="Consolas, monospace"
-                  fill={isSel ? "#7eb8f7" : "#7a93a6"}>{node.label}</text>
-              </g>
-            {/each}
-          </g>
-        </svg>
-        </div>
-        <div class="edit-graph-foot">scroll = zoom · drag = pan</div>
-      </div>
-
-      <!-- right: per-node editor pane -->
-      <div class="edit-pane">
-        {#if selectedNode}
-          {@const tabs = tabsForNode(selectedNode)}
-          <div class="edit-pane-hd">
-            <h3>{SCREEN_LABELS[selectedNode] ?? selectedNode}</h3>
-            <span class="edit-screen-id">{selectedNode}</span>
-          </div>
-          {#if tabs.length > 1}
-            <nav class="edit-tabs">
-              {#each tabs as tabKey}
-                <button class:active={activeTab===tabKey} on:click={()=>setTab(tabKey)}>{TAB_LABELS[tabKey]}</button>
-              {/each}
-            </nav>
-          {/if}
-          <div class="edit-tab-body">
-              <div class="det-editor">
-                <div class="det-feed">
-                  <div class="preview-wrapper det-feed-wrap" on:wheel={onFeedWheel}>
-                    {#if cameraOk}
-                      <div class="det-zoom" style="transform: translate({fPanX}px,{fPanY}px) scale({fZoom}); transform-origin:0 0;">
-                        <video bind:this={wizVideoEl} autoplay playsinline muted class="preview-video"></video>
-                      </div>
-                      <canvas bind:this={canvasEl} class="preview-canvas roi-canvas"
-                        on:mousedown={onCanvasMouseDown} on:mousemove={onCanvasMouseMove}></canvas>
-                      {#if fZoom > 1}
-                        <button class="det-zoom-reset" on:click={resetFeedZoom}>reset {fZoom.toFixed(1)}×</button>
-                      {/if}
-                    {:else}
-                      <div class="preview-placeholder"><span>Camera unavailable</span></div>
-                    {/if}
-                  </div>
-                  <p class="preview-cap">Drag handles to move/resize · click another box to select · scroll = zoom, drag empty space = pan.</p>
-                </div>
-
-                <div class="det-tree">
-                  {#if activeTab === "detection"}
-                  {#if editTell}
-                    <div class="tree-label">Detected when ALL groups match:</div>
-                    {#each editTell.groups as group, gi}
-                      {#if gi > 0}<div class="tree-and">— AND —</div>{/if}
-                      <div class="tree-group">
-                        <div class="tree-group-hd">Group {gi+1} · any of</div>
-                        {#each group as region, ri}
-                          <button class="tree-region" class:sel={activeRegion.group===gi && activeRegion.region===ri}
-                                  on:click={()=>selectRegion(gi,ri)}>
-                            <span class="treg-dot" style="background:{activeRegion.group===gi && activeRegion.region===ri ? '#7eb8f7' : (gi===activeRegion.group ? '#00ccff' : '#ffcc00')}"></span>
-                            <span class="treg-name">{region.kind==="dark_loading" ? "dark-loading" : `image ${ri+1}`}</span>
-                            {#if activeRegion.group===gi && activeRegion.region===ri && currentScore}
-                              <span class="treg-score" style="color:{scoreColor(currentScore.score)}">{currentScore.score.toFixed(2)}</span>
-                            {/if}
-                          </button>
-                        {/each}
-                        <button class="tree-add" on:click={()=>addRegion(gi)}>+ OR alternative image</button>
-                      </div>
-                    {/each}
-                    <button class="tree-add tree-add-and" on:click={addGroup}>+ AND condition group</button>
-
-                    {#if activeRegionObj}
-                      <div class="reg-controls">
-                        <div class="reg-row">
-                          <label class="reg-kind">Kind
-                            <select value={activeRegionObj.kind} on:change={(e)=>onKindChange(e.target.value)}>
-                              <option value="template">Template image</option>
-                              <option value="dark_loading">Dark-loading</option>
-                            </select>
-                          </label>
-                          {#if editTell.groups.length > 1 || (editTell.groups[activeRegion.group]?.length ?? 0) > 1}
-                            <button class="reg-del" on:click={removeActiveRegion}>🗑 Delete region</button>
-                          {/if}
-                        </div>
-                        {#if activeRegionObj.kind === "template"}
-                          <div class="reg-thumbs">
-                            <div class="reg-thumb"><span>live crop</span>{#if liveCropImg}<img src={liveCropImg} alt="live"/>{:else}<div class="reg-thumb-empty"></div>{/if}</div>
-                            <div class="reg-thumb"><span>template</span>{#if templateImg}<img src={templateImg} alt="template"/>{:else}<div class="reg-thumb-empty"></div>{/if}</div>
-                          </div>
-                          <button class="btn-secondary reg-recap" on:click={recaptureRegion} disabled={capturingTemplate}>
-                            {capturingTemplate ? "Capturing…" : "Recapture this region"}
-                          </button>
-                        {:else}
-                          <p class="hint">Dark-loading detects a near-black region plus a bright icon. Drag the main ROI on the feed; the icon ROI uses its default position.</p>
-                        {/if}
-                      </div>
-                    {/if}
-
-                    <div class="det-reset">
-                      {#if detResetPending}
-                        <p class="det-reset-q">Reset <b>{selectedNode}</b>’s detection ROIs &amp; groups to defaults? This discards your custom regions for this screen.</p>
-                        <div class="det-reset-row">
-                          <button class="btn-reset-confirm" on:click={resetDetection}>Yes, reset</button>
-                          <button class="btn-nav" on:click={()=>detResetPending=false}>Cancel</button>
-                        </div>
-                      {:else}
-                        <button class="det-reset-btn" on:click={()=>detResetPending=true}>↺ Reset detection to defaults</button>
-                      {/if}
-                    </div>
-                  {:else}
-                    <p class="hint">Loading detection config…</p>
-                  {/if}
-                  {:else}
-                    {@const _keys = activeTab==="selection" ? (NODE_SELECTION[selectedNode]||[]) : (NODE_HUD[selectedNode]||[])}
-                    {@const _cat = activeRoiName ? ROI_TEMPLATE_CAT[activeRoiName] : null}
-                    <div class="sel-cols">
-                      <div class="sel-col sel-col-roi">
-                        <div class="tree-label">{activeTab==="selection" ? "Text ROI" : "HUD ROI"}</div>
-                        <div class="tree-group">
-                          {#each _keys as k}
-                            <button class="tree-region" class:sel={activeRoiName===k} on:click={()=>selectRoiName(k)}>
-                              <span class="treg-dot" style="background:{activeRoiName===k ? '#7eb8f7' : '#ffcc00'}"></span>
-                              <span class="treg-name">{roiMeta(k).label}</span>
-                            </button>
-                          {/each}
-                        </div>
-                        {#if activeRoiName}
-                          <div class="det-reset">
-                            {#if roiResetPending}
-                              <p class="det-reset-q">Reset <b>{roiMeta(activeRoiName).label}</b> to default?</p>
-                              <div class="det-reset-row">
-                                <button class="btn-reset-confirm" on:click={resetActiveRoi}>Yes, reset</button>
-                                <button class="btn-nav" on:click={()=>roiResetPending=false}>Cancel</button>
-                              </div>
-                            {:else}
-                              <button class="det-reset-btn" on:click={()=>roiResetPending=true}>↺ Reset ROI</button>
-                            {/if}
-                          </div>
-                        {/if}
-                      </div>
-                      {#if _cat}
-                        <div class="sel-col sel-col-list">
-                          <div class="tree-label">{catLabel(_cat)}</div>
-                          <div class="tpl-list sel-tpl-list">
-                            {#each ASSET_ITEMS[_cat] || [] as item, i}
-                              <button class="tpl-item" class:sel={templateItemIdx===i} on:click={()=>selectTplItem(i)}>{item.name}</button>
-                            {/each}
-                          </div>
-                        </div>
-                      {/if}
-                    </div>
-                    {#if _cat && assetItem}
-                      <div class="reg-controls">
-                        <p class="hint">{ASSET_HINTS[_cat]?.(assetItem.name)}</p>
-                        <div class="reg-thumbs">
-                          <div class="reg-thumb"><span>live{_cat==="costumes" ? " (edges)" : ""}</span>{#if assetLiveCrop}<img src={assetLiveCrop} alt="live"/>{:else}<div class="reg-thumb-empty"></div>{/if}</div>
-                          <div class="reg-thumb"><span>template</span>{#if assetTemplateImg}<img src={assetTemplateImg} alt="template"/>{:else}<div class="reg-thumb-empty"></div>{/if}</div>
-                        </div>
-                        <button class="btn-secondary reg-recap" on:click={captureAsset} disabled={capturingTemplate}>
-                          {capturingTemplate ? "Capturing…" : `Capture ${assetItem.name}`}
-                        </button>
-                      </div>
-                    {:else if activeRoiName}
-                      <p class="hint" style="margin-top:6px">{roiMeta(activeRoiName).hint}</p>
-                    {/if}
-                  {/if}
-                </div>
-              </div>
-          </div>
-        {:else}
-          <div class="edit-pane-empty"><p class="hint">Select a screen node on the left to edit it.</p></div>
-        {/if}
-      </div>
-    </div>
-  </div>
 
   {:else if view === "setup"}
 
@@ -3176,6 +3133,25 @@
     grid-template-rows: 1fr auto;
     flex: 1; min-height: 0; overflow: hidden;
   }
+  .main-grid.sidebar-collapsed { grid-template-columns: 1fr 22px; }
+
+  /* In-place per-screen editor (replaces the feed in the main-feed pane) */
+  .main-feed-editing { background: #06060e; }
+  .node-editor-bar { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-bottom: 1px solid #14142a; flex-shrink: 0; flex-wrap: wrap; }
+  .btn-back-preview { background: #0c0c18; border: 1px solid #2a3a5a; color: #9cf; border-radius: 4px; font-family: inherit; font-size: .72rem; padding: 3px 9px; cursor: pointer; }
+  .btn-back-preview:hover { background: #0d1f40; }
+  .node-editor-title { font-size: .88rem; color: #cde; }
+  .main-feed-editing .edit-tab-body { flex: 1; min-height: 0; overflow: auto; padding: 10px 12px; }
+
+  /* Collapsible sidebar */
+  .sidebar-toggle {
+    position: sticky; top: 0; z-index: 3; width: 100%; text-align: right;
+    background: #06060e; border: none; border-bottom: 1px solid #111120;
+    color: #567; cursor: pointer; font-size: .8rem; line-height: 1; padding: 4px 8px;
+  }
+  .sidebar-toggle:hover { color: #9ab; }
+  .sidebar.sidebar-collapsed { overflow: hidden; }
+  .sidebar.sidebar-collapsed .sidebar-toggle { text-align: center; padding: 6px 2px; }
 
   /* ── Feed (col 1, row 1) ─────────────────────────────────────── */
   .main-feed {
