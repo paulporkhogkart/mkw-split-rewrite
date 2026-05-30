@@ -14,25 +14,26 @@ MUSHROOM_MATCH_THRESHOLD = 0.55
 # Mushroom icons are matched with the same grayscale + slack approach as the
 # screen tells (continuous-tone TM_CCOEFF_NORMED over a +/- search_pad window),
 # which is robust to per-capture-card brightness/contrast differences that a
-# fixed binary threshold collapses under.  Default templates are the packaged
-# continuous-tone crops in old_assets/; a user recapture (saved grayscale to the
-# data dir) takes precedence.
+# fixed binary threshold collapses under.  The packaged templates in
+# images/mushrooms/<lang>/ are grayscale crops (regenerated from old_assets/);
+# a user recapture (saved grayscale to the data dir) takes precedence.
 MUSHROOM_SEARCH_PAD = 6
 
 MUSHROOM_TEMPLATES: Dict[int, np.ndarray] = {}
 
 
 def load_mushroom_templates(switch2_language: str = None):
-    """Load grayscale mushroom quantity templates (user override, then old_assets)."""
+    """Load grayscale mushroom quantity templates (user override, then packaged)."""
     import os
     from ..utils.paths import data_dir
     lang = switch2_language or "en_uk"
     MUSHROOM_TEMPLATES.clear()
 
     def _load_mush(count: int, filename: str) -> bool:
+        lang_rel = f"images/mushrooms/{lang}/{filename}"
         candidates = [
-            str(data_dir() / f"images/mushrooms/{lang}/{filename}"),  # user recapture
-            resource_path(f"old_assets/{filename}"),                  # packaged default
+            str(data_dir() / lang_rel),   # user recapture (grayscale)
+            resource_path(lang_rel),      # packaged grayscale crop
         ]
         for path in candidates:
             if os.path.exists(path):
@@ -40,7 +41,7 @@ def load_mushroom_templates(switch2_language: str = None):
                 if tmpl is not None:
                     MUSHROOM_TEMPLATES[count] = tmpl
                     return True
-        print(f"[WARN] MushroomTracker: could not load {filename}")
+        print(f"[WARN] MushroomTracker: could not load {lang_rel}")
         return False
 
     _load_mush(3, "3mush.png")

@@ -484,14 +484,10 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
         if not _roi or not _img_dir or not item_name:
             return
         from .utils.paths import resource_path as _rp, data_dir as _dd
-        # Check user data dir first, then resource path (mushrooms fall back to the
-        # packaged old_assets grayscale crop the matcher uses, not the binarised copy).
+        # Check user data dir first, then resource path
         _tmpl_path = str(_dd() / f"{_img_dir}/{item_name}.png")
         if not os.path.exists(_tmpl_path):
-            if category == "mushrooms":
-                _tmpl_path = _rp(f"old_assets/{item_name}.png")
-            else:
-                _tmpl_path = _rp(f"{_img_dir}/{item_name}.png")
+            _tmpl_path = _rp(f"{_img_dir}/{item_name}.png")
         _template_img = None
         if os.path.exists(_tmpl_path):
             _tmpl = cv2.imread(_tmpl_path)
