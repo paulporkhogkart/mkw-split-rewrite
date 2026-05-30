@@ -94,3 +94,36 @@ def migrate_tells_to_tree() -> int:
     for pfx in _LEGACY_KEYS:
         delete_configs_like(f"{pfx}%")
     return migrated
+
+
+def serialize_groups(tell) -> list:
+    """Serialise a Tell's in-memory groups to the JSON-storable blob shape."""
+    out = []
+    for group in tell.groups:
+        g = []
+        for r in group:
+            g.append({"kind": r.kind, "roi": list(r.roi), "image_path": r.image_path,
+                      "thresh": int(r.thresh), "grayscale": bool(r.grayscale),
+                      "search_pad": int(r.search_pad),
+                      "icon_roi": list(r.icon_roi) if r.icon_roi else None})
+        out.append(g)
+    return out
+
+
+def groups_from_blob(blob: list):
+    """Rebuild a list[list[Region]] from a stored blob. Import Region lazily."""
+    from ..detection.screen import Region
+    groups = []
+    for g in blob or []:
+        regions = []
+        for rd in g:
+            regions.append(Region(
+                kind=rd.get("kind", "template"),
+                roi=tuple(rd.get("roi", (0, 0, 0, 0))),
+                image_path=rd.get("image_path"),
+                thresh=int(rd.get("thresh", 170)),
+                grayscale=bool(rd.get("grayscale", True)),
+                search_pad=int(rd.get("search_pad", 6)),
+                icon_roi=tuple(rd["icon_roi"]) if rd.get("icon_roi") else None))
+        groups.append(regions)
+    return groups

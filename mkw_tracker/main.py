@@ -607,6 +607,22 @@ def _persist_tell_structure(settings, screen_name: str, detector) -> None:
         settings.update(f"tell_alt_thresh_{sn}", alt_thresh)
 
 
+def _persist_tell_tree(settings, screen_name: str, detector) -> None:
+    """Persist a canonical screen's full groups tree (and its aliases)."""
+    from .detection.screen import Screen as _Scr, TELL_ALIAS_GROUPS as _TAG
+    from .database.tell_repo import serialize_groups
+    try:
+        canon = _Scr[screen_name]
+    except KeyError:
+        return
+    tell = detector._tells_by_screen.get(canon)
+    if tell is None:
+        return
+    blob = serialize_groups(tell)
+    for sn in [screen_name] + [a.name for a in _TAG.get(canon, [])]:
+        settings.update(f"tell_tree_{sn}", blob)
+
+
 def _apply_calibration_result(settings, detector, ipc, result: dict,
                                reset_tell_overrides: bool) -> None:
     """Persist a solver result, hot-reload the normalizer, optionally wipe
@@ -696,44 +712,13 @@ def run(args):
 
     detector  = ScreenDetector(on_screen_change=None, switch2_language=switch2_language)
 
-    # Apply any persisted tell overrides from the wizard.
-    # These keys are not in Defaults so settings.get() would never find them
-    # (Settings._load only caches keys present in Defaults).  Read directly
-    # from the DB via get_config so the values survive app restarts.
+    # Apply any persisted boolean-tree overrides from the editor.  Stored as one
+    # tell_tree_<SCREEN> JSON blob per screen (see database/tell_repo.py).
+    from .database.tell_repo import groups_from_blob
     for _screen_enum, _tell in detector._tells_by_screen.items():
-        _sn = _screen_enum.name
-        _roi_ov        = _get_config_direct(f"tell_roi_{_sn}")
-        _thresh_ov     = _get_config_direct(f"tell_thresh_{_sn}")
-        _req_also_ov   = _get_config_direct(f"tell_req_also_{_sn}")   # [[path,[roi]], ...]
-        _alt_ov        = _get_config_direct(f"tell_alt_{_sn}")        # [path,[roi]] | False
-        _and_thresh_ov = _get_config_direct(f"tell_and_thresh_{_sn}") # [int, ...]
-        _alt_thresh_ov = _get_config_direct(f"tell_alt_thresh_{_sn}") # int | None
-        if _roi_ov and isinstance(_roi_ov, list) and len(_roi_ov) >= 4:
-            _tell.roi = tuple(int(v) for v in _roi_ov)
-        if _thresh_ov is not None:
-            _tell.binary_thresh = int(_thresh_ov)
-        if _req_also_ov and isinstance(_req_also_ov, list):
-            _tell.required_also = [
-                (_item[0], tuple(int(v) for v in _item[1]))
-                for _item in _req_also_ov
-                if isinstance(_item, list) and len(_item) >= 2 and len(_item[1]) >= 4
-            ]
-            _tell.required_also_templates = [None] * len(_tell.required_also)
-        if _and_thresh_ov and isinstance(_and_thresh_ov, list):
-            _tell.required_also_thresh = [int(t) for t in _and_thresh_ov]
-            while len(_tell.required_also_thresh) < len(_tell.required_also):
-                _tell.required_also_thresh.append(170)
-        # alt: list → apply; False → explicitly removed; None → key not in DB, keep default
-        if isinstance(_alt_ov, list) and len(_alt_ov) >= 2 and _alt_ov[0]:
-            _tell.alt_image_path = _alt_ov[0]
-            _tell.alt_roi        = tuple(int(v) for v in _alt_ov[1])
-        elif _alt_ov is False:
-            _tell.alt_image_path = None
-            _tell.alt_roi        = None
-        if _alt_thresh_ov is not None:
-            _tell.alt_binary_thresh = int(_alt_thresh_ov)
-    # Re-load templates now that required_also / alt paths may have changed.
-    # Must pass switch2_language so _inject_language fires correctly.
+        _blob = _get_config_direct(f"tell_tree_{_screen_enum.name}")
+        if _blob:
+            _tell.groups = groups_from_blob(_blob)
     for _tell in detector._tells_by_screen.values():
         _tell.load(switch2_language)
 

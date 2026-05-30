@@ -119,3 +119,18 @@ def test_update_region_sets_roi_and_thresh():
     title = next(e for e in d.get_tells_config() if e["screen"] == "TITLE")
     assert title["groups"][0][0]["roi"] == [1, 2, 30, 40]
     assert title["groups"][0][0]["thresh"] == 88
+
+
+def test_serialize_groups_round_trips_through_blob():
+    from mkw_tracker.database.tell_repo import serialize_groups, groups_from_blob
+    d = ScreenDetector()
+    tell = d._tells_by_screen[Screen.RACING]
+    blob = serialize_groups(tell)
+    rebuilt = groups_from_blob(blob)
+    assert len(rebuilt) == len(tell.groups) == 2
+    assert rebuilt[0][0].roi == tell.groups[0][0].roi
+    assert rebuilt[0][0].image_path == tell.groups[0][0].image_path
+    # dark_loading icon_roi survives the round-trip
+    reset = groups_from_blob(serialize_groups(d._tells_by_screen[Screen.RESET]))
+    assert reset[0][0].kind == "dark_loading"
+    assert reset[0][0].icon_roi == d._tells_by_screen[Screen.RESET].groups[0][0].icon_roi
