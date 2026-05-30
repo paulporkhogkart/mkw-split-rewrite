@@ -492,6 +492,11 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
         if os.path.exists(_tmpl_path):
             _tmpl = cv2.imread(_tmpl_path)
             if _tmpl is not None:
+                # Costumes are matched on Canny edges — show the edge-processed
+                # template so the preview matches what the matcher actually sees.
+                if category == "costumes":
+                    from .detection.templates import prepare_text_edges as _pte
+                    _tmpl = _pte(_tmpl)
                 _, _buf = cv2.imencode(".png", _tmpl)
                 _template_img = _b64.b64encode(_buf.tobytes()).decode("ascii")
         _live_crop = None

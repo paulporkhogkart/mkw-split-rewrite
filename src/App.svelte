@@ -118,12 +118,12 @@
   const TAB_LABELS = { detection:"Detection", selection:"Selection", hud:"HUD", templates:"Templates" };
   const NODE_SELECTION = { CHARACTER_SELECT:["char_name","costume"], KART_SELECT:["kart_name"], COURSE_SELECT:["course_name"] };
   const NODE_HUD       = { RACING:["lap_current","lap_total","coin_left","coin_right","finish","mushroom"] };
-  const NODE_TEMPLATES = { CHARACTER_SELECT:["characters","costumes"], KART_SELECT:["karts"], COURSE_SELECT:["courses"], RACING:["mushrooms"] };
+  // Each selection/HUD ROI that has a per-item template library to capture.
+  const ROI_TEMPLATE_CAT = { char_name:"characters", costume:"costumes", kart_name:"karts", course_name:"courses", mushroom:"mushrooms" };
   function tabsForNode(n) {
     const t = ["detection"];
     if (NODE_SELECTION[n]) t.push("selection");
     if (NODE_HUD[n])       t.push("hud");
-    if (NODE_TEMPLATES[n]) t.push("templates");
     return t;
   }
   function openNode(screenName) {
@@ -241,23 +241,21 @@
   }
   function setTab(tab) {
     activeTab = tab; roiResetPending = false; detResetPending = false;
-    if (tab === "selection") activeRoiName = NODE_SELECTION[selectedNode]?.[0] ?? null;
-    else if (tab === "hud")  activeRoiName = NODE_HUD[selectedNode]?.[0] ?? null;
-    else if (tab === "templates") {
-      templateCategory = NODE_TEMPLATES[selectedNode]?.[0] ?? "characters";
-      templateItemIdx = 0; assetTemplateImg = null; assetLiveCrop = null;
-    }
+    if (tab === "selection") { const k = NODE_SELECTION[selectedNode]?.[0]; k ? selectRoiName(k) : (activeRoiName = null); }
+    else if (tab === "hud")  { const k = NODE_HUD[selectedNode]?.[0];       k ? selectRoiName(k) : (activeRoiName = null); }
   }
   function catLabel(c) { return ASSET_CATEGORIES.find(x=>x.key===c)?.label ?? c; }
-  function selectTplCategory(c) {
-    templateCategory = c; templateItemIdx = 0; assetTemplateImg = null; assetLiveCrop = null;
-  }
   function selectTplItem(i) {
     templateItemIdx = i; assetTemplateImg = null; assetLiveCrop = null;
     const item = ASSET_ITEMS[templateCategory]?.[i];
     if (item) send({ type:"get_asset_template", category:templateCategory, item_name:item.file });
   }
-  function selectRoiName(k) { activeRoiName = k; roiResetPending = false; drawRoi(); }
+  function selectRoiName(k) {
+    activeRoiName = k; roiResetPending = false;
+    const cat = ROI_TEMPLATE_CAT[k];
+    if (cat) { templateCategory = cat; templateItemIdx = 0; assetTemplateImg = null; assetLiveCrop = null; }
+    drawRoi();
+  }
   function editTabRois() {
     const keys = activeTab==="selection" ? (NODE_SELECTION[selectedNode]||[]) : (NODE_HUD[selectedNode]||[]);
     return keys.map(k => ({ k, roi: rois[k], active: k===activeRoiName, color: k===activeRoiName ? "#7eb8f7" : "#ffcc00" }));
@@ -1260,7 +1258,7 @@
       if (view === "edit") {
         if (activeTab === "detection" && selectedNode)
           send({type:"test_region",screen:selectedNode,group:activeRegion.group,region:activeRegion.region});
-        else if (activeTab === "templates") {
+        else if ((activeTab === "selection" || activeTab === "hud") && ROI_TEMPLATE_CAT[activeRoiName]) {
           const item=ASSET_ITEMS[templateCategory]?.[templateItemIdx];
           if (item) send({type:"get_asset_template",category:templateCategory,item_name:item.file});
         }
@@ -1630,7 +1628,9 @@
   $: currentTell = tells.find(t=>t.screen===SCREEN_NAMES[screenIdx])??null;
 
   $: if (((wizardOpen || view === "setup")&&["screens","selection","hud","templates"].includes(wizardStep))
-         || (view === "edit" && (activeTab === "detection" || activeTab === "templates") && selectedNode)) {
+         || (view === "edit" && selectedNode && (
+              activeTab === "detection"
+              || ((activeTab === "selection" || activeTab === "hud") && ROI_TEMPLATE_CAT[activeRoiName])))) {
     startRoiPoll();
   } else { stopRoiPoll(); }
 
@@ -2120,7 +2120,6 @@
             </nav>
           {/if}
           <div class="edit-tab-body">
-            {#if activeTab !== "templates"}
               <div class="det-editor">
                 <div class="det-feed">
                   <div class="preview-wrapper det-feed-wrap" on:wheel={onFeedWheel}>
@@ -2230,43 +2229,36 @@
                           {/if}
                         </div>
                       </div>
+                      {#if ROI_TEMPLATE_CAT[activeRoiName]}
+                        {@const cat = ROI_TEMPLATE_CAT[activeRoiName]}
+                        <div class="tpl-inline">
+                          <div class="tree-label">{catLabel(cat)} reference images</div>
+                          <div class="tpl-body">
+                            <div class="tpl-list">
+                              {#each ASSET_ITEMS[cat] || [] as item, i}
+                                <button class="tpl-item" class:sel={templateItemIdx===i} on:click={()=>selectTplItem(i)}>{item.name}</button>
+                              {/each}
+                            </div>
+                            <div class="tpl-detail">
+                              {#if assetItem}
+                                <div class="tpl-detail-hd">{assetItem.name}</div>
+                                <p class="hint">{ASSET_HINTS[cat]?.(assetItem.name)}</p>
+                                <div class="reg-thumbs">
+                                  <div class="reg-thumb"><span>live{cat==="costumes" ? " (edges)" : ""}</span>{#if assetLiveCrop}<img src={assetLiveCrop} alt="live"/>{:else}<div class="reg-thumb-empty"></div>{/if}</div>
+                                  <div class="reg-thumb"><span>template</span>{#if assetTemplateImg}<img src={assetTemplateImg} alt="template"/>{:else}<div class="reg-thumb-empty"></div>{/if}</div>
+                                </div>
+                                <button class="btn-secondary reg-recap" on:click={captureAsset} disabled={capturingTemplate}>
+                                  {capturingTemplate ? "Capturing…" : `Capture ${assetItem.name}`}
+                                </button>
+                              {/if}
+                            </div>
+                          </div>
+                        </div>
+                      {/if}
                     {/if}
                   {/if}
                 </div>
               </div>
-            {:else}
-              {@const cats = NODE_TEMPLATES[selectedNode] || []}
-              <div class="tpl-editor">
-                {#if cats.length > 1}
-                  <div class="tpl-cats">
-                    {#each cats as c}
-                      <button class:active={templateCategory===c} on:click={()=>selectTplCategory(c)}>{catLabel(c)}</button>
-                    {/each}
-                  </div>
-                {/if}
-                <div class="tpl-body">
-                  <div class="tpl-list">
-                    {#each ASSET_ITEMS[templateCategory] || [] as item, i}
-                      <button class="tpl-item" class:sel={templateItemIdx===i} on:click={()=>selectTplItem(i)}>{item.name}</button>
-                    {/each}
-                  </div>
-                  <div class="tpl-detail">
-                    {#if assetItem}
-                      <div class="tpl-detail-hd">{assetItem.name}</div>
-                      <p class="hint">{ASSET_HINTS[templateCategory]?.(assetItem.name)}</p>
-                      <div class="reg-thumbs">
-                        <div class="reg-thumb"><span>live crop</span>{#if assetLiveCrop}<img src={assetLiveCrop} alt="live"/>{:else}<div class="reg-thumb-empty"></div>{/if}</div>
-                        <div class="reg-thumb"><span>captured</span>{#if assetTemplateImg}<img src={assetTemplateImg} alt="captured"/>{:else}<div class="reg-thumb-empty"></div>{/if}</div>
-                      </div>
-                      <button class="btn-secondary reg-recap" on:click={captureAsset} disabled={capturingTemplate}>
-                        {capturingTemplate ? "Capturing…" : `Capture ${assetItem.name}`}
-                      </button>
-                      <p class="hint" style="font-size:.6rem">Crops the current frame to the {catLabel(templateCategory).toLowerCase()} ROI and saves it as this item’s reference image.</p>
-                    {/if}
-                  </div>
-                </div>
-              </div>
-            {/if}
           </div>
         {:else}
           <div class="edit-pane-empty"><p class="hint">Select a screen node on the left to edit it.</p></div>
