@@ -108,6 +108,8 @@
   let activeTab = "detection";                  // "detection" | "selection" | "hud" | "templates"
   let activeRegion = { group: 0, region: 0 };   // Detection tab: selected region
   let detResetPending = false;                  // confirm gate for "reset detection to defaults"
+  let activeRoiName = null;                      // Selection/HUD tab: selected config-ROI key
+  let roiResetPending = false;                   // confirm gate for "reset this ROI"
   // Detection feed zoom/pan (so small ROIs can be adjusted precisely)
   let fZoom = 1, fPanX = 0, fPanY = 0;
   let _fPanning = false, _fStart = null;
@@ -231,6 +233,29 @@
     send({ type:"reset_tell", screen:selectedNode });
     activeRegion = { group: 0, region: 0 };
     detResetPending = false;
+  }
+
+  // ── Selection / HUD tab helpers ─────────────────────────────────────────────────
+  function roiMeta(key) {
+    return SELECTION_ROIS.find(r=>r.key===key) || HUD_ROIS.find(r=>r.key===key) || { label:key, hint:"" };
+  }
+  function setTab(tab) {
+    activeTab = tab; roiResetPending = false; detResetPending = false;
+    if (tab === "selection") activeRoiName = NODE_SELECTION[selectedNode]?.[0] ?? null;
+    else if (tab === "hud")  activeRoiName = NODE_HUD[selectedNode]?.[0] ?? null;
+  }
+  function selectRoiName(k) { activeRoiName = k; roiResetPending = false; drawRoi(); }
+  function editTabRois() {
+    const keys = activeTab==="selection" ? (NODE_SELECTION[selectedNode]||[]) : (NODE_HUD[selectedNode]||[]);
+    return keys.map(k => ({ k, roi: rois[k], active: k===activeRoiName, color: k===activeRoiName ? "#7eb8f7" : "#ffcc00" }));
+  }
+  function _activeRoiConfigKey() {
+    return SELECTION_ROI_CONFIG_KEYS[activeRoiName] || HUD_ROI_CONFIG_KEYS[activeRoiName] || null;
+  }
+  function resetActiveRoi() {
+    const ck = _activeRoiConfigKey();
+    if (ck) send({ type:"reset_roi", key:ck });
+    roiResetPending = false;
   }
 
   let tells = [];
@@ -891,7 +916,9 @@
   function getCurrentRoi() {
     if (view === "edit") {
       if (activeTab === "detection") return activeRegionObj?.roi ?? null;
-      return null;   // selection/hud tab ROI editing lands in a later increment
+      if (activeTab === "selection" || activeTab === "hud")
+        return activeRoiName ? (rois[activeRoiName] ?? null) : null;
+      return null;
     }
     if (wizardStep === "screens") {
       const tell = tells.find(t => t.screen === SCREEN_NAMES[screenIdx]);
@@ -989,6 +1016,8 @@
         tells = tells.map(t => t.screen !== sn ? t : { ...t,
           groups: t.groups.map((grp, gi) => gi !== g ? grp
             : grp.map((reg, ri) => ri !== r ? reg : { ...reg, roi })) });
+      } else if ((activeTab === "selection" || activeTab === "hud") && activeRoiName) {
+        rois = { ...rois, [activeRoiName]: roi };
       }
       return;
     }
@@ -1018,6 +1047,10 @@
     if (view === "edit") {
       if (activeTab === "detection" && selectedNode)
         send({ type:"update_region", screen:selectedNode, group:activeRegion.group, region:activeRegion.region, roi });
+      else if (activeTab === "selection" || activeTab === "hud") {
+        const ck = _activeRoiConfigKey();
+        if (ck) send({ type:"update_config", key:ck, value:roi });
+      }
       return;
     }
     if (wizardStep==="screens") {
@@ -1057,6 +1090,17 @@
         }
       }
       // nothing hit → pan the (zoomed) feed
+      _fPanning = true; _fStart = { x:e.clientX, y:e.clientY, px:fPanX, py:fPanY };
+      e.preventDefault(); return;
+    }
+    if (view === "edit" && (activeTab === "selection" || activeTab === "hud")) {
+      for (const re of editTabRois()) {
+        if (re.active || !re.roi) continue;
+        if (hitTest(e.clientX,e.clientY,re.roi)) {
+          selectRoiName(re.k); hoveredHandle=null;
+          e.preventDefault(); return;
+        }
+      }
       _fPanning = true; _fStart = { x:e.clientX, y:e.clientY, px:fPanX, py:fPanY };
       e.preventDefault(); return;
     }
@@ -1149,6 +1193,11 @@
         for (const re of all) if (!re.active) _drawOneRoi(ctx,t,re.roi,re.color,false);
         const ae = all.find(r=>r.active);
         if (ae) _drawOneRoi(ctx,t,ae.roi,ae.color,true);
+      } else if (activeTab === "selection" || activeTab === "hud") {
+        const all = editTabRois();
+        for (const re of all) if (re.roi && !re.active) _drawOneRoi(ctx,t,re.roi,re.color,false);
+        const ae = all.find(r=>r.active);
+        if (ae && ae.roi) _drawOneRoi(ctx,t,ae.roi,ae.color,true);
       }
       return;
     }
@@ -2049,12 +2098,12 @@
           {#if tabs.length > 1}
             <nav class="edit-tabs">
               {#each tabs as tabKey}
-                <button class:active={activeTab===tabKey} on:click={()=>activeTab=tabKey}>{TAB_LABELS[tabKey]}</button>
+                <button class:active={activeTab===tabKey} on:click={()=>setTab(tabKey)}>{TAB_LABELS[tabKey]}</button>
               {/each}
             </nav>
           {/if}
           <div class="edit-tab-body">
-            {#if activeTab === "detection"}
+            {#if activeTab !== "templates"}
               <div class="det-editor">
                 <div class="det-feed">
                   <div class="preview-wrapper det-feed-wrap" on:wheel={onFeedWheel}>
@@ -2075,6 +2124,7 @@
                 </div>
 
                 <div class="det-tree">
+                  {#if activeTab === "detection"}
                   {#if editTell}
                     <div class="tree-label">Detected when ALL groups match:</div>
                     {#each editTell.groups as group, gi}
@@ -2137,10 +2187,38 @@
                   {:else}
                     <p class="hint">Loading detection config…</p>
                   {/if}
+                  {:else}
+                    {@const _keys = activeTab==="selection" ? (NODE_SELECTION[selectedNode]||[]) : (NODE_HUD[selectedNode]||[])}
+                    <div class="tree-label">{activeTab==="selection" ? "Selection text ROIs" : "HUD ROIs"}</div>
+                    <div class="tree-group">
+                      {#each _keys as k}
+                        <button class="tree-region" class:sel={activeRoiName===k} on:click={()=>selectRoiName(k)}>
+                          <span class="treg-dot" style="background:{activeRoiName===k ? '#7eb8f7' : '#ffcc00'}"></span>
+                          <span class="treg-name">{roiMeta(k).label}</span>
+                        </button>
+                      {/each}
+                    </div>
+                    {#if activeRoiName}
+                      <div class="reg-controls">
+                        <p class="hint">{roiMeta(activeRoiName).hint}</p>
+                        <div class="det-reset">
+                          {#if roiResetPending}
+                            <p class="det-reset-q">Reset <b>{roiMeta(activeRoiName).label}</b> to its default position?</p>
+                            <div class="det-reset-row">
+                              <button class="btn-reset-confirm" on:click={resetActiveRoi}>Yes, reset</button>
+                              <button class="btn-nav" on:click={()=>roiResetPending=false}>Cancel</button>
+                            </div>
+                          {:else}
+                            <button class="det-reset-btn" on:click={()=>roiResetPending=true}>↺ Reset this ROI to default</button>
+                          {/if}
+                        </div>
+                      </div>
+                    {/if}
+                  {/if}
                 </div>
               </div>
             {:else}
-              <p class="hint">Editor for “{TAB_LABELS[activeTab]}” is coming in the next increment.</p>
+              <p class="hint">Templates editor is coming in the next increment.</p>
             {/if}
           </div>
         {:else}

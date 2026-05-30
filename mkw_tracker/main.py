@@ -418,18 +418,17 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
         ipc.emit(emit_tells_list(detector.get_tells_config()))
 
     elif t == "list_rois":
-        ipc.emit(emit_rois_list({
-            "char_name":   settings.get("char_name_roi"),
-            "costume":     settings.get("costume_roi"),
-            "kart_name":   settings.get("kart_name_roi"),
-            "course_name": settings.get("course_name_roi"),
-            "lap_current": settings.get("lap_current_roi"),
-            "lap_total":   settings.get("lap_total_roi"),
-            "coin_left":   settings.get("coin_left_roi"),
-            "coin_right":  settings.get("coin_right_roi"),
-            "finish":      settings.get("finish_roi"),
-            "mushroom":    settings.get("mushroom_roi"),
-        }))
+        ipc.emit(emit_rois_list(_rois_payload(settings)))
+
+    elif t == "reset_roi":
+        # Restore one selection/HUD ROI config key to its packaged default.
+        key = msg.get("key", "")
+        from .config.defaults import Defaults
+        _dflts = Defaults().as_dict()
+        if key in _dflts:
+            settings.update(key, _dflts[key])
+            settings.reload([key])
+            ipc.emit(emit_rois_list(_rois_payload(settings)))
 
     elif t == "get_roi_preview":
         frame = current_frame[0]
@@ -550,6 +549,22 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
             _, _binary = cv2.threshold(_gray, 170, 255, cv2.THRESH_BINARY)
             cv2.imwrite(_save_path, _binary)
         ipc.emit(emit_asset_saved(category, item_name))
+
+
+def _rois_payload(settings) -> dict:
+    """Current selection + HUD ROIs (pixel space) for a rois_list emit."""
+    return {
+        "char_name":   settings.get("char_name_roi"),
+        "costume":     settings.get("costume_roi"),
+        "kart_name":   settings.get("kart_name_roi"),
+        "course_name": settings.get("course_name_roi"),
+        "lap_current": settings.get("lap_current_roi"),
+        "lap_total":   settings.get("lap_total_roi"),
+        "coin_left":   settings.get("coin_left_roi"),
+        "coin_right":  settings.get("coin_right_roi"),
+        "finish":      settings.get("finish_roi"),
+        "mushroom":    settings.get("mushroom_roi"),
+    }
 
 
 def _persist_tell_tree(settings, screen_name: str, detector) -> None:
