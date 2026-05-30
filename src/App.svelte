@@ -1160,7 +1160,7 @@
     fZoom = nz;
     if (nz === 1) { fPanX = 0; fPanY = 0; }   // fully zoomed out → snap back to fit
     else _clampPan();
-    drawRoi();
+    scheduleDrawRoi();
   }
   function resetFeedZoom() { fZoom = 1; fPanX = 0; fPanY = 0; }
 
@@ -1607,6 +1607,7 @@
 
   onDestroy(()=>{
     if (unlisten) unlisten();
+    if (_roiRaf) cancelAnimationFrame(_roiRaf);
     stopCamera(); stopRoiPoll(); stopFeedPoll(); _teardownAudio();
     window.removeEventListener("mouseup",onWindowMouseUp);
     if (trackerCameraPaused) send({type:"resume_camera"});
@@ -1614,7 +1615,16 @@
 
   $: if (mainVideoEl) mainVideoEl.srcObject=setupComplete ? (videoStream??null) : null;
   $: if (wizVideoEl)  wizVideoEl.srcObject =videoStream??null;
-  afterUpdate(()=>{ if (wizardOpen || view === "setup" || editingNode) drawRoi(); });
+  // Coalesce ROI redraws into one per animation frame.  afterUpdate fires on every
+  // reactive tick (engine frames stream at 10Hz, plus heartbeats and wheel bursts);
+  // redrawing the canvas synchronously each time backlogs the main thread and stalls
+  // the UI while scrolling.  One rAF-batched redraw keeps it smooth.
+  let _roiRaf = 0;
+  function scheduleDrawRoi() {
+    if (_roiRaf) return;
+    _roiRaf = requestAnimationFrame(() => { _roiRaf = 0; drawRoi(); });
+  }
+  afterUpdate(()=>{ if (wizardOpen || view === "setup" || editingNode) scheduleDrawRoi(); });
 
   // ── Reactive computeds ────────────────────────────────────────────────────────
   $: currentScreenName  = SCREEN_NAMES[screenIdx]??"";;
