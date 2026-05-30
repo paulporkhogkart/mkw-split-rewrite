@@ -149,7 +149,7 @@
   let _gPanning = false, _gMoved = false, _gStart = null;
   const GRAPH_H = 205;   // content height after the vertical compression
   $: if (gWrapW && !gFitted) {
-    gZoom = Math.max(0.4, 0.8 * gWrapW / GRAPH_W);
+    gZoom = Math.max(0.4, 0.92 * gWrapW / GRAPH_W);   // ~one wheel-notch (×1.15) past fit-to-80%
     gPanX = (gWrapW - GRAPH_W * gZoom) / 2;
     gPanY = Math.max(0, (gWrapH - GRAPH_H * gZoom) / 2);   // center vertically, don't upscale
     gFitted = true;
@@ -2977,6 +2977,13 @@
     font-family: Consolas, 'Courier New', monospace;
     font-size: 13px; overflow: hidden;
   }
+  /* Thin dark scrollbars to match the app chrome (Chromium webview) */
+  :global(*) { scrollbar-width: thin; scrollbar-color: #1c1c2e transparent; }
+  :global(::-webkit-scrollbar) { width: 6px; height: 6px; }
+  :global(::-webkit-scrollbar-track) { background: transparent; }
+  :global(::-webkit-scrollbar-thumb) { background: #1c1c2e; border-radius: 3px; }
+  :global(::-webkit-scrollbar-thumb:hover) { background: #2a2a40; }
+  :global(::-webkit-scrollbar-corner) { background: transparent; }
 
   /* ── App shell ────────────────────────────────────────────────── */
   .app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
