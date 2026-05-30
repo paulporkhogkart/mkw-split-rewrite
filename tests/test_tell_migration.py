@@ -28,3 +28,22 @@ def test_legacy_and_screen_migrates_to_two_groups(memdb):
 def test_screen_without_overrides_is_untouched(memdb):
     migrate_tells_to_tree()
     assert get_config("tell_tree_TITLE") is None         # no legacy keys → no blob
+
+
+def test_migrated_primary_keeps_default_image_path(memdb):
+    set_config("tell_roi_HOME", [1, 2, 3, 4])
+    set_config("tell_thresh_HOME", 60)
+    migrate_tells_to_tree()
+    tree = get_config("tell_tree_HOME")
+    assert tree[0][0]["image_path"] == "images/screens/home.png"   # preserved from default
+    assert tree[0][0]["roi"] == [1, 2, 3, 4]                        # overridden
+    assert tree[0][0]["thresh"] == 60
+
+
+def test_reset_roi_override_stays_dark_loading(memdb):
+    set_config("tell_roi_RESET", [0, 500, 500, 1080])
+    migrate_tells_to_tree()
+    tree = get_config("tell_tree_RESET")
+    assert tree[0][0]["kind"] == "dark_loading"                     # NOT converted to template
+    assert tree[0][0]["roi"] == [0, 500, 500, 1080]
+    assert tree[0][0]["icon_roi"] == [1700, 920, 1870, 1030]        # preserved from default
