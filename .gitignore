@@ -58,3 +58,4 @@ old_assets/
 # Testing
 *.mp4
 temp/
+.superpowers/
