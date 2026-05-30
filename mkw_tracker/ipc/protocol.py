@@ -149,8 +149,8 @@ def emit_template_score(screen: str, score: float, threshold: float,
                         matched: bool, roi: list,
                         template_img: Optional[str] = None,
                         live_crop: Optional[str] = None,
-                        roi_key: str = "primary", **_) -> str:
-    data = dict(screen=screen, roi_key=roi_key, score=round(score, 4),
+                        group: int = 0, region: int = 0, **_) -> str:
+    data = dict(screen=screen, group=group, region=region, score=round(score, 4),
                 threshold=threshold, matched=matched, roi=roi)
     if template_img is not None:
         data["template_img"] = template_img
@@ -161,15 +161,15 @@ def emit_template_score(screen: str, score: float, threshold: float,
 
 def emit_template_images(screen: str, template_img: Optional[str],
                          live_crop: Optional[str] = None,
-                         roi_key: str = "primary", **_) -> str:
-    return _emit("template_images", screen=screen, roi_key=roi_key,
+                         group: int = 0, region: int = 0, **_) -> str:
+    return _emit("template_images", screen=screen, group=group, region=region,
                  template_img=template_img, live_crop=live_crop)
 
 
 def emit_template_saved(screen: str, score: float, threshold: float,
-                        matched: bool, **_) -> str:
-    return _emit("template_saved", screen=screen, score=round(score, 4),
-                 threshold=threshold, matched=matched)
+                        matched: bool, group: int = 0, region: int = 0, **_) -> str:
+    return _emit("template_saved", screen=screen, group=group, region=region,
+                 score=round(score, 4), threshold=threshold, matched=matched)
 
 
 def emit_tells_list(tells: list) -> str:

@@ -349,67 +349,56 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
         ipc.emit(emit_frame_data(_b64.b64encode(buf.tobytes()).decode("ascii"),
                                   new_w, new_h, label))
 
-    elif t == "get_template_images":
-        roi_key = msg.get("roi_key", "primary")
-        result  = detector.get_template_images(current_frame[0], msg.get("screen", ""),
-                                               roi_key=roi_key)
-        if result:
-            ipc.emit(emit_template_images(**result))
-        else:
-            ipc.emit(emit_error(f"Unknown screen: {msg.get('screen')!r}"))
-
-    elif t == "test_template":
-        frame = current_frame[0]
-        if frame is not None:
-            roi_key = msg.get("roi_key", "primary")
-            result  = detector.test_tell_by_name(frame, msg.get("screen", ""),
-                                                  roi_key=roi_key)
-            if result:
-                ipc.emit(emit_template_score(**result))
-            else:
-                ipc.emit(emit_error(f"Unknown screen: {msg.get('screen')!r}"))
-
-    elif t == "capture_template":
-        frame = current_frame[0]
-        if frame is not None:
-            roi_key = msg.get("roi_key", "primary")
-            result  = detector.capture_and_save_template(frame, msg.get("screen", ""),
-                                                          roi_key=roi_key)
-            if result:
-                ipc.emit(emit_template_saved(**result))
-            else:
-                ipc.emit(emit_error(f"Failed to capture template for: {msg.get('screen')!r}"))
-
-    elif t == "add_required_also":
-        sn  = msg.get("screen", "")
-        roi = msg.get("roi")
-        result = detector.add_required_also(sn, roi=roi)
-        if result is not None:
-            _persist_tell_structure(settings, sn, detector)
-            ipc.emit(emit_tells_list(detector.get_tells_config()))
-
-    elif t == "remove_required_also":
-        sn    = msg.get("screen", "")
-        index = int(msg.get("index", 0))
-        result = detector.remove_required_also(sn, index=index)
-        if result is not None:
-            _persist_tell_structure(settings, sn, detector)
-            ipc.emit(emit_tells_list(detector.get_tells_config()))
-
-    elif t == "add_alt":
-        sn  = msg.get("screen", "")
-        roi = msg.get("roi")
-        result = detector.add_alt(sn, roi=roi)
-        if result is not None:
-            _persist_tell_structure(settings, sn, detector)
-            ipc.emit(emit_tells_list(detector.get_tells_config()))
-
-    elif t == "remove_alt":
+    elif t == "update_region":
         sn = msg.get("screen", "")
-        result = detector.remove_alt(sn)
-        if result is not None:
-            _persist_tell_structure(settings, sn, detector)
+        res = detector.update_region(
+            sn, int(msg.get("group", 0)), int(msg.get("region", 0)),
+            roi=msg.get("roi"), thresh=msg.get("thresh"),
+            grayscale=msg.get("grayscale"), kind=msg.get("kind"),
+            icon_roi=msg.get("icon_roi"))
+        if res is not None:
+            _persist_tell_tree(settings, sn, detector)
             ipc.emit(emit_tells_list(detector.get_tells_config()))
+
+    elif t in ("add_region", "remove_region", "add_group", "remove_group"):
+        sn = msg.get("screen", "")
+        if t == "add_region":
+            res = detector.add_region(sn, int(msg.get("group", 0)), roi=msg.get("roi"))
+        elif t == "remove_region":
+            res = detector.remove_region(sn, int(msg.get("group", 0)), int(msg.get("region", 0)))
+        elif t == "add_group":
+            res = detector.add_group(sn, roi=msg.get("roi"))
+        else:
+            res = detector.remove_group(sn, int(msg.get("group", 0)))
+        if res is not None:
+            _persist_tell_tree(settings, sn, detector)
+            ipc.emit(emit_tells_list(detector.get_tells_config()))
+
+    elif t == "capture_region_template":
+        frame = current_frame[0]
+        if frame is not None:
+            res = detector.capture_region_template(
+                frame, msg.get("screen", ""),
+                int(msg.get("group", 0)), int(msg.get("region", 0)))
+            if res:
+                _persist_tell_tree(settings, msg.get("screen", ""), detector)
+                ipc.emit(emit_template_saved(**res))
+            else:
+                ipc.emit(emit_error(f"Failed to capture region for {msg.get('screen')!r}"))
+
+    elif t == "test_region":
+        frame = current_frame[0]
+        res = detector.test_region(frame, msg.get("screen", ""),
+                                   int(msg.get("group", 0)), int(msg.get("region", 0)))
+        if res is not None:
+            ipc.emit(emit_template_score(**res))
+
+    elif t == "get_region_images":
+        frame = current_frame[0]
+        res = detector.get_region_images(frame, msg.get("screen", ""),
+                                         int(msg.get("group", 0)), int(msg.get("region", 0)))
+        if res is not None:
+            ipc.emit(emit_template_images(**res))
 
     elif t == "list_tells":
         ipc.emit(emit_tells_list(detector.get_tells_config()))
@@ -427,35 +416,6 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
             "finish":      settings.get("finish_roi"),
             "mushroom":    settings.get("mushroom_roi"),
         }))
-
-    elif t == "update_tell":
-        screen_name          = msg.get("screen", "")
-        roi                  = msg.get("roi")
-        binary_thresh        = msg.get("binary_thresh")
-        required_also_rois   = msg.get("required_also_rois")
-        required_also_thresh = msg.get("required_also_thresh")
-        alt_binary_thresh    = msg.get("alt_binary_thresh")
-        alt_roi              = msg.get("alt_roi")
-        detector.update_tell(screen_name, roi=roi, binary_thresh=binary_thresh,
-                             required_also_rois=required_also_rois,
-                             required_also_thresh=required_also_thresh,
-                             alt_binary_thresh=alt_binary_thresh,
-                             alt_roi=alt_roi)
-        # Persist primary ROI and threshold (per screen including aliases)
-        from .detection.screen import Screen as _Scr, TELL_ALIAS_GROUPS as _TAG
-        try:
-            _canon = _Scr[screen_name]
-            for _sn in [screen_name] + [a.name for a in _TAG.get(_canon, [])]:
-                if roi:
-                    settings.update(f"tell_roi_{_sn}", roi)
-                if binary_thresh is not None:
-                    settings.update(f"tell_thresh_{_sn}", int(binary_thresh))
-        except KeyError:
-            pass
-        # Persist structure changes (required_also rois/thresh, alt roi/thresh)
-        if required_also_rois is not None or required_also_thresh is not None \
-                or alt_binary_thresh is not None or alt_roi is not None:
-            _persist_tell_structure(settings, screen_name, detector)
 
     elif t == "get_roi_preview":
         frame = current_frame[0]
@@ -576,35 +536,6 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
             _, _binary = cv2.threshold(_gray, 170, 255, cv2.THRESH_BINARY)
             cv2.imwrite(_save_path, _binary)
         ipc.emit(emit_asset_saved(category, item_name))
-
-
-def _persist_tell_structure(settings, screen_name: str, detector) -> None:
-    """Persist full required_also + alt structure for a canonical screen and its aliases.
-
-    req_also is saved as [[path, [x1,y1,x2,y2]], ...].
-    alt is saved as [path, [x1,y1,x2,y2]] when present, or False when explicitly
-    removed (so startup loading can distinguish "removed" from "never configured").
-    """
-    from .detection.screen import Screen as _Scr, TELL_ALIAS_GROUPS as _TAG
-    try:
-        canon = _Scr[screen_name]
-    except KeyError:
-        return
-    tell = detector._tells_by_screen.get(canon)
-    if tell is None:
-        return
-    req_also = [[p, list(r)] for p, r in tell.required_also]
-    alt = ([tell.alt_image_path, list(tell.alt_roi)]
-           if tell.alt_image_path and tell.alt_roi else False)
-    req_also_thresh = list(tell.required_also_thresh)
-    while len(req_also_thresh) < len(tell.required_also):
-        req_also_thresh.append(170)
-    alt_thresh = tell.alt_binary_thresh if tell.alt_image_path else None
-    for sn in [screen_name] + [a.name for a in _TAG.get(canon, [])]:
-        settings.update(f"tell_req_also_{sn}", req_also)
-        settings.update(f"tell_alt_{sn}", alt)
-        settings.update(f"tell_and_thresh_{sn}", req_also_thresh)
-        settings.update(f"tell_alt_thresh_{sn}", alt_thresh)
 
 
 def _persist_tell_tree(settings, screen_name: str, detector) -> None:
