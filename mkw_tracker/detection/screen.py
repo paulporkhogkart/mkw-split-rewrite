@@ -171,52 +171,23 @@ class PerfStats(NamedTuple):
 
 @dataclass
 class Tell:
-    """Describes how to detect a single screen."""
+    """Boolean-tree description of how to detect a screen.
+
+    groups is an AND of groups; each group is an OR of Regions.  A tell matches
+    when every group matches, and a group matches when any region in it matches.
+    """
     screen: Screen
-    image_path: str
-    roi: tuple
+    groups: list = field(default_factory=list)   # list[list[Region]]
     match_threshold: float = 0.9
-    binary_thresh: Optional[int] = 170
-
-    # Matching mode.  grayscale=True (default) skips binarisation and matches the
-    # continuous-tone template with TM_CCOEFF_NORMED over a +/- search_pad px
-    # translation window.  This is robust to the per-capture-card acutance (edge
-    # softness) and sub-pixel offset differences that wreck a fixed-threshold
-    # binary match — see docs/screen-detection.md.  grayscale=False keeps the
-    # legacy binary path for tells with no clean reference screenshot to cut a
-    # grayscale template from (RESET/POST_TIME_TRIAL).  binary_thresh is retained
-    # in both modes for DB-override compatibility and the binary path.
-    grayscale: bool = True
-    search_pad: int = 6
-
-    # dark_loading: detect a near-black loading/reset screen by its crush-invariant
-    # signature (uniformly dark roi + a bright mascot in icon_roi) instead of
-    # template matching — needed where a capture card clips the screen's faint
-    # pattern to pure black, leaving no variance for a template to match.
-    dark_loading: bool = False
-    icon_roi: Optional[tuple] = None
-
-    alt_image_path: Optional[str] = None
-    alt_roi: Optional[tuple] = None
-    alt_binary_thresh: int = 170          # independent thresh for the OR-alt ROI
-
-    required_also: list = field(default_factory=list)          # [(path, roi), ...]
-    required_also_thresh: list = field(default_factory=list)   # [int, ...] per-AND thresh
-
-    template: Optional[np.ndarray] = field(default=None, repr=False)
-    alt_template: Optional[np.ndarray] = field(default=None, repr=False)
-    required_also_templates: list = field(default_factory=list, repr=False)
 
     def load(self, switch2_language: str = None):
-        if self.dark_loading:
-            return   # statistical detector — no template to load
         from ..utils.paths import data_dir, resource_path
         import os
 
         def _load_one(rel_path: str) -> Optional[np.ndarray]:
+            if not rel_path:
+                return None
             if switch2_language:
-                # Always resolve through the language directory — no fallback to
-                # base path, so stale/non-language templates are never silently used.
                 lang_path = _inject_language(rel_path, switch2_language)
                 user_lang = str(data_dir() / lang_path)
                 if os.path.exists(user_lang):
@@ -224,7 +195,6 @@ class Tell:
                     if img is not None:
                         return img
                 return cv2.imread(resource_path(lang_path), cv2.IMREAD_GRAYSCALE)
-            # No language configured — load from base path
             user = str(data_dir() / rel_path)
             if os.path.exists(user):
                 img = cv2.imread(user, cv2.IMREAD_GRAYSCALE)
@@ -232,26 +202,21 @@ class Tell:
                     return img
             return cv2.imread(resource_path(rel_path), cv2.IMREAD_GRAYSCALE)
 
-        self.template = _load_one(self.image_path)
-        if self.template is None:
-            print(f"[WARN] Could not load template: {self.image_path}")
-        if self.alt_image_path:
-            self.alt_template = _load_one(self.alt_image_path)
-            if self.alt_template is None:
-                print(f"[WARN] Could not load alt template: {self.alt_image_path}")
-        self.required_also_templates = []
-        for path, _ in self.required_also:
-            tmpl = _load_one(path)
-            if tmpl is None:
-                print(f"[WARN] Could not load required_also template: {path}")
-            self.required_also_templates.append(tmpl)
+        for group in self.groups:
+            for region in group:
+                if region.kind != "template":
+                    continue
+                region.template = _load_one(region.image_path)
+                if region.template is None:
+                    print(f"[WARN] Could not load template: {region.image_path}")
 
     def all_rois(self) -> list:
-        rois = [self.roi]
-        if self.alt_roi is not None:
-            rois.append(self.alt_roi)
-        for _, roi in self.required_also:
-            rois.append(roi)
+        rois = []
+        for group in self.groups:
+            for region in group:
+                rois.append(region.roi)
+                if region.icon_roi is not None:
+                    rois.append(region.icon_roi)
         return rois
 
 
@@ -259,74 +224,65 @@ class Tell:
 # Tell registry
 # ---------------------------------------------------------------------------
 
+def _tmpl(image_path, roi, thresh=170, grayscale=True):
+    return Region(kind="template", image_path=image_path, roi=roi,
+                  thresh=thresh, grayscale=grayscale)
+
+
 TELLS: list = [
-    Tell(screen=Screen.TITLE, image_path="images/screens/title.png",
-         roi=(833, 156, 1082, 360), binary_thresh=75),
-    Tell(screen=Screen.HOME, image_path="images/screens/home.png",
-         roi=(1110, 805, 1312, 877), binary_thresh=55,
-         alt_image_path="images/screens/home2.png",
-         alt_roi=(1361, 803, 1548, 875), alt_binary_thresh=55),
-    Tell(screen=Screen.START_TIME_TRIAL, image_path="images/screens/starttimetrial.png",
-         roi=(671, 312, 1267, 359), binary_thresh=199),
-    Tell(screen=Screen.START_REPLAY, image_path="images/screens/startreplay.png",
-         roi=(726, 317, 1209, 356), binary_thresh=222),
-    # RESET family = the dark LOADING screen.  Detected by its crush-invariant
-    # signature (near-uniform darkness in roi + a bright mascot in icon_roi), NOT
-    # by template matching: some capture cards clip the faint 19-26 shadow pattern
-    # to pure black, destroying the only thing a template could match.
-    Tell(screen=Screen.RESET, image_path="images/screens/reset.png",
-         roi=(0, 589, 527, 1080), dark_loading=True, icon_roi=(1700, 920, 1870, 1030)),
-    Tell(screen=Screen.GHOST_RESET, image_path="images/screens/reset.png",
-         roi=(0, 589, 527, 1080), dark_loading=True, icon_roi=(1700, 920, 1870, 1030)),
-    Tell(screen=Screen.UNKNOWN_RESET, image_path="images/screens/reset.png",
-         roi=(0, 589, 527, 1080), dark_loading=True, icon_roi=(1700, 920, 1870, 1030)),
-    # POST_TIME_TRIAL: grayscale+slack.  Only an en_uk reference exists
-    # (old_assets/posttimetrial.png), seeded as a PLACEHOLDER into every
-    # screenshots/<lang>/posttimetrial.png — non-en_uk matches en_uk text until
-    # real per-language screenshots are captured + regenerated.  binary_thresh is
-    # retained only for DB-override compatibility (unused on the grayscale path).
-    Tell(screen=Screen.POST_TIME_TRIAL, image_path="images/screens/posttimetrial.png",
-         roi=(1364, 798, 1458, 825), binary_thresh=190,
-         alt_image_path="images/screens/posttimetrial2.png",
-         alt_roi=(1209, 664, 1618, 691), alt_binary_thresh=190),
-    Tell(screen=Screen.MAIN_MENU, image_path="images/screens/mainmenu.png",
-         roi=(554, 784, 612, 838), binary_thresh=168,
-         alt_image_path="images/screens/main_menu-alt.png",
-         alt_roi=(392, 800, 447, 854), alt_binary_thresh=117),
-    Tell(screen=Screen.CHARACTER_SELECT, image_path="images/screens/character_screen.png",
-         roi=(1768, 1027, 1887, 1055), binary_thresh=208),
-    Tell(screen=Screen.KART_SELECT, image_path="images/screens/kart_screen.png",
-         roi=(1288, 1032, 1462, 1055), binary_thresh=195),
-    Tell(screen=Screen.COURSE_SELECT, image_path="images/screens/course_select.png",
-         roi=(267, 916, 553, 945), binary_thresh=226,
-         alt_image_path="images/screens/track-sel-alt.png",
-         alt_roi=(279, 814, 540, 858), alt_binary_thresh=214),
-    Tell(screen=Screen.RACING, image_path="images/screens/racing-coin.png",
-         roi=(78, 987, 96, 1015), binary_thresh=173,
-         required_also=[("images/screens/racing-flag.png", (245, 991, 269, 1011))],
-         required_also_thresh=[170]),
-    Tell(screen=Screen.GHOST, image_path="images/screens/racing-coin.png",
-         roi=(78, 987, 96, 1015), binary_thresh=173,
-         required_also=[("images/screens/racing-flag.png", (245, 991, 269, 1011))],
-         required_also_thresh=[170]),
-    Tell(screen=Screen.UNKNOWN_RACE_ACTIVE, image_path="images/screens/racing-coin.png",
-         roi=(78, 987, 96, 1015), binary_thresh=173,
-         required_also=[("images/screens/racing-flag.png", (245, 991, 269, 1011))],
-         required_also_thresh=[170]),
-    Tell(screen=Screen.RACE_MENU, image_path="images/screens/racemenu.png",
-         roi=(781, 649, 1142, 674), binary_thresh=180,
-         alt_image_path="images/screens/racemenu-alt.png",
-         alt_roi=(810, 530, 1111, 552), alt_binary_thresh=190),
-    Tell(screen=Screen.REPLAY_MENU, image_path="images/screens/ghostmenu.png",
-         roi=(770, 590, 1160, 615), binary_thresh=190),
-    Tell(screen=Screen.REPLAY_RACE_AGAINST, image_path="images/screens/ghostmenu-red.png",
-         roi=(762, 590, 1160, 615), binary_thresh=190),
-    Tell(screen=Screen.GALLERY, image_path="images/screens/gallery.png",
-         roi=(106, 191, 181, 484), binary_thresh=151),
-    Tell(screen=Screen.SINGLEPLAYER_MENU, image_path="images/screens/singleplayer.png",
-         roi=(110, 562, 183, 628), binary_thresh=187),
-    Tell(screen=Screen.TIME_TRIALS, image_path="images/screens/timetrials.png",
-         roi=(110, 562, 183, 628), binary_thresh=204),
+    Tell(screen=Screen.TITLE, groups=[[
+        _tmpl("images/screens/title.png", (833, 156, 1082, 360), thresh=75)]]),
+    Tell(screen=Screen.HOME, groups=[[
+        _tmpl("images/screens/home.png",  (1110, 805, 1312, 877), thresh=55),
+        _tmpl("images/screens/home2.png", (1361, 803, 1548, 875), thresh=55)]]),
+    Tell(screen=Screen.START_TIME_TRIAL, groups=[[
+        _tmpl("images/screens/starttimetrial.png", (671, 312, 1267, 359), thresh=199)]]),
+    Tell(screen=Screen.START_REPLAY, groups=[[
+        _tmpl("images/screens/startreplay.png", (726, 317, 1209, 356), thresh=222)]]),
+    Tell(screen=Screen.RESET, groups=[[
+        Region(kind="dark_loading", roi=(0, 589, 527, 1080),
+               icon_roi=(1700, 920, 1870, 1030))]]),
+    Tell(screen=Screen.GHOST_RESET, groups=[[
+        Region(kind="dark_loading", roi=(0, 589, 527, 1080),
+               icon_roi=(1700, 920, 1870, 1030))]]),
+    Tell(screen=Screen.UNKNOWN_RESET, groups=[[
+        Region(kind="dark_loading", roi=(0, 589, 527, 1080),
+               icon_roi=(1700, 920, 1870, 1030))]]),
+    Tell(screen=Screen.POST_TIME_TRIAL, groups=[[
+        _tmpl("images/screens/posttimetrial.png",  (1364, 798, 1458, 825), thresh=190),
+        _tmpl("images/screens/posttimetrial2.png", (1209, 664, 1618, 691), thresh=190)]]),
+    Tell(screen=Screen.MAIN_MENU, groups=[[
+        _tmpl("images/screens/mainmenu.png",      (554, 784, 612, 838), thresh=168),
+        _tmpl("images/screens/main_menu-alt.png", (392, 800, 447, 854), thresh=117)]]),
+    Tell(screen=Screen.CHARACTER_SELECT, groups=[[
+        _tmpl("images/screens/character_screen.png", (1768, 1027, 1887, 1055), thresh=208)]]),
+    Tell(screen=Screen.KART_SELECT, groups=[[
+        _tmpl("images/screens/kart_screen.png", (1288, 1032, 1462, 1055), thresh=195)]]),
+    Tell(screen=Screen.COURSE_SELECT, groups=[[
+        _tmpl("images/screens/course_select.png",  (267, 916, 553, 945), thresh=226),
+        _tmpl("images/screens/track-sel-alt.png",  (279, 814, 540, 858), thresh=214)]]),
+    Tell(screen=Screen.RACING, groups=[
+        [_tmpl("images/screens/racing-coin.png", (78, 987, 96, 1015), thresh=173)],
+        [_tmpl("images/screens/racing-flag.png", (245, 991, 269, 1011), thresh=170)]]),
+    Tell(screen=Screen.GHOST, groups=[
+        [_tmpl("images/screens/racing-coin.png", (78, 987, 96, 1015), thresh=173)],
+        [_tmpl("images/screens/racing-flag.png", (245, 991, 269, 1011), thresh=170)]]),
+    Tell(screen=Screen.UNKNOWN_RACE_ACTIVE, groups=[
+        [_tmpl("images/screens/racing-coin.png", (78, 987, 96, 1015), thresh=173)],
+        [_tmpl("images/screens/racing-flag.png", (245, 991, 269, 1011), thresh=170)]]),
+    Tell(screen=Screen.RACE_MENU, groups=[[
+        _tmpl("images/screens/racemenu.png",     (781, 649, 1142, 674), thresh=180),
+        _tmpl("images/screens/racemenu-alt.png", (810, 530, 1111, 552), thresh=190)]]),
+    Tell(screen=Screen.REPLAY_MENU, groups=[[
+        _tmpl("images/screens/ghostmenu.png", (770, 590, 1160, 615), thresh=190)]]),
+    Tell(screen=Screen.REPLAY_RACE_AGAINST, groups=[[
+        _tmpl("images/screens/ghostmenu-red.png", (762, 590, 1160, 615), thresh=190)]]),
+    Tell(screen=Screen.GALLERY, groups=[[
+        _tmpl("images/screens/gallery.png", (106, 191, 181, 484), thresh=151)]]),
+    Tell(screen=Screen.SINGLEPLAYER_MENU, groups=[[
+        _tmpl("images/screens/singleplayer.png", (110, 562, 183, 628), thresh=187)]]),
+    Tell(screen=Screen.TIME_TRIALS, groups=[[
+        _tmpl("images/screens/timetrials.png", (110, 562, 183, 628), thresh=204)]]),
 ]
 
 
@@ -454,31 +410,16 @@ def _match_tell(frame: np.ndarray, roi: tuple, template: np.ndarray,
 
 
 def detect_tell(frame: np.ndarray, tell: Tell) -> tuple:
-    """Return (detected: bool, best_score: float)."""
-    if tell.dark_loading:
-        return _detect_dark_loading(frame, tell.roi, tell.icon_roi)
-
-    primary_score = _match_tell(frame, tell.roi, tell.template, tell.binary_thresh,
-                                tell.grayscale, tell.search_pad)
-
-    if tell.required_also:
-        scores = [primary_score]
-        for i, ((_, roi), tmpl) in enumerate(zip(tell.required_also, tell.required_also_templates)):
-            thresh = tell.required_also_thresh[i] if i < len(tell.required_also_thresh) else 170
-            scores.append(_match_tell(frame, roi, tmpl, thresh, tell.grayscale, tell.search_pad))
-        min_score = min(scores)
-        return min_score >= tell.match_threshold, min_score
-
-    if primary_score >= tell.match_threshold:
-        return True, primary_score
-
-    if tell.alt_template is not None and tell.alt_roi is not None:
-        alt_score = _match_tell(frame, tell.alt_roi, tell.alt_template, tell.alt_binary_thresh,
-                                tell.grayscale, tell.search_pad)
-        if alt_score >= tell.match_threshold:
-            return True, alt_score
-
-    return False, primary_score
+    """Return (detected: bool, best_score: float) for a boolean-tree tell."""
+    if not tell.groups:
+        return False, 0.0
+    group_scores = []
+    for group in tell.groups:
+        if not group:
+            return False, 0.0
+        group_scores.append(max(score_region(frame, r, tell.match_threshold) for r in group))
+    overall = min(group_scores)
+    return overall >= tell.match_threshold, overall
 
 
 # ---------------------------------------------------------------------------
@@ -576,7 +517,7 @@ class ScreenDetector:
         current_tell = self._tells_by_screen.get(self.current_screen)
         if current_tell is not None:
             confirmed, current_score = detect_tell(frame, current_tell)
-            tells_evaluated += 1 + len(current_tell.required_also)
+            tells_evaluated += sum(len(g) for g in current_tell.groups)
         else:
             confirmed, current_score = False, 0.0
 
@@ -618,7 +559,7 @@ class ScreenDetector:
             tell = self._tells_by_screen.get(screen)
             if tell is None:
                 continue
-            tells_evaluated += 1 + len(tell.required_also)
+            tells_evaluated += sum(len(g) for g in tell.groups)
             detected, score = detect_tell(frame, tell)
             candidate_scores[screen] = score
             if detected and score > best_score:
