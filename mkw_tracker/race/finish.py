@@ -19,21 +19,30 @@ class FinishStillDetector:
     """Detect the final-lap finish without the position overlay.
 
     On the final lap the race timer freezes on the total time with NO colour flash,
-    so its ROI stays pixel-static for several seconds.  Intermediate lap pauses
-    flash gold<->white (pixels keep changing) and during racing the timer runs, so
-    neither stays still that long.  Detection is a cheap downscaled grayscale
-    frame-to-frame diff of the timer ROI — much lighter than template matching.
+    so the timer DIGITS stay static for several seconds.  Intermediate lap pauses
+    flash gold<->white (~10 golds / 6s) and during racing the digits advance, so
+    neither stays still that long.
+
+    The frame diff is restricted to the bright DIGIT pixels (grayscale above
+    BRIGHT_THRESHOLD in either frame), NOT the whole ROI — so a moving track behind
+    the semi-transparent HUD is ignored.  A white<->gold flash still changes the
+    digit luma, so flashing (intermediate) pauses register as "changed".  This is a
+    cheap masked absdiff over a small ROI — lighter than template matching.
 
     Tunables (validate against recorded footage):
-      STILL_SECONDS  — must exceed the gold/white flash half-period but stay well
-                       under the ~8s final pause (3.0s is safe for any normal flash).
-      DIFF_THRESHOLD — mean abs frame diff (0-255) below which the ROI counts as
-                       still; raise it if a noisy capture card false-resets stillness.
+      STILL_SECONDS    — must exceed the gold flash period (~0.6s) but stay under the
+                         ~8s final pause; 2.5s is safe.
+      DIFF_THRESHOLD   — mean abs diff over the digit pixels below which they count as
+                         still; raise it if capture noise / leftover background motion
+                         false-resets stillness.
+      BRIGHT_THRESHOLD — grayscale cutoff isolating the (near-white / gold) digits from
+                         the background; raise it if bright moving background leaks in.
     """
-    STILL_SECONDS  = 3.0
-    DIFF_THRESHOLD = 4.0
-    SCALE          = 0.25
-    SCAN_INTERVAL  = 0.05
+    STILL_SECONDS    = 2.5
+    DIFF_THRESHOLD   = 8.0
+    BRIGHT_THRESHOLD = 175
+    MIN_BRIGHT_PX    = 40
+    SCAN_INTERVAL    = 0.05
 
     def __init__(self):
         self.detected = False
@@ -62,20 +71,27 @@ class FinishStillDetector:
         crop = frame[y1:y2, x1:x2]
         if crop.size == 0:
             return False
-        small = cv2.resize(crop, None, fx=self.SCALE, fy=self.SCALE,
-                           interpolation=cv2.INTER_AREA)
-        gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY) if len(small.shape) == 3 else small
-        if self._prev is not None and self._prev.shape == gray.shape:
-            diff = float(cv2.absdiff(gray, self._prev).mean())
-            if diff > self.DIFF_THRESHOLD:
-                self._still_since = None          # running or flashing
-            elif self._still_since is None:
-                self._still_since = now
-            elif (now - self._still_since) >= self.STILL_SECONDS:
-                self.detected = True
-                print(f"  [finish] timer frozen >= {self.STILL_SECONDS}s on final lap "
-                      f"-> capturing final time")
+        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop
+        prev = self._prev
         self._prev = gray
+        if prev is None or prev.shape != gray.shape:
+            self._still_since = None
+            return False
+        # Compare only the bright digit pixels (bright in either frame) so a moving
+        # background is ignored; the white<->gold flash still flips digit luma.
+        mask = (gray > self.BRIGHT_THRESHOLD) | (prev > self.BRIGHT_THRESHOLD)
+        if int(mask.sum()) < self.MIN_BRIGHT_PX:
+            self._still_since = None          # no digits visible
+            return False
+        diff = float(cv2.absdiff(gray, prev)[mask].mean())
+        if diff > self.DIFF_THRESHOLD:
+            self._still_since = None          # digits advancing or flashing
+        elif self._still_since is None:
+            self._still_since = now
+        elif (now - self._still_since) >= self.STILL_SECONDS:
+            self.detected = True
+            print(f"  [finish] digits frozen >= {self.STILL_SECONDS}s on final lap "
+                  f"-> capturing final time")
         return self.detected
 FINISH_MATCH_THRESHOLD = 0.60
 FINISH_CONFIRM_FRAMES  = 3
