@@ -159,6 +159,62 @@
   function onGraphUp() { _gPanning = false; }
   function nodeClick(id) { if (_gMoved) return; openNode(id); }   // ignore the click that ends a pan-drag
 
+  // ── Detection tab (boolean-tree) helpers ────────────────────────────────────────
+  $: editTell = tells.find(t => t.screen === selectedNode) ?? null;
+  $: activeRegionObj = editTell?.groups?.[activeRegion.group]?.[activeRegion.region] ?? null;
+
+  // All regions of the open tell, flattened for drawing on the feed canvas.
+  function editRois() {
+    if (!editTell) return [];
+    const out = [];
+    editTell.groups.forEach((grp, gi) => grp.forEach((reg, ri) => {
+      const active   = gi === activeRegion.group && ri === activeRegion.region;
+      const sameGrp  = gi === activeRegion.group;
+      out.push({ roi: reg.roi, gi, ri, active,
+                 color: active ? "#7eb8f7" : (sameGrp ? "#00ccff" : "#ffcc00") });
+    }));
+    return out;
+  }
+
+  function selectRegion(gi, ri) {
+    activeRegion = { group: gi, region: ri };
+    currentScore = null; templateImg = null; liveCropImg = null;
+    syncThreshToScreen();
+    if (selectedNode) {
+      send({ type:"get_region_images", screen:selectedNode, group:gi, region:ri });
+      send({ type:"test_region",       screen:selectedNode, group:gi, region:ri });
+    }
+    drawRoi();
+  }
+  function addRegion(gi) {
+    if (!selectedNode || !editTell) return;
+    const newIdx = (editTell.groups[gi]?.length ?? 0);   // appended at the end of the group
+    send({ type:"add_region", screen:selectedNode, group:gi });
+    activeRegion = { group: gi, region: newIdx };
+  }
+  function addGroup() {
+    if (!selectedNode || !editTell) return;
+    const newGi = editTell.groups.length;
+    send({ type:"add_group", screen:selectedNode });
+    activeRegion = { group: newGi, region: 0 };
+  }
+  function removeActiveRegion() {
+    if (!selectedNode) return;
+    send({ type:"remove_region", screen:selectedNode, group:activeRegion.group, region:activeRegion.region });
+    activeRegion = { group: 0, region: 0 };
+  }
+  function onKindChange(kind) {
+    if (!selectedNode) return;
+    const extra = kind === "dark_loading" && activeRegionObj && !activeRegionObj.icon_roi
+      ? { icon_roi: [1700, 920, 1870, 1030] } : {};
+    send({ type:"update_region", screen:selectedNode, group:activeRegion.group, region:activeRegion.region, kind, ...extra });
+  }
+  function recaptureRegion() {
+    if (!selectedNode) return;
+    capturingTemplate = true; currentScore = null;
+    send({ type:"capture_region_template", screen:selectedNode, group:activeRegion.group, region:activeRegion.region });
+  }
+
   let tells = [];
   let rois = {};
   let currentScore = null;
@@ -569,13 +625,13 @@
         trackerCameraPaused = false;
         break;
       case "template_images":
-        if (msg.screen === currentScreenName && (msg.roi_key ?? "primary") === activeRoiKey) {
+        if (msg.screen === selectedNode && msg.group === activeRegion.group && msg.region === activeRegion.region) {
           templateImg = msg.template_img ? `data:image/png;base64,${msg.template_img}` : null;
           liveCropImg = msg.live_crop    ? `data:image/png;base64,${msg.live_crop}`    : null;
         }
         break;
       case "template_score":
-        if ((msg.roi_key ?? "primary") === activeRoiKey) {
+        if (msg.screen === selectedNode && msg.group === activeRegion.group && msg.region === activeRegion.region) {
           currentScore = { screen:msg.screen, score:msg.score, threshold:msg.threshold, matched:msg.matched };
           if (msg.template_img) templateImg = `data:image/png;base64,${msg.template_img}`;
           if (msg.live_crop)    liveCropImg  = `data:image/png;base64,${msg.live_crop}`;
@@ -815,6 +871,10 @@
   }
 
   function getCurrentRoi() {
+    if (view === "edit") {
+      if (activeTab === "detection") return activeRegionObj?.roi ?? null;
+      return null;   // selection/hud tab ROI editing lands in a later increment
+    }
     if (wizardStep === "screens") {
       const tell = tells.find(t => t.screen === SCREEN_NAMES[screenIdx]);
       if (!tell) return null;
@@ -885,6 +945,15 @@
   }
 
   function updateCurrentRoi(roi) {
+    if (view === "edit") {
+      if (activeTab === "detection" && selectedNode) {
+        const g = activeRegion.group, r = activeRegion.region, sn = selectedNode;
+        tells = tells.map(t => t.screen !== sn ? t : { ...t,
+          groups: t.groups.map((grp, gi) => gi !== g ? grp
+            : grp.map((reg, ri) => ri !== r ? reg : { ...reg, roi })) });
+      }
+      return;
+    }
     if (wizardStep==="screens") {
       const sn=SCREEN_NAMES[screenIdx];
       if (activeRoiKey==="primary") {
@@ -908,6 +977,11 @@
   }
 
   function saveCurrentRoi(roi) {
+    if (view === "edit") {
+      if (activeTab === "detection" && selectedNode)
+        send({ type:"update_region", screen:selectedNode, group:activeRegion.group, region:activeRegion.region, roi });
+      return;
+    }
     if (wizardStep==="screens") {
       const sn=SCREEN_NAMES[screenIdx];
       if (activeRoiKey==="primary") send({type:"update_tell",screen:sn,roi});
@@ -935,6 +1009,16 @@
       dragging=true; dragHandle=hit.handle; dragStartRoi=[...roi];
       dragStartMouse={x:(e.clientX-t.rect.left-t.ox)/t.sx, y:(e.clientY-t.rect.top-t.oy)/t.sy};
       e.preventDefault(); return;
+    }
+    if (view === "edit" && activeTab === "detection") {
+      for (const re of editRois()) {
+        if (re.active || !re.roi) continue;
+        if (hitTest(e.clientX,e.clientY,re.roi)) {
+          selectRegion(re.gi, re.ri); hoveredHandle=null;
+          e.preventDefault(); return;
+        }
+      }
+      return;
     }
     if (wizardStep==="screens") {
       const tell=tells.find(t=>t.screen===SCREEN_NAMES[screenIdx]);
@@ -997,6 +1081,15 @@
     canvasEl.width=t.rect.width; canvasEl.height=t.rect.height;
     const ctx=canvasEl.getContext("2d");
     ctx.clearRect(0,0,canvasEl.width,canvasEl.height);
+    if (view === "edit") {
+      if (activeTab === "detection") {
+        const all = editRois();
+        for (const re of all) if (!re.active) _drawOneRoi(ctx,t,re.roi,re.color,false);
+        const ae = all.find(r=>r.active);
+        if (ae) _drawOneRoi(ctx,t,ae.roi,ae.color,true);
+      }
+      return;
+    }
     if (wizardStep==="screens") {
       const tell=tells.find(tell=>tell.screen===SCREEN_NAMES[screenIdx]);
       const allRois=getAllRoisForTell(tell);
@@ -1039,7 +1132,13 @@
   function startRoiPoll() {
     if (_roiPollTimer) return;
     _roiPollTimer=setInterval(()=>{
-      if (!trackerConnected||!wizardOpen) return;
+      if (!trackerConnected) return;
+      if (view === "edit") {
+        if (activeTab === "detection" && selectedNode)
+          send({type:"test_region",screen:selectedNode,group:activeRegion.group,region:activeRegion.region});
+        return;
+      }
+      if (!wizardOpen) return;
       if (wizardStep==="screens") {
         send({type:"test_template",screen:SCREEN_NAMES[screenIdx],roi_key:activeRoiKey});
       } else if (wizardStep==="templates") {
@@ -1059,6 +1158,17 @@
   }
 
   function onThreshChange() {
+    if (view === "edit") {
+      if (activeTab === "detection" && selectedNode && trackerConnected) {
+        const g = activeRegion.group, r = activeRegion.region, sn = selectedNode;
+        tells = tells.map(t => t.screen !== sn ? t : { ...t,
+          groups: t.groups.map((grp, gi) => gi !== g ? grp
+            : grp.map((reg, ri) => ri !== r ? reg : { ...reg, thresh: currentBinaryThresh })) });
+        send({ type:"update_region", screen:sn, group:g, region:r, thresh:currentBinaryThresh });
+        send({ type:"test_region", screen:sn, group:g, region:r });
+      }
+      return;
+    }
     if (wizardStep==="screens"&&trackerConnected) {
       const sn=SCREEN_NAMES[screenIdx];
       if (activeRoiKey==="primary") {
@@ -1377,7 +1487,7 @@
 
   $: if (mainVideoEl) mainVideoEl.srcObject=setupComplete ? (videoStream??null) : null;
   $: if (wizVideoEl)  wizVideoEl.srcObject =videoStream??null;
-  afterUpdate(()=>{ if (wizardOpen || view === "setup") drawRoi(); });
+  afterUpdate(()=>{ if (wizardOpen || view === "setup" || view === "edit") drawRoi(); });
 
   // ── Reactive computeds ────────────────────────────────────────────────────────
   $: currentScreenName  = SCREEN_NAMES[screenIdx]??"";;
@@ -1391,14 +1501,24 @@
   $: assetItem = ASSET_ITEMS[templateCategory]?.[templateItemIdx];
   $: currentTell = tells.find(t=>t.screen===SCREEN_NAMES[screenIdx])??null;
 
-  $: if ((wizardOpen || view === "setup")&&["screens","selection","hud","templates"].includes(wizardStep)) {
+  $: if (((wizardOpen || view === "setup")&&["screens","selection","hud","templates"].includes(wizardStep))
+         || (view === "edit" && activeTab === "detection" && selectedNode)) {
     startRoiPoll();
   } else { stopRoiPoll(); }
+
+  // Load the stored template + live crop whenever the selected region changes.
+  $: if (view === "edit" && activeTab === "detection" && selectedNode && activeRegion && trackerConnected) {
+    send({ type:"get_region_images", screen:selectedNode, group:activeRegion.group, region:activeRegion.region });
+  }
 
   $: _=appLanguage;
   function tr(key) { return t(key,appLanguage); }
 
   function syncThreshToScreen() {
+    if (view === "edit") {
+      currentBinaryThresh = activeRegionObj?.thresh ?? 170;
+      return;
+    }
     if (wizardStep==="screens") {
       const _t=tells.find(t=>t.screen===SCREEN_NAMES[screenIdx]);
       if (!_t) { currentBinaryThresh=170; return; }
@@ -1872,7 +1992,80 @@
             </nav>
           {/if}
           <div class="edit-tab-body">
-            <p class="hint">Editor for “{TAB_LABELS[activeTab]}” is coming in the next increment.</p>
+            {#if activeTab === "detection"}
+              <div class="det-editor">
+                <div class="det-feed">
+                  <div class="preview-wrapper">
+                    {#if cameraOk}
+                      <video bind:this={wizVideoEl} autoplay playsinline muted class="preview-video"></video>
+                      <canvas bind:this={canvasEl} class="preview-canvas roi-canvas"
+                        on:mousedown={onCanvasMouseDown} on:mousemove={onCanvasMouseMove}></canvas>
+                    {:else}
+                      <div class="preview-placeholder"><span>Camera unavailable</span></div>
+                    {/if}
+                  </div>
+                  <p class="preview-cap">Drag the handles to move/resize the selected region. Click another box to select it.</p>
+                </div>
+
+                <div class="det-tree">
+                  {#if editTell}
+                    <div class="tree-label">Detected when ALL groups match:</div>
+                    {#each editTell.groups as group, gi}
+                      {#if gi > 0}<div class="tree-and">— AND —</div>{/if}
+                      <div class="tree-group">
+                        <div class="tree-group-hd">Group {gi+1} · any of</div>
+                        {#each group as region, ri}
+                          <button class="tree-region" class:sel={activeRegion.group===gi && activeRegion.region===ri}
+                                  on:click={()=>selectRegion(gi,ri)}>
+                            <span class="treg-dot" style="background:{activeRegion.group===gi && activeRegion.region===ri ? '#7eb8f7' : (gi===activeRegion.group ? '#00ccff' : '#ffcc00')}"></span>
+                            <span class="treg-name">{region.kind==="dark_loading" ? "dark-loading" : `image ${ri+1}`}</span>
+                            {#if activeRegion.group===gi && activeRegion.region===ri && currentScore}
+                              <span class="treg-score" style="color:{scoreColor(currentScore.score)}">{currentScore.score.toFixed(2)}</span>
+                            {/if}
+                          </button>
+                        {/each}
+                        <button class="tree-add" on:click={()=>addRegion(gi)}>+ OR alternative image</button>
+                      </div>
+                    {/each}
+                    <button class="tree-add tree-add-and" on:click={addGroup}>+ AND condition group</button>
+
+                    {#if activeRegionObj}
+                      <div class="reg-controls">
+                        <div class="reg-row">
+                          <label class="reg-kind">Kind
+                            <select value={activeRegionObj.kind} on:change={(e)=>onKindChange(e.target.value)}>
+                              <option value="template">Template image</option>
+                              <option value="dark_loading">Dark-loading</option>
+                            </select>
+                          </label>
+                          {#if editTell.groups.length > 1 || (editTell.groups[activeRegion.group]?.length ?? 0) > 1}
+                            <button class="reg-del" on:click={removeActiveRegion}>🗑 Delete region</button>
+                          {/if}
+                        </div>
+                        {#if activeRegionObj.kind === "template"}
+                          <div class="reg-thumbs">
+                            <div class="reg-thumb"><span>live crop</span>{#if liveCropImg}<img src={liveCropImg} alt="live"/>{:else}<div class="reg-thumb-empty"></div>{/if}</div>
+                            <div class="reg-thumb"><span>template</span>{#if templateImg}<img src={templateImg} alt="template"/>{:else}<div class="reg-thumb-empty"></div>{/if}</div>
+                          </div>
+                          <label class="reg-thresh">Binarise threshold <b>{currentBinaryThresh}</b>
+                            <input type="range" min="0" max="255" step="1" bind:value={currentBinaryThresh} on:input={onThreshChange}/>
+                          </label>
+                          <button class="btn-secondary reg-recap" on:click={recaptureRegion} disabled={capturingTemplate}>
+                            {capturingTemplate ? "Capturing…" : "Recapture this region"}
+                          </button>
+                        {:else}
+                          <p class="hint">Dark-loading detects a near-black region plus a bright icon. Drag the main ROI on the feed; the icon ROI uses its default position.</p>
+                        {/if}
+                      </div>
+                    {/if}
+                  {:else}
+                    <p class="hint">Loading detection config…</p>
+                  {/if}
+                </div>
+              </div>
+            {:else}
+              <p class="hint">Editor for “{TAB_LABELS[activeTab]}” is coming in the next increment.</p>
+            {/if}
           </div>
         {:else}
           <div class="edit-pane-empty"><p class="hint">Select a screen node on the left to edit it.</p></div>
@@ -2710,6 +2903,40 @@
   .edit-tabs button.active { color: #7eb8f7; border-bottom-color: #7eb8f7; }
   .edit-tabs button:hover:not(.active) { color: #9ab; }
   .edit-pane-empty { display: flex; align-items: center; justify-content: center; min-height: 240px; }
+
+  /* Detection tab editor */
+  .det-editor { display: flex; gap: 12px; align-items: flex-start; }
+  .det-feed { flex: 1.7; min-width: 0; }
+  .det-feed .preview-wrapper { position: relative; width: 100%; aspect-ratio: 16/9; background: #000; border: 1px solid #14142a; border-radius: 5px; overflow: hidden; }
+  .det-feed .preview-video { width: 100%; height: 100%; object-fit: contain; }
+  .det-feed .roi-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .det-feed .preview-cap { margin: 5px 2px 0; font-size: .64rem; color: #566; }
+  .det-tree { flex: 1; min-width: 250px; display: flex; flex-direction: column; gap: 6px; }
+  .tree-label { font-size: .66rem; text-transform: uppercase; letter-spacing: .08em; color: #8aa; }
+  .tree-and { text-align: center; font-size: .62rem; letter-spacing: .2em; color: #5a7a9a; margin: 1px 0; }
+  .tree-group { border: 1px solid #1c2740; border-radius: 5px; padding: 6px; background: #080a14; }
+  .tree-group-hd { font-size: .58rem; text-transform: uppercase; letter-spacing: .06em; color: #5a7a9a; margin-bottom: 4px; }
+  .tree-region { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; background: #0c0c18; border: 1px solid #1a1a2e; border-radius: 4px; padding: 4px 7px; margin-bottom: 3px; color: #aab; font-family: inherit; font-size: .72rem; cursor: pointer; }
+  .tree-region:hover { border-color: #2a3a5a; }
+  .tree-region.sel { border-color: #7eb8f7; background: #0d1f40; color: #cde; }
+  .treg-dot { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+  .treg-name { flex: 1; }
+  .treg-score { font-family: Consolas, monospace; font-size: .68rem; }
+  .tree-add { width: 100%; background: none; border: 1px dashed #243; border-radius: 4px; color: #567; font-family: inherit; font-size: .64rem; padding: 3px; cursor: pointer; }
+  .tree-add:hover { color: #8aa; border-color: #2a4a3a; }
+  .tree-add-and { border-color: #2a3a5a; margin-top: 2px; }
+  .reg-controls { border-top: 1px solid #14142a; margin-top: 4px; padding-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+  .reg-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .reg-kind { font-size: .66rem; color: #9ab; display: flex; align-items: center; gap: 5px; }
+  .reg-kind select { background: #0c0c18; color: #cde; border: 1px solid #1e1e3a; border-radius: 3px; font-family: inherit; font-size: .7rem; padding: 2px 4px; }
+  .reg-del { background: none; border: 1px solid #3a1e1e; color: #b66; border-radius: 3px; font-family: inherit; font-size: .64rem; padding: 3px 7px; cursor: pointer; }
+  .reg-del:hover { background: #1a0d0d; }
+  .reg-thumbs { display: flex; gap: 8px; }
+  .reg-thumb { flex: 1; font-size: .58rem; color: #678; text-align: center; }
+  .reg-thumb img, .reg-thumb-empty { display: block; width: 100%; height: 40px; object-fit: contain; background: #0c0c18; border: 1px solid #1a1a2e; border-radius: 3px; margin-top: 2px; image-rendering: pixelated; }
+  .reg-thresh { font-size: .66rem; color: #9ab; display: block; }
+  .reg-thresh input { width: 100%; }
+  .reg-recap { font-size: .7rem; align-self: flex-start; }
 
   .win-controls { display: flex; flex-shrink: 0; margin-left: 0; }
   .win-btn {
