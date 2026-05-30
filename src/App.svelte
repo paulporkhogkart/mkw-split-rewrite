@@ -120,7 +120,7 @@
   // Which extra tabs each node owns (beyond the always-present Detection tab).
   const TAB_LABELS = { detection:"Detection", selection:"Selection", hud:"HUD", templates:"Templates" };
   const NODE_SELECTION = { CHARACTER_SELECT:["char_name","costume"], KART_SELECT:["kart_name"], COURSE_SELECT:["course_name"] };
-  const NODE_HUD       = { RACING:["lap_current","lap_total","coin_left","coin_right","finish","mushroom"] };
+  const NODE_HUD       = { RACING:["lap_current","lap_total","coin_left","coin_right","mushroom"] };  /* "finish" disabled */
   // Each selection/HUD ROI that has a per-item template library to capture.
   const ROI_TEMPLATE_CAT = { char_name:"characters", costume:"costumes", kart_name:"karts", course_name:"courses", mushroom:"mushrooms" };
   function tabsForNode(n) {
@@ -148,10 +148,10 @@
   let gZoom = 1, gPanX = 0, gPanY = 0, gWrapW = 0, gWrapH = 0, gFitted = false;
   let _gPanning = false, _gMoved = false, _gStart = null;
   const GRAPH_H = 205;   // content height after the vertical compression
-  $: if (gWrapW && !gFitted) {
+  $: if (gWrapW && gWrapH && !gFitted) {
     gZoom = Math.max(0.4, 0.92 * gWrapW / GRAPH_W);   // ~one wheel-notch (×1.15) past fit-to-80%
     gPanX = (gWrapW - GRAPH_W * gZoom) / 2;
-    gPanY = Math.max(0, (gWrapH - GRAPH_H * gZoom) / 2);   // center vertically, don't upscale
+    gPanY = (gWrapH - GRAPH_H * gZoom) / 2;   // vertically center within the graph strip
     gFitted = true;
   }
   function fitGraph() { gFitted = false; }    // re-fit on next measure (called on entering edit)
@@ -469,7 +469,8 @@
     { key:"lap_total",   label:"Lap Counter (total)",   hint:"Total laps digit next to current lap." },
     { key:"coin_left",   label:"Coin Digit (tens)",     hint:"Left/tens coin counter digit." },
     { key:"coin_right",  label:"Coin Digit (units)",    hint:"Right/units coin counter digit." },
-    { key:"finish",      label:"Finish Position",       hint:"1st / 2nd / 3rd finish overlay, top-right area." },
+    // { key:"finish",   label:"Finish Position",       hint:"1st / 2nd / 3rd finish overlay, top-right area." },  // finish disabled
+
     { key:"mushroom",    label:"Mushroom Count",        hint:"Mushroom stack indicator, top-left area." },
   ];
   const HUD_ROI_CONFIG_KEYS = {

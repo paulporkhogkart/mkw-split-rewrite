@@ -951,7 +951,10 @@ def run(args):
             mush_state         = mush.state
             mm_state           = minimap.state
 
-        finish_state          = finish.update(frame, screen)
+        # Finish-position detection disabled — to re-enable, uncomment the line
+        # below (and the draw_finish_roi calls + the HUD "Finish" ROI in the UI).
+        # finish_state        = finish.update(frame, screen)
+        finish_state          = finish.state   # static, never detected
         finish_just_detected  = finish_state.detected and ts.total_time is None
 
         # ── Calibrate on finish detection ────────────────────────────────────
@@ -1097,7 +1100,7 @@ def run(args):
                 draw_lap_rois(frame, None, screen, lap_state)
                 draw_coin_rois(frame, None, screen, coin_state)
                 draw_timestamp_rois(frame, None, screen, ts_state)
-                draw_finish_roi(frame, None, screen, finish_state)
+                # draw_finish_roi(frame, None, screen, finish_state)   # finish disabled
                 draw_mushroom_roi(frame, None, screen, mush_state)
                 draw_minimap_crosshair(frame, None, screen, mm_state, tracker=minimap)
 
@@ -1116,7 +1119,7 @@ def run(args):
                 draw_lap_rois(None, display, screen, lap_state)
                 draw_coin_rois(None, display, screen, coin_state)
                 draw_timestamp_rois(None, display, screen, ts_state)
-                draw_finish_roi(None, display, screen, finish_state)
+                # draw_finish_roi(None, display, screen, finish_state)   # finish disabled
                 draw_mushroom_roi(None, display, screen, mush_state)
                 draw_minimap_crosshair(None, display, screen, mm_state, tracker=minimap)
                 mm_player.draw(None, display, screen)
