@@ -1150,7 +1150,7 @@
   }
 
   function onFeedWheel(e) {
-    if (view !== "edit" || !canvasEl) return;
+    if (!editingNode || !canvasEl) return;
     e.preventDefault();
     const r = canvasEl.getBoundingClientRect();
     const u = e.clientX - r.left, v = e.clientY - r.top;
@@ -1756,16 +1756,9 @@
       {#if selectedNode}
         {@const tabs = tabsForNode(selectedNode)}
         <div class="node-editor-bar">
-          <button class="btn-back-preview" on:click={closeNodeEditor}>← Full preview</button>
           <span class="node-editor-title">{SCREEN_LABELS[selectedNode] ?? selectedNode}</span>
           <span class="edit-screen-id">{selectedNode}</span>
-          {#if tabs.length > 1}
-            <nav class="edit-tabs">
-              {#each tabs as tabKey}
-                <button class:active={activeTab===tabKey} on:click={()=>setTab(tabKey)}>{TAB_LABELS[tabKey]}</button>
-              {/each}
-            </nav>
-          {/if}
+          <button class="btn-back-preview" on:click={closeNodeEditor}>← Full preview</button>
         </div>
         <div class="edit-tab-body">
               <div class="det-editor">
@@ -1788,6 +1781,13 @@
                 </div>
 
                 <div class="det-tree">
+                  {#if tabs.length > 1}
+                    <nav class="edit-tabs det-tabs">
+                      {#each tabs as tabKey}
+                        <button class:active={activeTab===tabKey} on:click={()=>setTab(tabKey)}>{TAB_LABELS[tabKey]}</button>
+                      {/each}
+                    </nav>
+                  {/if}
                   {#if activeTab === "detection"}
                   {#if editTell}
                     <div class="tree-label">Detected when ALL groups match:</div>
@@ -1971,7 +1971,7 @@
     <!-- Right: sidebar panels (collapsible) -->
     <aside class="sidebar" class:sidebar-collapsed={!sidebarOpen}>
       <button class="sidebar-toggle" on:click={()=>sidebarOpen=!sidebarOpen}
-        title={sidebarOpen ? "Collapse panels" : "Expand panels"}>{sidebarOpen ? "⟩" : "⟨"}</button>
+        title={sidebarOpen ? "Collapse panels" : "Expand panels"}>{sidebarOpen ? "▸" : "◂"}</button>
       {#if sidebarOpen}
 
       <!-- ── Panel: Detection ──────────────────────────────────────────── -->
@@ -3137,21 +3137,23 @@
 
   /* In-place per-screen editor (replaces the feed in the main-feed pane) */
   .main-feed-editing { background: #06060e; }
-  .node-editor-bar { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-bottom: 1px solid #14142a; flex-shrink: 0; flex-wrap: wrap; }
-  .btn-back-preview { background: #0c0c18; border: 1px solid #2a3a5a; color: #9cf; border-radius: 4px; font-family: inherit; font-size: .72rem; padding: 3px 9px; cursor: pointer; }
+  .node-editor-bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid #14142a; flex-shrink: 0; }
+  .btn-back-preview { margin-left: auto; flex-shrink: 0; background: #0c0c18; border: 1px solid #2a3a5a; color: #9cf; border-radius: 4px; font-family: inherit; font-size: .72rem; padding: 3px 9px; cursor: pointer; }
   .btn-back-preview:hover { background: #0d1f40; }
   .node-editor-title { font-size: .88rem; color: #cde; }
+  .det-tabs { margin-bottom: 8px; }
   .main-feed-editing .edit-tab-body { flex: 1; min-height: 0; overflow: auto; padding: 10px 12px; }
 
   /* Collapsible sidebar */
   .sidebar-toggle {
-    position: sticky; top: 0; z-index: 3; width: 100%; text-align: right;
+    position: sticky; top: 0; z-index: 3; width: 100%; height: 22px; box-sizing: border-box;
+    display: flex; align-items: center; justify-content: flex-end;
     background: #06060e; border: none; border-bottom: 1px solid #111120;
-    color: #567; cursor: pointer; font-size: .8rem; line-height: 1; padding: 4px 8px;
+    color: #567; cursor: pointer; font-size: .62rem; line-height: 1; padding: 0 8px;
   }
   .sidebar-toggle:hover { color: #9ab; }
   .sidebar.sidebar-collapsed { overflow: hidden; }
-  .sidebar.sidebar-collapsed .sidebar-toggle { text-align: center; padding: 6px 2px; }
+  .sidebar.sidebar-collapsed .sidebar-toggle { justify-content: center; padding: 0; }
 
   /* ── Feed (col 1, row 1) ─────────────────────────────────────── */
   .main-feed {
