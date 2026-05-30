@@ -77,3 +77,45 @@ def test_empty_groups_never_matches():
     frame = _solid(10, 10, 200)
     t = Tell(screen=Screen.TITLE, groups=[])
     assert detect_tell(frame, t) == (False, 0.0)
+
+
+from mkw_tracker.detection.screen import ScreenDetector
+
+
+def test_serialize_get_tells_config_round_trip():
+    d = ScreenDetector()
+    cfg = {e["screen"]: e for e in d.get_tells_config()}
+    racing = cfg["RACING"]
+    assert len(racing["groups"]) == 2                 # coin AND flag
+    assert len(racing["groups"][0]) == 1
+    assert racing["groups"][0][0]["kind"] == "template"
+    assert "aliases" in racing                        # GHOST, UNKNOWN_RACE_ACTIVE
+    home = cfg["HOME"]
+    assert len(home["groups"]) == 1 and len(home["groups"][0]) == 2  # OR
+
+
+def test_add_and_remove_group_propagates_to_aliases():
+    d = ScreenDetector()
+    d.add_group("RACING", roi=[10, 10, 50, 50])
+    racing = next(e for e in d.get_tells_config() if e["screen"] == "RACING")
+    ghost  = next(e for e in d.get_tells_config() if e["screen"] == "GHOST")
+    assert len(racing["groups"]) == 3
+    assert len(ghost["groups"]) == 3                  # alias kept in sync
+    d.remove_group("RACING", 2)
+    racing = next(e for e in d.get_tells_config() if e["screen"] == "RACING")
+    assert len(racing["groups"]) == 2
+
+
+def test_add_region_adds_or_alternative():
+    d = ScreenDetector()
+    d.add_region("HOME", group=0, roi=[1, 2, 3, 4])
+    home = next(e for e in d.get_tells_config() if e["screen"] == "HOME")
+    assert len(home["groups"][0]) == 3
+
+
+def test_update_region_sets_roi_and_thresh():
+    d = ScreenDetector()
+    d.update_region("TITLE", group=0, region=0, roi=[1, 2, 30, 40], thresh=88)
+    title = next(e for e in d.get_tells_config() if e["screen"] == "TITLE")
+    assert title["groups"][0][0]["roi"] == [1, 2, 30, 40]
+    assert title["groups"][0][0]["thresh"] == 88
