@@ -116,7 +116,7 @@ def draw_state_panel(
     items += [
         f"Coins: {coins.coins if coins.coins is not None else '-'}",
         f"Time: {ts.formatted() or '-'}",
-        f"Finish: {finish.result or '-'}",
+        f"Finish: {getattr(finish, 'result', None) or ('detected' if getattr(finish, 'detected', False) else '-')}",
         f"Mush: {mush.count}",
         f"MM: {mm.track_state} ({mm.cx_smooth:.0f},{mm.cy_smooth:.0f}) s={mm.last_score:.3f}",
     ]

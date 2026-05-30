@@ -36,7 +36,7 @@ from .detection.selection import SelectionTracker
 from .race.laps import LapTracker
 from .race.coins import CoinTracker
 from .race.timestamp import TimestampTracker
-from .race.finish import FinishDetector, load_finish_templates
+from .race.finish import FinishDetector, FinishStillDetector, load_finish_templates
 from .race.mushrooms import MushroomTracker, load_mushroom_templates, MUSHROOM_ROI, MUSHROOM_TEMPLATES
 from .minimap.tracker import MinimapTracker
 from .minimap.recorder import MinimapRecorder
@@ -698,7 +698,7 @@ def run(args):
     laps      = LapTracker()
     coins     = CoinTracker()
     ts        = TimestampTracker()
-    finish    = FinishDetector(scan_interval=0.0)
+    finish    = FinishStillDetector()   # final-lap finish via frozen timer (position-ROI scan disabled)
     mush      = MushroomTracker()
     minimap   = MinimapTracker()
     mm_rec    = MinimapRecorder()
@@ -951,11 +951,13 @@ def run(args):
             mush_state         = mush.state
             mm_state           = minimap.state
 
-        # Finish-position detection disabled — to re-enable, uncomment the line
-        # below (and the draw_finish_roi calls + the HUD "Finish" ROI in the UI).
-        # finish_state        = finish.update(frame, screen)
-        finish_state          = finish.state   # static, never detected
-        finish_just_detected  = finish_state.detected and ts.total_time is None
+        # Final-lap finish: the timer freezes (no gold/white flash) on the final
+        # lap.  See FinishStillDetector.  (Position-ROI scan stays disabled.)
+        _on_final_lap = (lap_state.current_lap is not None
+                         and lap_state.total_laps
+                         and lap_state.current_lap == lap_state.total_laps)
+        finish_just_detected  = (finish.update(frame, screen, bool(_on_final_lap))
+                                 and ts.total_time is None)
 
         # ── Calibrate on finish detection ────────────────────────────────────
         if finish_just_detected and not minimap._calibrated:
@@ -1059,7 +1061,7 @@ def run(args):
         # won't be ready yet  - defer until ts.total_time is populated.
         if finish_just_detected and not _prev_finish and not _want_finish_emit:
             _want_finish_emit = True
-            _finish_result    = finish_state.result
+            _finish_result    = None   # no position overlay (finish-ROI disabled)
             _finish_wait      = 0
 
         if _want_finish_emit:
@@ -1128,7 +1130,7 @@ def run(args):
                 draw_legend(display)
                 draw_state_panel(
                     display, screen, perf, selection, lap_state, coin_state,
-                    ts_state, finish_state, mush_state, mm_state,
+                    ts_state, finish, mush_state, mm_state,
                     avg_fps=avg_fps, avg_ms=avg_ms, avg_tells=avg_tells,
                     peak_ms=peak_ms, transition_count=transition_count[0],
                     lap_splits=ts.splits,

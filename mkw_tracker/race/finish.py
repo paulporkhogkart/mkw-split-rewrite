@@ -10,6 +10,73 @@ from ..detection.screen import Screen
 from ..utils.paths import resource_path, data_dir
 
 FINISH_ROI = (1290, 410, 1290 + 90, 410 + 90)
+
+# Bounding box of the lap/total timer digits (union of timestamp.TIMESTAMP_ROIS).
+FINISH_TIMER_BBOX = (1556, 54, 1860, 106)
+
+
+class FinishStillDetector:
+    """Detect the final-lap finish without the position overlay.
+
+    On the final lap the race timer freezes on the total time with NO colour flash,
+    so its ROI stays pixel-static for several seconds.  Intermediate lap pauses
+    flash gold<->white (pixels keep changing) and during racing the timer runs, so
+    neither stays still that long.  Detection is a cheap downscaled grayscale
+    frame-to-frame diff of the timer ROI — much lighter than template matching.
+
+    Tunables (validate against recorded footage):
+      STILL_SECONDS  — must exceed the gold/white flash half-period but stay well
+                       under the ~8s final pause (3.0s is safe for any normal flash).
+      DIFF_THRESHOLD — mean abs frame diff (0-255) below which the ROI counts as
+                       still; raise it if a noisy capture card false-resets stillness.
+    """
+    STILL_SECONDS  = 3.0
+    DIFF_THRESHOLD = 4.0
+    SCALE          = 0.25
+    SCAN_INTERVAL  = 0.05
+
+    def __init__(self):
+        self.detected = False
+        self._prev = None
+        self._still_since = None
+        self._last_scan = 0.0
+
+    def reset(self):
+        self.detected = False
+        self._prev = None
+        self._still_since = None
+        self._last_scan = 0.0
+
+    def update(self, frame: np.ndarray, screen: Screen, on_final_lap: bool) -> bool:
+        if self.detected:
+            return True
+        if screen != Screen.RACING or not on_final_lap:
+            self._prev = None
+            self._still_since = None
+            return False
+        now = time.perf_counter()
+        if (now - self._last_scan) < self.SCAN_INTERVAL:
+            return False
+        self._last_scan = now
+        x1, y1, x2, y2 = FINISH_TIMER_BBOX
+        crop = frame[y1:y2, x1:x2]
+        if crop.size == 0:
+            return False
+        small = cv2.resize(crop, None, fx=self.SCALE, fy=self.SCALE,
+                           interpolation=cv2.INTER_AREA)
+        gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY) if len(small.shape) == 3 else small
+        if self._prev is not None and self._prev.shape == gray.shape:
+            diff = float(cv2.absdiff(gray, self._prev).mean())
+            if diff > self.DIFF_THRESHOLD:
+                self._still_since = None          # running or flashing
+            elif self._still_since is None:
+                self._still_since = now
+            elif (now - self._still_since) >= self.STILL_SECONDS:
+                self.detected = True
+                print(f"  [finish] timer frozen >= {self.STILL_SECONDS}s on final lap "
+                      f"-> capturing final time")
+        self._prev = gray
+        return self.detected
 FINISH_MATCH_THRESHOLD = 0.60
 FINISH_CONFIRM_FRAMES  = 3
 
