@@ -55,13 +55,13 @@ Two-phase detection:
 - **Phase 1** (every frame): re-confirm current screen with one template match
 - **Phase 2** (after `CONFIRM_LOSS_FRAMES=3` consecutive misses): scan all reachable candidates from `TRANSITIONS` directed graph
 
-`Screen` is an Enum. Each `Tell` has a primary ROI + optional `alt_roi` + optional `required_also` list. Template images live in `images/screens/`.
+`Screen` is an Enum. Each `Tell` is a **boolean tree**: `tell.groups` is a list of groups (ANDed) where each group is a list of `Region`s (ORed) — a screen matches when every group matches and a group matches when any region matches (`detect_tell` = `min` over groups of `max` over regions ≥ `match_threshold`). A `Region` is `kind="template"` (grayscale `TM_CCOEFF_NORMED` over a ±`search_pad` window) or `kind="dark_loading"` (crush-invariant dark-ROI + bright-icon statistical match, for the RESET family). Template images live in `images/screens/`. User edits persist as one `tell_tree_<SCREEN>` JSON blob per screen (config table); schema v3 (`database/tell_repo.py`) migrates the legacy `tell_roi_/tell_alt_/tell_req_also_*` keys.
 
 ### Selection Tracking (`detection/selection.py`)
-Scans ROIs at 10Hz max. Characters/karts: binary threshold → `TM_CCOEFF_NORMED`. Costumes: Canny edge detection (background-agnostic). Requires `CHAR_CONFIRM_FRAMES=5` consecutive wins; `COSTUME_LOSS_FRAMES=8` consecutive misses before clearing.
+Scans ROIs at 10Hz max. Characters/karts/courses: binary threshold → `TM_CCOEFF_NORMED`. Costumes: Canny edge detection (background-agnostic). Requires `CHAR_CONFIRM_FRAMES=5` consecutive wins; `COSTUME_LOSS_FRAMES=8` consecutive misses before clearing. (Char/kart/course name matching is a candidate to move to the grayscale+slack approach once clean per-item screenshots exist.)
 
 ### Race Telemetry (`race/`)
-All trackers run during `RACING` screen only, at 10Hz. `TimestampTracker` uses burst capture (3 consecutive scans, 2 identical required) triggered by lap crossing or finish detection.
+All trackers run during `RACING` screen only, at 10Hz. `TimestampTracker` uses burst capture (3 consecutive scans, 2 identical required) triggered by a lap crossing or the final-finish event. The **final finish** is detected by `FinishStillDetector` (`race/finish.py`): on the final lap (`current_lap == total_laps`) the timer freezes on the total time with no gold/white flash, so a masked frame-diff of the bright digit pixels stays still for `STILL_SECONDS`. (The old `FinishDetector` 1st/2nd/3rd position-ROI scan is kept in code but disabled — re-enable by uncommenting `finish.update(...)` in `main.py` + restoring the HUD `finish` ROI.) The mushroom counter (`race/mushrooms.py`) matches grayscale templates (cropped from `old_assets/*mush.png`) with `search_pad`, not binary.
 
 ### Minimap Tracking (`minimap/tracker.py`)
 `seed()` locks an HSV-CLAHE-normalized template. Per-frame gatekeeping pipeline: locked-score rejection → jump gate (40px) → re-acquire (5 frames) → Hough ring detection → two-candidate tiebreak (velocity + Hough). EMA smoothing. Visual freeze after 4 low-conf frames, full suspend after 36. Auto-calibration on race completion via inverse-scaled margin formula.
@@ -70,7 +70,10 @@ All trackers run during `RACING` screen only, at 10Hz. `TimestampTracker` uses b
 `RaceLifecycle.on_screen_change()` drives all start/pause/resume/finalize transitions. Attached to `ScreenDetector.on_screen_change`.
 
 ### IPC (`ipc/`)
-`IpcServer` runs asyncio in a daemon thread. Reads newline-delimited JSON from stdin into `inbound_queue`; main loop drains queue once per frame. Outbound events written to stdout. See `docs/ipc-protocol.md`.
+`IpcServer` runs asyncio in a daemon thread. Reads newline-delimited JSON from stdin into `inbound_queue`; main loop drains queue once per frame. Outbound events written to stdout. See `docs/ipc-protocol.md`. Tell editing is region-indexed: `update_region` / `add_region` / `remove_region` / `add_group` / `remove_group` / `capture_region_template` / `test_region` / `get_region_images` (all keyed by `screen`+`group`+`region`), plus `reset_tell` (one screen → defaults) and `reset_roi` (one selection/HUD config ROI → default). Calibration IPC remains in the backend but is unused (no UI).
+
+### Frontend / in-app editor (`src/App.svelte`)
+Single Svelte file. Normal main view = live feed + collapsible status sidebar + interactive screen-graph footer (pan/zoom, click-to-edit). Clicking a graph node turns the feed pane **in place** into the per-screen editor (Detection boolean-tree editor with a zoomable ROI canvas, plus Selection/HUD ROI editing with inline per-item template capture); "← Full preview" returns. The `⚙` button opens a slim Settings modal (language + camera only); first-run setup is Language → Camera → Done. ROI canvas redraws are rAF-coalesced and the engine-frame poll pauses while editing (perf).
 
 ### Config (`config/`)
 `Defaults` dataclass defines all ~60 constants. `Settings` loads from `config` table (falls back to defaults). `settings.update(key, value)` writes to DB; `settings.reload(keys)` hot-reloads affected trackers.

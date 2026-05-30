@@ -13,6 +13,19 @@ Messages are newline-delimited JSON on stdio (Python sidecar ↔ Tauri frontend)
 | `export_pb` | `course` | Emit `pb_export` event with `.mkwreplay` payload |
 | `set_seed` | `course`, `cx`, `cy`, `radius` | Write to `minimap_seeds` table |
 | `set_roi` | `course`, `x`, `y`, `w`, `h` | Write to `minimap_rois` table |
+| `list_tells` | — | Emit `tells_list` (boolean-tree config for every screen) |
+| `list_rois` | — | Emit `rois_list` (selection + HUD config ROIs) |
+| `update_region` | `screen`, `group`, `region`, `roi?`/`thresh?`/`grayscale?`/`kind?`/`icon_roi?` | Mutate one detection region; persists `tell_tree_<SCREEN>`; emits `tells_list` |
+| `add_region` / `remove_region` | `screen`, `group`(, `region`) | Add/remove an OR region in a group; emits `tells_list` |
+| `add_group` / `remove_group` | `screen`(, `group`) | Add/remove an AND group; emits `tells_list` |
+| `capture_region_template` | `screen`, `group`, `region` | Crop+save+reload the region's template; emits `template_saved` |
+| `test_region` / `get_region_images` | `screen`, `group`, `region` | Score / fetch stored template + live crop; emits `template_score` / `template_images` |
+| `reset_tell` | `screen` | Restore one screen's tell (and aliases) to defaults; drops `tell_tree_*`; emits `tells_list` |
+| `reset_roi` | `key` (e.g. `char_name_roi`) | Restore one selection/HUD ROI to its packaged default; emits `rois_list` |
+| `capture_asset_template` / `get_asset_template` | `category`, `item_name` | Capture / preview a per-item reference image (characters/costumes/karts/courses/mushrooms) |
+
+> **Calibration (below) is disabled.** The backend handlers remain but the UI no longer sends them; image normalization is a no-op. The legacy `update_tell`/`add_alt`/`add_required_also`/`capture_template`/`test_template`/`get_template_images` commands were replaced by the region ops above.
+
 | `get_calibration` | — | Echo current `calib_*` values via `calibration_result` (`is_echo=true`) and current capture-slot states via two `calib_capture` events |
 | `capture_calib_frame` | `slot` (1..7) | Snapshot the current camera frame into the backend's calibration slot cache; emits `calib_capture` with `captured=true` |
 | `solve_calibration` | `reset_tell_overrides` (bool) | Pair every cached capture slot with its matching shipped reference and run `solve_transform` on the pooled patches; persists `calib_*` keys; emits `calibration_result`; clears the slot cache.  When `reset_tell_overrides=true`, also wipes `tell_thresh_*` / `tell_alt_thresh_*` / `tell_and_thresh_*` keys |

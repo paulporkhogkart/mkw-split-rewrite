@@ -9,6 +9,13 @@ All constants are stored in the `config` SQLite table (JSON-encoded values). The
 | `confirm_loss_frames` | `3` | Consecutive misses before Phase 2 candidate scan |
 | `unknown_recheck_interval` | `0.5` | Seconds between scans in UNKNOWN state |
 
+Per-screen tell edits (the boolean tree of regions) persist as one JSON blob per
+screen, `tell_tree_<SCREEN>` (e.g. `tell_tree_RACING`), written by the region-edit
+IPC. Schema v3 (`database/tell_repo.py:migrate_tells_to_tree`) one-time-migrates the
+legacy `tell_roi_*` / `tell_thresh_*` / `tell_alt_*` / `tell_req_also_*` /
+`tell_and_thresh_*` / `tell_alt_thresh_*` keys into these blobs and deletes them.
+`calib_*` keys remain but are unused (image normalization is a no-op).
+
 ## Selection Tracking
 
 | Key | Default | Description |
@@ -47,16 +54,21 @@ All constants are stored in the `config` SQLite table (JSON-encoded values). The
 
 ## Finish Detection
 
-| Key | Default | Description |
-|---|---|---|
-| `finish_match_threshold` | `0.60` | Minimum NCC score for finish overlay |
-| `finish_confirm_frames` | `3` | Consecutive hits required to confirm finish |
+Final-lap finish is detected by `FinishStillDetector` (`race/finish.py`): on the
+final lap the timer freezes on the total time with no gold/white flash, so a masked
+frame-diff of the bright digit pixels stays still. Tunables are class constants
+(not config keys): `STILL_SECONDS=2.5`, `DIFF_THRESHOLD=8.0`, `BRIGHT_THRESHOLD=175`.
+The old position-ROI scan (`finish_match_threshold` / `finish_confirm_frames`) is
+disabled but kept in code.
 
 ## Mushroom Tracking
 
+Templates are grayscale crops of `old_assets/*mush.png` (matched with `search_pad`,
+not binary). The ROI is read from the `mushroom_roi` config key.
+
 | Key | Default | Description |
 |---|---|---|
-| `mushroom_match_threshold` | `0.55` | Minimum NCC score for mushroom count template |
+| `mushroom_match_threshold` | `0.55` | Min NCC score for mushroom count (grayscale; may need re-tuning) |
 | `mushroom_loss_frames` | `2` | Consecutive misses before decrementing count |
 | `mushroom_gain_frames` | `2` | Consecutive hits before incrementing count |
 
