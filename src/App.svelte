@@ -3050,24 +3050,15 @@
   }
   .btn-setup       { color: #7eb8f7; border: 1px solid #1e1e4a; }
   .btn-setup:hover { background: #0d0d22; }
-  .btn-edit        { color: #7ef7b8; border: 1px solid #173a2a; }
-  .btn-edit:hover  { background: #0a1a12; }
   .btn-close-wiz   { color: #666; border: 1px solid #1e1e2e; }
   .btn-close-wiz:hover { color: #bbb; background: #111120; }
 
-  /* ── Edit Screens view ──────────────────────────────────────── */
-  .edit-view { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 10px; }
-  /* Graph is wide-and-short → keep it as a slim scrollable strip on top at native
-     (legible) size; the editor pane below takes all remaining space and dominates. */
-  .edit-split { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+  /* ── Screen graph (interactive footer strip) + per-node editor ─── */
   .edit-graph { flex: none; height: 248px; display: flex; flex-direction: column; background: #06060e; border: 1px solid #14142a; border-radius: 6px; overflow: hidden; }
   .edit-graph-vp { flex: 1; min-height: 0; overflow: hidden; }
   .graph-svg-zoom { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
   .graph-svg-zoom.panning { cursor: grabbing; }
   .edit-graph-foot { flex: none; border-top: 1px solid #14142a; padding: 3px 8px; font-size: .58rem; color: #566; text-align: right; }
-  .edit-pane { flex: 1; min-height: 0; overflow: auto; background: #06060e; border: 1px solid #14142a; border-radius: 6px; padding: 10px 12px; }
-  .edit-pane-hd { display: flex; align-items: baseline; gap: 8px; border-bottom: 1px solid #14142a; padding-bottom: 6px; margin-bottom: 8px; }
-  .edit-pane-hd h3 { margin: 0; font-size: .9rem; color: #cde; }
   .edit-screen-id { font-family: Consolas, monospace; font-size: .62rem; color: #567; }
   .edit-tabs { display: flex; gap: 4px; margin-bottom: 10px; }
   .edit-tabs button {
@@ -3076,7 +3067,6 @@
   }
   .edit-tabs button.active { color: #7eb8f7; border-bottom-color: #7eb8f7; }
   .edit-tabs button:hover:not(.active) { color: #9ab; }
-  .edit-pane-empty { display: flex; align-items: center; justify-content: center; min-height: 240px; }
 
   /* Detection tab editor */
   .det-editor { display: flex; gap: 12px; align-items: flex-start; }
@@ -3111,8 +3101,6 @@
   .reg-thumbs { display: flex; gap: 8px; }
   .reg-thumb { flex: 1; font-size: .58rem; color: #678; text-align: center; }
   .reg-thumb img, .reg-thumb-empty { display: block; width: 100%; height: 40px; object-fit: contain; background: #0c0c18; border: 1px solid #1a1a2e; border-radius: 3px; margin-top: 2px; image-rendering: pixelated; }
-  .reg-thresh { font-size: .66rem; color: #9ab; display: block; }
-  .reg-thresh input { width: 100%; }
   .reg-recap { font-size: .7rem; align-self: flex-start; }
   .det-reset { border-top: 1px solid #14142a; margin-top: 4px; padding-top: 8px; }
   .det-reset-btn { width: 100%; background: none; border: 1px solid #2a2a3e; border-radius: 4px; color: #889; font-family: inherit; font-size: .66rem; padding: 5px; cursor: pointer; }
@@ -3120,18 +3108,11 @@
   .det-reset-q { font-size: .68rem; color: #c99; margin: 0 0 6px; }
   .det-reset-row { display: flex; gap: 8px; }
 
-  /* Templates tab */
-  .tpl-editor { display: flex; flex-direction: column; gap: 8px; }
-  .tpl-cats { display: flex; gap: 4px; }
-  .tpl-cats button { background: #0c0c18; border: 1px solid #1e1e3a; color: #9ab; border-radius: 3px; font-family: inherit; font-size: .68rem; padding: 3px 9px; cursor: pointer; }
-  .tpl-cats button.active { border-color: #7eb8f7; color: #cde; background: #0d1f40; }
-  .tpl-body { display: flex; gap: 12px; align-items: flex-start; }
+  /* Per-item template library (in the Selection/HUD tab) */
   .tpl-list { flex: 1; max-height: 360px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; border: 1px solid #14142a; border-radius: 5px; padding: 4px; background: #080a14; }
   .tpl-item { text-align: left; background: none; border: none; color: #9ab; font-family: inherit; font-size: .72rem; padding: 4px 7px; border-radius: 3px; cursor: pointer; }
   .tpl-item:hover { background: #0d1424; }
   .tpl-item.sel { background: #0d1f40; color: #cde; }
-  .tpl-detail { flex: 1.2; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
-  .tpl-detail-hd { font-size: .85rem; color: #cde; }
   /* Selection/HUD: ROI picker beside the (shorter) template list, comparison below */
   .sel-cols { display: flex; gap: 10px; align-items: flex-start; }
   .sel-col { min-width: 0; }
@@ -3256,8 +3237,7 @@
   }
   .graph-toggle:hover { color: #888; }
   .graph-chev { color: #333; font-size: .6rem; }
-  .graph-content { padding: 4px 8px 8px; overflow-x: auto; }
-  .graph-svg { width: 100%; min-width: 700px; height: 215px; display: block; }
+  .graph-content { padding: 4px 8px 8px; }
 
   /* ── Panel ────────────────────────────────────────────────────── */
   .panel { border-bottom: 1px solid #111120; }
@@ -3666,36 +3646,4 @@
   .ldlg-actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: 1rem; }
 
   /* ── First-time modal ─────────────────────────────────────────── */
-
-  /* ── Calibration step ─────────────────────────────────────────── */
-  .calib-step .info-col           { gap: .8rem; }
-  .calib-section                  { background: #06060e; border: 1px solid #1a1a2e; border-radius: 4px; padding: .7rem .8rem; }
-  .calib-section-title            { font-size: .72rem; color: #7eb8f7; margin: 0 0 .5rem; font-weight: 600; }
-  .calib-instruct                 { font-size: .68rem; color: #888; margin: 0 0 .55rem; line-height: 1.5; }
-  .calib-instruct strong          { color: #c8d8ea; font-weight: 500; }
-  .calib-pills                    { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: .55rem; }
-  .calib-pill                     { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .15rem; min-width: 3rem; padding: .45rem .55rem; background: #08081a; border: 1px solid #1a1a2e; border-radius: 4px; color: #888; cursor: pointer; font-family: inherit; transition: border-color .2s, background .2s, color .2s; }
-  .calib-pill:hover:not(:disabled){ border-color: #2a3a5a; color: #c8d8ea; }
-  .calib-pill:disabled            { cursor: not-allowed; opacity: .45; }
-  .calib-pill-ready               { border-color: #1e4030; background: #0a1612; color: #c8d8ea; }
-  .calib-pill-ready:hover:not(:disabled) { border-color: #2e6048; }
-  .calib-pill-num                 { font-size: .85rem; font-weight: 600; color: #7eb8f7; line-height: 1; }
-  .calib-pill-ready .calib-pill-num { color: #7adea2; }
-  .calib-pill-state               { font-size: .7rem; opacity: .8; line-height: 1; }
-  .calib-checkbox                 { display: flex; gap: .45rem; align-items: flex-start; font-size: .7rem; color: #c8d8ea; margin: .35rem 0 .6rem; cursor: pointer; line-height: 1.35; }
-  .calib-checkbox input           { margin-top: 3px; accent-color: #7eb8f7; cursor: pointer; }
-  .calib-checkbox small           { display: block; font-size: .62rem; color: #666; margin-top: 2px; }
-  .calib-result                   { font-size: .72rem; padding: .45rem .6rem; border-radius: 3px; margin-top: .55rem; border: 1px solid; }
-  .calib-result.good              { background: #0b1a14; border-color: #1e4030; color: #7adea2; }
-  .calib-result.warn              { background: #1c1808; border-color: #4a3a10; color: #e0c060; }
-  .calib-result.bad               { background: #1a0a0a; border-color: #4a1818; color: #e07878; }
-  .calib-result-tag               { color: inherit; opacity: .75; margin-left: .25rem; }
-  .calib-manual                   { background: #06060e; border: 1px solid #1a1a2e; border-radius: 4px; padding: .55rem .7rem; }
-  .calib-manual summary           { cursor: pointer; font-size: .7rem; color: #888; outline: none; user-select: none; }
-  .calib-manual[open] summary     { color: #7eb8f7; margin-bottom: .55rem; }
-  .calib-sliders                  { display: flex; flex-direction: column; gap: .3rem; }
-  .calib-sliders .slider-row      { display: grid; grid-template-columns: 4.5rem 1fr 2.3rem; align-items: center; gap: .5rem; font-size: .68rem; color: #aaa; }
-  .calib-sliders .slider-row label { color: #888; }
-  .calib-sliders .slider-row input[type=range] { accent-color: #7eb8f7; cursor: pointer; height: 3px; }
-  .calib-sliders .slider-val      { text-align: right; color: #c8d8ea; font-variant-numeric: tabular-nums; }
 </style>
