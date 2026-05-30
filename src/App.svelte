@@ -370,7 +370,7 @@
       "lobster_roller","loco_moto","mach_rocket","mecha_trike","pipe_frame",
       "plushbuggy","rally_bike","rally_kart","rally_romper","rallygator",
       "reel_racer","ribbit_revster","roadster_royale","rob_hog","standard_bike",
-      "standard_kart","stellar_sled","tune_thumper","w-twin_chopper","zoom_buggy",
+      "standard_kart","stellar_sled","tune_thumper","w_twin_chopper","zoom_buggy",
     ].map(f => ({ name: fileToDisplayName(f), file: f })),
     courses: [
       "Acorn Heights","Airship Fortress","Boo Cinema","Bowser's Castle",
@@ -382,7 +382,7 @@
       "Toad's Factory","Wario Stadium","Wario's Galleon","Whistlestop Summit",
     ].map(n => ({ name: n, file: toFilename(n) })),
     costumes: [
-      "aero","all-terrain","aristocrat","aurora","aviator","biker","biker_jr",
+      "aero","all_terrain","aristocrat","aurora","aviator","biker","biker_jr",
       "burger_bud","conductor","cowboy","dune_rider","engineer","explorer",
       "farmer","fisherman","food_slinger","gondolier","happi","mariachi",
       "matsuri","mechanic","oasis","pirate","pit_crew","pro_racer","road_ruffian",
@@ -2205,60 +2205,60 @@
                   {/if}
                   {:else}
                     {@const _keys = activeTab==="selection" ? (NODE_SELECTION[selectedNode]||[]) : (NODE_HUD[selectedNode]||[])}
-                    <div class="tree-label">{activeTab==="selection" ? "Selection text ROIs" : "HUD ROIs"}</div>
-                    <div class="tree-group">
-                      {#each _keys as k}
-                        <button class="tree-region" class:sel={activeRoiName===k} on:click={()=>selectRoiName(k)}>
-                          <span class="treg-dot" style="background:{activeRoiName===k ? '#7eb8f7' : '#ffcc00'}"></span>
-                          <span class="treg-name">{roiMeta(k).label}</span>
-                        </button>
-                      {/each}
-                    </div>
-                    {#if activeRoiName}
-                      <div class="reg-controls">
-                        <p class="hint">{roiMeta(activeRoiName).hint}</p>
-                        <div class="det-reset">
-                          {#if roiResetPending}
-                            <p class="det-reset-q">Reset <b>{roiMeta(activeRoiName).label}</b> to its default position?</p>
-                            <div class="det-reset-row">
-                              <button class="btn-reset-confirm" on:click={resetActiveRoi}>Yes, reset</button>
-                              <button class="btn-nav" on:click={()=>roiResetPending=false}>Cancel</button>
-                            </div>
-                          {:else}
-                            <button class="det-reset-btn" on:click={()=>roiResetPending=true}>↺ Reset this ROI to default</button>
-                          {/if}
+                    {@const _cat = activeRoiName ? ROI_TEMPLATE_CAT[activeRoiName] : null}
+                    <div class="sel-cols">
+                      <div class="sel-col sel-col-roi">
+                        <div class="tree-label">{activeTab==="selection" ? "Text ROI" : "HUD ROI"}</div>
+                        <div class="tree-group">
+                          {#each _keys as k}
+                            <button class="tree-region" class:sel={activeRoiName===k} on:click={()=>selectRoiName(k)}>
+                              <span class="treg-dot" style="background:{activeRoiName===k ? '#7eb8f7' : '#ffcc00'}"></span>
+                              <span class="treg-name">{roiMeta(k).label}</span>
+                            </button>
+                          {/each}
                         </div>
+                        {#if activeRoiName}
+                          <div class="det-reset">
+                            {#if roiResetPending}
+                              <p class="det-reset-q">Reset <b>{roiMeta(activeRoiName).label}</b> to default?</p>
+                              <div class="det-reset-row">
+                                <button class="btn-reset-confirm" on:click={resetActiveRoi}>Yes, reset</button>
+                                <button class="btn-nav" on:click={()=>roiResetPending=false}>Cancel</button>
+                              </div>
+                            {:else}
+                              <button class="det-reset-btn" on:click={()=>roiResetPending=true}>↺ Reset ROI</button>
+                            {/if}
+                          </div>
+                        {/if}
                       </div>
-                    {/if}
-                  {/if}
-                </div>
-              </div>
-              {#if (activeTab === "selection" || activeTab === "hud") && activeRoiName && ROI_TEMPLATE_CAT[activeRoiName]}
-                {@const cat = ROI_TEMPLATE_CAT[activeRoiName]}
-                <div class="tpl-full">
-                  <div class="tree-label">{catLabel(cat)} reference images</div>
-                  <div class="tpl-full-body">
-                    <div class="tpl-list">
-                      {#each ASSET_ITEMS[cat] || [] as item, i}
-                        <button class="tpl-item" class:sel={templateItemIdx===i} on:click={()=>selectTplItem(i)}>{item.name}</button>
-                      {/each}
+                      {#if _cat}
+                        <div class="sel-col sel-col-list">
+                          <div class="tree-label">{catLabel(_cat)}</div>
+                          <div class="tpl-list sel-tpl-list">
+                            {#each ASSET_ITEMS[_cat] || [] as item, i}
+                              <button class="tpl-item" class:sel={templateItemIdx===i} on:click={()=>selectTplItem(i)}>{item.name}</button>
+                            {/each}
+                          </div>
+                        </div>
+                      {/if}
                     </div>
-                    <div class="tpl-detail">
-                      {#if assetItem}
-                        <div class="tpl-detail-hd">{assetItem.name}</div>
-                        <p class="hint">{ASSET_HINTS[cat]?.(assetItem.name)}</p>
-                        <div class="tpl-thumbs">
-                          <div class="tpl-thumb"><span>live{cat==="costumes" ? " (edges)" : ""}</span>{#if assetLiveCrop}<img src={assetLiveCrop} alt="live"/>{:else}<div class="tpl-thumb-empty"></div>{/if}</div>
-                          <div class="tpl-thumb"><span>template</span>{#if assetTemplateImg}<img src={assetTemplateImg} alt="template"/>{:else}<div class="tpl-thumb-empty"></div>{/if}</div>
+                    {#if _cat && assetItem}
+                      <div class="reg-controls">
+                        <p class="hint">{ASSET_HINTS[_cat]?.(assetItem.name)}</p>
+                        <div class="reg-thumbs">
+                          <div class="reg-thumb"><span>live{_cat==="costumes" ? " (edges)" : ""}</span>{#if assetLiveCrop}<img src={assetLiveCrop} alt="live"/>{:else}<div class="reg-thumb-empty"></div>{/if}</div>
+                          <div class="reg-thumb"><span>template</span>{#if assetTemplateImg}<img src={assetTemplateImg} alt="template"/>{:else}<div class="reg-thumb-empty"></div>{/if}</div>
                         </div>
                         <button class="btn-secondary reg-recap" on:click={captureAsset} disabled={capturingTemplate}>
                           {capturingTemplate ? "Capturing…" : `Capture ${assetItem.name}`}
                         </button>
-                      {/if}
-                    </div>
-                  </div>
+                      </div>
+                    {:else if activeRoiName}
+                      <p class="hint" style="margin-top:6px">{roiMeta(activeRoiName).hint}</p>
+                    {/if}
+                  {/if}
                 </div>
-              {/if}
+              </div>
           </div>
         {:else}
           <div class="edit-pane-empty"><p class="hint">Select a screen node on the left to edit it.</p></div>
@@ -3151,13 +3151,12 @@
   .tpl-item.sel { background: #0d1f40; color: #cde; }
   .tpl-detail { flex: 1.2; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
   .tpl-detail-hd { font-size: .85rem; color: #cde; }
-  /* Full-width template row below the feed/ROI editor (so thumbnails aren't cramped) */
-  .tpl-full { margin-top: 12px; border-top: 1px solid #14142a; padding-top: 10px; }
-  .tpl-full-body { display: flex; gap: 16px; align-items: flex-start; margin-top: 6px; }
-  .tpl-full .tpl-list { flex: 0 0 210px; max-height: 320px; }
-  .tpl-thumbs { display: flex; gap: 16px; }
-  .tpl-thumb { flex: 1; max-width: 360px; font-size: .64rem; color: #678; text-align: center; }
-  .tpl-thumb img, .tpl-thumb-empty { display: block; width: 100%; height: 96px; object-fit: contain; background: #0c0c18; border: 1px solid #1a1a2e; border-radius: 4px; margin-top: 3px; image-rendering: pixelated; }
+  /* Selection/HUD: ROI picker beside the (shorter) template list, comparison below */
+  .sel-cols { display: flex; gap: 10px; align-items: flex-start; }
+  .sel-col { min-width: 0; }
+  .sel-col-roi { flex: 1; }
+  .sel-col-list { flex: 1; }
+  .sel-tpl-list { max-height: 168px; }
 
   .win-controls { display: flex; flex-shrink: 0; margin-left: 0; }
   .win-btn {
