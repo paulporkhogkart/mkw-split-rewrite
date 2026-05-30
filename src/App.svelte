@@ -2229,36 +2229,36 @@
                           {/if}
                         </div>
                       </div>
-                      {#if ROI_TEMPLATE_CAT[activeRoiName]}
-                        {@const cat = ROI_TEMPLATE_CAT[activeRoiName]}
-                        <div class="tpl-inline">
-                          <div class="tree-label">{catLabel(cat)} reference images</div>
-                          <div class="tpl-body">
-                            <div class="tpl-list">
-                              {#each ASSET_ITEMS[cat] || [] as item, i}
-                                <button class="tpl-item" class:sel={templateItemIdx===i} on:click={()=>selectTplItem(i)}>{item.name}</button>
-                              {/each}
-                            </div>
-                            <div class="tpl-detail">
-                              {#if assetItem}
-                                <div class="tpl-detail-hd">{assetItem.name}</div>
-                                <p class="hint">{ASSET_HINTS[cat]?.(assetItem.name)}</p>
-                                <div class="reg-thumbs">
-                                  <div class="reg-thumb"><span>live{cat==="costumes" ? " (edges)" : ""}</span>{#if assetLiveCrop}<img src={assetLiveCrop} alt="live"/>{:else}<div class="reg-thumb-empty"></div>{/if}</div>
-                                  <div class="reg-thumb"><span>template</span>{#if assetTemplateImg}<img src={assetTemplateImg} alt="template"/>{:else}<div class="reg-thumb-empty"></div>{/if}</div>
-                                </div>
-                                <button class="btn-secondary reg-recap" on:click={captureAsset} disabled={capturingTemplate}>
-                                  {capturingTemplate ? "Capturing…" : `Capture ${assetItem.name}`}
-                                </button>
-                              {/if}
-                            </div>
-                          </div>
-                        </div>
-                      {/if}
                     {/if}
                   {/if}
                 </div>
               </div>
+              {#if (activeTab === "selection" || activeTab === "hud") && activeRoiName && ROI_TEMPLATE_CAT[activeRoiName]}
+                {@const cat = ROI_TEMPLATE_CAT[activeRoiName]}
+                <div class="tpl-full">
+                  <div class="tree-label">{catLabel(cat)} reference images</div>
+                  <div class="tpl-full-body">
+                    <div class="tpl-list">
+                      {#each ASSET_ITEMS[cat] || [] as item, i}
+                        <button class="tpl-item" class:sel={templateItemIdx===i} on:click={()=>selectTplItem(i)}>{item.name}</button>
+                      {/each}
+                    </div>
+                    <div class="tpl-detail">
+                      {#if assetItem}
+                        <div class="tpl-detail-hd">{assetItem.name}</div>
+                        <p class="hint">{ASSET_HINTS[cat]?.(assetItem.name)}</p>
+                        <div class="tpl-thumbs">
+                          <div class="tpl-thumb"><span>live{cat==="costumes" ? " (edges)" : ""}</span>{#if assetLiveCrop}<img src={assetLiveCrop} alt="live"/>{:else}<div class="tpl-thumb-empty"></div>{/if}</div>
+                          <div class="tpl-thumb"><span>template</span>{#if assetTemplateImg}<img src={assetTemplateImg} alt="template"/>{:else}<div class="tpl-thumb-empty"></div>{/if}</div>
+                        </div>
+                        <button class="btn-secondary reg-recap" on:click={captureAsset} disabled={capturingTemplate}>
+                          {capturingTemplate ? "Capturing…" : `Capture ${assetItem.name}`}
+                        </button>
+                      {/if}
+                    </div>
+                  </div>
+                </div>
+              {/if}
           </div>
         {:else}
           <div class="edit-pane-empty"><p class="hint">Select a screen node on the left to edit it.</p></div>
@@ -3151,6 +3151,13 @@
   .tpl-item.sel { background: #0d1f40; color: #cde; }
   .tpl-detail { flex: 1.2; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
   .tpl-detail-hd { font-size: .85rem; color: #cde; }
+  /* Full-width template row below the feed/ROI editor (so thumbnails aren't cramped) */
+  .tpl-full { margin-top: 12px; border-top: 1px solid #14142a; padding-top: 10px; }
+  .tpl-full-body { display: flex; gap: 16px; align-items: flex-start; margin-top: 6px; }
+  .tpl-full .tpl-list { flex: 0 0 210px; max-height: 320px; }
+  .tpl-thumbs { display: flex; gap: 16px; }
+  .tpl-thumb { flex: 1; max-width: 360px; font-size: .64rem; color: #678; text-align: center; }
+  .tpl-thumb img, .tpl-thumb-empty { display: block; width: 100%; height: 96px; object-fit: contain; background: #0c0c18; border: 1px solid #1a1a2e; border-radius: 4px; margin-top: 3px; image-rendering: pixelated; }
 
   .win-controls { display: flex; flex-shrink: 0; margin-left: 0; }
   .win-btn {
