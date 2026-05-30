@@ -2655,14 +2655,14 @@
   .btn-close-wiz:hover { color: #bbb; background: #111120; }
 
   /* ── Edit Screens view ──────────────────────────────────────── */
-  .edit-view { flex: 1; min-height: 0; overflow: auto; padding: 10px; }
-  /* Graph is wide-and-short, so stack it on top at full width (labels scale up
-     and stay legible) with the editor pane filling the space below it. */
-  .edit-split { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
-  .edit-graph { background: #06060e; border: 1px solid #14142a; border-radius: 6px; padding: 8px; overflow-x: auto; }
-  .edit-graph .graph-svg { width: 100%; min-width: 860px; height: auto; display: block; }
-  .edit-graph-hint { margin: 6px 2px 0; font-size: .66rem; color: #566; }
-  .edit-pane { flex: 1; background: #06060e; border: 1px solid #14142a; border-radius: 6px; padding: 10px 12px; min-height: 320px; }
+  .edit-view { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 10px; }
+  /* Graph is wide-and-short → keep it as a slim scrollable strip on top at native
+     (legible) size; the editor pane below takes all remaining space and dominates. */
+  .edit-split { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+  .edit-graph { flex: none; height: 196px; background: #06060e; border: 1px solid #14142a; border-radius: 6px; padding: 6px 8px; overflow: auto; }
+  .edit-graph .graph-svg { width: 860px; height: 248px; min-width: 0; display: block; }
+  .edit-graph-hint { display: none; }
+  .edit-pane { flex: 1; min-height: 0; overflow: auto; background: #06060e; border: 1px solid #14142a; border-radius: 6px; padding: 10px 12px; }
   .edit-pane-hd { display: flex; align-items: baseline; gap: 8px; border-bottom: 1px solid #14142a; padding-bottom: 6px; margin-bottom: 8px; }
   .edit-pane-hd h3 { margin: 0; font-size: .9rem; color: #cde; }
   .edit-screen-id { font-family: Consolas, monospace; font-size: .62rem; color: #567; }
