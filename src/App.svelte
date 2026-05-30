@@ -124,12 +124,40 @@
     selectedNode = screenName;
     activeTab = "detection";
     activeRegion = { group: 0, region: 0 };
+    if (!editMode) fitGraph();   // re-fit the graph to width when entering the view
     editMode = true;
     send({ type: "list_tells" });
     send({ type: "list_rois" });
   }
   function closeEdit() { editMode = false; stopRoiPoll(); }
   function openSettings() { openWizard(); }   // modal wizard, now limited to Language + Camera
+
+  // ── Edit-view graph pan/zoom ────────────────────────────────────────────────────
+  // Graph content spans ~860×248 user units. The strip is a fixed-height viewport;
+  // a transform group provides zoom (wheel) + pan (drag). Initial zoom fits width.
+  const GRAPH_W = 860;
+  let gZoom = 1, gPanX = 0, gPanY = 0, gWrapW = 0, gFitted = false;
+  let _gPanning = false, _gMoved = false, _gStart = null;
+  $: if (gWrapW && !gFitted) { gZoom = Math.max(0.4, (gWrapW - 16) / GRAPH_W); gPanX = 0; gPanY = 0; gFitted = true; }
+  function fitGraph() { gFitted = false; }    // re-fit on next measure (called on entering edit)
+  function onGraphWheel(e) {
+    e.preventDefault();
+    const r = e.currentTarget.getBoundingClientRect();
+    const cx = e.clientX - r.left, cy = e.clientY - r.top;
+    const nz = Math.min(6, Math.max(0.25, gZoom * (e.deltaY < 0 ? 1.12 : 1/1.12)));
+    gPanX = cx - (cx - gPanX) * (nz / gZoom);
+    gPanY = cy - (cy - gPanY) * (nz / gZoom);
+    gZoom = nz;
+  }
+  function onGraphDown(e) { _gPanning = true; _gMoved = false; _gStart = { x:e.clientX, y:e.clientY, px:gPanX, py:gPanY }; }
+  function onGraphMove(e) {
+    if (!_gPanning) return;
+    const dx = e.clientX - _gStart.x, dy = e.clientY - _gStart.y;
+    if (Math.abs(dx) + Math.abs(dy) > 3) _gMoved = true;
+    gPanX = _gStart.px + dx; gPanY = _gStart.py + dy;
+  }
+  function onGraphUp() { _gPanning = false; }
+  function nodeClick(id) { if (_gMoved) return; openNode(id); }   // ignore the click that ends a pan-drag
 
   let tells = [];
   let rois = {};
@@ -1793,33 +1821,37 @@
   <!-- ── Edit Screens view (interactive graph + per-node editor) ─────────────── -->
   <div class="edit-view">
     <div class="edit-split">
-      <!-- left: interactive screen graph -->
-      <div class="edit-graph">
-        <svg viewBox="0 0 860 248" class="graph-svg" xmlns="http://www.w3.org/2000/svg">
-          {#each GRAPH_EDGES as [from, to]}
-            {@const a=graphNodeMap[from]}
-            {@const b=graphNodeMap[to]}
-            {#if a && b}
-              <line x1={a.x+NW/2} y1={a.y+NH/2} x2={b.x+NW/2} y2={b.y+NH/2}
-                stroke="#1a1a2e" stroke-width="1" opacity="0.5" />
-            {/if}
-          {/each}
-          {#each GRAPH_NODES as node}
-            {@const isSel    = node.id === selectedNode}
-            {@const isActive = node.id === backendScreen}
-            <g transform="translate({node.x},{node.y})" style="cursor:pointer"
-               role="button" tabindex="-1" on:click={()=>openNode(node.id)}>
-              <rect width={NW} height={NH} rx="3" ry="3"
-                fill={isSel ? "#0d1f40" : "#05050e"}
-                stroke={isSel ? "#7eb8f7" : (isActive ? "#3a5a7a" : "#1a1a2e")}
-                stroke-width={isSel ? 1.5 : 1} />
-              <text x={NW/2} y={NH/2} text-anchor="middle" dominant-baseline="central"
-                font-size="7" font-family="Consolas, monospace"
-                fill={isSel ? "#7eb8f7" : "#566"}>{node.label}</text>
-            </g>
-          {/each}
+      <!-- left: interactive screen graph (zoom = scroll, pan = drag) -->
+      <div class="edit-graph" bind:clientWidth={gWrapW}>
+        <svg class="graph-svg-zoom" class:panning={_gPanning} xmlns="http://www.w3.org/2000/svg"
+             on:wheel={onGraphWheel} on:mousedown={onGraphDown}
+             on:mousemove={onGraphMove} on:mouseup={onGraphUp} on:mouseleave={onGraphUp}>
+          <g transform="translate({gPanX} {gPanY}) scale({gZoom})">
+            {#each GRAPH_EDGES as [from, to]}
+              {@const a=graphNodeMap[from]}
+              {@const b=graphNodeMap[to]}
+              {#if a && b}
+                <line x1={a.x+NW/2} y1={a.y+NH/2} x2={b.x+NW/2} y2={b.y+NH/2}
+                  stroke="#1a1a2e" stroke-width="1" opacity="0.5" />
+              {/if}
+            {/each}
+            {#each GRAPH_NODES as node}
+              {@const isSel    = node.id === selectedNode}
+              {@const isActive = node.id === backendScreen}
+              <g transform="translate({node.x},{node.y})" style="cursor:pointer"
+                 role="button" tabindex="-1" on:click={()=>nodeClick(node.id)}>
+                <rect width={NW} height={NH} rx="3" ry="3"
+                  fill={isSel ? "#0d1f40" : "#05050e"}
+                  stroke={isSel ? "#7eb8f7" : (isActive ? "#3a5a7a" : "#1a1a2e")}
+                  stroke-width={isSel ? 1.5 : 1} />
+                <text x={NW/2} y={NH/2} text-anchor="middle" dominant-baseline="central"
+                  font-size="7" font-family="Consolas, monospace"
+                  fill={isSel ? "#7eb8f7" : "#566"}>{node.label}</text>
+              </g>
+            {/each}
+          </g>
         </svg>
-        <p class="edit-graph-hint">Click a screen node to edit its detection &amp; templates.</p>
+        <span class="edit-graph-tip">scroll = zoom · drag = pan</span>
       </div>
 
       <!-- right: per-node editor pane -->
@@ -2659,9 +2691,10 @@
   /* Graph is wide-and-short → keep it as a slim scrollable strip on top at native
      (legible) size; the editor pane below takes all remaining space and dominates. */
   .edit-split { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
-  .edit-graph { flex: none; height: 196px; background: #06060e; border: 1px solid #14142a; border-radius: 6px; padding: 6px 8px; overflow: auto; }
-  .edit-graph .graph-svg { width: 860px; height: 248px; min-width: 0; display: block; }
-  .edit-graph-hint { display: none; }
+  .edit-graph { position: relative; flex: none; height: 220px; background: #06060e; border: 1px solid #14142a; border-radius: 6px; overflow: hidden; }
+  .graph-svg-zoom { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+  .graph-svg-zoom.panning { cursor: grabbing; }
+  .edit-graph-tip { position: absolute; right: 8px; bottom: 6px; font-size: .58rem; color: #455; pointer-events: none; background: #06060ecc; padding: 1px 5px; border-radius: 3px; }
   .edit-pane { flex: 1; min-height: 0; overflow: auto; background: #06060e; border: 1px solid #14142a; border-radius: 6px; padding: 10px 12px; }
   .edit-pane-hd { display: flex; align-items: baseline; gap: 8px; border-bottom: 1px solid #14142a; padding-bottom: 6px; margin-bottom: 8px; }
   .edit-pane-hd h3 { margin: 0; font-size: .9rem; color: #cde; }
