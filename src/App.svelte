@@ -138,7 +138,7 @@
   const GRAPH_W = 860;
   let gZoom = 1, gPanX = 0, gPanY = 0, gWrapW = 0, gFitted = false;
   let _gPanning = false, _gMoved = false, _gStart = null;
-  $: if (gWrapW && !gFitted) { gZoom = Math.max(0.4, (gWrapW - 16) / GRAPH_W); gPanX = 0; gPanY = 0; gFitted = true; }
+  $: if (gWrapW && !gFitted) { gZoom = Math.max(0.4, 0.8 * gWrapW / GRAPH_W); gPanX = 0; gPanY = 0; gFitted = true; }
   function fitGraph() { gFitted = false; }    // re-fit on next measure (called on entering edit)
   function onGraphWheel(e) {
     e.preventDefault();
@@ -1822,7 +1822,8 @@
   <div class="edit-view">
     <div class="edit-split">
       <!-- left: interactive screen graph (zoom = scroll, pan = drag) -->
-      <div class="edit-graph" bind:clientWidth={gWrapW}>
+      <div class="edit-graph">
+        <div class="edit-graph-vp" bind:clientWidth={gWrapW}>
         <svg class="graph-svg-zoom" class:panning={_gPanning} xmlns="http://www.w3.org/2000/svg"
              on:wheel={onGraphWheel} on:mousedown={onGraphDown}
              on:mousemove={onGraphMove} on:mouseup={onGraphUp} on:mouseleave={onGraphUp}>
@@ -1851,7 +1852,8 @@
             {/each}
           </g>
         </svg>
-        <span class="edit-graph-tip">scroll = zoom · drag = pan</span>
+        </div>
+        <div class="edit-graph-foot">scroll = zoom · drag = pan</div>
       </div>
 
       <!-- right: per-node editor pane -->
@@ -2691,10 +2693,11 @@
   /* Graph is wide-and-short → keep it as a slim scrollable strip on top at native
      (legible) size; the editor pane below takes all remaining space and dominates. */
   .edit-split { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
-  .edit-graph { position: relative; flex: none; height: 220px; background: #06060e; border: 1px solid #14142a; border-radius: 6px; overflow: hidden; }
+  .edit-graph { flex: none; height: 232px; display: flex; flex-direction: column; background: #06060e; border: 1px solid #14142a; border-radius: 6px; overflow: hidden; }
+  .edit-graph-vp { flex: 1; min-height: 0; overflow: hidden; }
   .graph-svg-zoom { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
   .graph-svg-zoom.panning { cursor: grabbing; }
-  .edit-graph-tip { position: absolute; right: 8px; bottom: 6px; font-size: .58rem; color: #455; pointer-events: none; background: #06060ecc; padding: 1px 5px; border-radius: 3px; }
+  .edit-graph-foot { flex: none; border-top: 1px solid #14142a; padding: 3px 8px; font-size: .58rem; color: #566; text-align: right; }
   .edit-pane { flex: 1; min-height: 0; overflow: auto; background: #06060e; border: 1px solid #14142a; border-radius: 6px; padding: 10px 12px; }
   .edit-pane-hd { display: flex; align-items: baseline; gap: 8px; border-bottom: 1px solid #14142a; padding-bottom: 6px; margin-bottom: 8px; }
   .edit-pane-hd h3 { margin: 0; font-size: .9rem; color: #cde; }
