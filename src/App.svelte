@@ -243,6 +243,19 @@
     activeTab = tab; roiResetPending = false; detResetPending = false;
     if (tab === "selection") activeRoiName = NODE_SELECTION[selectedNode]?.[0] ?? null;
     else if (tab === "hud")  activeRoiName = NODE_HUD[selectedNode]?.[0] ?? null;
+    else if (tab === "templates") {
+      templateCategory = NODE_TEMPLATES[selectedNode]?.[0] ?? "characters";
+      templateItemIdx = 0; assetTemplateImg = null; assetLiveCrop = null;
+    }
+  }
+  function catLabel(c) { return ASSET_CATEGORIES.find(x=>x.key===c)?.label ?? c; }
+  function selectTplCategory(c) {
+    templateCategory = c; templateItemIdx = 0; assetTemplateImg = null; assetLiveCrop = null;
+  }
+  function selectTplItem(i) {
+    templateItemIdx = i; assetTemplateImg = null; assetLiveCrop = null;
+    const item = ASSET_ITEMS[templateCategory]?.[i];
+    if (item) send({ type:"get_asset_template", category:templateCategory, item_name:item.file });
   }
   function selectRoiName(k) { activeRoiName = k; roiResetPending = false; drawRoi(); }
   function editTabRois() {
@@ -1247,6 +1260,10 @@
       if (view === "edit") {
         if (activeTab === "detection" && selectedNode)
           send({type:"test_region",screen:selectedNode,group:activeRegion.group,region:activeRegion.region});
+        else if (activeTab === "templates") {
+          const item=ASSET_ITEMS[templateCategory]?.[templateItemIdx];
+          if (item) send({type:"get_asset_template",category:templateCategory,item_name:item.file});
+        }
         return;
       }
       if (!wizardOpen) return;
@@ -1613,7 +1630,7 @@
   $: currentTell = tells.find(t=>t.screen===SCREEN_NAMES[screenIdx])??null;
 
   $: if (((wizardOpen || view === "setup")&&["screens","selection","hud","templates"].includes(wizardStep))
-         || (view === "edit" && activeTab === "detection" && selectedNode)) {
+         || (view === "edit" && (activeTab === "detection" || activeTab === "templates") && selectedNode)) {
     startRoiPoll();
   } else { stopRoiPoll(); }
 
@@ -2218,7 +2235,37 @@
                 </div>
               </div>
             {:else}
-              <p class="hint">Templates editor is coming in the next increment.</p>
+              {@const cats = NODE_TEMPLATES[selectedNode] || []}
+              <div class="tpl-editor">
+                {#if cats.length > 1}
+                  <div class="tpl-cats">
+                    {#each cats as c}
+                      <button class:active={templateCategory===c} on:click={()=>selectTplCategory(c)}>{catLabel(c)}</button>
+                    {/each}
+                  </div>
+                {/if}
+                <div class="tpl-body">
+                  <div class="tpl-list">
+                    {#each ASSET_ITEMS[templateCategory] || [] as item, i}
+                      <button class="tpl-item" class:sel={templateItemIdx===i} on:click={()=>selectTplItem(i)}>{item.name}</button>
+                    {/each}
+                  </div>
+                  <div class="tpl-detail">
+                    {#if assetItem}
+                      <div class="tpl-detail-hd">{assetItem.name}</div>
+                      <p class="hint">{ASSET_HINTS[templateCategory]?.(assetItem.name)}</p>
+                      <div class="reg-thumbs">
+                        <div class="reg-thumb"><span>live crop</span>{#if assetLiveCrop}<img src={assetLiveCrop} alt="live"/>{:else}<div class="reg-thumb-empty"></div>{/if}</div>
+                        <div class="reg-thumb"><span>captured</span>{#if assetTemplateImg}<img src={assetTemplateImg} alt="captured"/>{:else}<div class="reg-thumb-empty"></div>{/if}</div>
+                      </div>
+                      <button class="btn-secondary reg-recap" on:click={captureAsset} disabled={capturingTemplate}>
+                        {capturingTemplate ? "Capturing…" : `Capture ${assetItem.name}`}
+                      </button>
+                      <p class="hint" style="font-size:.6rem">Crops the current frame to the {catLabel(templateCategory).toLowerCase()} ROI and saves it as this item’s reference image.</p>
+                    {/if}
+                  </div>
+                </div>
+              </div>
             {/if}
           </div>
         {:else}
@@ -3099,6 +3146,19 @@
   .det-reset-btn:hover { border-color: #4a2a2a; color: #c99; }
   .det-reset-q { font-size: .68rem; color: #c99; margin: 0 0 6px; }
   .det-reset-row { display: flex; gap: 8px; }
+
+  /* Templates tab */
+  .tpl-editor { display: flex; flex-direction: column; gap: 8px; }
+  .tpl-cats { display: flex; gap: 4px; }
+  .tpl-cats button { background: #0c0c18; border: 1px solid #1e1e3a; color: #9ab; border-radius: 3px; font-family: inherit; font-size: .68rem; padding: 3px 9px; cursor: pointer; }
+  .tpl-cats button.active { border-color: #7eb8f7; color: #cde; background: #0d1f40; }
+  .tpl-body { display: flex; gap: 12px; align-items: flex-start; }
+  .tpl-list { flex: 1; max-height: 360px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; border: 1px solid #14142a; border-radius: 5px; padding: 4px; background: #080a14; }
+  .tpl-item { text-align: left; background: none; border: none; color: #9ab; font-family: inherit; font-size: .72rem; padding: 4px 7px; border-radius: 3px; cursor: pointer; }
+  .tpl-item:hover { background: #0d1424; }
+  .tpl-item.sel { background: #0d1f40; color: #cde; }
+  .tpl-detail { flex: 1.2; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+  .tpl-detail-hd { font-size: .85rem; color: #cde; }
 
   .win-controls { display: flex; flex-shrink: 0; margin-left: 0; }
   .win-btn {
