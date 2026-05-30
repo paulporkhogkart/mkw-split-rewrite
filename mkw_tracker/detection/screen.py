@@ -650,6 +650,21 @@ class ScreenDetector:
     def get_tells_config(self) -> list:
         return [self._tell_to_dict(s, t) for s, t in self._tells_by_screen.items()]
 
+    def reset_tell(self, screen_name: str) -> Optional[dict]:
+        """Restore one screen's tell to its hardcoded default tree (and aliases)."""
+        try:
+            screen = Screen[screen_name]
+        except KeyError:
+            return None
+        spec = next((t for t in self._tells_spec if t.screen == screen), None)
+        if spec is None:
+            return None
+        fresh = copy.deepcopy(spec)
+        fresh.load(self._switch2_language)
+        self._tells_by_screen[screen] = fresh
+        self._propagate_tree(screen)
+        return self._tell_to_dict(screen, fresh)
+
     def _propagate_tree(self, screen: Screen) -> None:
         """Deep-copy the canonical screen's groups onto its alias screens."""
         tell = self._tells_by_screen.get(screen)

@@ -121,6 +121,20 @@ def test_update_region_sets_roi_and_thresh():
     assert title["groups"][0][0]["thresh"] == 88
 
 
+def test_reset_tell_restores_default_and_aliases():
+    d = ScreenDetector()
+    d.update_region("RACING", group=0, region=0, roi=[1, 2, 3, 4])
+    d.add_group("RACING", roi=[5, 6, 7, 8])
+    racing = next(e for e in d.get_tells_config() if e["screen"] == "RACING")
+    assert len(racing["groups"]) == 3 and racing["groups"][0][0]["roi"] == [1, 2, 3, 4]
+    d.reset_tell("RACING")
+    racing = next(e for e in d.get_tells_config() if e["screen"] == "RACING")
+    ghost  = next(e for e in d.get_tells_config() if e["screen"] == "GHOST")
+    assert len(racing["groups"]) == 2
+    assert racing["groups"][0][0]["roi"] == [78, 987, 96, 1015]
+    assert len(ghost["groups"]) == 2 and ghost["groups"][0][0]["roi"] == [78, 987, 96, 1015]
+
+
 def test_serialize_groups_round_trips_through_blob():
     from mkw_tracker.database.tell_repo import serialize_groups, groups_from_blob
     d = ScreenDetector()

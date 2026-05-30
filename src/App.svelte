@@ -107,6 +107,7 @@
   let selectedNode = null;                      // Screen name currently open in the editor
   let activeTab = "detection";                  // "detection" | "selection" | "hud" | "templates"
   let activeRegion = { group: 0, region: 0 };   // Detection tab: selected region
+  let detResetPending = false;                  // confirm gate for "reset detection to defaults"
   // Detection feed zoom/pan (so small ROIs can be adjusted precisely)
   let fZoom = 1, fPanX = 0, fPanY = 0;
   let _fPanning = false, _fStart = null;
@@ -127,6 +128,7 @@
     selectedNode = screenName;
     activeTab = "detection";
     activeRegion = { group: 0, region: 0 };
+    detResetPending = false;
     resetFeedZoom();
     if (!editMode) fitGraph();   // re-fit the graph to width when entering the view
     editMode = true;
@@ -140,9 +142,15 @@
   // Graph content spans ~860×248 user units. The strip is a fixed-height viewport;
   // a transform group provides zoom (wheel) + pan (drag). Initial zoom fits width.
   const GRAPH_W = 860;
-  let gZoom = 1, gPanX = 0, gPanY = 0, gWrapW = 0, gFitted = false;
+  let gZoom = 1, gPanX = 0, gPanY = 0, gWrapW = 0, gWrapH = 0, gFitted = false;
   let _gPanning = false, _gMoved = false, _gStart = null;
-  $: if (gWrapW && !gFitted) { gZoom = Math.max(0.4, 0.8 * gWrapW / GRAPH_W); gPanX = (gWrapW - GRAPH_W * gZoom) / 2; gPanY = 0; gFitted = true; }
+  const GRAPH_H = 205;   // content height after the vertical compression
+  $: if (gWrapW && !gFitted) {
+    gZoom = Math.max(0.4, 0.8 * gWrapW / GRAPH_W);
+    gPanX = (gWrapW - GRAPH_W * gZoom) / 2;
+    gPanY = Math.max(0, (gWrapH - GRAPH_H * gZoom) / 2);   // center vertically, don't upscale
+    gFitted = true;
+  }
   function fitGraph() { gFitted = false; }    // re-fit on next measure (called on entering edit)
   function onGraphWheel(e) {
     e.preventDefault();
@@ -217,6 +225,12 @@
     if (!selectedNode) return;
     capturingTemplate = true; currentScore = null;
     send({ type:"capture_region_template", screen:selectedNode, group:activeRegion.group, region:activeRegion.region });
+  }
+  function resetDetection() {
+    if (!selectedNode) return;
+    send({ type:"reset_tell", screen:selectedNode });
+    activeRegion = { group: 0, region: 0 };
+    detResetPending = false;
   }
 
   let tells = [];
@@ -1991,7 +2005,7 @@
     <div class="edit-split">
       <!-- left: interactive screen graph (zoom = scroll, pan = drag) -->
       <div class="edit-graph">
-        <div class="edit-graph-vp" bind:clientWidth={gWrapW}>
+        <div class="edit-graph-vp" bind:clientWidth={gWrapW} bind:clientHeight={gWrapH}>
         <svg class="graph-svg-zoom" class:panning={_gPanning} xmlns="http://www.w3.org/2000/svg"
              on:wheel={onGraphWheel} on:mousedown={onGraphDown}
              on:mousemove={onGraphMove} on:mouseup={onGraphUp} on:mouseleave={onGraphUp}>
@@ -2108,6 +2122,18 @@
                         {/if}
                       </div>
                     {/if}
+
+                    <div class="det-reset">
+                      {#if detResetPending}
+                        <p class="det-reset-q">Reset <b>{selectedNode}</b>’s detection ROIs &amp; groups to defaults? This discards your custom regions for this screen.</p>
+                        <div class="det-reset-row">
+                          <button class="btn-reset-confirm" on:click={resetDetection}>Yes, reset</button>
+                          <button class="btn-nav" on:click={()=>detResetPending=false}>Cancel</button>
+                        </div>
+                      {:else}
+                        <button class="det-reset-btn" on:click={()=>detResetPending=true}>↺ Reset detection to defaults</button>
+                      {/if}
+                    </div>
                   {:else}
                     <p class="hint">Loading detection config…</p>
                   {/if}
@@ -2936,7 +2962,7 @@
   /* Graph is wide-and-short → keep it as a slim scrollable strip on top at native
      (legible) size; the editor pane below takes all remaining space and dominates. */
   .edit-split { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
-  .edit-graph { flex: none; height: 200px; display: flex; flex-direction: column; background: #06060e; border: 1px solid #14142a; border-radius: 6px; overflow: hidden; }
+  .edit-graph { flex: none; height: 248px; display: flex; flex-direction: column; background: #06060e; border: 1px solid #14142a; border-radius: 6px; overflow: hidden; }
   .edit-graph-vp { flex: 1; min-height: 0; overflow: hidden; }
   .graph-svg-zoom { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
   .graph-svg-zoom.panning { cursor: grabbing; }
@@ -2990,6 +3016,11 @@
   .reg-thresh { font-size: .66rem; color: #9ab; display: block; }
   .reg-thresh input { width: 100%; }
   .reg-recap { font-size: .7rem; align-self: flex-start; }
+  .det-reset { border-top: 1px solid #14142a; margin-top: 4px; padding-top: 8px; }
+  .det-reset-btn { width: 100%; background: none; border: 1px solid #2a2a3e; border-radius: 4px; color: #889; font-family: inherit; font-size: .66rem; padding: 5px; cursor: pointer; }
+  .det-reset-btn:hover { border-color: #4a2a2a; color: #c99; }
+  .det-reset-q { font-size: .68rem; color: #c99; margin: 0 0 6px; }
+  .det-reset-row { display: flex; gap: 8px; }
 
   .win-controls { display: flex; flex-shrink: 0; margin-left: 0; }
   .win-btn {

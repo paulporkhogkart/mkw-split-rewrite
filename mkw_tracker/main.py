@@ -374,6 +374,20 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
             _persist_tell_tree(settings, sn, detector)
             ipc.emit(emit_tells_list(detector.get_tells_config()))
 
+    elif t == "reset_tell":
+        sn = msg.get("screen", "")
+        res = detector.reset_tell(sn)
+        if res is not None:
+            # Drop the persisted override so it stays default across restarts.
+            from .detection.screen import Screen as _Scr, TELL_ALIAS_GROUPS as _TAG
+            try:
+                _canon = _Scr[sn]
+                for _s in [sn] + [a.name for a in _TAG.get(_canon, [])]:
+                    delete_configs_like(f"tell_tree_{_s}")
+            except KeyError:
+                pass
+            ipc.emit(emit_tells_list(detector.get_tells_config()))
+
     elif t == "capture_region_template":
         frame = current_frame[0]
         if frame is not None:
