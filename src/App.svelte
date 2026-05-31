@@ -2857,8 +2857,8 @@
   /* In-place per-screen editor (replaces the feed in the main-feed pane) */
   .main-feed-editing { background: var(--panel); }
   .node-editor-bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--bd); flex-shrink: 0; }
-  .btn-back-preview { margin-left: auto; flex-shrink: 0; background: var(--panel-2); border: 1px solid var(--bd); color: var(--accent); border-radius: var(--r); font-family: inherit; font-size: .72rem; padding: 3px 9px; cursor: pointer; }
-  .btn-back-preview:hover { background: var(--accent-bg); }
+  .btn-back-preview { margin-left: auto; flex-shrink: 0; background: var(--panel-2); border: 1px solid var(--bd); color: var(--tx-mut); border-radius: var(--r); font-family: inherit; font-size: .72rem; padding: 3px 9px; cursor: pointer; }
+  .btn-back-preview:hover { background: var(--raised); color: var(--tx); }
   .node-editor-title { font-size: .88rem; color: var(--tx); }
   .det-tabs { margin-bottom: 8px; }
   .main-feed-editing .edit-tab-body { flex: 1; min-height: 0; overflow: auto; padding: 10px 12px; }
@@ -3217,17 +3217,17 @@
   .btn-secondary:hover:not(:disabled) { background: var(--raised); color: var(--tx-mut); }
   .btn-secondary:disabled { opacity: .4; cursor: default; }
   .btn-nav {
-    background: var(--panel-2); color: var(--accent); border: 1px solid var(--bd); border-radius: var(--r);
+    background: var(--panel-2); color: var(--tx-mut); border: 1px solid var(--bd); border-radius: var(--r);
     padding: .24rem .7rem; font-family: inherit; font-size: .72rem;
-    cursor: pointer; flex-shrink: 0; transition: background .12s;
+    cursor: pointer; flex-shrink: 0; transition: background .12s, color .12s;
   }
-  .btn-nav:hover { background: var(--panel-2); }
+  .btn-nav:hover { background: var(--raised); color: var(--tx); }
   .btn-sm {
-    background: var(--panel-2); color: var(--accent); border: 1px solid var(--bd); border-radius: var(--r);
+    background: var(--panel-2); color: var(--tx-mut); border: 1px solid var(--bd); border-radius: var(--r);
     padding: .16rem .45rem; font-family: inherit; font-size: .68rem;
-    cursor: pointer; flex-shrink: 0;
+    cursor: pointer; flex-shrink: 0; transition: background .12s, color .12s;
   }
-  .btn-sm:hover { background: var(--panel-2); }
+  .btn-sm:hover { background: var(--raised); color: var(--tx); }
 
   /* Forms / select */
   select {
