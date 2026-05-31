@@ -117,7 +117,6 @@
   let wizardOpen = false;
   let wizardStep = "language";
   let resetConfirmPending = false;
-  let screenIdx = 0, selectionIdx = 0, hudIdx = 0;
 
   // ── Edit Screens model ──────────────────────────────────────────────────────────
   let selectedNode = null;                      // Screen name currently open in the editor
@@ -383,7 +382,6 @@
   let templateCategory = "characters", templateItemIdx = 0;
   let _roiPollTimer = null;
   let currentBinaryThresh = 170;
-  let activeRoiKey = "primary";
 
   // ── Camera ────────────────────────────────────────────────────────────────────
   let wizVideoEl = null, videoStream = null;
@@ -1032,7 +1030,7 @@
   // ── Wizard controls ───────────────────────────────────────────────────────────
   async function openWizard() {
     wizardOpen=true; wizardStep="language";
-    screenIdx=0; selectionIdx=0; hudIdx=0; currentScore=null;
+    currentScore=null;
     await loadBrowserDevices();
   }
   function closeWizard() {
@@ -1048,11 +1046,11 @@
     if (!selectedAudioDeviceId) startCamera(selectedBrowserDeviceId || undefined);
   }
   function goStep(step) {
-    wizardStep=step; screenIdx=0; selectionIdx=0; hudIdx=0;
+    wizardStep=step;
     templateCategory="characters"; templateItemIdx=0;
     currentScore=null; templateImg=null; liveCropImg=null;
     liveRoiCrop=null; assetTemplateImg=null; assetLiveCrop=null;
-    activeRoiKey="primary"; resetConfirmPending=false; syncThreshToScreen();
+    resetConfirmPending=false; syncThreshToScreen();
     if (step==="camera") {
       // Ask Python to open its camera if not already open
       if (pythonCameraStatus!=="ok") {
@@ -1071,29 +1069,6 @@
     }
   }
 
-  function addRequiredAlso() {
-    send({type:"add_required_also",screen:SCREEN_NAMES[screenIdx],roi:[935,515,985,565]});
-    activeRoiKey="and_0"; syncThreshToScreen();
-  }
-  function removeRequiredAlso(index) {
-    send({type:"remove_required_also",screen:SCREEN_NAMES[screenIdx],index});
-    activeRoiKey="primary";
-  }
-  function addAlt() {
-    send({type:"add_alt",screen:SCREEN_NAMES[screenIdx],roi:[935,515,985,565]});
-    activeRoiKey="alt"; syncThreshToScreen();
-  }
-  function removeAlt() {
-    send({type:"remove_alt",screen:SCREEN_NAMES[screenIdx]}); activeRoiKey="primary";
-  }
-  function testScreen() {
-    currentScore=null; liveCropImg=null;
-    send({type:"test_template",screen:SCREEN_NAMES[screenIdx],roi_key:activeRoiKey});
-  }
-  function captureScreen() {
-    capturingTemplate=true; currentScore=null;
-    send({type:"capture_template",screen:SCREEN_NAMES[screenIdx],roi_key:activeRoiKey});
-  }
   function captureAsset() {
     const item=ASSET_ITEMS[templateCategory]?.[templateItemIdx]; if (!item) return;
     capturingTemplate=true; assetTemplateImg=null;
@@ -1230,16 +1205,10 @@
   // RoiCanvas.svelte; the editor view just feeds it props.)
 
   // ── Reactive computeds ────────────────────────────────────────────────────────
-  $: currentScreenName  = SCREEN_NAMES[screenIdx]??"";;
-  $: currentScreenLabel = SCREEN_LABELS[currentScreenName]??currentScreenName;
-  $: currentScreenHint  = SCREEN_HINTS[currentScreenName]??"";
-  $: selItem   = SELECTION_ROIS[selectionIdx];
-  $: hudItem   = HUD_ROIS[hudIdx];
   $: cameraOk  = cameraStatus==="ok";
   $: pythonCameraOk = pythonCameraStatus==="ok"&&engineFrame!==null&&!trackerCameraPaused;
   $: bothCamerasOk  = cameraOk&&pythonCameraOk;
   $: assetItem = ASSET_ITEMS[templateCategory]?.[templateItemIdx];
-  $: currentTell = tells.find(t=>t.screen===SCREEN_NAMES[screenIdx])??null;
 
   $: if (((wizardOpen || appView === "setup")&&["screens","selection","hud","templates"].includes(wizardStep))
          || (editingNode && selectedNode && (

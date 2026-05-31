@@ -72,8 +72,17 @@ All trackers run during `RACING` screen only, at 10Hz. `TimestampTracker` uses b
 ### IPC (`ipc/`)
 `IpcServer` runs asyncio in a daemon thread. Reads newline-delimited JSON from stdin into `inbound_queue`; main loop drains queue once per frame. Outbound events written to stdout. See `docs/ipc-protocol.md`. Tell editing is region-indexed: `update_region` / `add_region` / `remove_region` / `add_group` / `remove_group` / `capture_region_template` / `test_region` / `get_region_images` (all keyed by `screen`+`group`+`region`), plus `reset_tell` (one screen → defaults) and `reset_roi` (one selection/HUD config ROI → default). Calibration IPC remains in the backend but is unused (no UI).
 
-### Frontend / in-app editor (`src/App.svelte`)
-Single Svelte file. Normal main view = live feed + collapsible status sidebar + interactive screen-graph footer (pan/zoom, click-to-edit). Clicking a graph node turns the feed pane **in place** into the per-screen editor (Detection boolean-tree editor with a zoomable ROI canvas, plus Selection/HUD ROI editing with inline per-item template capture); "← Full preview" returns. The `⚙` button opens a slim Settings modal (language + camera only); first-run setup is Language → Camera → Done. ROI canvas redraws are rAF-coalesced and the engine-frame poll pauses while editing (perf).
+### Frontend (`src/App.svelte` + `src/lib/` + `src/components/`)
+`App.svelte` is the thin shell: `tracker-event` IPC handler, Svelte store mirrors, view router (`"monitor"` | `"edit"`), editor event forwarding, and camera/wizard logic. Shared modules in `src/lib/`: `ipc.js` (fire-and-forget `send()`), `stores.js` (writable stores for all backend state), `palette.js` (design tokens), `format.js` (score formatting / labels), `graph.js` (screen-graph layout + pan/zoom math), `overlay.js` (canvas drawing functions).
+
+Two top-level views, toggled by a title-bar button (`TitleBar`):
+
+- **Monitor view** — `FeedOverlay` draws active ROIs and the minimap reconstruction (icon sample / live tracking dot / historical replay trails) over a `<video>` element showing the browser camera stream. To its right: the **Rail** (`Rail.svelte`) — a `RailSection`-based column with expandable `ReadoutRow` entries (click to reveal `CandidateList` with ranked confidence scores) for screen, character, kart, course, and costume; a `RaceSection` showing dynamic lap splits and total time; and a collapsible `EventLog`.
+- **Edit mode** — `EditMode.svelte` hosts a top-strip `ScreenGraph` navigator (pan/zoom, click-to-select), a `RoiCanvas` (zoomable, drag-to-resize ROI handles, engine frame as background), and a `ToolsPanel` with Detection and Readout tabs. The Detection tab contains `DetectionTree` (boolean-tree AND-groups / OR-regions editor) and `RegionInspector` (live crop vs stored template side-by-side). The Readout tab provides `ReadoutRoiEditor` with inline per-item template capture.
+
+**Settings modal** (`SettingsModal.svelte`) — `SourceCheck` (dual browser+Python feed preview), `DeviceSelectors` (video + audio device dropdowns), and `LanguageSelectors` (application language + Switch-system language). First-run wizard follows Language → Camera → Done; returning-user re-run shows all on one screen.
+
+A bottom `StatusBar` shows connection dot, live screen name + confidence score, fps, and capture resolution. All components use tabular-figures monospace for numeric readouts. The engine-frame poll pauses while the monitor view is active (browser stream renders directly); ROI canvas redraws are rAF-coalesced inside `RoiCanvas.svelte`.
 
 ### Config (`config/`)
 `Defaults` dataclass defines all ~60 constants. `Settings` loads from `config` table (falls back to defaults). `settings.update(key, value)` writes to DB; `settings.reload(keys)` hot-reloads affected trackers.
