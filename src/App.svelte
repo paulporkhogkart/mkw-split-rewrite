@@ -1441,10 +1441,6 @@
   function onAppLanguageChange()   { send({type:"update_config",key:"app_language",   value:appLanguage}); }
   function onSwitch2LanguageChange(){ send({type:"update_config",key:"switch2_language",value:switch2Language}); }
 
-  function openLangDialog() {
-    langDlgApp=appLanguage; langDlgSw2=switch2Language;
-    langDialogEl?.showModal();
-  }
   function saveLangDialog() {
     if (langDlgApp!==appLanguage) {
       appLanguage=langDlgApp;
@@ -2476,6 +2472,29 @@
 
   {/if}<!-- /view router -->
 
+  <!-- ── Bottom status bar (single home for live engine status) ─────────────── -->
+  <footer class="statusbar">
+    <span class="hb-dot" style="background:{statusDot}"></span>
+    {#if trackerConnected && backendAlive}
+      <span class="sb-screen">{backendScreen}</span>
+      <span class="sb-sep">·</span>
+      <span class="sb-score" style="color:{scoreColor(liveScore)}">{liveScore.toFixed(3)}</span>
+      <span class="sb-sep">·</span>
+      <span class="sb-fps">{backendFps} fps</span>
+      <span class="sb-spacer"></span>
+      <span class="sb-res">{pythonFrameW}×{pythonFrameH}</span>
+    {:else if trackerConnected}
+      <span class="sb-warn">backend stalled</span>
+      <span class="sb-spacer"></span>
+    {:else if trackerSpawned}
+      <span class="sb-idle">engine starting…</span>
+      <span class="sb-spacer"></span>
+    {:else}
+      <span class="sb-idle">launching…</span>
+      <span class="sb-spacer"></span>
+    {/if}
+  </footer>
+
 </div><!-- /app -->
 
 
@@ -2714,26 +2733,7 @@
   .brand-name { font-size: .85rem; font-weight: bold; color: var(--accent); letter-spacing: .02em; }
   .brand-ver  { font-size: .65rem; color: var(--tx-dim); }
 
-  .lang-badge {
-    display: flex; align-items: center; gap: 4px;
-    background: var(--panel); border: 1px solid var(--bd); border-radius: var(--r);
-    padding: 2px 7px; font-family: inherit; font-size: .65rem; cursor: pointer;
-    color: var(--tx-mut); transition: background .12s, border-color .12s;
-    -webkit-app-region: no-drag; flex-shrink: 0;
-  }
-  .lang-badge:hover { background: var(--raised); border-color: var(--bd); color: var(--tx-mut); }
-  .lang-app { color: var(--accent); }
-  .lang-sep  { color: var(--tx-dim); }
-  .lang-sw2  { color: var(--accent-soft); }
-
-  .tb-health { flex: 1; display: flex; align-items: center; gap: 6px; font-size: .7rem; min-width: 0; overflow: hidden; }
   .hb-dot    { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; transition: background .6s; }
-  .hb-screen { color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .hb-score  { font-size: .7rem; font-family: var(--mono); }
-  .hb-fps    { color: var(--tx-dim); }
-  .hb-sep    { color: var(--tx-dim); }
-  .hb-warn   { color: var(--warn); }
-  .hb-idle   { color: var(--tx-dim); font-style: italic; }
 
   .tb-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; -webkit-app-region: no-drag; margin-left: auto; }
   .upd-strip  { display: flex; align-items: center; gap: 5px; font-size: .65rem; }
@@ -2750,6 +2750,21 @@
   .btn-setup:hover { background: var(--raised); }
   .btn-close-wiz   { color: var(--tx-dim); border: 1px solid var(--bd); }
   .btn-close-wiz:hover { color: var(--tx-mut); background: var(--bd); }
+
+  /* Bottom status bar */
+  .statusbar {
+    flex: none; display: flex; align-items: center; gap: 8px;
+    height: 24px; padding: 0 12px;
+    background: var(--panel); border-top: 1px solid var(--bd);
+    font-family: var(--mono); font-size: .68rem; color: var(--tx-mut);
+  }
+  .statusbar .sb-screen { color: var(--tx); }
+  .statusbar .sb-sep    { color: var(--tx-dim); }
+  .statusbar .sb-fps,
+  .statusbar .sb-res    { color: var(--tx-mut); }
+  .statusbar .sb-warn   { color: var(--warn); }
+  .statusbar .sb-idle   { color: var(--tx-dim); font-style: italic; }
+  .statusbar .sb-spacer { flex: 1; }
 
   /* ── Screen graph (interactive footer strip) + per-node editor ─── */
   .edit-graph { flex: none; height: 248px; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--bd); border-radius: var(--r); overflow: hidden; }
