@@ -1,0 +1,60 @@
+/* Design tokens + globals — Neutral Graphite (OBS-style).
+   Single source of truth for CSS colors. JS/canvas/SVG colors are mirrored
+   in the `C` palette object in App.svelte (a <canvas> cannot read CSS vars).
+   Keep the two in sync. */
+:root {
+  /* Surfaces & borders */
+  --bg:        #1b1c1e;
+  --panel:     #232427;
+  --panel-2:   #2a2b2f;
+  --raised:    #303135;
+  --bd:        #3a3b40;
+  --bd-soft:   #2e2f33;
+  --feed-bg:   #0c0d0f;
+  --track:     #0e0f11;
+
+  /* Text */
+  --tx:        #d8d9dc;
+  --tx-mut:    #9a9ca1;
+  --tx-dim:    #6b6d73;
+
+  /* Accent — the only decorative color (active / selected / primary action) */
+  --accent:      #3d7cc2;
+  --accent-soft: #2d5e94;
+  --accent-bg:   #26303c;
+
+  /* Status — functional (tracking health) */
+  --ok:    #5aa86a;
+  --warn:  #c89a3e;
+  --err:   #cf5b4e;
+  --idle:  #56585e;
+  --close: #c4382a;
+
+  /* Typography */
+  --ui:   'Segoe UI', system-ui, -apple-system, sans-serif;
+  --mono: 'Cascadia Code', Consolas, ui-monospace, monospace;
+
+  /* Geometry */
+  --r:    3px;
+  --r-sm: 2px;
+}
+
+/* Universal reset — preserved from App.svelte's old :global(*) rule.
+   box-sizing must stay global or panel/feed widths shift. */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: var(--bg); color: var(--tx);
+  font-family: var(--ui); font-size: 13px;
+  overflow: hidden;
+}
+#app { height: 100vh; }
+
+/* Thin scrollbars to match the app chrome (Chromium webview) */
+* { scrollbar-width: thin; scrollbar-color: var(--bd) transparent; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bd); border-radius: var(--r); }
+::-webkit-scrollbar-thumb:hover { background: var(--raised); }
+::-webkit-scrollbar-corner { background: transparent; }

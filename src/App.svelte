@@ -8,6 +8,18 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { t } from "./translations.js";
 
+  // JS color palette — mirrors the CSS tokens in theme.css for places that
+  // cannot read CSS vars (canvas 2D context, inline SVG fills, JS-returned styles).
+  // Keep in sync with theme.css :root.
+  const C = {
+    bg:'#1b1c1e', panel:'#232427', panel2:'#2a2b2f', raised:'#303135',
+    bd:'#3a3b40', bdSoft:'#2e2f33',
+    tx:'#d8d9dc', txMut:'#9a9ca1', txDim:'#6b6d73',
+    accent:'#3d7cc2', accentSoft:'#2d5e94', accentBg:'#26303c',
+    ok:'#5aa86a', warn:'#c89a3e', err:'#cf5b4e', idle:'#56585e',
+    roiCtx:'#8a8d93',   // neutral sibling/context ROI box on the feed overlay
+  };
+
   let appWindow = null;
   function winMinimize()       { appWindow?.minimize(); }
   function winToggleMaximize() { appWindow?.toggleMaximize(); }
@@ -30,7 +42,7 @@
   let candidateScores = {};
   let _tick = 0;
   $: backendAlive = trackerConnected && _tick >= 0 && (Date.now() - lastHeartbeatTs) < 4000;
-  $: statusDot = !trackerConnected ? "#444" : backendAlive ? "#4caf50" : "#f59e0b";
+  $: statusDot = !trackerConnected ? C.idle : backendAlive ? C.ok : C.warn;
   $: view = setupComplete === null ? "startup"
           : setupComplete === false ? "setup"
           : "main";
@@ -1692,9 +1704,9 @@
 
   function confBar(v) { return Math.round((v||0)*100); }
   function scoreColor(v) {
-    if (v>=0.8) return "#4caf50";
-    if (v>=0.5) return "#f59e0b";
-    return "#ef4444";
+    if (v >= 0.8) return C.ok;
+    if (v >= 0.5) return C.warn;
+    return C.err;
   }
 </script>
 
@@ -2709,19 +2721,8 @@
 <!-- ═══════════════════════════════════════════════════════════════════════════ -->
 
 <style>
-  :global(*) { box-sizing: border-box; margin: 0; padding: 0; }
-  :global(body) {
-    background: #080810; color: #e8e8f0;
-    font-family: Consolas, 'Courier New', monospace;
-    font-size: 13px; overflow: hidden;
-  }
-  /* Thin dark scrollbars to match the app chrome (Chromium webview) */
-  :global(*) { scrollbar-width: thin; scrollbar-color: #1c1c2e transparent; }
-  :global(::-webkit-scrollbar) { width: 6px; height: 6px; }
-  :global(::-webkit-scrollbar-track) { background: transparent; }
-  :global(::-webkit-scrollbar-thumb) { background: #1c1c2e; border-radius: 3px; }
-  :global(::-webkit-scrollbar-thumb:hover) { background: #2a2a40; }
-  :global(::-webkit-scrollbar-corner) { background: transparent; }
+  /* ── Global ──────────────────────────────────────────────────────────────── */
+  /* Universal reset, html/body base, #app, and scrollbar styling live in src/theme.css */
 
   /* ── App shell ────────────────────────────────────────────────── */
   .app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
