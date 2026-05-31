@@ -1,5 +1,5 @@
 <script>
-  import { onMount, onDestroy, afterUpdate } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import { check } from "@tauri-apps/plugin-updater";
   import { listen } from "@tauri-apps/api/event";
   import { attachLogger } from "@tauri-apps/plugin-log";
@@ -9,15 +9,16 @@
   import { t } from "./translations.js";
   import { C } from "./lib/palette.js";
   import { send } from "./lib/ipc.js";
-  import { scoreColor } from "./lib/format.js";
   import TitleBar from "./components/TitleBar.svelte";
   import StatusBar from "./components/StatusBar.svelte";
   import Rail from "./components/Rail.svelte";
   import FeedOverlay from "./components/FeedOverlay.svelte";
+  import EditMode from "./components/EditMode.svelte";
   import { screen as screenStore, liveScore as liveScoreStore,
            candidates as candidatesStore, selection as selectionStore,
            race as raceStore, logs as logsStore,
            tells as tellsStore, rois as roisStore,
+           view as viewStore,
            minimap as minimapStore, replays as replaysStore, sample as sampleStore } from "./lib/stores.js";
 
   let appWindow = null;
@@ -45,12 +46,15 @@
   let _tick = 0;
   $: backendAlive = trackerConnected && _tick >= 0 && (Date.now() - lastHeartbeatTs) < 4000;
   $: statusDot = !trackerConnected ? C.idle : backendAlive ? C.ok : C.warn;
-  $: view = setupComplete === null ? "startup"
+  // Lifecycle view (startup → setup → main). The monitor↔edit switch within "main"
+  // lives in the `view` store ($viewStore: "monitor" | "edit").
+  $: appView = setupComplete === null ? "startup"
           : setupComplete === false ? "setup"
           : "main";
-  // Editing a screen = a graph node is selected; the feed pane becomes the editor
-  // in place (no separate view).
-  $: editingNode = view === "main" && selectedNode != null;
+  // Editing a screen = the main lifecycle view is active AND the edit view is open.
+  $: editingNode = appView === "main" && $viewStore === "edit";
+  // Force back to the monitor view whenever we leave the main lifecycle view.
+  $: if (appView !== "main" && $viewStore === "edit") closeNodeEditor();
 
   // ── Selection state ───────────────────────────────────────────────────────────
   let selChar = null, selCharConf = 0;
@@ -110,7 +114,6 @@
 
   // ── Sidebar panel open/close ──────────────────────────────────────────────────
   let panelOpen = { detection: true, candidates: true, selection: true, hud: true, thresholds: false, log: true };
-  let graphOpen = true;
 
   // ── Wizard state ──────────────────────────────────────────────────────────────
   let setupComplete = null;  // null = unknown (waiting for ready), false = needs setup, true = done
@@ -127,9 +130,7 @@
   let detResetPending = false;                  // confirm gate for "reset detection to defaults"
   let activeRoiName = null;                      // Selection/HUD tab: selected config-ROI key
   let roiResetPending = false;                   // confirm gate for "reset this ROI"
-  // Detection feed zoom/pan (so small ROIs can be adjusted precisely)
-  let fZoom = 1, fPanX = 0, fPanY = 0;
-  let _fPanning = false, _fStart = null;
+  // (ROI canvas zoom/pan + drag now live inside RoiCanvas.svelte.)
 
   // Which extra tabs each node owns (beyond the always-present Detection tab).
   const TAB_LABELS = { detection:"Detection", selection:"Selection", hud:"HUD", templates:"Templates" };
@@ -148,45 +149,36 @@
     activeTab = "detection";
     activeRegion = { group: 0, region: 0 };
     detResetPending = false;
-    resetFeedZoom();
+    editCanvas?.resetCanvas();
     send({ type: "list_tells" });
     send({ type: "list_rois" });
   }
   function closeNodeEditor() { selectedNode = null; stopRoiPoll(); }
   function openSettings() { openWizard(); }   // modal wizard, now limited to Language + Camera
 
-  // ── Edit-view graph pan/zoom ────────────────────────────────────────────────────
-  // Graph content spans ~860×248 user units. The strip is a fixed-height viewport;
-  // a transform group provides zoom (wheel) + pan (drag). Initial zoom fits width.
-  const GRAPH_W = 860;
-  let gZoom = 1, gPanX = 0, gPanY = 0, gWrapW = 0, gWrapH = 0, gFitted = false;
-  let _gPanning = false, _gMoved = false, _gStart = null;
-  const GRAPH_H = 205;   // content height after the vertical compression
-  $: if (gWrapW && gWrapH && !gFitted) {
-    gZoom = Math.max(0.4, 0.92 * gWrapW / GRAPH_W);   // ~one wheel-notch (×1.15) past fit-to-80%
-    gPanX = (gWrapW - GRAPH_W * gZoom) / 2;
-    gPanY = (gWrapH - GRAPH_H * gZoom) / 2;   // vertically center within the graph strip
-    gFitted = true;
+  // Toggle between the monitor and edit views. Entering edit defaults the selected
+  // screen to the live backend screen when it's editable; exiting clears the editor.
+  let editCanvas = null;   // bound EditMode instance (fit graph / reset canvas on enter)
+  function toggleView() {
+    if ($viewStore === "edit") {
+      viewStore.set("monitor");
+      closeNodeEditor();
+    } else {
+      // Default to the current live screen if it's a known editable node; otherwise
+      // keep whatever was last open (may be null → graph shows with no selection).
+      if (!selectedNode && SCREEN_NAMES.includes(backendScreen)) {
+        openNode(backendScreen);
+      } else {
+        send({ type: "list_tells" });
+        send({ type: "list_rois" });
+      }
+      viewStore.set("edit");
+    }
   }
-  function fitGraph() { gFitted = false; }    // re-fit on next measure (called on entering edit)
-  function onGraphWheel(e) {
-    e.preventDefault();
-    const r = e.currentTarget.getBoundingClientRect();
-    const cx = e.clientX - r.left, cy = e.clientY - r.top;
-    const nz = Math.min(6, Math.max(0.25, gZoom * (e.deltaY < 0 ? 1.12 : 1/1.12)));
-    gPanX = cx - (cx - gPanX) * (nz / gZoom);
-    gPanY = cy - (cy - gPanY) * (nz / gZoom);
-    gZoom = nz;
-  }
-  function onGraphDown(e) { _gPanning = true; _gMoved = false; _gStart = { x:e.clientX, y:e.clientY, px:gPanX, py:gPanY }; }
-  function onGraphMove(e) {
-    if (!_gPanning) return;
-    const dx = e.clientX - _gStart.x, dy = e.clientY - _gStart.y;
-    if (Math.abs(dx) + Math.abs(dy) > 3) _gMoved = true;
-    gPanX = _gStart.px + dx; gPanY = _gStart.py + dy;
-  }
-  function onGraphUp() { _gPanning = false; }
-  function nodeClick(id) { if (_gMoved) return; openNode(id); }   // ignore the click that ends a pan-drag
+
+  // ── Edit-view graph ───────────────────────────────────────────────────────────
+  // Pan/zoom + node-click handling now live in the ScreenGraph component
+  // (src/components/ScreenGraph.svelte), driven by src/lib/graph.js.
 
   // ── Detection tab (boolean-tree) helpers ────────────────────────────────────────
   $: editTell = tells.find(t => t.screen === selectedNode) ?? null;
@@ -213,7 +205,6 @@
       send({ type:"get_region_images", screen:selectedNode, group:gi, region:ri });
       send({ type:"test_region",       screen:selectedNode, group:gi, region:ri });
     }
-    drawRoi();
   }
   function addRegion(gi) {
     if (!selectedNode || !editTell) return;
@@ -269,7 +260,6 @@
     activeRoiName = k; roiResetPending = false;
     const cat = ROI_TEMPLATE_CAT[k];
     if (cat) { templateCategory = cat; templateItemIdx = 0; assetTemplateImg = null; assetLiveCrop = null; }
-    drawRoi();
   }
   function editTabRois() {
     const keys = activeTab==="selection" ? (NODE_SELECTION[selectedNode]||[]) : (NODE_HUD[selectedNode]||[]);
@@ -284,6 +274,105 @@
     roiResetPending = false;
   }
 
+  // ── RoiCanvas adapters ────────────────────────────────────────────────────────
+  // Map the editor's ROI lists onto the RoiCanvas prop shape ({ box, role, ... }).
+  // role: 'active' (selected), 'sibling' (same group, detection only), 'other'.
+  $: canvasRois = !editingNode ? []
+    : activeTab === "detection"
+      ? editRois().map(re => ({
+          box: re.roi,
+          role: re.active ? "active" : (re.gi === activeRegion.group ? "sibling" : "other"),
+          gi: re.gi, ri: re.ri,
+        }))
+      : editTabRois().map(re => ({
+          box: re.roi,
+          role: re.active ? "active" : "other",
+          k: re.k,
+        }));
+  // The editable ROI that receives drag handles.
+  $: activeEditBox = !editingNode ? null
+    : activeTab === "detection" ? (activeRegionObj?.roi ?? null)
+    : (activeRoiName ? (rois[activeRoiName] ?? null) : null);
+
+  // RoiCanvas committed a drag/resize → persist locally (so the box stays) + IPC.
+  function onCanvasChange(box) {
+    updateCurrentRoi(box);
+    saveCurrentRoi(box);
+  }
+  // RoiCanvas click on an inactive box → switch the active region/ROI.
+  function onCanvasSelect(re) {
+    if (!re) return;
+    if (activeTab === "detection") {
+      if (re.gi != null && re.ri != null) selectRegion(re.gi, re.ri);
+    } else if (re.k) {
+      selectRoiName(re.k);
+    }
+  }
+
+  // ── ToolsPanel bundles ────────────────────────────────────────────────────────
+  // ToolsPanel exposes two tabs: "detection" | "readout". The editor's internal
+  // activeTab is "detection" | "selection" | "hud" — map between them. A screen has
+  // at most one readout tab (selection XOR hud), so "readout" resolves to whichever.
+  $: readoutEnabled = !!(NODE_SELECTION[selectedNode] || NODE_HUD[selectedNode]);
+  $: toolsActiveTab = activeTab === "detection" ? "detection" : "readout";
+  function setToolsTab(tab) {
+    if (tab === "detection") setTab("detection");
+    else setTab(NODE_SELECTION[selectedNode] ? "selection" : "hud");
+  }
+
+  // Detection bundle for ToolsPanel (DetectionTree + RegionInspector).
+  $: detectionBundle = {
+    tree: {
+      groups:       editTell?.groups ?? [],
+      active:       activeRegion,
+      resetPending: detResetPending,
+      currentScore,
+      screenName:   selectedNode ?? "",
+    },
+    inspector: {
+      liveCrop:  liveCropImg,
+      template:  templateImg,
+      score:     currentScore,
+      isCostume: false,
+      capturing: capturingTemplate,
+    },
+  };
+
+  // Readout bundle for ToolsPanel (ReadoutRoiEditor).
+  $: readoutKeys = activeTab === "hud"
+    ? (NODE_HUD[selectedNode] || [])
+    : (NODE_SELECTION[selectedNode] || []);
+  $: readoutMetas = Object.fromEntries(readoutKeys.map(k => [k, roiMeta(k)]));
+  $: readoutCat   = activeRoiName ? (ROI_TEMPLATE_CAT[activeRoiName] ?? null) : null;
+  $: readoutItems = readoutCat ? (ASSET_ITEMS[readoutCat] ?? []) : [];
+  $: readoutActiveItem = readoutItems[templateItemIdx] ?? null;
+  $: readoutBundle = {
+    roiKeys:         readoutKeys,
+    roiMetas:        readoutMetas,
+    activeRoiName,
+    tabKind:         activeTab === "hud" ? "hud" : "selection",
+    templateCategory: readoutCat,
+    categoryLabel:   readoutCat ? catLabel(readoutCat) : null,
+    items:           readoutItems,
+    activeItemIdx:   templateItemIdx,
+    activeItemHint:  (readoutCat && readoutActiveItem) ? (ASSET_HINTS[readoutCat]?.(readoutActiveItem.name) ?? null) : null,
+    assetTemplate:   assetTemplateImg,
+    assetLiveCrop,
+    capturing:       capturingTemplate,
+    resetPending:    roiResetPending,
+  };
+
+  // ToolsPanel "capture" maps to the Detection recapture or the asset capture.
+  function onToolsCapture() {
+    if (activeTab === "detection") recaptureRegion();
+    else captureAsset();
+  }
+  // ToolsPanel "test" (Detection tab only) re-runs the region match.
+  function onToolsTest() {
+    if (activeTab === "detection" && selectedNode)
+      send({ type:"test_region", screen:selectedNode, group:activeRegion.group, region:activeRegion.region });
+  }
+
   let tells = [];
   let rois = {};
   let currentScore = null;
@@ -291,19 +380,16 @@
   let templateImg = null;
   let liveCropImg = null;
 
-  // ── ROI drag editing ──────────────────────────────────────────────────────────
-  let dragging = false, dragHandle = null, dragStartMouse = null, dragStartRoi = null;
-  let hoveredHandle = null;
+  // ── ROI editing state ─────────────────────────────────────────────────────────
   let liveRoiCrop = null;
   let assetTemplateImg = null, assetLiveCrop = null;
   let templateCategory = "characters", templateItemIdx = 0;
   let _roiPollTimer = null;
   let currentBinaryThresh = 170;
   let activeRoiKey = "primary";
-  const HANDLE_HIT_RADIUS = 9;
 
   // ── Camera ────────────────────────────────────────────────────────────────────
-  let wizVideoEl = null, canvasEl = null, videoStream = null;
+  let wizVideoEl = null, videoStream = null;
   let cameraStatus = "idle";
   let trackerCameraPaused = false;
   let browserDevices = [], selectedBrowserDeviceId = "";
@@ -431,14 +517,6 @@
     "RACING","RACE_MENU","REPLAY_MENU","REPLAY_RACE_AGAINST",
     "RESET","POST_TIME_TRIAL","GALLERY",
   ];
-  const TELL_GROUP_ALIASES = {
-    RACING: ["GHOST","UNKNOWN_RACE_ACTIVE"],
-    RESET:  ["GHOST_RESET","UNKNOWN_RESET"],
-  };
-  const TELL_GROUP_NOTES = {
-    RACING: "This ROI setup also applies to Ghost Race and Unknown Race states — they share the same detection tell.",
-    RESET:  "This ROI setup also applies to Ghost Reset and Unknown Reset states — they share the same detection tell.",
-  };
   const SCREEN_LABELS = {
     TITLE:"Title Screen",HOME:"Home / Profile Select",MAIN_MENU:"Main Menu",
     SINGLEPLAYER_MENU:"Single Player Mode Menu",TIME_TRIALS:"Time Trials Menu",
@@ -497,102 +575,8 @@
     kart_name:"kart_name_roi", course_name:"course_name_roi",
   };
 
-  // Screen graph nodes (NW×NH boxes)
-  const NW = 88, NH = 24;
-  const GRAPH_NODES = [
-    { id:"UNKNOWN",            x:5,   y:175, label:"UNKNOWN"    },
-    { id:"TITLE",              x:5,   y:5,   label:"TITLE"      },
-    { id:"HOME",               x:5,   y:45,  label:"HOME"       },
-    { id:"GALLERY",            x:5,   y:85,  label:"GALLERY"    },
-    { id:"MAIN_MENU",          x:115, y:5,   label:"MAIN MENU"  },
-    { id:"SINGLEPLAYER_MENU",  x:225, y:5,   label:"SP MENU"    },
-    { id:"TIME_TRIALS",        x:225, y:31,  label:"SP [TT SEL]"},
-    { id:"CHARACTER_SELECT",   x:335, y:5,   label:"CHAR SEL"   },
-    { id:"KART_SELECT",        x:445, y:5,   label:"KART SEL"   },
-    { id:"COURSE_SELECT",      x:550, y:5,   label:"COURSE SEL" },
-    { id:"START_TIME_TRIAL",   x:760, y:41,  label:"START TT"   },
-    { id:"START_REPLAY",       x:760, y:81,  label:"START RPY"  },
-    { id:"RACING",             x:655, y:101, label:"RACING"     },
-    { id:"GHOST",              x:760, y:121, label:"GHOST"      },
-    { id:"UNKNOWN_RACE_ACTIVE",x:655, y:139, label:"UNK RACE"   },
-    { id:"RACE_MENU",          x:550, y:101, label:"RACE MENU"  },
-    { id:"REPLAY_MENU",        x:550, y:139, label:"REPLAY MENU"},
-    { id:"RESET",              x:445, y:139, label:"RESET"      },
-    { id:"GHOST_RESET",        x:445, y:175, label:"GHOST RST"  },
-    { id:"UNKNOWN_RESET",      x:335, y:139, label:"UNK RESET"  },
-    { id:"REPLAY_RACE_AGAINST",x:550, y:175, label:"REPLAY [RA]"},
-    { id:"POST_TIME_TRIAL",    x:655, y:175, label:"POST TT"    },
-  ];
-  // HOME edges: HOME↔TITLE and HOME↔GALLERY are constant (full opacity).
-  // All other →HOME edges are present but rendered dimmed.
-  // The dynamic prevBackendScreen↔HOME edge is drawn separately at full opacity.
-  const GRAPH_EDGES = [
-    // UNKNOWN: no edges (isolated indicator node)
-    // HOME constant two-way connections
-    ["HOME","TITLE"],["HOME","GALLERY"],["TITLE","HOME"],["GALLERY","HOME"],
-    // all other →HOME (dimmed in renderer)
-    ["MAIN_MENU","HOME"],["SINGLEPLAYER_MENU","HOME"],["TIME_TRIALS","HOME"],
-    ["CHARACTER_SELECT","HOME"],["KART_SELECT","HOME"],["COURSE_SELECT","HOME"],
-    ["START_TIME_TRIAL","HOME"],["START_REPLAY","HOME"],
-    ["RACING","HOME"],["GHOST","HOME"],["UNKNOWN_RACE_ACTIVE","HOME"],
-    ["RESET","HOME"],["GHOST_RESET","HOME"],["UNKNOWN_RESET","HOME"],
-    ["POST_TIME_TRIAL","HOME"],["RACE_MENU","HOME"],
-    ["REPLAY_MENU","HOME"],["REPLAY_RACE_AGAINST","HOME"],
-    // TITLE
-    ["TITLE","MAIN_MENU"],
-    // MAIN_MENU
-    ["MAIN_MENU","SINGLEPLAYER_MENU"],["MAIN_MENU","TIME_TRIALS"],["MAIN_MENU","TITLE"],
-    // SINGLEPLAYER_MENU
-    ["SINGLEPLAYER_MENU","TIME_TRIALS"],["SINGLEPLAYER_MENU","MAIN_MENU"],
-    // TIME_TRIALS
-    ["TIME_TRIALS","CHARACTER_SELECT"],["TIME_TRIALS","SINGLEPLAYER_MENU"],["TIME_TRIALS","MAIN_MENU"],
-    // CHARACTER_SELECT
-    ["CHARACTER_SELECT","KART_SELECT"],["CHARACTER_SELECT","TIME_TRIALS"],
-    // KART_SELECT
-    ["KART_SELECT","COURSE_SELECT"],["KART_SELECT","CHARACTER_SELECT"],
-    // COURSE_SELECT
-    ["COURSE_SELECT","START_TIME_TRIAL"],["COURSE_SELECT","START_REPLAY"],["COURSE_SELECT","KART_SELECT"],
-    // START_TIME_TRIAL
-    ["START_TIME_TRIAL","RACING"],["START_TIME_TRIAL","RACE_MENU"],["START_TIME_TRIAL","COURSE_SELECT"],
-    // START_REPLAY
-    ["START_REPLAY","GHOST"],["START_REPLAY","REPLAY_MENU"],["START_REPLAY","COURSE_SELECT"],
-    // RACING
-    ["RACING","POST_TIME_TRIAL"],["RACING","RACE_MENU"],
-    // GHOST
-    ["GHOST","REPLAY_MENU"],
-    // UNKNOWN_RACE_ACTIVE
-    ["UNKNOWN_RACE_ACTIVE","RACE_MENU"],["UNKNOWN_RACE_ACTIVE","REPLAY_MENU"],
-    ["UNKNOWN_RACE_ACTIVE","POST_TIME_TRIAL"],["UNKNOWN_RACE_ACTIVE","RESET"],
-    // RESET
-    ["RESET","RACING"],["RESET","CHARACTER_SELECT"],["RESET","COURSE_SELECT"],
-    ["RESET","MAIN_MENU"],["RESET","TITLE"],
-    // GHOST_RESET
-    ["GHOST_RESET","GHOST"],["GHOST_RESET","MAIN_MENU"],["GHOST_RESET","COURSE_SELECT"],
-    // UNKNOWN_RESET
-    ["UNKNOWN_RESET","UNKNOWN_RACE_ACTIVE"],["UNKNOWN_RESET","RACING"],["UNKNOWN_RESET","GHOST"],
-    ["UNKNOWN_RESET","CHARACTER_SELECT"],["UNKNOWN_RESET","COURSE_SELECT"],
-    ["UNKNOWN_RESET","MAIN_MENU"],["UNKNOWN_RESET","TITLE"],
-    // POST_TIME_TRIAL
-    ["POST_TIME_TRIAL","COURSE_SELECT"],["POST_TIME_TRIAL","RESET"],
-    // RACE_MENU
-    ["RACE_MENU","RACING"],["RACE_MENU","RESET"],
-    // REPLAY_MENU
-    ["REPLAY_MENU","GHOST"],["REPLAY_MENU","REPLAY_RACE_AGAINST"],["REPLAY_MENU","GHOST_RESET"],
-    // REPLAY_RACE_AGAINST
-    ["REPLAY_RACE_AGAINST","RESET"],["REPLAY_RACE_AGAINST","REPLAY_MENU"],
-    // GALLERY (HOME→GALLERY is dynamic)
-  ];
-  $: graphNodeMap = Object.fromEntries(GRAPH_NODES.map(n => [n.id, n]));
-  // When on HOME, compute all screens reachable from prevBackendScreen via
-  // GRAPH_EDGES — these match what the Python detector will actually scan.
-  $: homeContextScreens = (backendScreen === "HOME" && prevBackendScreen)
-    ? new Set(GRAPH_EDGES.filter(([f, t]) => f === prevBackendScreen && t !== "HOME").map(([,t]) => t))
-    : new Set();
-  function edgePath(from, to) {
-    const a = graphNodeMap[from], b = graphNodeMap[to];
-    if (!a || !b) return "";
-    return `M${a.x+NW/2},${a.y+NH/2} L${b.x+NW/2},${b.y+NH/2}`;
-  }
+  // The screen-graph layout, edges, and pan/zoom now live in src/lib/graph.js and
+  // are rendered by src/components/ScreenGraph.svelte (used inside EditMode).
 
   // ── Helpers ───────────────────────────────────────────────────────────────────
   // send() lives in lib/ipc.js
@@ -985,80 +969,6 @@
     return null;
   }
 
-  function getTransform() {
-    if (!canvasEl) return null;
-    const rect = canvasEl.getBoundingClientRect();
-    // Base (untransformed) layout size — clientWidth/Height ignore the CSS zoom,
-    // so ROI geometry stays in unscaled canvas px and the zoom is applied on top.
-    const bw = canvasEl.clientWidth, bh = canvasEl.clientHeight;
-    if (!bw || !bh) return null;
-    const isEdit = editingNode;
-    const z = isEdit ? fZoom : 1, px = isEdit ? fPanX : 0, py = isEdit ? fPanY : 0;
-    const pyw = pythonFrameW||1920, pyh = pythonFrameH||1080;
-    const eAR = bw/bh, vAR = pyw/pyh;
-    let rendW, rendH, ox, oy;
-    if (vAR > eAR) { rendW=bw; rendH=bw/vAR; ox=0; oy=(bh-rendH)/2; }
-    else            { rendH=bh; rendW=bh*vAR; ox=(bw-rendW)/2; oy=0; }
-    return { ox, oy, sx:rendW/pyw, sy:rendH/pyh, rect, z, px, py };
-  }
-  // The canvas overlay is NOT zoomed (so lines stay crisp); instead the zoom is
-  // folded into the drawing/hit math so boxes track the zoomed video underneath.
-  function frameToCanvas(fx, fy, t) {
-    return { cx: t.px + (t.ox + fx*t.sx)*t.z, cy: t.py + (t.oy + fy*t.sy)*t.z };
-  }
-  function canvasToFrame(clientX, clientY, t) {
-    const mx = clientX - t.rect.left, my = clientY - t.rect.top;
-    return { fx: ((mx - t.px)/t.z - t.ox)/t.sx, fy: ((my - t.py)/t.z - t.oy)/t.sy };
-  }
-  function _clampPan() {
-    if (!canvasEl) return;
-    const W = canvasEl.clientWidth, H = canvasEl.clientHeight, OVER = 100;
-    fPanX = Math.min(OVER, Math.max(W*(1-fZoom) - OVER, fPanX));
-    fPanY = Math.min(OVER, Math.max(H*(1-fZoom) - OVER, fPanY));
-  }
-
-  function getHandlePositions(roi) {
-    if (!roi||roi.length<4) return [];
-    const [x1,y1,x2,y2]=roi, mx=(x1+x2)/2, my=(y1+y2)/2;
-    return [
-      {id:"tl",fx:x1,fy:y1,cursor:"nw-resize"},{id:"tr",fx:x2,fy:y1,cursor:"ne-resize"},
-      {id:"bl",fx:x1,fy:y2,cursor:"sw-resize"},{id:"br",fx:x2,fy:y2,cursor:"se-resize"},
-      {id:"t", fx:mx,fy:y1,cursor:"n-resize"}, {id:"b", fx:mx,fy:y2,cursor:"s-resize"},
-      {id:"l", fx:x1,fy:my,cursor:"w-resize"}, {id:"r", fx:x2,fy:my,cursor:"e-resize"},
-    ];
-  }
-
-  function hitTest(clientX, clientY, roi) {
-    const t = getTransform();
-    if (!t||!roi||roi.length<4) return null;
-    const mx = clientX - t.rect.left, my = clientY - t.rect.top;
-    for (const h of getHandlePositions(roi)) {
-      const c = frameToCanvas(h.fx, h.fy, t);
-      if (Math.hypot(mx-c.cx, my-c.cy) <= HANDLE_HIT_RADIUS)
-        return { handle:h.id, cursor:h.cursor };
-    }
-    const a = frameToCanvas(roi[0], roi[1], t), b = frameToCanvas(roi[2], roi[3], t);
-    if (mx>=a.cx&&mx<=b.cx&&my>=a.cy&&my<=b.cy) return { handle:"move", cursor:"move" };
-    return null;
-  }
-
-  function applyDrag(roi, handle, dx, dy) {
-    let [x1,y1,x2,y2]=roi;
-    const MIN=4, W=pythonFrameW||1920, H=pythonFrameH||1080;
-    if      (handle==="tl")   { x1+=dx; y1+=dy; }
-    else if (handle==="tr")   { x2+=dx; y1+=dy; }
-    else if (handle==="bl")   { x1+=dx; y2+=dy; }
-    else if (handle==="br")   { x2+=dx; y2+=dy; }
-    else if (handle==="t")    { y1+=dy; }
-    else if (handle==="b")    { y2+=dy; }
-    else if (handle==="l")    { x1+=dx; }
-    else if (handle==="r")    { x2+=dx; }
-    else if (handle==="move") { x1+=dx; x2+=dx; y1+=dy; y2+=dy; }
-    x1=Math.max(0,Math.min(x1,W-MIN)); x2=Math.max(x1+MIN,Math.min(x2,W));
-    y1=Math.max(0,Math.min(y1,H-MIN)); y2=Math.max(y1+MIN,Math.min(y2,H));
-    return [Math.round(x1),Math.round(y1),Math.round(x2),Math.round(y2)];
-  }
-
   function updateCurrentRoi(roi) {
     if (editingNode) {
       if (activeTab === "detection" && selectedNode) {
@@ -1120,149 +1030,6 @@
       const cfk=HUD_ROI_CONFIG_KEYS[HUD_ROIS[hudIdx]?.key];
       if (cfk) send({type:"update_config",key:cfk,value:roi});
     }
-  }
-
-  // ── Canvas events ─────────────────────────────────────────────────────────────
-  function onCanvasMouseDown(e) {
-    const roi=getCurrentRoi(), hit=roi?hitTest(e.clientX,e.clientY,roi):null;
-    if (hit) {
-      const t=getTransform(); const fr = canvasToFrame(e.clientX,e.clientY,t);
-      dragging=true; dragHandle=hit.handle; dragStartRoi=[...roi];
-      dragStartMouse={x:fr.fx, y:fr.fy};
-      e.preventDefault(); return;
-    }
-    if (editingNode && activeTab === "detection") {
-      for (const re of editRois()) {
-        if (re.active || !re.roi) continue;
-        if (hitTest(e.clientX,e.clientY,re.roi)) {
-          selectRegion(re.gi, re.ri); hoveredHandle=null;
-          e.preventDefault(); return;
-        }
-      }
-      // nothing hit → pan the (zoomed) feed
-      _fPanning = true; _fStart = { x:e.clientX, y:e.clientY, px:fPanX, py:fPanY };
-      e.preventDefault(); return;
-    }
-    if (editingNode && (activeTab === "selection" || activeTab === "hud")) {
-      for (const re of editTabRois()) {
-        if (re.active || !re.roi) continue;
-        if (hitTest(e.clientX,e.clientY,re.roi)) {
-          selectRoiName(re.k); hoveredHandle=null;
-          e.preventDefault(); return;
-        }
-      }
-      _fPanning = true; _fStart = { x:e.clientX, y:e.clientY, px:fPanX, py:fPanY };
-      e.preventDefault(); return;
-    }
-    if (wizardStep==="screens") {
-      const tell=tells.find(t=>t.screen===SCREEN_NAMES[screenIdx]);
-      for (const re of getAllRoisForTell(tell)) {
-        if (re.key===activeRoiKey||!re.roi) continue;
-        if (hitTest(e.clientX,e.clientY,re.roi)) {
-          activeRoiKey=re.key; syncThreshToScreen(); hoveredHandle=null; drawRoi();
-          e.preventDefault(); return;
-        }
-      }
-    }
-  }
-
-  function onCanvasMouseMove(e) {
-    if (_fPanning) {
-      fPanX = _fStart.px + (e.clientX - _fStart.x);
-      fPanY = _fStart.py + (e.clientY - _fStart.y);
-      _clampPan();
-      return;
-    }
-    const roi=getCurrentRoi();
-    if (!dragging) {
-      const hit=roi?hitTest(e.clientX,e.clientY,roi):null;
-      const nh=hit?.handle??null;
-      if (nh!==hoveredHandle) { hoveredHandle=nh; drawRoi(); }
-      if (canvasEl) canvasEl.style.cursor=hit?.cursor ?? (editingNode&&fZoom>1?"grab":"default");
-      return;
-    }
-    const t=getTransform(); if (!t) return;
-    const fr = canvasToFrame(e.clientX,e.clientY,t);
-    const dx=fr.fx-dragStartMouse.x, dy=fr.fy-dragStartMouse.y;
-    updateCurrentRoi(applyDrag(dragStartRoi,dragHandle,dx,dy)); scheduleDrawRoi();
-  }
-
-  function onFeedWheel(e) {
-    if (!editingNode || !canvasEl) return;
-    e.preventDefault();
-    const r = canvasEl.getBoundingClientRect();
-    const u = e.clientX - r.left, v = e.clientY - r.top;
-    const nz = Math.min(8, Math.max(1, fZoom * (e.deltaY < 0 ? 1.15 : 1/1.15)));
-    fPanX += u * (1 - nz / fZoom);
-    fPanY += v * (1 - nz / fZoom);
-    fZoom = nz;
-    if (nz === 1) { fPanX = 0; fPanY = 0; }   // fully zoomed out → snap back to fit
-    else _clampPan();
-    scheduleDrawRoi();
-  }
-  function resetFeedZoom() { fZoom = 1; fPanX = 0; fPanY = 0; }
-
-  function onWindowMouseUp() {
-    if (_fPanning) { _fPanning = false; return; }
-    if (!dragging) return;
-    dragging=false;
-    const roi=getCurrentRoi(); if (roi) saveCurrentRoi(roi);
-    dragHandle=null; dragStartRoi=null; dragStartMouse=null;
-  }
-
-  const ROI_COLORS={primary:C.tx, and:C.warn, or:C.accent};
-
-  function _drawOneRoi(ctx,t,roi,color,showHandles) {
-    if (!roi||roi.length<4) return;
-    const a=frameToCanvas(roi[0],roi[1],t), b=frameToCanvas(roi[2],roi[3],t);
-    const cx1=a.cx, cy1=a.cy, cw=b.cx-a.cx, ch=b.cy-a.cy;
-    ctx.strokeStyle="rgba(0,0,0,0.7)"; ctx.lineWidth=4; ctx.setLineDash([]);
-    ctx.strokeRect(cx1,cy1,cw,ch);
-    ctx.strokeStyle=color; ctx.lineWidth=2; ctx.setLineDash([7,4]);
-    ctx.strokeRect(cx1,cy1,cw,ch); ctx.setLineDash([]);
-    if (showHandles) {
-      for (const h of getHandlePositions(roi)) {
-        const hc=frameToCanvas(h.fx,h.fy,t), hcx=hc.cx, hcy=hc.cy, r=5;
-        const active=hoveredHandle===h.id||(dragging&&dragHandle===h.id);
-        ctx.fillStyle=active?C.accent:color;
-        ctx.strokeStyle="rgba(0,0,0,0.85)"; ctx.lineWidth=1.5;
-        ctx.beginPath(); ctx.rect(hcx-r,hcy-r,r*2,r*2); ctx.fill(); ctx.stroke();
-      }
-    }
-  }
-
-  function drawRoi() {
-    if (!canvasEl) return;
-    const t=getTransform(); if (!t) return;
-    canvasEl.width=canvasEl.clientWidth; canvasEl.height=canvasEl.clientHeight;
-    const ctx=canvasEl.getContext("2d");
-    ctx.clearRect(0,0,canvasEl.width,canvasEl.height);
-    if (editingNode) {
-      if (activeTab === "detection") {
-        const all = editRois();
-        for (const re of all) if (!re.active) _drawOneRoi(ctx,t,re.roi,re.color,false);
-        const ae = all.find(r=>r.active);
-        if (ae) _drawOneRoi(ctx,t,ae.roi,ae.color,true);
-      } else if (activeTab === "selection" || activeTab === "hud") {
-        const all = editTabRois();
-        for (const re of all) if (re.roi && !re.active) _drawOneRoi(ctx,t,re.roi,re.color,false);
-        const ae = all.find(r=>r.active);
-        if (ae && ae.roi) _drawOneRoi(ctx,t,ae.roi,ae.color,true);
-      }
-      return;
-    }
-    if (wizardStep==="screens") {
-      const tell=tells.find(tell=>tell.screen===SCREEN_NAMES[screenIdx]);
-      const allRois=getAllRoisForTell(tell);
-      for (const re of allRois) {
-        if (re.key===activeRoiKey) continue;
-        _drawOneRoi(ctx,t,re.roi,ROI_COLORS[re.type]??C.tx,false);
-      }
-      const ae=allRois.find(r=>r.key===activeRoiKey);
-      if (ae) _drawOneRoi(ctx,t,ae.roi,ROI_COLORS[ae.type]??C.tx,true);
-      return;
-    }
-    _drawOneRoi(ctx,t,getCurrentRoi(),C.tx,true);
   }
 
   let _pauseIntent="";
@@ -1378,7 +1145,7 @@
     templateCategory="characters"; templateItemIdx=0;
     currentScore=null; templateImg=null; liveCropImg=null;
     liveRoiCrop=null; assetTemplateImg=null; assetLiveCrop=null;
-    hoveredHandle=null; activeRoiKey="primary"; resetConfirmPending=false; syncThreshToScreen();
+    activeRoiKey="primary"; resetConfirmPending=false; syncThreshToScreen();
     if (step==="camera") {
       // Ask Python to open its camera if not already open
       if (pythonCameraStatus!=="ok") {
@@ -1428,7 +1195,7 @@
 
   function prevItem() {
     currentScore=null; liveCropImg=null; liveRoiCrop=null;
-    assetTemplateImg=null; assetLiveCrop=null; hoveredHandle=null; activeRoiKey="primary";
+    assetTemplateImg=null; assetLiveCrop=null; activeRoiKey="primary";
     if (wizardStep==="camera") goStep("language");
     else if (wizardStep==="screens") { if (screenIdx>0) screenIdx--; else goStep("camera"); }
     else if (wizardStep==="selection") { if (selectionIdx>0) selectionIdx--; else goStep("screens"); }
@@ -1446,7 +1213,7 @@
 
   function nextItem() {
     currentScore=null; liveCropImg=null; liveRoiCrop=null;
-    assetTemplateImg=null; assetLiveCrop=null; hoveredHandle=null; activeRoiKey="primary";
+    assetTemplateImg=null; assetLiveCrop=null; activeRoiKey="primary";
     if (wizardStep==="screens") { if (screenIdx<SCREEN_NAMES.length-1) screenIdx++; else goStep("selection"); }
     else if (wizardStep==="selection") { if (selectionIdx<SELECTION_ROIS.length-1) selectionIdx++; else goStep("hud"); }
     else if (wizardStep==="hud") { if (hudIdx<HUD_ROIS.length-1) hudIdx++; else goStep("templates"); }
@@ -1635,29 +1402,18 @@
     }).catch(() => {});
     setInterval(()=>{ _tick++; },1000);
     checkForUpdate();
-    window.addEventListener("mouseup",onWindowMouseUp);
     startFeedPoll();
   });
 
   onDestroy(()=>{
     if (unlisten) unlisten();
-    if (_roiRaf) cancelAnimationFrame(_roiRaf);
     stopCamera(); stopRoiPoll(); stopFeedPoll(); _teardownAudio();
-    window.removeEventListener("mouseup",onWindowMouseUp);
     if (trackerCameraPaused) send({type:"resume_camera"});
   });
 
   $: if (wizVideoEl)  wizVideoEl.srcObject =videoStream??null;
-  // Coalesce ROI redraws into one per animation frame.  afterUpdate fires on every
-  // reactive tick (engine frames stream at 10Hz, plus heartbeats and wheel bursts);
-  // redrawing the canvas synchronously each time backlogs the main thread and stalls
-  // the UI while scrolling.  One rAF-batched redraw keeps it smooth.
-  let _roiRaf = 0;
-  function scheduleDrawRoi() {
-    if (_roiRaf) return;
-    _roiRaf = requestAnimationFrame(() => { _roiRaf = 0; drawRoi(); });
-  }
-  afterUpdate(()=>{ if (wizardOpen || view === "setup" || editingNode) scheduleDrawRoi(); });
+  // (ROI canvas redraw/drag/pan + its window mouseup listener now live inside
+  // RoiCanvas.svelte; the editor view just feeds it props.)
 
   // ── Reactive computeds ────────────────────────────────────────────────────────
   $: currentScreenName  = SCREEN_NAMES[screenIdx]??"";;
@@ -1671,18 +1427,18 @@
   $: assetItem = ASSET_ITEMS[templateCategory]?.[templateItemIdx];
   $: currentTell = tells.find(t=>t.screen===SCREEN_NAMES[screenIdx])??null;
 
-  $: if (((wizardOpen || view === "setup")&&["screens","selection","hud","templates"].includes(wizardStep))
+  $: if (((wizardOpen || appView === "setup")&&["screens","selection","hud","templates"].includes(wizardStep))
          || (editingNode && selectedNode && (
               activeTab === "detection"
               || ((activeTab === "selection" || activeTab === "hud") && ROI_TEMPLATE_CAT[activeRoiName])))) {
     startRoiPoll();
   } else { stopRoiPoll(); }
 
-  // The engine-frame preview (10Hz capture_frame poll) is only shown in the
-  // settings/setup camera step — pause it while editing a node so its 10Hz
-  // component invalidation doesn't compound with drag/pan churn and stall the UI.
-  $: if (editingNode && !wizardOpen) stopFeedPoll();
-     else if (trackerConnected) startFeedPoll();
+  // The engine-frame poll (100ms capture_frame) feeds both the setup camera step
+  // and the RoiCanvas background in edit view, so keep it running whenever the
+  // tracker is connected. (The monitor view shows the browser stream directly.)
+  $: if ($viewStore === "edit" || trackerConnected) startFeedPoll();
+     else stopFeedPoll();
 
   // Load the stored template + live crop whenever the selected region changes.
   $: if (editingNode && activeTab === "detection" && selectedNode && activeRegion && trackerConnected) {
@@ -1756,6 +1512,9 @@
   <!-- ── Title bar ──────────────────────────────────────────────────────────── -->
   <TitleBar
     version={version}
+    view={appView === "main" ? $viewStore : "monitor"}
+    editingScreen={selectedNode}
+    onToggleView={toggleView}
     onMinimize={winMinimize}
     onToggleMaximize={winToggleMaximize}
     onClose={winClose}
@@ -1775,7 +1534,7 @@
     </svelte:fragment>
     <!-- Settings button: view- and wizard-state-conditional logic stays here -->
     <svelte:fragment slot="settings">
-      {#if view === "main"}
+      {#if appView === "main"}
         {#if wizardOpen}
           <button class="btn-hdr btn-close-wiz" on:click={closeWizard}>✕ Close Settings</button>
         {:else}
@@ -1786,315 +1545,127 @@
   </TitleBar>
 
   <!-- ── View router ───────────────────────────────────────────────────────── -->
-  {#if view === "main"}
+  {#if appView === "main"}
 
-  <!-- ── Main grid: feed | sidebar, with graph footer below ─────────────────── -->
-  <div class="main-grid" class:sidebar-collapsed={!sidebarOpen}>
+    {#if $viewStore === "edit"}
 
-    <!-- Left: camera feed, or the in-place per-screen editor when a node is selected -->
-    <div class="main-feed" class:main-feed-editing={selectedNode}>
-      {#if selectedNode}
-        {@const tabs = tabsForNode(selectedNode)}
-        <div class="node-editor-bar">
-          <span class="node-editor-title">{SCREEN_LABELS[selectedNode] ?? selectedNode}</span>
-          <span class="edit-screen-id">{selectedNode}</span>
-          <button class="btn-back-preview" on:click={closeNodeEditor}>← Full preview</button>
+    <!-- ── Edit view: screen graph + ROI canvas + tools panel ───────────────── -->
+    <EditMode
+      bind:this={editCanvas}
+      currentScreen={backendScreen}
+      selected={selectedNode}
+      frame={engineFrame}
+      rois={canvasRois}
+      activeBox={activeEditBox}
+      frameW={pythonFrameW}
+      frameH={pythonFrameH}
+      activeTab={toolsActiveTab}
+      {readoutEnabled}
+      detection={detectionBundle}
+      readout={readoutBundle}
+      on:selectScreen={(e)=>openNode(e.detail)}
+      on:tabChange={(e)=>setToolsTab(e.detail)}
+      on:change={(e)=>onCanvasChange(e.detail)}
+      on:selectBox={(e)=>onCanvasSelect(e.detail)}
+      on:selectRegion={(e)=>selectRegion(e.detail.group, e.detail.region)}
+      on:addRegion={(e)=>addRegion(e.detail)}
+      on:addGroup={addGroup}
+      on:removeRegion={removeActiveRegion}
+      on:kindChange={(e)=>onKindChange(e.detail)}
+      on:requestReset={()=>{ if (activeTab==="detection") detResetPending=true; else roiResetPending=true; }}
+      on:cancelReset={()=>{ detResetPending=false; roiResetPending=false; }}
+      on:resetDetection={resetDetection}
+      on:capture={onToolsCapture}
+      on:test={onToolsTest}
+      on:selectRoi={(e)=>selectRoiName(e.detail)}
+      on:selectItem={(e)=>selectTplItem(e.detail)}
+      on:resetRoi={resetActiveRoi}
+    />
+
+    {:else}
+
+    <!-- ── Monitor view: camera feed + status sidebar ───────────────────────── -->
+    <div class="main-grid" class:sidebar-collapsed={!sidebarOpen}>
+
+      <!-- Left: camera feed -->
+      <div class="main-feed">
+        <div class="feed-area">
+          <FeedOverlay
+            stream={setupComplete ? (videoStream ?? null) : null}
+            muted={feedMuted}
+            volume={feedVolume}
+            hidden={!cameraOk || feedVideoHidden}
+          />
+          {#if !cameraOk || feedVideoHidden}
+            <div class="feed-placeholder">
+              {#if feedVideoHidden && cameraOk}
+                <span class="feed-ph-text feed-ph-dim">Feed hidden</span>
+              {:else if !trackerConnected}
+                <span class="feed-ph-icon">◌</span>
+                <span class="feed-ph-text">Connecting to engine…</span>
+              {:else if cameraStatus === "requesting"}
+                <span class="feed-ph-icon">◌</span>
+                <span class="feed-ph-text">Opening camera…</span>
+              {:else}
+                <span class="feed-ph-icon">◌</span>
+                <span class="feed-ph-text">Waiting for camera…</span>
+              {/if}
+            </div>
+          {/if}
         </div>
-        <div class="edit-tab-body">
-              <div class="det-editor">
-                <div class="det-feed">
-                  <div class="preview-wrapper det-feed-wrap" on:wheel={onFeedWheel}>
-                    {#if cameraOk}
-                      <div class="det-zoom" style="transform: translate({fPanX}px,{fPanY}px) scale({fZoom}); transform-origin:0 0; visibility:{feedVideoHidden ? 'hidden' : 'visible'}">
-                        <video bind:this={wizVideoEl} autoplay playsinline muted class="preview-video"></video>
-                      </div>
-                      <canvas bind:this={canvasEl} class="preview-canvas roi-canvas"
-                        on:mousedown={onCanvasMouseDown} on:mousemove={onCanvasMouseMove}></canvas>
-                      {#if fZoom > 1}
-                        <button class="det-zoom-reset" on:click={resetFeedZoom}>reset {fZoom.toFixed(1)}×</button>
-                      {/if}
-                    {:else}
-                      <div class="preview-placeholder"><span>Camera unavailable</span></div>
-                    {/if}
-                  </div>
-                  <p class="preview-cap">Drag handles to move/resize · click another box to select · scroll = zoom, drag empty space = pan.</p>
-                </div>
 
-                <div class="det-tree">
-                  {#if tabs.length > 1}
-                    <nav class="edit-tabs det-tabs">
-                      {#each tabs as tabKey}
-                        <button class:active={activeTab===tabKey} on:click={()=>setTab(tabKey)}>{TAB_LABELS[tabKey]}</button>
-                      {/each}
-                    </nav>
-                  {/if}
-                  {#if activeTab === "detection"}
-                  {#if editTell}
-                    <div class="tree-label">Detected when ALL groups match:</div>
-                    {#each editTell.groups as group, gi}
-                      {#if gi > 0}<div class="tree-and">— AND —</div>{/if}
-                      <div class="tree-group">
-                        <div class="tree-group-hd">Group {gi+1} · any of</div>
-                        {#each group as region, ri}
-                          <button class="tree-region" class:sel={activeRegion.group===gi && activeRegion.region===ri}
-                                  on:click={()=>selectRegion(gi,ri)}>
-                            <span class="treg-dot" style="background:{activeRegion.group===gi && activeRegion.region===ri ? C.accent : (gi===activeRegion.group ? C.roiCtx : C.warn)}"></span>
-                            <span class="treg-name">{region.kind==="dark_loading" ? "dark-loading" : `image ${ri+1}`}</span>
-                            {#if activeRegion.group===gi && activeRegion.region===ri && currentScore}
-                              <span class="treg-score" style="color:{scoreColor(currentScore.score)}">{currentScore.score.toFixed(2)}</span>
-                            {/if}
-                          </button>
-                        {/each}
-                        <button class="tree-add" on:click={()=>addRegion(gi)}>+ OR alternative image</button>
-                      </div>
-                    {/each}
-                    <button class="tree-add tree-add-and" on:click={addGroup}>+ AND condition group</button>
-
-                    {#if activeRegionObj}
-                      <div class="reg-controls">
-                        <div class="reg-row">
-                          <label class="reg-kind">Kind
-                            <select value={activeRegionObj.kind} on:change={(e)=>onKindChange(e.target.value)}>
-                              <option value="template">Template image</option>
-                              <option value="dark_loading">Dark-loading</option>
-                            </select>
-                          </label>
-                          {#if editTell.groups.length > 1 || (editTell.groups[activeRegion.group]?.length ?? 0) > 1}
-                            <button class="reg-del" on:click={removeActiveRegion}>🗑 Delete region</button>
-                          {/if}
-                        </div>
-                        {#if activeRegionObj.kind === "template"}
-                          <div class="reg-thumbs">
-                            <div class="reg-thumb"><span>live crop</span>{#if liveCropImg}<img src={liveCropImg} alt="live"/>{:else}<div class="reg-thumb-empty"></div>{/if}</div>
-                            <div class="reg-thumb"><span>template</span>{#if templateImg}<img src={templateImg} alt="template"/>{:else}<div class="reg-thumb-empty"></div>{/if}</div>
-                          </div>
-                          <button class="btn-secondary reg-recap" on:click={recaptureRegion} disabled={capturingTemplate}>
-                            {capturingTemplate ? "Capturing…" : "Recapture this region"}
-                          </button>
-                        {:else}
-                          <p class="hint">Dark-loading detects a near-black region plus a bright icon. Drag the main ROI on the feed; the icon ROI uses its default position.</p>
-                        {/if}
-                      </div>
-                    {/if}
-
-                    <div class="det-reset">
-                      {#if detResetPending}
-                        <p class="det-reset-q">Reset <b>{selectedNode}</b>’s detection ROIs &amp; groups to defaults? This discards your custom regions for this screen.</p>
-                        <div class="det-reset-row">
-                          <button class="btn-reset-confirm" on:click={resetDetection}>Yes, reset</button>
-                          <button class="btn-nav" on:click={()=>detResetPending=false}>Cancel</button>
-                        </div>
-                      {:else}
-                        <button class="det-reset-btn" on:click={()=>detResetPending=true}>↺ Reset detection to defaults</button>
-                      {/if}
-                    </div>
-                  {:else}
-                    <p class="hint">Loading detection config…</p>
-                  {/if}
-                  {:else}
-                    {@const _keys = activeTab==="selection" ? (NODE_SELECTION[selectedNode]||[]) : (NODE_HUD[selectedNode]||[])}
-                    {@const _cat = activeRoiName ? ROI_TEMPLATE_CAT[activeRoiName] : null}
-                    <div class="sel-cols">
-                      <div class="sel-col sel-col-roi">
-                        <div class="tree-label">{activeTab==="selection" ? "Text ROI" : "HUD ROI"}</div>
-                        <div class="tree-group">
-                          {#each _keys as k}
-                            <button class="tree-region" class:sel={activeRoiName===k} on:click={()=>selectRoiName(k)}>
-                              <span class="treg-dot" style="background:{activeRoiName===k ? C.accent : C.warn}"></span>
-                              <span class="treg-name">{roiMeta(k).label}</span>
-                            </button>
-                          {/each}
-                        </div>
-                        {#if activeRoiName}
-                          <div class="det-reset">
-                            {#if roiResetPending}
-                              <p class="det-reset-q">Reset <b>{roiMeta(activeRoiName).label}</b> to default?</p>
-                              <div class="det-reset-row">
-                                <button class="btn-reset-confirm" on:click={resetActiveRoi}>Yes, reset</button>
-                                <button class="btn-nav" on:click={()=>roiResetPending=false}>Cancel</button>
-                              </div>
-                            {:else}
-                              <button class="det-reset-btn" on:click={()=>roiResetPending=true}>↺ Reset ROI</button>
-                            {/if}
-                          </div>
-                        {/if}
-                      </div>
-                      {#if _cat}
-                        <div class="sel-col sel-col-list">
-                          <div class="tree-label">{catLabel(_cat)}</div>
-                          <div class="tpl-list sel-tpl-list">
-                            {#each ASSET_ITEMS[_cat] || [] as item, i}
-                              <button class="tpl-item" class:sel={templateItemIdx===i} on:click={()=>selectTplItem(i)}>{item.name}</button>
-                            {/each}
-                          </div>
-                        </div>
-                      {/if}
-                    </div>
-                    {#if _cat && assetItem}
-                      <div class="reg-controls">
-                        <p class="hint">{ASSET_HINTS[_cat]?.(assetItem.name)}</p>
-                        <div class="reg-thumbs">
-                          <div class="reg-thumb"><span>live{_cat==="costumes" ? " (edges)" : ""}</span>{#if assetLiveCrop}<img src={assetLiveCrop} alt="live"/>{:else}<div class="reg-thumb-empty"></div>{/if}</div>
-                          <div class="reg-thumb"><span>template</span>{#if assetTemplateImg}<img src={assetTemplateImg} alt="template"/>{:else}<div class="reg-thumb-empty"></div>{/if}</div>
-                        </div>
-                        <button class="btn-secondary reg-recap" on:click={captureAsset} disabled={capturingTemplate}>
-                          {capturingTemplate ? "Capturing…" : `Capture ${assetItem.name}`}
-                        </button>
-                      </div>
-                    {:else if activeRoiName}
-                      <p class="hint" style="margin-top:6px">{roiMeta(activeRoiName).hint}</p>
-                    {/if}
-                  {/if}
-                </div>
-              </div>
-        </div>
-      {:else}
-      <div class="feed-area">
-        <FeedOverlay
-          stream={setupComplete ? (videoStream ?? null) : null}
-          muted={feedMuted}
-          volume={feedVolume}
-          hidden={!cameraOk || feedVideoHidden}
-        />
-        {#if !cameraOk || feedVideoHidden}
-          <div class="feed-placeholder">
-            {#if feedVideoHidden && cameraOk}
-              <span class="feed-ph-text feed-ph-dim">Feed hidden</span>
-            {:else if !trackerConnected}
-              <span class="feed-ph-icon">◌</span>
-              <span class="feed-ph-text">Connecting to engine…</span>
-            {:else if cameraStatus === "requesting"}
-              <span class="feed-ph-icon">◌</span>
-              <span class="feed-ph-text">Opening camera…</span>
+        <!-- Feed controls: audio + video toggle -->
+        <div class="feed-controls">
+          {#if _hasAudio}
+            <button class="fc-btn" title={feedMuted ? "Unmute" : "Mute"}
+              on:click={() => feedMuted = !feedMuted}>
+              {#if feedMuted}
+                <svg viewBox="0 0 16 16" class="fc-icon"><path d="M8 2v12l-4-3H1V7h3L8 4V2zm4.5 2.5a6 6 0 010 7M11 5.5a4 4 0 010 5"/><line x1="1" y1="1" x2="15" y2="15" stroke-linecap="round"/></svg>
+              {:else if feedVolume < 0.35}
+                <svg viewBox="0 0 16 16" class="fc-icon"><path d="M8 2v12l-4-3H1V7h3L8 4V2z"/><path d="M11 6a2.5 2.5 0 010 4"/></svg>
+              {:else}
+                <svg viewBox="0 0 16 16" class="fc-icon"><path d="M8 2v12l-4-3H1V7h3L8 4V2z"/><path d="M11 5.5a4 4 0 010 5M13 3.5a7 7 0 010 9"/></svg>
+              {/if}
+            </button>
+            <input type="range" min="0" max="1" step="0.01"
+              bind:value={feedVolume}
+              on:input={() => { if (feedVolume > 0) feedMuted = false; }}
+              class="fc-slider" title="Volume" />
+            <span class="fc-vol">{Math.round(feedVolume * 100)}%</span>
+            <div class="fc-divider"></div>
+          {:else if cameraOk}
+            <span class="fc-no-audio">no audio</span>
+            <div class="fc-divider"></div>
+          {/if}
+          <button class="fc-btn fc-vid-btn" title={feedVideoHidden ? "Show feed" : "Hide feed"}
+            on:click={() => feedVideoHidden = !feedVideoHidden}>
+            {#if feedVideoHidden}
+              <svg viewBox="0 0 16 16" class="fc-icon"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2"/><line x1="2" y1="2" x2="14" y2="14" stroke-linecap="round"/></svg>
+              <span class="fc-vid-label">Show</span>
             {:else}
-              <span class="feed-ph-icon">◌</span>
-              <span class="feed-ph-text">Waiting for camera…</span>
-            {/if}
-          </div>
-        {/if}
-      </div>
-      {/if}
-
-      <!-- Feed controls: audio + video toggle -->
-      <div class="feed-controls">
-        {#if _hasAudio}
-          <button class="fc-btn" title={feedMuted ? "Unmute" : "Mute"}
-            on:click={() => feedMuted = !feedMuted}>
-            {#if feedMuted}
-              <svg viewBox="0 0 16 16" class="fc-icon"><path d="M8 2v12l-4-3H1V7h3L8 4V2zm4.5 2.5a6 6 0 010 7M11 5.5a4 4 0 010 5"/><line x1="1" y1="1" x2="15" y2="15" stroke-linecap="round"/></svg>
-            {:else if feedVolume < 0.35}
-              <svg viewBox="0 0 16 16" class="fc-icon"><path d="M8 2v12l-4-3H1V7h3L8 4V2z"/><path d="M11 6a2.5 2.5 0 010 4"/></svg>
-            {:else}
-              <svg viewBox="0 0 16 16" class="fc-icon"><path d="M8 2v12l-4-3H1V7h3L8 4V2z"/><path d="M11 5.5a4 4 0 010 5M13 3.5a7 7 0 010 9"/></svg>
+              <svg viewBox="0 0 16 16" class="fc-icon"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2"/></svg>
+              <span class="fc-vid-label">Hide</span>
             {/if}
           </button>
-          <input type="range" min="0" max="1" step="0.01"
-            bind:value={feedVolume}
-            on:input={() => { if (feedVolume > 0) feedMuted = false; }}
-            class="fc-slider" title="Volume" />
-          <span class="fc-vol">{Math.round(feedVolume * 100)}%</span>
-          <div class="fc-divider"></div>
-        {:else if cameraOk}
-          <span class="fc-no-audio">no audio</span>
-          <div class="fc-divider"></div>
-        {/if}
-        <button class="fc-btn fc-vid-btn" title={feedVideoHidden ? "Show feed" : "Hide feed"}
-          on:click={() => feedVideoHidden = !feedVideoHidden}>
-          {#if feedVideoHidden}
-            <svg viewBox="0 0 16 16" class="fc-icon"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2"/><line x1="2" y1="2" x2="14" y2="14" stroke-linecap="round"/></svg>
-            <span class="fc-vid-label">Show</span>
-          {:else}
-            <svg viewBox="0 0 16 16" class="fc-icon"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2"/></svg>
-            <span class="fc-vid-label">Hide</span>
-          {/if}
-        </button>
-      </div>
-    </div>
-
-    <!-- Right: sidebar panels (collapsible) -->
-    <aside class="sidebar" class:sidebar-collapsed={!sidebarOpen}>
-      <button class="sidebar-toggle" on:click={()=>sidebarOpen=!sidebarOpen}
-        title={sidebarOpen ? "Collapse panels" : "Expand panels"}>{sidebarOpen ? "▸" : "◂"}</button>
-      {#if sidebarOpen}
-
-      <Rail />
-
-      {/if}
-    </aside>
-
-    <!-- Graph footer (spans col 1 only, row 2) -->
-    <div class="graph-row">
-      <button class="graph-toggle" on:click={()=>{ graphOpen=!graphOpen; if (graphOpen) fitGraph(); }}>
-        <span>Screen Graph</span>
-        <span class="graph-chev">{graphOpen?'▾':'▸'}</span>
-      </button>
-      {#if graphOpen}
-        <div class="graph-content">
-          <div class="edit-graph">
-            <div class="edit-graph-vp" bind:clientWidth={gWrapW} bind:clientHeight={gWrapH}>
-              <svg class="graph-svg-zoom" class:panning={_gPanning} xmlns="http://www.w3.org/2000/svg"
-                   on:wheel={onGraphWheel} on:mousedown={onGraphDown}
-                   on:mousemove={onGraphMove} on:mouseup={onGraphUp} on:mouseleave={onGraphUp}>
-                <g transform="translate({gPanX} {gPanY}) scale({gZoom})">
-                  {#each GRAPH_EDGES as [from, to]}
-                    {@const a=graphNodeMap[from]}
-                    {@const b=graphNodeMap[to]}
-                    {#if a && b}
-                      {@const involvesHome = from==="HOME" || to==="HOME"}
-                      {@const isConstant   = involvesHome && (from==="TITLE"||to==="TITLE"||from==="GALLERY"||to==="GALLERY")}
-                      {@const onHomeCluster = backendScreen==="HOME" || backendScreen==="GALLERY"}
-                      {@const isPrevLink   = involvesHome && onHomeCluster && !!prevBackendScreen && (from===prevBackendScreen||to===prevBackendScreen)}
-                      {@const isCtxLink    = involvesHome && (homeContextScreens.has(from) || homeContextScreens.has(to))}
-                      {@const dimHome      = involvesHome && !isConstant && !isPrevLink && !isCtxLink}
-                      <line x1={a.x+NW/2} y1={a.y+NH/2} x2={b.x+NW/2} y2={b.y+NH/2}
-                        stroke={C.bd} stroke-width="1" opacity={dimHome ? 0.12 : 1} />
-                    {/if}
-                  {/each}
-                  {#each GRAPH_NODES as node}
-                    {@const isActive  = node.id === backendScreen}
-                    {@const isSel     = node.id === selectedNode}
-                    {@const isHome    = node.id === "HOME"}
-                    {@const isUnknown = node.id === "UNKNOWN"}
-                    {@const candScore = candidateScores[node.id]}
-                    {@const dimmed    = isUnknown}
-                    <g transform="translate({node.x},{node.y})" style="cursor:pointer"
-                       role="button" tabindex="-1" on:click={()=>nodeClick(node.id)}>
-                      <rect width={NW} height={NH} rx="3" ry="3"
-                        fill={isActive ? C.accentBg : C.panel2}
-                        stroke={isSel ? C.tx : (isActive ? C.accent : (candScore ? C.bd : C.bdSoft))}
-                        stroke-width={isSel || isActive ? 1.5 : 1}
-                        opacity={dimmed ? 0.45 : 1} />
-                      <text x={NW/2} y={isActive && isHome && prevBackendScreen ? NH/2-3 : NH/2}
-                        text-anchor="middle" dominant-baseline="central"
-                        font-size="10" font-family="var(--mono)"
-                        fill={isSel ? C.tx : (isActive ? C.accent : (candScore ? C.txMut : (dimmed ? C.txDim : C.txMut)))}
-                        opacity={dimmed ? 0.6 : 1}>{node.label}</text>
-                      {#if isHome && prevBackendScreen}
-                        <text x={NW/2} y={NH/2+7} text-anchor="middle" dominant-baseline="central"
-                          font-size="6.5" font-family="var(--mono)"
-                          fill={isActive ? C.accentSoft : C.txDim} opacity="0.85"
-                        >↩ {prevBackendScreen.replace(/_/g," ")}</text>
-                      {/if}
-                      {#if candScore}
-                        <text x={NW-2} y="3" text-anchor="end" dominant-baseline="hanging"
-                          font-size="7" font-family="var(--mono)"
-                          fill={scoreColor(candScore)} opacity="0.9"
-                        >{candScore.toFixed(2)}</text>
-                      {/if}
-                    </g>
-                  {/each}
-                </g>
-              </svg>
-            </div>
-            <div class="edit-graph-foot">scroll = zoom · drag = pan · click a screen to edit it</div>
-          </div>
         </div>
-      {/if}
-    </div>
+      </div>
 
-  </div><!-- /main-grid -->
+      <!-- Right: sidebar panels (collapsible) -->
+      <aside class="sidebar" class:sidebar-collapsed={!sidebarOpen}>
+        <button class="sidebar-toggle" on:click={()=>sidebarOpen=!sidebarOpen}
+          title={sidebarOpen ? "Collapse panels" : "Expand panels"}>{sidebarOpen ? "▸" : "◂"}</button>
+        {#if sidebarOpen}
 
-  {:else if view === "setup"}
+        <Rail />
+
+        {/if}
+      </aside>
+
+    </div><!-- /main-grid -->
+
+    {/if}
+
+  {:else if appView === "setup"}
 
   <!-- ── First-time setup view (full screen, no modal) ──────────────────────── -->
   <div class="setup-view">
@@ -2625,91 +2196,17 @@
   .btn-close-wiz:hover { color: var(--tx-mut); background: var(--bd); }
 
   /* ── Status bar styles live in src/components/StatusBar.svelte ───── */
+  /* (Screen-graph strip + per-screen editor now live in EditMode.svelte and its
+     child components: ScreenGraph / RoiCanvas / ToolsPanel.) */
 
-  /* ── Screen graph (interactive footer strip) + per-node editor ─── */
-  .edit-graph { flex: none; height: 248px; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--bd); border-radius: var(--r); overflow: hidden; }
-  .edit-graph-vp { flex: 1; min-height: 0; overflow: hidden; }
-  .graph-svg-zoom { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
-  .graph-svg-zoom.panning { cursor: grabbing; }
-  .edit-graph-foot { flex: none; border-top: 1px solid var(--bd); padding: 3px 8px; font-size: .58rem; color: var(--tx-mut); text-align: right; }
-  .edit-screen-id { font-family: var(--mono); font-size: .62rem; color: var(--tx-mut); }
-  .edit-tabs { display: flex; gap: 4px; margin-bottom: 10px; }
-  .edit-tabs button {
-    background: transparent; border: none; border-bottom: 2px solid transparent;
-    color: var(--accent-soft); font-family: inherit; font-size: .72rem; padding: 4px 8px; cursor: pointer;
-  }
-  .edit-tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
-  .edit-tabs button:hover:not(.active) { color: var(--tx-mut); }
-
-  /* Detection tab editor */
-  .det-editor { display: flex; gap: 12px; align-items: flex-start; }
-  .det-feed { flex: 1.7; min-width: 0; }
-  .det-feed .preview-wrapper { position: relative; width: 100%; aspect-ratio: 16/9; background: var(--feed-bg); border: 1px solid var(--bd); border-radius: var(--r); overflow: hidden; }
-  .det-zoom { position: absolute; inset: 0; will-change: transform; }
-  .det-feed .preview-video { width: 100%; height: 100%; object-fit: contain; }
-  .det-feed .roi-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
-  .det-zoom-reset { position: absolute; right: 6px; top: 6px; z-index: 2; background: var(--panel); border: 1px solid var(--bd); color: var(--accent); border-radius: var(--r); font-family: var(--mono); font-size: .6rem; padding: 2px 6px; cursor: pointer; }
-  .det-zoom-reset:hover { background: var(--accent-bg); }
-  .det-feed .preview-cap { margin: 5px 2px 0; font-size: .64rem; color: var(--tx-mut); }
-  .det-tree { flex: 1; min-width: 250px; display: flex; flex-direction: column; gap: 6px; }
-  .tree-label { font-size: .66rem; text-transform: uppercase; letter-spacing: .08em; color: var(--tx-mut); }
-  .tree-and { text-align: center; font-size: .62rem; letter-spacing: .2em; color: var(--accent-soft); margin: 1px 0; }
-  .tree-group { border: 1px solid var(--bd); border-radius: var(--r); padding: 6px; background: var(--panel-2); }
-  .tree-group-hd { font-size: .58rem; text-transform: uppercase; letter-spacing: .06em; color: var(--accent-soft); margin-bottom: 4px; }
-  .tree-region { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; background: var(--panel-2); border: 1px solid var(--bd); border-radius: var(--r); padding: 4px 7px; margin-bottom: 3px; color: var(--tx-mut); font-family: inherit; font-size: .72rem; cursor: pointer; }
-  .tree-region:hover { border-color: var(--accent-soft); }
-  .tree-region.sel { border-color: var(--accent); background: var(--accent-bg); color: var(--tx); }
-  .treg-dot { width: 9px; height: 9px; border-radius: var(--r-sm); flex: none; }
-  .treg-name { flex: 1; }
-  .treg-score { font-family: var(--mono); font-size: .68rem; }
-  .tree-add { width: 100%; background: none; border: 1px dashed var(--tx-dim); border-radius: var(--r); color: var(--tx-mut); font-family: inherit; font-size: .64rem; padding: 3px; cursor: pointer; }
-  .tree-add:hover { color: var(--tx-mut); border-color: var(--tx-dim); }
-  .tree-add-and { border-color: var(--bd); margin-top: 2px; }
-  .reg-controls { border-top: 1px solid var(--bd); margin-top: 4px; padding-top: 8px; display: flex; flex-direction: column; gap: 8px; }
-  .reg-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  .reg-kind { font-size: .66rem; color: var(--tx-mut); display: flex; align-items: center; gap: 5px; }
-  .reg-kind select { background: var(--panel-2); color: var(--tx); border: 1px solid var(--bd); border-radius: var(--r); font-family: inherit; font-size: .7rem; padding: 2px 4px; }
-  .reg-del { background: none; border: 1px solid var(--err); color: var(--err); border-radius: var(--r); font-family: inherit; font-size: .64rem; padding: 3px 7px; cursor: pointer; }
-  .reg-del:hover { background: var(--err); color: #fff; }
-  .reg-thumbs { display: flex; gap: 8px; }
-  .reg-thumb { flex: 1; font-size: .58rem; color: var(--tx-mut); text-align: center; }
-  .reg-thumb img, .reg-thumb-empty { display: block; width: 100%; height: 40px; object-fit: contain; background: var(--panel-2); border: 1px solid var(--bd); border-radius: var(--r); margin-top: 2px; image-rendering: pixelated; }
-  .reg-recap { font-size: .7rem; align-self: flex-start; }
-  .det-reset { border-top: 1px solid var(--bd); margin-top: 4px; padding-top: 8px; }
-  .det-reset-btn { width: 100%; background: none; border: 1px solid var(--bd); border-radius: var(--r); color: var(--tx-mut); font-family: inherit; font-size: .66rem; padding: 5px; cursor: pointer; }
-  .det-reset-btn:hover { border-color: var(--err); color: var(--err); }
-  .det-reset-q { font-size: .68rem; color: var(--err); margin: 0 0 6px; }
-  .det-reset-row { display: flex; gap: 8px; }
-
-  /* Per-item template library (in the Selection/HUD tab) */
-  .tpl-list { flex: 1; max-height: 360px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--bd); border-radius: var(--r); padding: 4px; background: var(--panel-2); }
-  .tpl-item { text-align: left; background: none; border: none; color: var(--tx-mut); font-family: inherit; font-size: .72rem; padding: 4px 7px; border-radius: var(--r); cursor: pointer; }
-  .tpl-item:hover { background: var(--raised); }
-  .tpl-item.sel { background: var(--accent-bg); color: var(--tx); }
-  /* Selection/HUD: ROI picker beside the (shorter) template list, comparison below */
-  .sel-cols { display: flex; gap: 10px; align-items: flex-start; }
-  .sel-col { min-width: 0; }
-  .sel-col-roi { flex: 1; }
-  .sel-col-list { flex: 1; }
-  .sel-tpl-list { max-height: 168px; }
-
-  /* ── Main grid ────────────────────────────────────────────────── */
+  /* ── Main grid (monitor view: feed | sidebar) ─────────────────── */
   .main-grid {
     display: grid;
     grid-template-columns: 1fr 256px;
-    grid-template-rows: 1fr auto;
+    grid-template-rows: 1fr;
     flex: 1; min-height: 0; overflow: hidden;
   }
   .main-grid.sidebar-collapsed { grid-template-columns: 1fr 22px; }
-
-  /* In-place per-screen editor (replaces the feed in the main-feed pane) */
-  .main-feed-editing { background: var(--panel); }
-  .node-editor-bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--bd); flex-shrink: 0; }
-  .btn-back-preview { margin-left: auto; flex-shrink: 0; background: var(--panel-2); border: 1px solid var(--bd); color: var(--tx-mut); border-radius: var(--r); font-family: inherit; font-size: .72rem; padding: 3px 9px; cursor: pointer; }
-  .btn-back-preview:hover { background: var(--raised); color: var(--tx); }
-  .node-editor-title { font-size: .88rem; color: var(--tx); }
-  .det-tabs { margin-bottom: 8px; }
-  .main-feed-editing .edit-tab-body { flex: 1; min-height: 0; overflow: auto; padding: 10px 12px; }
 
   /* Collapsible sidebar */
   .sidebar-toggle {
@@ -2772,29 +2269,14 @@
   .feed-ph-text { font-size: .72rem; color: var(--tx-dim); }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  /* ── Sidebar (col 2, rows 1-2) ──────────────────────────────── */
+  /* ── Sidebar (col 2) ─────────────────────────────────────────── */
   .sidebar {
-    grid-column: 2; grid-row: 1 / 3;
+    grid-column: 2; grid-row: 1;
     display: flex; flex-direction: column;
     background: var(--bg); border-left: 1px solid var(--bd);
     overflow-y: auto; overflow-x: hidden;
     min-height: 0;
   }
-
-  /* ── Graph row (col 1, row 2) ────────────────────────────────── */
-  .graph-row {
-    grid-column: 1; grid-row: 2;
-    border-top: 1px solid var(--bd); background: var(--panel);
-  }
-  .graph-toggle {
-    display: flex; align-items: center; justify-content: space-between;
-    width: 100%; background: transparent; border: none; color: var(--tx-dim);
-    padding: 4px 10px; font-family: inherit; font-size: .65rem;
-    cursor: pointer; transition: color .12s;
-  }
-  .graph-toggle:hover { color: var(--tx-mut); }
-  .graph-chev { color: var(--tx-dim); font-size: .6rem; }
-  .graph-content { padding: 4px 8px 8px; }
 
   .log-line  { font-size: .65rem; color: var(--accent-soft); white-space: pre-wrap; word-break: break-all; line-height: 1.5; padding: 0 2px; font-family: var(--mono); }
   .log-empty { font-size: .65rem; color: var(--tx-dim); font-style: italic; padding: 4px 2px; }
@@ -2894,17 +2376,13 @@
   .step-centred h2 { color: var(--tx); font-size: 1.05rem; }
   .step-centred p  { font-size: .78rem; color: var(--tx-mut); line-height: 1.65; }
   .done-check { font-size: 2.2rem; color: var(--ok); }
-  .btn-reset-confirm { background: rgba(207,91,78,.12); border: 1px solid rgba(207,91,78,.35); color: var(--err); font-size: .72rem; padding: .3rem .75rem; border-radius: var(--r); cursor: pointer; }
-  .btn-reset-confirm:hover { background: rgba(207,91,78,.2); }
 
-  /* Preview wrapper */
+  /* Preview wrapper (wizard camera step) */
   .preview-wrapper {
     position: relative; width: 100%; aspect-ratio: 16/9;
     background: var(--feed-bg); border: 1px solid var(--bd); border-radius: var(--r); overflow: hidden;
   }
   .preview-video { width: 100%; height: 100%; display: block; object-fit: contain; }
-  .preview-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
-  .roi-canvas { pointer-events: auto; }
   .preview-placeholder {
     width: 100%; height: 100%; position: absolute; inset: 0;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -2913,7 +2391,6 @@
   }
   .preview-icon { font-size: 1.4rem; line-height: 1; }
   .spin { animation: spin 1.2s linear infinite; }
-  .preview-cap { font-size: .6rem; color: var(--tx-dim); margin: 0; }
 
   /* Camera step */
   .cam-setup { display: flex; flex-direction: column; gap: .9rem; }

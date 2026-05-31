@@ -1,6 +1,12 @@
 <script>
   /** App version string (without the "v" prefix) */
   export let version = "";
+  /** Current top-level view: "monitor" | "edit" */
+  export let view = "monitor";
+  /** Screen name being edited (shown in edit view), or null */
+  export let editingScreen = null;
+  /** Called to flip monitor↔edit (Edit screens / ← Monitor buttons) */
+  export let onToggleView = () => {};
   /** Called when the Minimize window control is clicked */
   export let onMinimize = () => {};
   /** Called when the Maximize/restore window control is clicked */
@@ -10,14 +16,26 @@
 </script>
 
 <header class="titlebar" data-tauri-drag-region>
-  <div class="tb-brand" data-tauri-drag-region>
-    <span class="brand-name">MKW Tracker</span>
-    {#if version}<span class="brand-ver">v{version}</span>{/if}
-  </div>
+  {#if view === "edit"}
+    <button class="tb-back" on:click={onToggleView}>← Monitor</button>
+    <div class="tb-editing" data-tauri-drag-region>
+      <span class="editing-label">Editing</span>
+      <span class="editing-sep">—</span>
+      <span class="editing-screen">{editingScreen ?? "—"}</span>
+    </div>
+  {:else}
+    <div class="tb-brand" data-tauri-drag-region>
+      <span class="brand-name">MKW Tracker</span>
+      {#if version}<span class="brand-ver">v{version}</span>{/if}
+    </div>
+  {/if}
 
   <div class="tb-actions" data-tauri-drag-region>
-    <!-- Update strip: App.svelte injects its existing update markup here -->
-    <slot name="update" />
+    <!-- Update strip: App.svelte injects its existing update markup here (monitor view) -->
+    {#if view !== "edit"}
+      <slot name="update" />
+      <button class="btn-hdr btn-edit" on:click={onToggleView}>Edit screens</button>
+    {/if}
 
     <!-- Settings button slot: App.svelte injects the view-conditional button -->
     <slot name="settings" />
@@ -41,10 +59,32 @@
   .brand-name { font-size: .85rem; font-weight: bold; color: var(--tx); letter-spacing: .02em; }
   .brand-ver  { font-size: .65rem; color: var(--tx-dim); }
 
+  /* Edit-view left side: back button + "Editing — SCREEN" */
+  .tb-back {
+    -webkit-app-region: no-drag; flex-shrink: 0;
+    background: var(--panel); border: 1px solid var(--bd); border-radius: var(--r);
+    color: var(--tx-mut); font-family: inherit; font-size: .7rem;
+    padding: 3px 10px; cursor: pointer; transition: background .12s, color .12s;
+  }
+  .tb-back:hover { background: var(--raised); color: var(--tx); }
+  .tb-editing { display: flex; align-items: baseline; gap: 6px; flex-shrink: 0; }
+  .editing-label  { font-size: .72rem; color: var(--tx-mut); }
+  .editing-sep    { font-size: .72rem; color: var(--tx-dim); }
+  .editing-screen { font-size: .72rem; color: var(--tx); font-family: var(--mono); }
+
   .tb-actions {
     display: flex; align-items: center; gap: 6px; flex-shrink: 0;
     -webkit-app-region: no-drag; margin-left: auto;
   }
+
+  /* "Edit screens" button (monitor view) */
+  .btn-hdr {
+    background: var(--panel); border-radius: var(--r); padding: 3px 9px;
+    font-family: inherit; font-size: .68rem; cursor: pointer; white-space: nowrap;
+    transition: background .12s; -webkit-app-region: no-drag;
+  }
+  .btn-edit       { color: var(--tx-mut); border: 1px solid var(--bd); }
+  .btn-edit:hover { background: var(--raised); color: var(--tx); }
 
   .win-controls { display: flex; flex-shrink: 0; margin-left: 0; }
   .win-btn {
