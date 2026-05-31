@@ -12,6 +12,10 @@
   import { scoreColor } from "./lib/format.js";
   import TitleBar from "./components/TitleBar.svelte";
   import StatusBar from "./components/StatusBar.svelte";
+  import Rail from "./components/Rail.svelte";
+  import { screen as screenStore, liveScore as liveScoreStore,
+           candidates as candidatesStore, selection as selectionStore,
+           race as raceStore, logs as logsStore } from "./lib/stores.js";
 
   let appWindow = null;
   function winMinimize()       { appWindow?.minimize(); }
@@ -590,6 +594,7 @@
 
   function pushLog(line) {
     logs = [...logs.slice(-299), line];
+    logsStore.update(a => { const n = [...a, line]; return n.length > 500 ? n.slice(-500) : n; });
     setTimeout(() => { if (logEl) logEl.scrollTop = logEl.scrollHeight; }, 0);
   }
 
@@ -1693,6 +1698,21 @@
 
   function confBar(v) { return Math.round((v||0)*100); }
   // scoreColor() lives in lib/format.js
+
+  // ── Store mirrors (keep local vars unchanged; Rail/RaceSection/EventLog read stores) ──
+  function rankedFrom(obj) {
+    return Object.entries(obj).map(([name, score]) => ({ name, score }))
+      .sort((a, b) => b.score - a.score).slice(0, 5);
+  }
+  $: screenStore.set(backendScreen);
+  $: liveScoreStore.set(liveScore);
+  $: candidatesStore.set({ screen: rankedFrom(candidateScores), char: [], kart: [], course: [], costume: [] });
+  $: selectionStore.set({ char: selChar, charConf: selCharConf,
+                          costume: selCostume, costumeConf: selCostumeConf,
+                          kart: selKart, kartConf: selKartConf,
+                          course: selCourse, courseConf: selCourseConf });
+  $: raceStore.set({ curLap, totLap, coins, mushrooms,
+                     splits: raceSplits, finishTime: raceFinishTime });
 </script>
 
 <!-- ═══════════════════════════════════════════════════════════════════════════ -->
@@ -1962,180 +1982,7 @@
         title={sidebarOpen ? "Collapse panels" : "Expand panels"}>{sidebarOpen ? "▸" : "◂"}</button>
       {#if sidebarOpen}
 
-      <!-- ── Panel: Detection ──────────────────────────────────────────── -->
-      <div class="panel">
-        <button class="panel-hdr" on:click={()=>panelOpen.detection=!panelOpen.detection}>
-          <span class="panel-title">Detection</span>
-          <span class="panel-chev">{panelOpen.detection?'▾':'▸'}</span>
-        </button>
-        {#if panelOpen.detection}
-          <div class="panel-body">
-            <div class="det-screen">
-              <span class="det-screen-lbl">Screen</span>
-              <span class="det-screen-val" class:det-active={backendAlive}>{SCREEN_LABELS[backendScreen] ?? backendScreen}</span>
-            </div>
-            <div class="det-score-row">
-              <span class="det-lbl">Score</span>
-              <div class="det-bar-wrap">
-                <div class="det-bar" style="width:{confBar(liveScore)}%; background:{scoreColor(liveScore)}"></div>
-              </div>
-              <span class="det-val" style="color:{scoreColor(liveScore)}">{liveScore.toFixed(3)}</span>
-            </div>
-            {#if devices.length > 0}
-              <div class="det-device-row">
-                <label class="det-lbl" for="main-dev">Input</label>
-                <select id="main-dev" class="det-select" disabled={deviceSwitching} on:change={handleDeviceChange}>
-                  {#if !configuredDevice}
-                    <option value="" disabled selected>— pick a device —</option>
-                  {/if}
-                  {#each devices as d}
-                    <option value={d} selected={d===configuredDevice}>{d}</option>
-                  {/each}
-                </select>
-                {#if deviceSwitching}
-                  <span class="det-switching">switching…</span>
-                {/if}
-              </div>
-            {/if}
-            {#if audioDevices.length > 0}
-              <div class="det-device-row">
-                <label class="det-lbl" for="main-aud">Audio</label>
-                <select id="main-aud" class="det-select" on:change={handleAudioDeviceChange}>
-                  <option value="none" selected={!selectedAudioDeviceId||selectedAudioDeviceId==="none"}>— none —</option>
-                  {#each audioDevices as d}
-                    <option value={d.deviceId} selected={d.deviceId===selectedAudioDeviceId}>
-                      {d.label || `Audio ${d.deviceId.slice(0,6)}…`}
-                    </option>
-                  {/each}
-                </select>
-              </div>
-            {/if}
-          </div>
-        {/if}
-      </div>
-
-      <!-- ── Panel: Candidates ─────────────────────────────────────────── -->
-      <div class="panel">
-        <button class="panel-hdr" on:click={()=>panelOpen.candidates=!panelOpen.candidates}>
-          <span class="panel-title">Candidates</span>
-          <span class="panel-chev">{panelOpen.candidates?'▾':'▸'}</span>
-        </button>
-        {#if panelOpen.candidates}
-          <div class="panel-body cand-body">
-            {#if sortedCandidates.length > 0}
-              {#each sortedCandidates as [scr, score]}
-                {@const isActive = scr === backendScreen}
-                <div class="cand-row" class:cand-active={isActive}>
-                  <span class="cand-name" class:cand-name-active={isActive}>
-                    {SCREEN_LABELS[scr]??scr}
-                  </span>
-                  <div class="cand-bar-wrap">
-                    <div class="cand-bar" style="width:{confBar(score)}%; background:{scoreColor(score)}"></div>
-                  </div>
-                  <span class="cand-score" style="color:{scoreColor(score)}">{score.toFixed(3)}</span>
-                </div>
-              {/each}
-            {:else}
-              <span class="panel-empty">No candidate data yet</span>
-            {/if}
-          </div>
-        {/if}
-      </div>
-
-      <!-- ── Panel: Selection ──────────────────────────────────────────── -->
-      <div class="panel">
-        <button class="panel-hdr" on:click={()=>panelOpen.selection=!panelOpen.selection}>
-          <span class="panel-title">Selection</span>
-          <span class="panel-chev">{panelOpen.selection?'▾':'▸'}</span>
-        </button>
-        {#if panelOpen.selection}
-          <div class="panel-body">
-            {#each [
-              { label:"Character", val:selChar,   conf:selCharConf   },
-              { label:"Costume",   val:selCostume, conf:selCostumeConf},
-              { label:"Kart",      val:selKart,    conf:selKartConf   },
-              { label:"Course",    val:selCourse,  conf:selCourseConf },
-            ] as item}
-              <div class="sel-row">
-                <span class="sel-lbl">{item.label}</span>
-                <div class="sel-right">
-                  <span class="sel-val">{item.val ?? "—"}</span>
-                  {#if item.val}
-                    <div class="sel-bar-wrap">
-                      <div class="sel-bar" style="width:{confBar(item.conf)}%; background:{scoreColor(item.conf)}"></div>
-                    </div>
-                  {/if}
-                </div>
-              </div>
-            {/each}
-          </div>
-        {/if}
-      </div>
-
-      <!-- ── Panel: Race ───────────────────────────────────────────────── -->
-      <div class="panel">
-        <button class="panel-hdr" on:click={()=>panelOpen.hud=!panelOpen.hud}>
-          <span class="panel-title">Race</span>
-          <span class="panel-chev">{panelOpen.hud?'▾':'▸'}</span>
-        </button>
-        {#if panelOpen.hud}
-          <div class="panel-body hud-body">
-            <div class="hud-row">
-              <span class="hud-lbl">Lap</span>
-              <span class="hud-val">
-                {#if curLap !== null}{curLap} / {totLap ?? "?"}{:else}—{/if}
-              </span>
-            </div>
-            <div class="hud-row">
-              <span class="hud-lbl">Coins</span>
-              <span class="hud-val">{coins !== null ? coins : "—"}</span>
-            </div>
-            <div class="hud-row">
-              <span class="hud-lbl">Mush</span>
-              <span class="hud-val mush-val">
-                {#if mushrooms > 0}{'🍄'.repeat(mushrooms)}{:else}—{/if}
-              </span>
-            </div>
-            <div class="hud-divider"></div>
-            {#each Array.from({length: totLap ?? 0}, (_, i) => i + 1) as lap}
-              <div class="hud-row">
-                <span class="hud-lbl split-lbl">Lap {lap}</span>
-                <span class="hud-val split-val" class:split-pending={!raceSplits[lap]}>{raceSplits[lap] ?? "--:--.---"}</span>
-              </div>
-            {/each}
-            <div class="hud-row hud-total-row">
-              <span class="hud-lbl split-lbl">Total</span>
-              <span class="hud-val hud-total" class:split-pending={!raceFinishTime}>{raceFinishTime ?? "--:--.---"}</span>
-            </div>
-          </div>
-        {/if}
-      </div>
-
-      <!-- ── Panel: Log ────────────────────────────────────────────────── -->
-      <div class="panel panel-log">
-        <button class="panel-hdr" on:click={()=>panelOpen.log=!panelOpen.log}>
-          <span class="panel-title">Event Log</span>
-          <span class="panel-chev">{panelOpen.log?'▾':'▸'}</span>
-        </button>
-        {#if panelOpen.log}
-          <div class="panel-body log-body" bind:this={logEl}>
-            {#each logs as line}
-              <div class="log-line">{line}</div>
-            {/each}
-            {#if logs.length === 0}
-              {#if sidecarStartupError}
-                <div class="log-empty log-error">
-                  Tracker failed to start. Check that your antivirus isn't blocking
-                  <code>bin\mkw-tracker-engine.exe</code> in the install folder,
-                  then restart the app.
-                </div>
-              {:else}
-                <div class="log-empty">Waiting for events…</div>
-              {/if}
-            {/if}
-          </div>
-        {/if}
-      </div>
+      <Rail />
 
       {/if}
     </aside>
@@ -2892,79 +2739,9 @@
   .graph-chev { color: var(--tx-dim); font-size: .6rem; }
   .graph-content { padding: 4px 8px 8px; }
 
-  /* ── Panel ────────────────────────────────────────────────────── */
-  .panel { border-bottom: 1px solid var(--bd); }
-  .panel-hdr {
-    display: flex; align-items: center; justify-content: space-between;
-    width: 100%; background: var(--panel); border: none; border-bottom: 1px solid var(--bd); color: var(--tx-mut);
-    padding: 7px 10px; font-family: inherit; font-size: .68rem;
-    cursor: pointer; text-align: left; transition: background .1s, color .1s;
-    text-transform: uppercase; letter-spacing: .06em;
-  }
-  .panel-hdr:hover { background: var(--raised); color: var(--tx-mut); }
-  .panel-title { flex: 1; }
-  .panel-chev  { font-size: .6rem; color: var(--tx-dim); }
-  .panel-body  { padding: 6px 10px 8px; display: flex; flex-direction: column; gap: 5px; }
-  .panel-empty { font-size: .66rem; color: var(--tx-dim); font-style: italic; }
-  .panel-log   { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-  .log-body {
-    flex: 1; min-height: 0;
-    overflow-y: auto; overflow-x: hidden;
-    background: var(--bg);
-  }
   .log-line  { font-size: .65rem; color: var(--accent-soft); white-space: pre-wrap; word-break: break-all; line-height: 1.5; padding: 0 2px; font-family: var(--mono); }
   .log-empty { font-size: .65rem; color: var(--tx-dim); font-style: italic; padding: 4px 2px; }
   .log-error { color: var(--err); font-style: normal; }
-
-  /* Detection panel */
-  .det-screen { display: flex; align-items: center; gap: 6px; }
-  .det-screen-lbl { font-size: .63rem; color: var(--tx-mut); flex-shrink: 0; min-width: 36px; }
-  .det-screen-val { font-size: .72rem; color: var(--tx-dim); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--ui); }
-  .det-active { color: var(--tx); }
-  .det-score-row, .det-device-row { display: flex; align-items: center; gap: 5px; }
-  .det-lbl { font-size: .63rem; color: var(--tx-mut); flex-shrink: 0; min-width: 36px; }
-  .det-bar-wrap { flex: 1; height: 3px; background: var(--track); border-radius: var(--r-sm); overflow: hidden; }
-  .det-bar { height: 100%; border-radius: var(--r-sm); transition: width .15s, background .15s; }
-  .det-val { font-size: .68rem; font-weight: bold; min-width: 3em; text-align: right; flex-shrink: 0; font-family: var(--mono); }
-  .det-select { flex: 1; min-width: 0; }
-  .btn-xs {
-    background: var(--panel-2); color: var(--accent); border: 1px solid var(--bd); border-radius: var(--r);
-    padding: 2px 6px; font-family: inherit; font-size: .63rem; cursor: pointer; flex-shrink: 0;
-  }
-  .btn-xs:hover { background: var(--bd); }
-  .btn-restart { white-space: nowrap; }
-  .det-switching { font-size: 0.7rem; color: var(--tx-mut); white-space: nowrap; }
-
-  /* Candidates panel */
-  .cand-body   { gap: 3px; }
-  .cand-row    { display: flex; align-items: center; gap: 4px; }
-  .cand-active { background: rgba(61,124,194,.07); border-radius: var(--r); margin: 0 -4px; padding: 0 4px; }
-  .cand-name        { font-size: .62rem; color: var(--tx-mut); min-width: 72px; max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .cand-name-active { color: var(--accent); }
-  .cand-bar-wrap { flex: 1; height: 2px; background: var(--track); border-radius: var(--r-sm); overflow: hidden; }
-  .cand-bar   { height: 100%; border-radius: var(--r-sm); transition: width .15s, background .15s; }
-  .cand-score { font-size: .62rem; min-width: 3em; text-align: right; flex-shrink: 0; font-family: var(--mono); }
-
-  /* Selection panel */
-  .sel-row   { display: flex; align-items: center; gap: 5px; }
-  .sel-lbl   { font-size: .62rem; color: var(--tx-mut); min-width: 52px; flex-shrink: 0; }
-  .sel-right { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-  .sel-val   { font-size: .68rem; color: var(--tx); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
-  .sel-bar-wrap { height: 2px; background: var(--track); border-radius: var(--r-sm); overflow: hidden; }
-  .sel-bar { height: 100%; border-radius: var(--r-sm); transition: width .15s, background .15s; }
-
-  /* Race panel */
-  .hud-body     { gap: 4px; }
-  .hud-row      { display: flex; align-items: center; gap: 6px; }
-  .hud-lbl      { font-size: .63rem; color: var(--tx-mut); min-width: 40px; }
-  .hud-val      { font-size: .82rem; color: var(--tx); font-weight: bold; font-family: var(--mono); }
-  .hud-divider  { border-top: 1px solid var(--bd); margin: 3px 0; }
-  .split-lbl    { color: var(--tx-dim); }
-  .split-val    { font-size: .75rem; color: var(--accent-soft); font-weight: normal; font-variant-numeric: tabular-nums; font-family: var(--mono); }
-  .split-pending { color: var(--tx-dim) !important; }
-  .hud-total-row { margin-top: 2px; }
-  .hud-total    { font-size: .82rem; color: var(--ok); font-weight: bold; font-variant-numeric: tabular-nums; font-family: var(--mono); }
-  .mush-val { font-size: .75rem; font-family: var(--mono); }
 
   /* ── Startup view ─────────────────────────────────────────────── */
   .startup-view {
