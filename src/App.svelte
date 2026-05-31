@@ -2177,6 +2177,18 @@
                   {#if restartNeeded}<button class="btn-sm" on:click={restartTracker}>Restart</button>{/if}
                 </div>
               {/if}
+              {#if audioDevices.length > 0}
+                <div class="device-row">
+                  <label for="sv-aud">Audio</label>
+                  <select id="sv-aud" on:change={handleAudioDeviceChange}>
+                    {#each audioDevices as d}
+                      <option value={d.deviceId} selected={d.deviceId===selectedAudioDeviceId}>
+                        {d.label||`Audio ${d.deviceId.slice(0,6)}…`}
+                      </option>
+                    {/each}
+                  </select>
+                </div>
+              {/if}
               <div class="cam-prereq" class:cam-prereq-ok={bothCamerasOk}>
                 {#if bothCamerasOk}
                   <span class="cam-prereq-title cam-prereq-title-ok">Camera sharing is working</span>
@@ -2449,6 +2461,18 @@
                     </select>
                   {/if}
                   {#if restartNeeded}<button class="btn-sm" on:click={restartTracker}>Restart</button>{/if}
+                </div>
+              {/if}
+              {#if audioDevices.length > 0}
+                <div class="device-row">
+                  <label for="wiz-aud">Audio</label>
+                  <select id="wiz-aud" on:change={handleAudioDeviceChange}>
+                    {#each audioDevices as d}
+                      <option value={d.deviceId} selected={d.deviceId===selectedAudioDeviceId}>
+                        {d.label||`Audio ${d.deviceId.slice(0,6)}…`}
+                      </option>
+                    {/each}
+                  </select>
                 </div>
               {/if}
 
