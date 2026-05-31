@@ -10,6 +10,8 @@
   import { C } from "./lib/palette.js";
   import { send } from "./lib/ipc.js";
   import { scoreColor } from "./lib/format.js";
+  import TitleBar from "./components/TitleBar.svelte";
+  import StatusBar from "./components/StatusBar.svelte";
 
   let appWindow = null;
   function winMinimize()       { appWindow?.minimize(); }
@@ -1700,13 +1702,15 @@
 <div class="app">
 
   <!-- ── Title bar ──────────────────────────────────────────────────────────── -->
-  <header class="titlebar" data-tauri-drag-region>
-    <div class="tb-brand" data-tauri-drag-region>
-      <span class="brand-name">MKW Tracker</span>
-      {#if version}<span class="brand-ver">v{version}</span>{/if}
-    </div>
-
-    <div class="tb-actions" data-tauri-drag-region>
+  <TitleBar
+    version={version}
+    onSettings={openSettings}
+    onMinimize={winMinimize}
+    onToggleMaximize={winToggleMaximize}
+    onClose={winClose}
+  >
+    <!-- Update strip: logic stays here; slot is rendered inside TitleBar's .tb-actions -->
+    <svelte:fragment slot="update">
       {#if updateVersion}
         <div class="upd-strip">
           <span class="upd-label">{updateReady ? `v${updateVersion} ready` : `v${updateVersion} ${downloadPercent !== null ? `${downloadPercent}%` : "…"}`}</span>
@@ -1717,6 +1721,9 @@
           {/if}
         </div>
       {/if}
+    </svelte:fragment>
+    <!-- Settings button: view- and wizard-state-conditional logic stays here -->
+    <svelte:fragment slot="settings">
       {#if view === "main"}
         {#if wizardOpen}
           <button class="btn-hdr btn-close-wiz" on:click={closeWizard}>✕ Close Settings</button>
@@ -1724,14 +1731,8 @@
           <button class="btn-hdr btn-setup" on:click={openSettings}>⚙ Settings</button>
         {/if}
       {/if}
-    </div>
-
-    <div class="win-controls">
-      <button class="win-btn" on:click={winMinimize} title="Minimize">&#x2013;</button>
-      <button class="win-btn" on:click={winToggleMaximize} title="Maximize">&#x25a1;</button>
-      <button class="win-btn win-btn-close" on:click={winClose} title="Close">&#x2715;</button>
-    </div>
-  </header>
+    </svelte:fragment>
+  </TitleBar>
 
   <!-- ── View router ───────────────────────────────────────────────────────── -->
   {#if view === "main"}
@@ -2460,27 +2461,15 @@
   {/if}<!-- /view router -->
 
   <!-- ── Bottom status bar (single home for live engine status) ─────────────── -->
-  <footer class="statusbar">
-    <span class="hb-dot" style="background:{statusDot}"></span>
-    {#if trackerConnected && backendAlive}
-      <span class="sb-screen">{backendScreen}</span>
-      <span class="sb-sep">·</span>
-      <span class="sb-score" style="color:{scoreColor(liveScore)}">{liveScore.toFixed(3)}</span>
-      <span class="sb-sep">·</span>
-      <span class="sb-fps">{backendFps} fps</span>
-      <span class="sb-spacer"></span>
-      <span class="sb-res">{pythonFrameW}×{pythonFrameH}</span>
-    {:else if trackerConnected}
-      <span class="sb-warn">backend stalled</span>
-      <span class="sb-spacer"></span>
-    {:else if trackerSpawned}
-      <span class="sb-idle">engine starting…</span>
-      <span class="sb-spacer"></span>
-    {:else}
-      <span class="sb-idle">launching…</span>
-      <span class="sb-spacer"></span>
-    {/if}
-  </footer>
+  <StatusBar
+    connected={trackerConnected && backendAlive}
+    spawned={trackerSpawned || trackerConnected}
+    screenName={backendScreen}
+    score={liveScore}
+    fps={backendFps}
+    frameW={pythonFrameW}
+    frameH={pythonFrameH}
+  />
 
 </div><!-- /app -->
 
@@ -2709,25 +2698,14 @@
   /* ── App shell ────────────────────────────────────────────────── */
   .app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 
-  /* ── Title bar ────────────────────────────────────────────────── */
-  .titlebar {
-    display: flex; align-items: center; height: 40px; flex-shrink: 0;
-    background: var(--panel); border-bottom: 1px solid var(--bd);
-    padding: 0 0 0 12px; gap: 8px;
-    -webkit-app-region: drag; user-select: none;
-  }
-  .tb-brand { display: flex; align-items: baseline; gap: 5px; flex-shrink: 0; }
-  .brand-name { font-size: .85rem; font-weight: bold; color: var(--tx); letter-spacing: .02em; }
-  .brand-ver  { font-size: .65rem; color: var(--tx-dim); }
-
-  .hb-dot    { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; transition: background .6s; }
-
-  .tb-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; -webkit-app-region: no-drag; margin-left: auto; }
+  /* ── Title bar (component: src/components/TitleBar.svelte) ───────── */
+  /* Update-strip markup is slotted from App.svelte so its styles stay here */
   .upd-strip  { display: flex; align-items: center; gap: 5px; font-size: .65rem; }
   .upd-label  { color: var(--ok); flex-shrink: 0; font-family: var(--mono); }
   .upd-track  { width: 60px; height: 3px; background: var(--track); border-radius: var(--r-sm); overflow: hidden; }
   .upd-fill   { height: 100%; background: var(--ok); transition: width .2s; }
 
+  /* Settings / close-wizard buttons are slotted from App.svelte so their styles stay here */
   .btn-hdr {
     background: var(--panel); border-radius: var(--r); padding: 3px 9px;
     font-family: inherit; font-size: .68rem; cursor: pointer; white-space: nowrap;
@@ -2738,20 +2716,7 @@
   .btn-close-wiz   { color: var(--tx-dim); border: 1px solid var(--bd); }
   .btn-close-wiz:hover { color: var(--tx-mut); background: var(--bd); }
 
-  /* Bottom status bar */
-  .statusbar {
-    flex: none; display: flex; align-items: center; gap: 8px;
-    height: 24px; padding: 0 12px;
-    background: var(--panel); border-top: 1px solid var(--bd);
-    font-family: var(--mono); font-size: .68rem; color: var(--tx-mut);
-  }
-  .statusbar .sb-screen { color: var(--tx); }
-  .statusbar .sb-sep    { color: var(--tx-dim); }
-  .statusbar .sb-fps,
-  .statusbar .sb-res    { color: var(--tx-mut); }
-  .statusbar .sb-warn   { color: var(--warn); }
-  .statusbar .sb-idle   { color: var(--tx-dim); font-style: italic; }
-  .statusbar .sb-spacer { flex: 1; }
+  /* ── Status bar (component: src/components/StatusBar.svelte) ─────── */
 
   /* ── Screen graph (interactive footer strip) + per-node editor ─── */
   .edit-graph { flex: none; height: 248px; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--bd); border-radius: var(--r); overflow: hidden; }
@@ -2819,17 +2784,6 @@
   .sel-col-roi { flex: 1; }
   .sel-col-list { flex: 1; }
   .sel-tpl-list { max-height: 168px; }
-
-  .win-controls { display: flex; flex-shrink: 0; margin-left: 0; }
-  .win-btn {
-    background: transparent; border: none; color: var(--tx-dim);
-    width: 46px; height: 40px; font-size: .78rem; cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-    transition: background .1s, color .1s; flex-shrink: 0;
-    -webkit-app-region: no-drag;
-  }
-  .win-btn:hover { background: var(--bd); color: var(--tx); }
-  .win-btn-close:hover { background: var(--close); color: #fff; }
 
   /* ── Main grid ────────────────────────────────────────────────── */
   .main-grid {
