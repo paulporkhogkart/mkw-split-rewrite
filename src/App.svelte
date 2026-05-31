@@ -2716,7 +2716,7 @@
   .btn-close-wiz   { color: var(--tx-dim); border: 1px solid var(--bd); }
   .btn-close-wiz:hover { color: var(--tx-mut); background: var(--bd); }
 
-  /* ── Status bar (component: src/components/StatusBar.svelte) ─────── */
+  /* ── Status bar styles live in src/components/StatusBar.svelte ───── */
 
   /* ── Screen graph (interactive footer strip) + per-node editor ─── */
   .edit-graph { flex: none; height: 248px; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--bd); border-radius: var(--r); overflow: hidden; }

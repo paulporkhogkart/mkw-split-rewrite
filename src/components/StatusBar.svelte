@@ -60,7 +60,6 @@
     font-family: var(--ui); font-size: .68rem; color: var(--tx-mut);
     font-variant-numeric: tabular-nums; font-feature-settings: "tnum";
   }
-  .hb-dot   { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; transition: background .6s; }
   .sb-screen { color: var(--tx); }
   .sb-sep    { color: var(--tx-dim); }
   .sb-fps,

@@ -57,3 +57,7 @@ html, body {
    properties, which take precedence over ::-webkit-scrollbar). Opt out locally
    with scrollbar-width: none where a bar isn't wanted. */
 * { scrollbar-width: thin; scrollbar-color: var(--raised) transparent; }
+
+/* Status-indicator dot — used in App.svelte setup/startup views AND StatusBar.svelte.
+   Must be global so Svelte scoping doesn't strip it in the host component. */
+.hb-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; transition: background .6s; }
