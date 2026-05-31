@@ -8,6 +8,7 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { t } from "./translations.js";
   import { C } from "./lib/palette.js";
+  import { send } from "./lib/ipc.js";
 
   let appWindow = null;
   function winMinimize()       { appWindow?.minimize(); }
@@ -582,7 +583,7 @@
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────────
-  function send(msg) { invoke("send_to_tracker", { message: JSON.stringify(msg) }).catch(() => {}); }
+  // send() lives in lib/ipc.js
 
   function pushLog(line) {
     logs = [...logs.slice(-299), line];
