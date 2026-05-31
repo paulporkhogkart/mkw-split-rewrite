@@ -9,6 +9,7 @@
   import { t } from "./translations.js";
   import { C } from "./lib/palette.js";
   import { send } from "./lib/ipc.js";
+  import { scoreColor } from "./lib/format.js";
 
   let appWindow = null;
   function winMinimize()       { appWindow?.minimize(); }
@@ -1689,12 +1690,7 @@
     .sort((a,b)=>b[1]-a[1]).slice(0,8);
 
   function confBar(v) { return Math.round((v||0)*100); }
-  function scoreColor(v) {
-    if (v < 0.005) return C.txDim;   // no/negligible signal — idle, not alarm-red
-    if (v >= 0.8) return C.ok;
-    if (v >= 0.5) return C.warn;
-    return C.err;
-  }
+  // scoreColor() lives in lib/format.js
 </script>
 
 <!-- ═══════════════════════════════════════════════════════════════════════════ -->
