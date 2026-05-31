@@ -1,6 +1,7 @@
 <script>
   import { onMount, onDestroy } from "svelte";
-  import { screen as screenStore, tells as tellsStore, rois as roisStore } from "../lib/stores.js";
+  import { screen as screenStore, tells as tellsStore, rois as roisStore,
+           minimap as minimapStore, replays as replaysStore, sample as sampleStore } from "../lib/stores.js";
   import { drawOverlay } from "../lib/overlay.js";
 
   // ── Props ─────────────────────────────────────────────────────────────────────
@@ -26,10 +27,21 @@
   let currentScreen = "—";
   let currentTells  = [];
   let currentRois   = {};
+  let currentMinimap = null;
+  let currentReplays = [];
+  let sampleImg      = null;   // decoded HTMLImageElement | null
 
-  const unsubScreen = screenStore.subscribe(v => { currentScreen = v; });
-  const unsubTells  = tellsStore.subscribe(v  => { currentTells  = v ?? []; });
-  const unsubRois   = roisStore.subscribe(v   => { currentRois   = v ?? {}; });
+  const unsubScreen  = screenStore.subscribe(v  => { currentScreen  = v;      });
+  const unsubTells   = tellsStore.subscribe(v   => { currentTells   = v ?? []; });
+  const unsubRois    = roisStore.subscribe(v    => { currentRois    = v ?? {}; });
+  const unsubMinimap = minimapStore.subscribe(v => { currentMinimap = v ?? null; });
+  const unsubReplays = replaysStore.subscribe(v => { currentReplays = v ?? []; });
+  const unsubSample  = sampleStore.subscribe(b64 => {
+    if (!b64) { sampleImg = null; return; }
+    const img = new Image();
+    img.onload = () => { sampleImg = img; };
+    img.src = "data:image/png;base64," + b64;
+  });
 
   // ── Node → ROI-key maps (must mirror App.svelte constants exactly) ────────────
   const NODE_SELECTION = {
@@ -84,14 +96,22 @@
   $: if (videoEl) videoEl.muted     = muted;
   $: if (videoEl) videoEl.volume    = volume;
 
-  // ── Reactive: redraw when active ROIs or canvas size change ──────────────────
+  // ── Reactive: redraw when active ROIs, minimap, replays, sampleImg, or canvas size change ───
   $: activeRois = buildActiveRois(currentScreen, currentTells, currentRois);
 
   $: if (canvasEl && canvasW > 0 && canvasH > 0) {
+    // Depend on all dynamic overlays so Svelte re-runs this block on any change.
+    void currentMinimap; void currentReplays; void sampleImg;
     canvasEl.width  = canvasW;
     canvasEl.height = canvasH;
     const ctx = canvasEl.getContext("2d");
-    if (ctx) drawOverlay(ctx, { canvasW, canvasH, rois: activeRois });
+    if (ctx) drawOverlay(ctx, {
+      canvasW, canvasH,
+      rois:      activeRois,
+      minimap:   currentMinimap,
+      replays:   currentReplays,
+      sampleImg,
+    });
   }
 
   // ── ResizeObserver: keep canvas dimensions in sync with container ─────────────
@@ -113,6 +133,9 @@
     unsubScreen();
     unsubTells();
     unsubRois();
+    unsubMinimap();
+    unsubReplays();
+    unsubSample();
     _ro?.disconnect();
   });
 </script>

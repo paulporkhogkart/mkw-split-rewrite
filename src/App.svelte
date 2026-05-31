@@ -17,7 +17,8 @@
   import { screen as screenStore, liveScore as liveScoreStore,
            candidates as candidatesStore, selection as selectionStore,
            race as raceStore, logs as logsStore,
-           tells as tellsStore, rois as roisStore } from "./lib/stores.js";
+           tells as tellsStore, rois as roisStore,
+           minimap as minimapStore, replays as replaysStore, sample as sampleStore } from "./lib/stores.js";
 
   let appWindow = null;
   function winMinimize()       { appWindow?.minimize(); }
@@ -39,6 +40,8 @@
   let lastHeartbeatTs = 0;
   let liveScore = 0.0;
   let candidateScores = {};
+  let selectionCandidates = { char: [], kart: [], course: [], costume: [] };
+  let _lastFetchedCourse = null;
   let _tick = 0;
   $: backendAlive = trackerConnected && _tick >= 0 && (Date.now() - lastHeartbeatTs) < 4000;
   $: statusDot = !trackerConnected ? C.idle : backendAlive ? C.ok : C.warn;
@@ -685,6 +688,7 @@
         lastHeartbeatTs = Date.now();
         liveScore       = msg.current_score ?? 0;
         candidateScores = msg.candidate_scores ?? {};
+        selectionCandidates = msg.selection_candidates ?? { char: [], kart: [], course: [], costume: [] };
         break;
       case "camera_paused":
         _pauseIntent = "";
@@ -790,6 +794,15 @@
         pushLog(`[finish] ${msg.result}  ${msg.total_time ?? "—"}`);
         break;
       case "error":  pushLog(`[ERR] ${msg.message}`); break;
+      case "minimap_update":
+        minimapStore.set({ cx: msg.cx, cy: msg.cy, radius: msg.radius, trackState: msg.track_state });
+        break;
+      case "replay_paths":
+        replaysStore.set(msg.paths ?? []);
+        break;
+      case "minimap_sample":
+        sampleStore.set(msg.png_b64 ?? null);
+        break;
     }
   }
 
@@ -1703,7 +1716,11 @@
   }
   $: screenStore.set(backendScreen);
   $: liveScoreStore.set(liveScore);
-  $: candidatesStore.set({ screen: rankedFrom(candidateScores), char: [], kart: [], course: [], costume: [] });
+  $: candidatesStore.set({ screen: rankedFrom(candidateScores),
+                           char: selectionCandidates.char ?? [],
+                           kart: selectionCandidates.kart ?? [],
+                           course: selectionCandidates.course ?? [],
+                           costume: selectionCandidates.costume ?? [] });
   $: selectionStore.set({ char: selChar, charConf: selCharConf,
                           costume: selCostume, costumeConf: selCostumeConf,
                           kart: selKart, kartConf: selKartConf,
@@ -1712,6 +1729,13 @@
                      splits: raceSplits, finishTime: raceFinishTime });
   $: tellsStore.set(tells);
   $: roisStore.set(rois);
+
+  // ── Fetch minimap replays + sample when course becomes known ──────────────────
+  $: if (selCourse && selCourse !== _lastFetchedCourse) {
+    _lastFetchedCourse = selCourse;
+    send({ type: "get_replay_paths",   course: selCourse });
+    send({ type: "get_minimap_sample", course: selCourse });
+  }
 </script>
 
 <!-- ═══════════════════════════════════════════════════════════════════════════ -->
