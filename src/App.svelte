@@ -1704,7 +1704,6 @@
   <!-- ── Title bar ──────────────────────────────────────────────────────────── -->
   <TitleBar
     version={version}
-    onSettings={openSettings}
     onMinimize={winMinimize}
     onToggleMaximize={winToggleMaximize}
     onClose={winClose}
@@ -2462,8 +2461,9 @@
 
   <!-- ── Bottom status bar (single home for live engine status) ─────────────── -->
   <StatusBar
-    connected={trackerConnected && backendAlive}
-    spawned={trackerSpawned || trackerConnected}
+    connected={trackerConnected}
+    alive={backendAlive}
+    spawned={trackerSpawned}
     screenName={backendScreen}
     score={liveScore}
     fps={backendFps}

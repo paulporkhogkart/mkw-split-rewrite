@@ -2,16 +2,15 @@
   import { C } from "../lib/palette.js";
   import { scoreColor, screenLabel, fmtScore } from "../lib/format.js";
 
-  /**
-   * Whether the backend is fully alive (trackerConnected && backendAlive).
-   * When true, the full screen/score/fps/resolution readout is shown.
-   */
+  /** Whether the IPC connection to the backend is established (trackerConnected). */
   export let connected = false;
   /**
-   * Whether a backend process is running at all (trackerSpawned || trackerConnected).
-   * When connected=false and spawned=true the bar shows a degraded-state label.
-   * When both false the bar shows "launching…".
+   * Whether the backend is actively sending heartbeats (backendAlive).
+   * Only meaningful when connected=true; when connected=true but alive=false the
+   * process is connected but has stalled.
    */
+  export let alive = false;
+  /** Whether a backend process has been spawned at all (trackerSpawned). */
   export let spawned = false;
   /** Current backend screen enum name (e.g. "RACING") or "—" placeholder */
   export let screenName = "—";
@@ -24,16 +23,16 @@
   /** Capture resolution height */
   export let frameH = 1080;
 
-  // Three-state dot colour, mirroring App.svelte's original statusDot logic:
-  //   connected (alive)        → ok   (green)
-  //   spawned but not alive    → warn (amber)
-  //   nothing running          → idle (grey)
-  $: dotColor = connected ? C.ok : spawned ? C.warn : C.idle;
+  // Dot colour mirrors App.svelte's original statusDot reactive:
+  //   connected && alive  → ok   (green)
+  //   connected, no alive → warn (amber)
+  //   not connected       → idle (grey)
+  $: dotColor = !connected ? C.idle : alive ? C.ok : C.warn;
 </script>
 
 <footer class="statusbar">
   <span class="hb-dot" style="background:{dotColor}"></span>
-  {#if connected}
+  {#if connected && alive}
     <span class="sb-screen">{screenLabel(screenName)}</span>
     <span class="sb-sep">|</span>
     <span class="sb-score" style="color:{scoreColor(score)}">{fmtScore(score)}</span>
@@ -41,8 +40,11 @@
     <span class="sb-fps">{fps} fps</span>
     <span class="sb-spacer"></span>
     <span class="sb-res">{frameW}×{frameH}</span>
-  {:else if spawned}
+  {:else if connected}
     <span class="sb-warn">backend stalled</span>
+    <span class="sb-spacer"></span>
+  {:else if spawned}
+    <span class="sb-idle">engine starting…</span>
     <span class="sb-spacer"></span>
   {:else}
     <span class="sb-idle">launching…</span>

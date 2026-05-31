@@ -1,8 +1,6 @@
 <script>
   /** App version string (without the "v" prefix) */
   export let version = "";
-  /** Called when the ⚙ settings button is clicked */
-  export let onSettings = () => {};
   /** Called when the Minimize window control is clicked */
   export let onMinimize = () => {};
   /** Called when the Maximize/restore window control is clicked */
@@ -22,9 +20,7 @@
     <slot name="update" />
 
     <!-- Settings button slot: App.svelte injects the view-conditional button -->
-    <slot name="settings">
-      <button class="btn-hdr btn-setup" on:click={onSettings}>⚙ Settings</button>
-    </slot>
+    <slot name="settings" />
   </div>
 
   <div class="win-controls">
@@ -49,14 +45,6 @@
     display: flex; align-items: center; gap: 6px; flex-shrink: 0;
     -webkit-app-region: no-drag; margin-left: auto;
   }
-
-  .btn-hdr {
-    background: var(--panel); border-radius: var(--r); padding: 3px 9px;
-    font-family: inherit; font-size: .68rem; cursor: pointer; white-space: nowrap;
-    transition: background .12s; -webkit-app-region: no-drag;
-  }
-  .btn-setup       { color: var(--tx-mut); border: 1px solid var(--bd); }
-  .btn-setup:hover { background: var(--raised); }
 
   .win-controls { display: flex; flex-shrink: 0; margin-left: 0; }
   .win-btn {
