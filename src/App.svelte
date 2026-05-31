@@ -14,6 +14,10 @@
   import Rail from "./components/Rail.svelte";
   import FeedOverlay from "./components/FeedOverlay.svelte";
   import EditMode from "./components/EditMode.svelte";
+  import SourceCheck from "./components/SourceCheck.svelte";
+  import DeviceSelectors from "./components/DeviceSelectors.svelte";
+  import LanguageSelectors from "./components/LanguageSelectors.svelte";
+  import SettingsModal from "./components/SettingsModal.svelte";
   import { screen as screenStore, liveScore as liveScoreStore,
            candidates as candidatesStore, selection as selectionStore,
            race as raceStore, logs as logsStore,
@@ -105,10 +109,6 @@
   ];
   let appLanguage     = "en_uk";
   let switch2Language = "en_uk";
-  let langDialogEl;
-  // Staging vars for lang dialog (committed on Save)
-  let langDlgApp = "en_uk";
-  let langDlgSw2 = "en_uk";
   $: appLangName  = LANGUAGES.find(l => l.id === appLanguage)?.name     ?? appLanguage;
   $: sw2LangName  = LANGUAGES.find(l => l.id === switch2Language)?.name ?? switch2Language;
 
@@ -1233,18 +1233,6 @@
   function onAppLanguageChange()   { send({type:"update_config",key:"app_language",   value:appLanguage}); }
   function onSwitch2LanguageChange(){ send({type:"update_config",key:"switch2_language",value:switch2Language}); }
 
-  function saveLangDialog() {
-    if (langDlgApp!==appLanguage) {
-      appLanguage=langDlgApp;
-      send({type:"update_config",key:"app_language",value:appLanguage});
-    }
-    if (langDlgSw2!==switch2Language) {
-      switch2Language=langDlgSw2;
-      send({type:"update_config",key:"switch2_language",value:switch2Language});
-    }
-    langDialogEl?.close();
-  }
-
   // ── Device / update ───────────────────────────────────────────────────────────
 
   async function handleDeviceChange(e) {
@@ -1679,123 +1667,49 @@
       </nav>
 
       <div class="wiz-body setup-wiz-body">
-        <!-- language / camera / done steps — identical content to the modal wizard -->
+        <!-- language / camera / done steps -->
         {#if wizardStep === "language"}
           <div class="step-centred">
             <h2>{tr("lang.title")}</h2>
             <p>{tr("lang.desc")}</p>
-            <div class="lang-form">
-              <div class="lang-row">
-                <label for="sv-app-lang">{tr("lang.app_label")}</label>
-                <select id="sv-app-lang" bind:value={appLanguage} on:change={onAppLanguageChange}>
-                  {#each LANGUAGES as l}<option value={l.id}>{l.name}</option>{/each}
-                </select>
-              </div>
-              <div class="lang-row">
-                <label for="sv-sw2-lang">{tr("lang.sw2_label")}</label>
-                <select id="sv-sw2-lang" bind:value={switch2Language} on:change={onSwitch2LanguageChange}>
-                  {#each LANGUAGES as l}<option value={l.id}>{l.name}</option>{/each}
-                </select>
-                <p class="hint lang-hint">{tr("lang.sw2_hint")}</p>
-              </div>
-            </div>
+            <LanguageSelectors
+              {LANGUAGES}
+              bind:appLanguage
+              bind:switch2Language
+              {onAppLanguageChange}
+              {onSwitch2LanguageChange}
+              idPrefix="sv"
+            />
             <button class="btn-primary btn-lg" on:click={()=>goStep("camera")}>{tr("lang.continue")}</button>
           </div>
 
         {:else if wizardStep === "camera"}
           <div class="cam-setup">
-            <div class="cam-dual">
-              <div class="cam-pane">
-                <div class="cam-pane-label">Browser / App Input</div>
-                <div class="preview-wrapper">
-                  {#if cameraOk}
-                    <video bind:this={wizVideoEl} autoplay playsinline muted class="preview-video"></video>
-                  {:else if cameraStatus === "requesting"}
-                    <div class="preview-placeholder"><span class="spin">◌</span><span>Opening…</span></div>
-                  {:else if cameraStatus === "busy"}
-                    <div class="preview-placeholder">
-                      <span class="preview-icon">⊗</span>
-                      <span class="cam-pane-err-label">Blocked — device in exclusive use</span>
-                    </div>
-                  {:else if cameraStatus === "error"}
-                    <div class="preview-placeholder">
-                      <span class="preview-icon">⊗</span><span class="cam-pane-err-label">Camera error</span>
-                    </div>
-                  {:else if trackerCameraPaused}
-                    <div class="preview-placeholder">
-                      <span class="preview-icon" style="color:{C.txMut}">○</span>
-                      <span class="cam-pane-err-label">Camera released</span>
-                    </div>
-                  {:else}
-                    <div class="preview-placeholder"><span class="spin">◌</span><span>Waiting…</span></div>
-                  {/if}
-                </div>
-                <div class="cam-pane-status" class:cam-status-ok={cameraOk} class:cam-status-err={cameraStatus==="busy"||cameraStatus==="error"} class:cam-status-warn={trackerCameraPaused&&!cameraOk}>
-                  <span class="cam-dot"></span>
-                  {cameraOk?"Connected":cameraStatus==="requesting"?"Opening…":cameraStatus==="busy"?"Blocked":cameraStatus==="error"?"Error":trackerCameraPaused?"Released":"Waiting"}
-                </div>
-              </div>
-
-              <div class="cam-pane">
-                <div class="cam-pane-label">Python Engine Input</div>
-                <div class="preview-wrapper">
-                  {#if engineFrame && !trackerCameraPaused}
-                    <img src={engineFrame} alt="Engine feed" class="preview-video" style="object-fit:contain"/>
-                  {:else if trackerCameraPaused}
-                    <div class="preview-placeholder">
-                      <span class="preview-icon" style="color:{C.txMut}">○</span>
-                      <span class="cam-pane-err-label">Camera released</span>
-                    </div>
-                  {:else if pythonCameraStatus === "error"}
-                    <div class="preview-placeholder">
-                      <span class="preview-icon">⊗</span>
-                      <span class="cam-pane-err-label">Can't access device{pythonCameraError?`: ${pythonCameraError}`:""}</span>
-                    </div>
-                  {:else}
-                    <div class="preview-placeholder">
-                      <span class="spin">◌</span>
-                      <span>{pythonCameraStatus==="opening"?"Opening and verifying…":!trackerConnected?"Connecting to engine…":"Waiting for camera…"}</span>
-                    </div>
-                  {/if}
-                </div>
-                <div class="cam-pane-status" class:cam-status-ok={pythonCameraOk} class:cam-status-err={pythonCameraStatus==="error"} class:cam-status-warn={trackerCameraPaused}>
-                  <span class="cam-dot"></span>
-                  {pythonCameraOk?"Connected":trackerCameraPaused?"Released":pythonCameraStatus==="error"?"Error":pythonCameraStatus==="opening"?"Opening…":"Waiting"}
-                </div>
-              </div>
-            </div>
+            <SourceCheck
+              bind:videoEl={wizVideoEl}
+              {cameraOk}
+              {cameraStatus}
+              {trackerCameraPaused}
+              {engineFrame}
+              {pythonCameraOk}
+              {pythonCameraStatus}
+              {pythonCameraError}
+              {trackerConnected}
+            />
 
             <div class="cam-below">
-              {#if browserDevices.length > 0}
-                <div class="device-row">
-                  <label for="sv-cam">Camera</label>
-                  <select id="sv-cam" on:change={handleCameraDeviceChange}
-                    disabled={pythonCameraStatus==="opening"||cameraStatus==="requesting"}>
-                    {#each browserDevices as d}
-                      <option value={d.deviceId} selected={d.deviceId===selectedBrowserDeviceId}>
-                        {d.label||`Camera ${d.deviceId.slice(0,6)}…`}
-                      </option>
-                    {/each}
-                  </select>
-                  {#if pythonCameraStatus==="opening"||cameraStatus==="requesting"}
-                    <span class="spin select-spin">◌</span>
-                  {/if}
-                  {#if restartNeeded}<button class="btn-sm" on:click={restartTracker}>Restart</button>{/if}
-                </div>
-              {/if}
-              {#if audioDevices.length > 0}
-                <div class="device-row">
-                  <label for="sv-aud">Audio</label>
-                  <select id="sv-aud" on:change={handleAudioDeviceChange}>
-                    <option value="none" selected={!selectedAudioDeviceId||selectedAudioDeviceId==="none"}>— none —</option>
-                    {#each audioDevices as d}
-                      <option value={d.deviceId} selected={d.deviceId===selectedAudioDeviceId}>
-                        {d.label||`Audio ${d.deviceId.slice(0,6)}…`}
-                      </option>
-                    {/each}
-                  </select>
-                </div>
-              {/if}
+              <DeviceSelectors
+                {browserDevices}
+                {selectedBrowserDeviceId}
+                {audioDevices}
+                {selectedAudioDeviceId}
+                {pythonCameraStatus}
+                {cameraStatus}
+                {restartNeeded}
+                onCameraDeviceChange={handleCameraDeviceChange}
+                onAudioDeviceChange={handleAudioDeviceChange}
+                onRestartTracker={restartTracker}
+              />
               <div class="cam-prereq" class:cam-prereq-ok={bothCamerasOk}>
                 {#if bothCamerasOk}
                   <span class="cam-prereq-title cam-prereq-title-ok">Camera sharing is working</span>
@@ -1941,230 +1855,44 @@
 
 
 <!-- ═══════════════════════════════════════════════════════════════════════════ -->
-<!--  WIZARD DIALOG (re-run setup: camera, screens, selection, hud, templates)  -->
+<!--  SETTINGS / WIZARD MODAL                                                   -->
 <!-- ═══════════════════════════════════════════════════════════════════════════ -->
 
-{#if wizardOpen}
-  <div class="modal-backdrop wiz-backdrop" on:click|self={setupComplete ? closeWizard : undefined}>
-    <div class="wiz-dialog" class:wiz-dialog-narrow={wizardStep === "language"}>
-
-      <!-- Wizard tabs -->
-      <nav class="wiz-tabs">
-        {#each STEPS as s}
-          <button class="wiz-tab" class:active={wizardStep===s} on:click={()=>goStep(s)}>
-            {STEP_LABELS[s]}
-          </button>
-        {/each}
-        {#if setupComplete}
-          <button class="wiz-tab-close" on:click={closeWizard} title="Close">✕</button>
-        {/if}
-      </nav>
-
-      <div class="wiz-body">
-
-        <!-- ── LANGUAGE step ────────────────────────────────────────────── -->
-        {#if wizardStep === "language"}
-          <div class="step-centred">
-            <h2>{tr("lang.title")}</h2>
-            <p>{tr("lang.desc")}</p>
-            <div class="lang-form">
-              <div class="lang-row">
-                <label for="wiz-app-lang">{tr("lang.app_label")}</label>
-                <select id="wiz-app-lang" bind:value={appLanguage} on:change={onAppLanguageChange}>
-                  {#each LANGUAGES as l}<option value={l.id}>{l.name}</option>{/each}
-                </select>
-              </div>
-              <div class="lang-row">
-                <label for="wiz-sw2-lang">{tr("lang.sw2_label")}</label>
-                <select id="wiz-sw2-lang" bind:value={switch2Language} on:change={onSwitch2LanguageChange}>
-                  {#each LANGUAGES as l}<option value={l.id}>{l.name}</option>{/each}
-                </select>
-                <p class="hint lang-hint">{tr("lang.sw2_hint")}</p>
-              </div>
-            </div>
-            <button class="btn-primary btn-lg" on:click={()=>goStep("camera")}>{tr("lang.continue")}</button>
-          </div>
-
-        <!-- ── CAMERA step ──────────────────────────────────────────────── -->
-        {:else if wizardStep === "camera"}
-          <div class="cam-setup">
-            <div class="cam-dual">
-              <div class="cam-pane">
-                <div class="cam-pane-label">Browser / App Input</div>
-                <div class="preview-wrapper">
-                  {#if cameraOk}
-                    <video bind:this={wizVideoEl} autoplay playsinline muted class="preview-video"></video>
-                  {:else if cameraStatus === "requesting"}
-                    <div class="preview-placeholder"><span class="spin">◌</span><span>Opening…</span></div>
-                  {:else if cameraStatus === "busy"}
-                    <div class="preview-placeholder">
-                      <span class="preview-icon">⊗</span>
-                      <span class="cam-pane-err-label">Blocked — device in exclusive use</span>
-                    </div>
-                  {:else if cameraStatus === "error"}
-                    <div class="preview-placeholder">
-                      <span class="preview-icon">⊗</span><span class="cam-pane-err-label">Camera error</span>
-                    </div>
-                  {:else if trackerCameraPaused}
-                    <div class="preview-placeholder">
-                      <span class="preview-icon" style="color:{C.txMut}">○</span>
-                      <span class="cam-pane-err-label">Camera released</span>
-                    </div>
-                  {:else}
-                    <div class="preview-placeholder"><span class="spin">◌</span><span>Waiting…</span></div>
-                  {/if}
-                </div>
-                <div class="cam-pane-status" class:cam-status-ok={cameraOk} class:cam-status-err={cameraStatus==="busy"||cameraStatus==="error"} class:cam-status-warn={trackerCameraPaused&&!cameraOk}>
-                  <span class="cam-dot"></span>
-                  {cameraOk?"Connected":cameraStatus==="requesting"?"Opening…":cameraStatus==="busy"?"Blocked":cameraStatus==="error"?"Error":trackerCameraPaused?"Released":"Waiting"}
-                </div>
-              </div>
-
-              <div class="cam-pane">
-                <div class="cam-pane-label">Python Engine Input</div>
-                <div class="preview-wrapper">
-                  {#if engineFrame && !trackerCameraPaused}
-                    <img src={engineFrame} alt="Engine feed" class="preview-video" style="object-fit:contain"/>
-                  {:else if trackerCameraPaused}
-                    <div class="preview-placeholder">
-                      <span class="preview-icon" style="color:{C.txMut}">○</span>
-                      <span class="cam-pane-err-label">Camera released</span>
-                    </div>
-                  {:else if pythonCameraStatus === "error"}
-                    <div class="preview-placeholder">
-                      <span class="preview-icon">⊗</span>
-                      <span class="cam-pane-err-label">Can't access device{pythonCameraError?`: ${pythonCameraError}`:""}</span>
-                    </div>
-                  {:else}
-                    <div class="preview-placeholder">
-                      <span class="spin">◌</span>
-                      <span>{pythonCameraStatus==="opening"?"Opening and verifying…":!trackerConnected?"Connecting to engine…":"Waiting for camera…"}</span>
-                    </div>
-                  {/if}
-                </div>
-                <div class="cam-pane-status" class:cam-status-ok={pythonCameraOk} class:cam-status-err={pythonCameraStatus==="error"} class:cam-status-warn={trackerCameraPaused}>
-                  <span class="cam-dot"></span>
-                  {pythonCameraOk?"Connected":trackerCameraPaused?"Released":pythonCameraStatus==="error"?"Error":pythonCameraStatus==="opening"?"Opening…":"Waiting"}
-                </div>
-              </div>
-            </div>
-
-            <div class="cam-below">
-              {#if browserDevices.length > 0}
-                <div class="device-row">
-                  <label for="wiz-cam">Camera</label>
-                  {#if pythonCameraStatus==="opening"||cameraStatus==="requesting"}
-                    <div class="select-loading">
-                      <span class="spin">◌</span>
-                      <span>{browserDevices.find(d=>d.deviceId===selectedBrowserDeviceId)?.label||"Opening…"}</span>
-                    </div>
-                  {:else}
-                    <select id="wiz-cam" on:change={handleCameraDeviceChange}>
-                      {#each browserDevices as d}
-                        <option value={d.deviceId} selected={d.deviceId===selectedBrowserDeviceId}>
-                          {d.label||`Camera ${d.deviceId.slice(0,6)}…`}
-                        </option>
-                      {/each}
-                    </select>
-                  {/if}
-                  {#if restartNeeded}<button class="btn-sm" on:click={restartTracker}>Restart</button>{/if}
-                </div>
-              {/if}
-              {#if audioDevices.length > 0}
-                <div class="device-row">
-                  <label for="wiz-aud">Audio</label>
-                  <select id="wiz-aud" on:change={handleAudioDeviceChange}>
-                    <option value="none" selected={!selectedAudioDeviceId||selectedAudioDeviceId==="none"}>— none —</option>
-                    {#each audioDevices as d}
-                      <option value={d.deviceId} selected={d.deviceId===selectedAudioDeviceId}>
-                        {d.label||`Audio ${d.deviceId.slice(0,6)}…`}
-                      </option>
-                    {/each}
-                  </select>
-                </div>
-              {/if}
-
-              {#if !setupComplete}
-                <div class="cam-prereq" class:cam-prereq-ok={bothCamerasOk}>
-                  {#if bothCamerasOk}
-                    <span class="cam-prereq-title cam-prereq-title-ok">Camera sharing is working</span>
-                    <p class="cam-prereq-body">Both feeds are connected to the same device. You're good to continue.</p>
-                  {:else}
-                    <span class="cam-prereq-title">Required — enable Windows camera sharing</span>
-                    <p class="cam-prereq-body">MKW Tracker needs simultaneous access to the same capture card as the app preview. Windows blocks this by default. Do this once before continuing:</p>
-                    {#if trackerCameraPaused}
-                      <div class="cam-release-bar cam-release-bar-released">
-                        <span class="cam-release-dot"></span>
-                        <span class="cam-release-msg">App feeds released — also close OBS, Discord, and any other apps currently using the camera before proceeding.</span>
-                      </div>
-                    {:else}
-                      <div class="cam-release-bar">
-                        <span class="cam-release-dot"></span>
-                        <span class="cam-release-msg">Release this app's feeds and close OBS, Discord, and any other apps currently using the camera before changing this setting.</span>
-                        <div style="display:flex;gap:.4rem;flex-shrink:0">
-                          <button class="btn-sm" on:click={releaseForSettings}>Release feeds</button>
-                          <button class="btn-sm" on:click={retryNow}>Retry</button>
-                        </div>
-                      </div>
-                    {/if}
-                    <ol class="cam-steps">
-                      <li>Click <strong>Open Windows Camera Settings</strong> below</li>
-                      <li>Find your capture card → <strong>Advanced camera options</strong> → <strong>Edit</strong></li>
-                      <li>Turn on <strong>"Allow multiple apps to use camera at the same time"</strong></li>
-                      <li>Return here, then <button class="btn-sm" on:click={retryNow}>Retry</button></li>
-                    </ol>
-                    <div class="cam-prereq-actions">
-                      <button class="btn-primary" on:click={() => invoke("open_url",{url:"ms-settings:camera"}).catch(()=>{})}>Open Windows Camera Settings →</button>
-                    </div>
-                  {/if}
-                </div>
-              {/if}
-
-              <div class="cam-actions">
-                <p class="hint">Both feeds must show your capture card output before you can continue.</p>
-                <div class="cam-nav">
-                  <button class="btn-nav" on:click={()=>goStep("language")}>← Back</button>
-                  <button class="btn-primary" on:click={closeWizard}>Done</button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-        {/if}
-
-      </div><!-- /wiz-body -->
-
-
-    </div><!-- /wiz-dialog -->
-  </div><!-- /wiz-backdrop -->
-{/if}
-
-<!-- ═══════════════════════════════════════════════════════════════════════════ -->
-<!--  LANGUAGE DIALOG                                                           -->
-<!-- ═══════════════════════════════════════════════════════════════════════════ -->
-
-<dialog bind:this={langDialogEl} class="lang-dialog">
-  <h3 class="ldlg-title">Language Settings</h3>
-  <div class="ldlg-form">
-    <div class="ldlg-row">
-      <label class="ldlg-label" for="ldlg-app">Application Language</label>
-      <select id="ldlg-app" bind:value={langDlgApp}>
-        {#each LANGUAGES as l}<option value={l.id}>{l.name}</option>{/each}
-      </select>
-    </div>
-    <div class="ldlg-row">
-      <label class="ldlg-label" for="ldlg-sw2">Switch 2 System Language</label>
-      <select id="ldlg-sw2" bind:value={langDlgSw2}>
-        {#each LANGUAGES as l}<option value={l.id}>{l.name}</option>{/each}
-      </select>
-      <p class="ldlg-hint">Determines which image templates are used for detection (characters, courses, menus, etc.).</p>
-    </div>
-  </div>
-  <div class="ldlg-actions">
-    <button class="btn-secondary" on:click={()=>langDialogEl?.close()}>Cancel</button>
-    <button class="btn-primary" on:click={saveLangDialog}>Save</button>
-  </div>
-</dialog>
+<SettingsModal
+  {wizardOpen}
+  {setupComplete}
+  {wizardStep}
+  {STEPS}
+  {STEP_LABELS}
+  onGoStep={goStep}
+  onClose={closeWizard}
+  onComplete={completeSetup}
+  bind:wizVideoEl
+  {cameraOk}
+  {cameraStatus}
+  {trackerCameraPaused}
+  {engineFrame}
+  {pythonCameraOk}
+  {pythonCameraStatus}
+  {pythonCameraError}
+  {trackerConnected}
+  {bothCamerasOk}
+  {browserDevices}
+  {selectedBrowserDeviceId}
+  {audioDevices}
+  {selectedAudioDeviceId}
+  {restartNeeded}
+  {LANGUAGES}
+  bind:appLanguage
+  bind:switch2Language
+  onCameraDeviceChange={handleCameraDeviceChange}
+  onAudioDeviceChange={handleAudioDeviceChange}
+  onRestartTracker={restartTracker}
+  onReleaseForSettings={releaseForSettings}
+  onRetryNow={retryNow}
+  onAppLanguageChange={onAppLanguageChange}
+  onSwitch2LanguageChange={onSwitch2LanguageChange}
+/>
 
 <!-- ═══════════════════════════════════════════════════════════════════════════ -->
 <!--  STYLES                                                                    -->
@@ -2312,10 +2040,8 @@
     display: flex; align-items: center; justify-content: center;
     overflow: hidden; scrollbar-gutter: stable both-edges;
   }
-  /* Constrain camera step width — aspect-ratio on preview-wrapper does the rest */
+  /* Constrain camera step width in setup view */
   .setup-wiz-body .cam-setup { width: 100%; max-width: 560px; }
-  /* Cover-crop in setup preview — source may not be 16:9, bars aren't useful here */
-  .setup-wiz-body .preview-video { object-fit: cover; }
   /* Step indicator tabs are display-only in setup view — not keyboard or mouse navigable */
   .setup-wiz-tabs { pointer-events: none; }
 
@@ -2334,23 +2060,8 @@
     flex: 1; overflow-y: auto; padding: 4px 8px; min-height: 0;
   }
 
-  /* ── Modal backdrop ───────────────────────────────────────────── */
-  .modal-backdrop {
-    position: fixed; inset: 0; background: rgba(0,0,0,.75);
-    display: flex; align-items: center; justify-content: center;
-    z-index: 100;
-  }
-  .wiz-backdrop { align-items: stretch; padding: 32px; }
-
-
-  /* ── Wizard dialog ────────────────────────────────────────────── */
-  .wiz-dialog {
-    background: var(--panel); border: 1px solid var(--bd); border-radius: var(--r);
-    display: flex; flex-direction: column; overflow: hidden;
-    width: 100%; max-width: 960px; max-height: 100%; align-self: center; margin: auto;
-    transition: max-width .2s ease;
-  }
-  .wiz-dialog-narrow { max-width: 480px; }
+  /* ── Wizard tab bar (used in setup-view) ─────────────────────── */
+  /* Modal shell (modal-backdrop, wiz-dialog, wiz-tab-close) is in SettingsModal.svelte */
   .wiz-tabs {
     display: flex; flex-shrink: 0; background: var(--panel);
     border-bottom: 1px solid var(--bd); overflow-x: auto; scrollbar-width: none;
@@ -2363,12 +2074,6 @@
   }
   .wiz-tab:hover { background: var(--panel-2); color: var(--tx-mut); }
   .wiz-tab.active { background: var(--raised); color: var(--accent); border-bottom: 2px solid var(--accent); margin-bottom: -1px; }
-  .wiz-tab-close {
-    margin-left: auto; background: transparent; color: var(--tx-dim); border: none;
-    padding: 7px 14px; font-family: inherit; font-size: .78rem; cursor: pointer;
-    transition: color .12s;
-  }
-  .wiz-tab-close:hover { color: var(--tx-mut); }
   .wiz-body { flex: 1; overflow: auto; padding: 1rem; min-height: 0; }
 
   /* Step: centred */
@@ -2377,32 +2082,8 @@
   .step-centred p  { font-size: .78rem; color: var(--tx-mut); line-height: 1.65; }
   .done-check { font-size: 2.2rem; color: var(--ok); }
 
-  /* Preview wrapper (wizard camera step) */
-  .preview-wrapper {
-    position: relative; width: 100%; aspect-ratio: 16/9;
-    background: var(--feed-bg); border: 1px solid var(--bd); border-radius: var(--r); overflow: hidden;
-  }
-  .preview-video { width: 100%; height: 100%; display: block; object-fit: contain; }
-  .preview-placeholder {
-    width: 100%; height: 100%; position: absolute; inset: 0;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: .35rem; font-size: .75rem; color: var(--tx-dim);
-    padding: 0 .75rem; box-sizing: border-box; text-align: center;
-  }
-  .preview-icon { font-size: 1.4rem; line-height: 1; }
-  .spin { animation: spin 1.2s linear infinite; }
-
-  /* Camera step */
+  /* Camera step (preview panes live in SourceCheck.svelte) */
   .cam-setup { display: flex; flex-direction: column; gap: .9rem; }
-  .cam-dual  { display: flex; gap: .75rem; }
-  .cam-pane  { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .3rem; }
-  .cam-pane-label { font-size: .63rem; color: var(--tx-mut); text-transform: uppercase; letter-spacing: .06em; }
-  .cam-pane-status { display: flex; align-items: center; gap: .3rem; font-size: .65rem; color: var(--tx-mut); }
-  .cam-pane-status .cam-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--tx-dim); flex-shrink: 0; }
-  .cam-status-ok  { color: var(--ok); } .cam-status-ok .cam-dot  { background: var(--ok); }
-  .cam-status-err { color: var(--err); } .cam-status-err .cam-dot { background: var(--err); }
-  .cam-status-warn { color: var(--tx-mut); }  .cam-status-warn .cam-dot { background: var(--tx-mut); }
-  .cam-pane-err-label { font-size: .72rem; color: var(--tx-dim); }
   .cam-below   { display: flex; flex-direction: column; gap: .65rem; }
   .cam-actions { display: flex; flex-direction: column; gap: .3rem; }
   .cam-nav     { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
@@ -2416,16 +2097,6 @@
   .cam-prereq-ok           { background: rgba(90,168,106,.05); border-color: rgba(90,168,106,.2); }
   .cam-prereq-body    { font-size: .68rem; color: var(--tx-dim); margin: 0; line-height: 1.55; }
   .cam-prereq-actions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-top: .15rem; }
-  .cam-troubleshoot {
-    padding: .55rem .7rem; border-radius: var(--r);
-    background: rgba(207,91,78,.05); border: 1px solid rgba(207,91,78,.2);
-    display: flex; flex-direction: column; gap: .3rem;
-  }
-  .cam-troubleshoot-neutral { background: rgba(61,124,194,.07); border-color: rgba(61,124,194,.15); }
-  .cam-troubleshoot-title   { font-size: .72rem; color: var(--tx); }
-  .cam-troubleshoot-body    { font-size: .68rem; color: var(--tx-dim); margin: 0; line-height: 1.55; }
-  .cam-troubleshoot-actions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-top: .15rem; }
-  .cam-err-detail { display: block; font-size: .65rem; color: var(--tx-dim); margin-top: .2rem; font-style: italic; }
   .cam-release-bar {
     display: flex; align-items: center; gap: .55rem;
     padding: .38rem .55rem; border-radius: var(--r);
@@ -2442,11 +2113,6 @@
   .cam-release-bar-released .cam-release-dot { background: var(--ok); }
   .cam-release-msg { flex: 1; font-size: .66rem; color: var(--warn); line-height: 1.45; transition: color .25s; }
   .cam-release-bar-released .cam-release-msg { color: var(--ok); }
-  .cam-release-bar-error {
-    background: rgba(207,91,78,.05); border-color: rgba(207,91,78,.2);
-  }
-  .cam-release-bar-error .cam-release-dot { background: var(--err); }
-  .cam-release-bar-error .cam-release-msg { color: var(--err); }
   .cam-steps { margin: .15rem 0 .05rem; padding-left: 1.2rem; font-size: .68rem; color: var(--tx-dim); line-height: 1.8; }
   .cam-steps strong { color: var(--tx-mut); }
 
@@ -2460,13 +2126,6 @@
   .btn-primary:hover:not(:disabled) { background: var(--bd); }
   .btn-primary:disabled { opacity: .35; cursor: default; }
   .btn-primary.btn-lg { padding: .45rem 1.1rem; font-size: .85rem; margin-top: .5rem; }
-  .btn-secondary {
-    background: var(--panel); color: var(--tx-dim); border: 1px solid var(--bd); border-radius: var(--r);
-    padding: .28rem .7rem; font-family: inherit; font-size: .72rem;
-    cursor: pointer; white-space: nowrap; transition: background .12s;
-  }
-  .btn-secondary:hover:not(:disabled) { background: var(--raised); color: var(--tx-mut); }
-  .btn-secondary:disabled { opacity: .4; cursor: default; }
   .btn-nav {
     background: var(--panel-2); color: var(--tx-mut); border: 1px solid var(--bd); border-radius: var(--r);
     padding: .24rem .7rem; font-family: inherit; font-size: .72rem;
@@ -2480,40 +2139,5 @@
   }
   .btn-sm:hover { background: var(--raised); color: var(--tx); }
 
-  /* Forms / select */
-  select {
-    background: var(--panel); color: var(--tx);
-    border: 1px solid var(--bd); border-radius: var(--r);
-    padding: .18rem .3rem; font-family: inherit; font-size: .7rem;
-  }
-  select:disabled {
-    opacity: .35; cursor: not-allowed; pointer-events: none;
-  }
-  .device-row { display: flex; align-items: center; gap: .4rem; font-size: .72rem; flex-shrink: 0; }
-  .device-row label { color: var(--tx-dim); flex-shrink: 0; }
-  .select-loading { display: flex; align-items: center; gap: .3rem; color: var(--tx-mut); font-size: .72rem; font-style: italic; }
-  .select-spin { color: var(--tx-mut); font-size: .85rem; }
-
   .hint { font-size: .7rem; color: var(--tx-dim); margin: 0; line-height: 1.55; }
-  .lang-form { display: flex; flex-direction: column; gap: 1rem; width: 100%; max-width: 400px; margin: .5rem auto; }
-  .lang-row  { display: flex; flex-direction: column; gap: .3rem; }
-  .lang-row label { font-size: .72rem; color: var(--tx-mut); }
-  .lang-hint { font-size: .64rem; }
-
-  /* ── Language dialog ──────────────────────────────────────────── */
-  .lang-dialog {
-    background: var(--panel); color: var(--tx);
-    border: 1px solid var(--bd); border-radius: var(--r);
-    padding: 1.2rem; min-width: 360px; max-width: 440px;
-    font-family: var(--ui);
-  }
-  .lang-dialog::backdrop { background: rgba(0,0,0,.65); }
-  .ldlg-title  { font-size: .9rem; color: var(--tx); margin-bottom: 1rem; }
-  .ldlg-form   { display: flex; flex-direction: column; gap: .8rem; }
-  .ldlg-row    { display: flex; flex-direction: column; gap: .3rem; }
-  .ldlg-label  { font-size: .7rem; color: var(--tx-mut); }
-  .ldlg-hint   { font-size: .64rem; color: var(--tx-dim); margin-top: 2px; }
-  .ldlg-actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: 1rem; }
-
-  /* ── First-time modal ─────────────────────────────────────────── */
 </style>
