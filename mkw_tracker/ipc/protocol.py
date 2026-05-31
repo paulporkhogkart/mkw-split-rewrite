@@ -209,6 +209,45 @@ def emit_calib_capture(slot: int, captured: bool, error: str = "") -> str:
     return _emit("calib_capture", slot=int(slot), captured=bool(captured), error=error)
 
 
+def minimap_update_payload(state, roi: tuple) -> Optional[dict]:
+    """Return a ``minimap_update`` payload dict or ``None`` if there is no usable lock.
+
+    ``state`` is a :class:`mkw_tracker.minimap.tracker.MinimapState`.
+    ``roi`` is the ``MINIMAP_ROI`` constant ``(x, y, w, h)`` — kept as a parameter so
+    the function is a pure, testable helper with no module-level import cycle.
+
+    ``state.cx`` / ``state.cy`` are already stored in **full-frame** pixel coordinates
+    (the tracker's ``_publish()`` method adds the ROI origin before writing them), so
+    no coordinate transform is applied here.
+
+    Returns ``None`` when:
+    - ``state.tracking`` is False (idle / lost states)
+    - ``state.cx`` or ``state.cy`` is None (no position yet, e.g. immediately after seed)
+    """
+    if not state.tracking:
+        return None
+    if state.cx is None or state.cy is None:
+        return None
+    return {
+        "type":        "minimap_update",
+        "cx":          int(state.cx),
+        "cy":          int(state.cy),
+        "radius":      int(state.radius),
+        "track_state": state.track_state,
+    }
+
+
+def emit_minimap_update(state, roi: tuple) -> Optional[str]:
+    """Serialise a :class:`~mkw_tracker.minimap.tracker.MinimapState` as a JSON line.
+
+    Returns ``None`` (not emitted) when there is no usable tracking lock.
+    """
+    payload = minimap_update_payload(state, roi)
+    if payload is None:
+        return None
+    return json.dumps(payload)
+
+
 def emit_calibration_result(gain_r: float, gain_g: float, gain_b: float,
                             offset_r: int, offset_g: int, offset_b: int,
                             gamma: float, fit_quality: float,

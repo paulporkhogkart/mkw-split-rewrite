@@ -38,7 +38,7 @@ from .race.coins import CoinTracker
 from .race.timestamp import TimestampTracker
 from .race.finish import FinishDetector, FinishStillDetector, load_finish_templates
 from .race.mushrooms import MushroomTracker, load_mushroom_templates, MUSHROOM_ROI, MUSHROOM_TEMPLATES
-from .minimap.tracker import MinimapTracker
+from .minimap.tracker import MinimapTracker, MINIMAP_ROI as _MINIMAP_ROI
 from .minimap.recorder import MinimapRecorder
 from .minimap.player import MinimapPlayer
 from .overlay.debug import draw_debug_rois, draw_selection_rois
@@ -55,7 +55,8 @@ from .ipc.protocol import (parse_inbound, emit_ready, emit_screen_change, emit_s
                             emit_template_saved, emit_template_images, emit_tells_list, emit_rois_list,
                             emit_camera_paused, emit_camera_resumed, emit_camera_status,
                             emit_roi_preview, emit_asset_preview, emit_asset_saved,
-                            emit_calibration_result, emit_calib_capture)
+                            emit_calibration_result, emit_calib_capture,
+                            emit_minimap_update, minimap_update_payload)
 from .utils.camera import build_camera_source
 from .utils.normalize import Normalizer
 
@@ -810,6 +811,11 @@ def run(args):
 
     _last_heartbeat = 0.0
 
+    # Minimap stream: throttle to ~15 Hz and skip unchanged payloads
+    _MM_EMIT_INTERVAL    = 1.0 / 15.0   # seconds between minimap_update emits
+    _last_mm_emit        = 0.0
+    _prev_mm_payload_key = None          # (cx, cy, radius, track_state) dedup tuple
+
     # ── Main capture loop ────────────────────────────────────────────────────
     frame = None
     while True:
@@ -1055,6 +1061,26 @@ def run(args):
         if mush_state.count != _prev_mush:
             ipc.emit(emit_mush_update(mush_state.count))
             _prev_mush = mush_state.count
+
+        # Minimap update: stream at ~15 Hz during RACING, skip unchanged state.
+        # Only emits when screen == RACING (the tracker itself returns early on other
+        # screens, so mm_state stays stale — no point forwarding it).
+        if screen == Screen.RACING:
+            if t_frame - _last_mm_emit >= _MM_EMIT_INTERVAL:
+                _mm_p = minimap_update_payload(mm_state, _MINIMAP_ROI)
+                if _mm_p is not None:
+                    _mm_key = (_mm_p["cx"], _mm_p["cy"],
+                               _mm_p["radius"], _mm_p["track_state"])
+                    if _mm_key != _prev_mm_payload_key:
+                        ipc.emit(emit_minimap_update(mm_state, _MINIMAP_ROI))
+                        _prev_mm_payload_key = _mm_key
+                        _last_mm_emit = t_frame
+                elif _prev_mm_payload_key is not None:
+                    # Lock was lost — notify frontend once (no emit: None means no lock)
+                    _prev_mm_payload_key = None
+        elif _prev_mm_payload_key is not None:
+            # Left RACING — clear dedup so next race re-emits from scratch
+            _prev_mm_payload_key = None
 
         # Arm the deferred finish emit when finish is first detected.
         # The timestamp burst starts on this same frame, so total_time / splits

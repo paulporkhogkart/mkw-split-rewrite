@@ -41,6 +41,7 @@ Messages are newline-delimited JSON on stdio (Python sidecar ↔ Tauri frontend)
 | `selection_update` | `character`, `costume`, `kart`, `course` |
 | `lap_update` | `current`, `total`, `split` |
 | `coin_update` | `coins` |
+| `minimap_update` | `cx`, `cy` (full-frame 1080p px), `radius` (px), `track_state` (`"tracking"` \| `"ring_only"` \| `"reacquire"` \| `"lost"`) — emitted at ≤15 Hz during `RACING` only, only when lock is active (`tracking=True` and `cx`/`cy` are not None), and only when the value changes |
 | `finish` | `result`, `total_time`, `splits` |
 | `pb_achieved` | `course`, `time` |
 | `pb_export` | `course`, `mkwreplay` (full payload dict) |
