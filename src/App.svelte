@@ -198,7 +198,7 @@
       const active   = gi === activeRegion.group && ri === activeRegion.region;
       const sameGrp  = gi === activeRegion.group;
       out.push({ roi: reg.roi, gi, ri, active,
-                 color: active ? "#7eb8f7" : (sameGrp ? "#00ccff" : "#ffcc00") });
+                 color: active ? C.accent : (sameGrp ? C.roiCtx : C.warn) });
     }));
     return out;
   }
@@ -271,7 +271,7 @@
   }
   function editTabRois() {
     const keys = activeTab==="selection" ? (NODE_SELECTION[selectedNode]||[]) : (NODE_HUD[selectedNode]||[]);
-    return keys.map(k => ({ k, roi: rois[k], active: k===activeRoiName, color: k===activeRoiName ? "#7eb8f7" : "#ffcc00" }));
+    return keys.map(k => ({ k, roi: rois[k], active: k===activeRoiName, color: k===activeRoiName ? C.accent : C.warn }));
   }
   function _activeRoiConfigKey() {
     return SELECTION_ROI_CONFIG_KEYS[activeRoiName] || HUD_ROI_CONFIG_KEYS[activeRoiName] || null;
@@ -1185,7 +1185,7 @@
     dragHandle=null; dragStartRoi=null; dragStartMouse=null;
   }
 
-  const ROI_COLORS={primary:"#ffffff",and:"#ffcc00",or:"#00ccff"};
+  const ROI_COLORS={primary:C.tx, and:C.warn, or:C.accent};
 
   function _drawOneRoi(ctx,t,roi,color,showHandles) {
     if (!roi||roi.length<4) return;
@@ -1199,7 +1199,7 @@
       for (const h of getHandlePositions(roi)) {
         const hc=frameToCanvas(h.fx,h.fy,t), hcx=hc.cx, hcy=hc.cy, r=5;
         const active=hoveredHandle===h.id||(dragging&&dragHandle===h.id);
-        ctx.fillStyle=active?"#7eb8f7":color;
+        ctx.fillStyle=active?C.accent:color;
         ctx.strokeStyle="rgba(0,0,0,0.85)"; ctx.lineWidth=1.5;
         ctx.beginPath(); ctx.rect(hcx-r,hcy-r,r*2,r*2); ctx.fill(); ctx.stroke();
       }
@@ -1231,13 +1231,13 @@
       const allRois=getAllRoisForTell(tell);
       for (const re of allRois) {
         if (re.key===activeRoiKey) continue;
-        _drawOneRoi(ctx,t,re.roi,ROI_COLORS[re.type]??"#ffffff",false);
+        _drawOneRoi(ctx,t,re.roi,ROI_COLORS[re.type]??C.tx,false);
       }
       const ae=allRois.find(r=>r.key===activeRoiKey);
-      if (ae) _drawOneRoi(ctx,t,ae.roi,ROI_COLORS[ae.type]??"#ffffff",true);
+      if (ae) _drawOneRoi(ctx,t,ae.roi,ROI_COLORS[ae.type]??C.tx,true);
       return;
     }
-    _drawOneRoi(ctx,t,getCurrentRoi(),"#ffffff",true);
+    _drawOneRoi(ctx,t,getCurrentRoi(),C.tx,true);
   }
 
   let _pauseIntent="";
@@ -1827,7 +1827,7 @@
                         {#each group as region, ri}
                           <button class="tree-region" class:sel={activeRegion.group===gi && activeRegion.region===ri}
                                   on:click={()=>selectRegion(gi,ri)}>
-                            <span class="treg-dot" style="background:{activeRegion.group===gi && activeRegion.region===ri ? '#7eb8f7' : (gi===activeRegion.group ? '#00ccff' : '#ffcc00')}"></span>
+                            <span class="treg-dot" style="background:{activeRegion.group===gi && activeRegion.region===ri ? C.accent : (gi===activeRegion.group ? C.roiCtx : C.warn)}"></span>
                             <span class="treg-name">{region.kind==="dark_loading" ? "dark-loading" : `image ${ri+1}`}</span>
                             {#if activeRegion.group===gi && activeRegion.region===ri && currentScore}
                               <span class="treg-score" style="color:{scoreColor(currentScore.score)}">{currentScore.score.toFixed(2)}</span>
@@ -1889,7 +1889,7 @@
                         <div class="tree-group">
                           {#each _keys as k}
                             <button class="tree-region" class:sel={activeRoiName===k} on:click={()=>selectRoiName(k)}>
-                              <span class="treg-dot" style="background:{activeRoiName===k ? '#7eb8f7' : '#ffcc00'}"></span>
+                              <span class="treg-dot" style="background:{activeRoiName===k ? C.accent : C.warn}"></span>
                               <span class="treg-name">{roiMeta(k).label}</span>
                             </button>
                           {/each}
@@ -2206,7 +2206,7 @@
                       {@const isCtxLink    = involvesHome && (homeContextScreens.has(from) || homeContextScreens.has(to))}
                       {@const dimHome      = involvesHome && !isConstant && !isPrevLink && !isCtxLink}
                       <line x1={a.x+NW/2} y1={a.y+NH/2} x2={b.x+NW/2} y2={b.y+NH/2}
-                        stroke="#1a1a2e" stroke-width="1" opacity={dimHome ? 0.12 : 1} />
+                        stroke={C.bd} stroke-width="1" opacity={dimHome ? 0.12 : 1} />
                     {/if}
                   {/each}
                   {#each GRAPH_NODES as node}
@@ -2219,19 +2219,19 @@
                     <g transform="translate({node.x},{node.y})" style="cursor:pointer"
                        role="button" tabindex="-1" on:click={()=>nodeClick(node.id)}>
                       <rect width={NW} height={NH} rx="3" ry="3"
-                        fill={isSel ? "#0d2a1f" : (isActive ? "#0d1f40" : "#05050e")}
-                        stroke={isSel ? "#7ef7b8" : (isActive ? "#7eb8f7" : (candScore ? "#2a3a5a" : "#1a1a2e"))}
+                        fill={isSel || isActive ? C.accentBg : C.panel2}
+                        stroke={isSel ? C.tx : (isActive ? C.accent : (candScore ? C.bd : C.bdSoft))}
                         stroke-width={isSel || isActive ? 1.5 : 1}
                         opacity={dimmed ? 0.45 : 1} />
                       <text x={NW/2} y={isActive && isHome && prevBackendScreen ? NH/2-3 : NH/2}
                         text-anchor="middle" dominant-baseline="central"
                         font-size="10" font-family="var(--mono)"
-                        fill={isSel ? "#7ef7b8" : (isActive ? "#7eb8f7" : (candScore ? "#7a93a6" : (dimmed ? "#333" : "#566")))}
+                        fill={isSel ? C.tx : (isActive ? C.accent : (candScore ? C.txMut : (dimmed ? C.txDim : C.txMut)))}
                         opacity={dimmed ? 0.6 : 1}>{node.label}</text>
                       {#if isHome && prevBackendScreen}
                         <text x={NW/2} y={NH/2+7} text-anchor="middle" dominant-baseline="central"
                           font-size="6.5" font-family="var(--mono)"
-                          fill={isActive ? "#4a7ab0" : "#33506a"} opacity="0.85"
+                          fill={isActive ? C.accentSoft : C.txDim} opacity="0.85"
                         >↩ {prevBackendScreen.replace(/_/g," ")}</text>
                       {/if}
                       {#if candScore}
@@ -2311,7 +2311,7 @@
                     </div>
                   {:else if trackerCameraPaused}
                     <div class="preview-placeholder">
-                      <span class="preview-icon" style="color:#888">○</span>
+                      <span class="preview-icon" style="color:{C.txMut}">○</span>
                       <span class="cam-pane-err-label">Camera released</span>
                     </div>
                   {:else}
@@ -2331,7 +2331,7 @@
                     <img src={engineFrame} alt="Engine feed" class="preview-video" style="object-fit:contain"/>
                   {:else if trackerCameraPaused}
                     <div class="preview-placeholder">
-                      <span class="preview-icon" style="color:#888">○</span>
+                      <span class="preview-icon" style="color:{C.txMut}">○</span>
                       <span class="cam-pane-err-label">Camera released</span>
                     </div>
                   {:else if pythonCameraStatus === "error"}
@@ -2570,7 +2570,7 @@
                     </div>
                   {:else if trackerCameraPaused}
                     <div class="preview-placeholder">
-                      <span class="preview-icon" style="color:#888">○</span>
+                      <span class="preview-icon" style="color:{C.txMut}">○</span>
                       <span class="cam-pane-err-label">Camera released</span>
                     </div>
                   {:else}
@@ -2590,7 +2590,7 @@
                     <img src={engineFrame} alt="Engine feed" class="preview-video" style="object-fit:contain"/>
                   {:else if trackerCameraPaused}
                     <div class="preview-placeholder">
-                      <span class="preview-icon" style="color:#888">○</span>
+                      <span class="preview-icon" style="color:{C.txMut}">○</span>
                       <span class="cam-pane-err-label">Camera released</span>
                     </div>
                   {:else if pythonCameraStatus === "error"}
