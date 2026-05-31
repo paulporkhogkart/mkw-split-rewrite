@@ -39,6 +39,7 @@ Messages are newline-delimited JSON on stdio (Python sidecar ↔ Tauri frontend)
 
 | `type` | Key payload fields |
 |---|---|
+| `heartbeat` | `fps` (rounded 1 dp), `screen` (Screen enum name), `tracking` (bool — minimap lock active), `current_score` (detection score 0–1, 4 dp), `candidate_scores` (dict of Screen-name → score for all reachable candidate screens), `selection_candidates` ({`char`, `kart`, `course`, `costume`} → ranked `[{name, score}, …]` top-5 lists — same data as the `candidates` field in `state`, updated live at 5 Hz) — emitted at 5 Hz |
 | `screen_change` | `from`, `to` |
 | `selection_update` | `character`, `costume`, `kart`, `course` |
 | `lap_update` | `current`, `total`, `split` |

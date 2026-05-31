@@ -135,10 +135,12 @@ def emit_error(message: str) -> str:
 
 def emit_heartbeat(fps: float, screen: str, tracking: bool,
                    current_score: float = 0.0,
-                   candidate_scores: Optional[Dict[str, float]] = None) -> str:
+                   candidate_scores: Optional[Dict[str, float]] = None,
+                   selection_candidates: Optional[Dict[str, list]] = None) -> str:
     return _emit("heartbeat", fps=round(fps, 1), screen=screen, tracking=tracking,
                  current_score=round(current_score, 4),
-                 candidate_scores={k: round(v, 4) for k, v in (candidate_scores or {}).items()})
+                 candidate_scores={k: round(v, 4) for k, v in (candidate_scores or {}).items()},
+                 selection_candidates=selection_candidates or {})
 
 
 def emit_frame_data(data: str, width: int, height: int, label: str = "") -> str:

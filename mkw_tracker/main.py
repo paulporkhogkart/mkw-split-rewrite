@@ -1096,6 +1096,7 @@ def run(args):
                 avg_fps, screen.name, mm_state.tracking,
                 current_score=perf.current_score,
                 candidate_scores={k.name: v for k, v in perf.candidate_scores.items()},
+                selection_candidates=tracker.score_maps if tracker is not None else {},
             ))
             _last_heartbeat = t_frame
 
@@ -1132,6 +1133,7 @@ def run(args):
         # screens, so mm_state stays stale — no point forwarding it).
         if screen == Screen.RACING:
             if t_frame - _last_mm_emit >= _MM_EMIT_INTERVAL:
+                _last_mm_emit = t_frame
                 _mm_p = minimap_update_payload(mm_state, _MINIMAP_ROI)
                 if _mm_p is not None:
                     _mm_key = (_mm_p["cx"], _mm_p["cy"],
@@ -1139,9 +1141,9 @@ def run(args):
                     if _mm_key != _prev_mm_payload_key:
                         ipc.emit(emit_minimap_update(mm_state, _MINIMAP_ROI))
                         _prev_mm_payload_key = _mm_key
-                        _last_mm_emit = t_frame
                 elif _prev_mm_payload_key is not None:
-                    # Lock was lost — notify frontend once (no emit: None means no lock)
+                    # Lock lost / left RACING — clear dedup key; nothing emitted
+                    # (frontend stops receiving updates).
                     _prev_mm_payload_key = None
         elif _prev_mm_payload_key is not None:
             # Left RACING — clear dedup so next race re-emits from scratch
