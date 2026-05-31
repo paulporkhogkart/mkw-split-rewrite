@@ -17,7 +17,7 @@
 </script>
 
 <div class="log-body" bind:this={container}>
-  {#each entries as line (line)}
+  {#each entries as line}
     <div class="log-row">{line}</div>
   {/each}
 </div>
