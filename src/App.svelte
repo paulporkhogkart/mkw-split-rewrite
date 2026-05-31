@@ -2219,7 +2219,7 @@
                     <g transform="translate({node.x},{node.y})" style="cursor:pointer"
                        role="button" tabindex="-1" on:click={()=>nodeClick(node.id)}>
                       <rect width={NW} height={NH} rx="3" ry="3"
-                        fill={isSel || isActive ? C.accentBg : C.panel2}
+                        fill={isActive ? C.accentBg : C.panel2}
                         stroke={isSel ? C.tx : (isActive ? C.accent : (candScore ? C.bd : C.bdSoft))}
                         stroke-width={isSel || isActive ? 1.5 : 1}
                         opacity={dimmed ? 0.45 : 1} />
@@ -3265,7 +3265,7 @@
     background: var(--panel); color: var(--tx);
     border: 1px solid var(--bd); border-radius: 6px;
     padding: 1.2rem; min-width: 360px; max-width: 440px;
-    font-family: var(--mono);
+    font-family: var(--ui);
   }
   .lang-dialog::backdrop { background: rgba(0,0,0,.65); }
   .ldlg-title  { font-size: .9rem; color: var(--accent); margin-bottom: 1rem; }
