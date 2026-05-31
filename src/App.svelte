@@ -7,18 +7,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { t } from "./translations.js";
-
-  // JS color palette — mirrors the CSS tokens in theme.css for places that
-  // cannot read CSS vars (canvas 2D context, inline SVG fills, JS-returned styles).
-  // Keep in sync with theme.css :root.
-  const C = {
-    bg:'#1b1c1e', panel:'#232427', panel2:'#2a2b2f', raised:'#303135',
-    bd:'#3a3b40', bdSoft:'#2e2f33',
-    tx:'#d8d9dc', txMut:'#9a9ca1', txDim:'#6b6d73',
-    accent:'#3d7cc2', accentSoft:'#2d5e94', accentBg:'#26303c',
-    ok:'#5aa86a', warn:'#c89a3e', err:'#cf5b4e', idle:'#56585e',
-    roiCtx:'#8a8d93',   // neutral sibling/context ROI box on the feed overlay
-  };
+  import { C } from "./lib/palette.js";
 
   let appWindow = null;
   function winMinimize()       { appWindow?.minimize(); }
