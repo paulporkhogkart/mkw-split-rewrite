@@ -3,7 +3,7 @@
   import { C } from "../lib/palette.js";
   import {
     GRAPH_NODES, GRAPH_EDGES, GRAPH_NODE_MAP,
-    NW, NH, GRAPH_W, GRAPH_H,
+    NW, NH, GRAPH_W,
     fitToWrapper, zoomAt,
   } from "../lib/graph.js";
 

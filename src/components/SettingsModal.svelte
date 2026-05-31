@@ -65,6 +65,7 @@
 </script>
 
 {#if wizardOpen}
+  <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
   <div class="modal-backdrop wiz-backdrop"
     on:click|self={setupComplete ? onClose : undefined}
     on:keydown|self={(e) => { if (e.key === 'Escape' && setupComplete) onClose(); }}

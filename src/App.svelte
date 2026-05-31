@@ -112,9 +112,6 @@
   $: appLangName  = LANGUAGES.find(l => l.id === appLanguage)?.name     ?? appLanguage;
   $: sw2LangName  = LANGUAGES.find(l => l.id === switch2Language)?.name ?? switch2Language;
 
-  // ── Sidebar panel open/close ──────────────────────────────────────────────────
-  let panelOpen = { detection: true, candidates: true, selection: true, hud: true, thresholds: false, log: true };
-
   // ── Wizard state ──────────────────────────────────────────────────────────────
   let setupComplete = null;  // null = unknown (waiting for ready), false = needs setup, true = done
   let wizardOpen = false;
@@ -948,87 +945,32 @@
   }
 
   function getCurrentRoi() {
-    if (editingNode) {
-      if (activeTab === "detection") return activeRegionObj?.roi ?? null;
-      if (activeTab === "selection" || activeTab === "hud")
-        return activeRoiName ? (rois[activeRoiName] ?? null) : null;
-      return null;
-    }
-    if (wizardStep === "screens") {
-      const tell = tells.find(t => t.screen === SCREEN_NAMES[screenIdx]);
-      if (!tell) return null;
-      if (activeRoiKey === "primary") return tell.roi ?? null;
-      if (activeRoiKey === "alt")     return tell.alt_roi ?? null;
-      if (activeRoiKey.startsWith("and_"))
-        return tell.required_also?.[parseInt(activeRoiKey.slice(4))]?.roi ?? null;
-      return tell.roi ?? null;
-    }
-    if (wizardStep === "selection") return rois[SELECTION_ROIS[selectionIdx]?.key] ?? null;
-    if (wizardStep === "hud")       return rois[HUD_ROIS[hudIdx]?.key] ?? null;
-    if (wizardStep === "templates") return rois[ASSET_ROI_KEYS[templateCategory]] ?? null;
+    if (!editingNode) return null;
+    if (activeTab === "detection") return activeRegionObj?.roi ?? null;
+    if (activeTab === "selection" || activeTab === "hud")
+      return activeRoiName ? (rois[activeRoiName] ?? null) : null;
     return null;
   }
 
   function updateCurrentRoi(roi) {
-    if (editingNode) {
-      if (activeTab === "detection" && selectedNode) {
-        const g = activeRegion.group, r = activeRegion.region, sn = selectedNode;
-        tells = tells.map(t => t.screen !== sn ? t : { ...t,
-          groups: t.groups.map((grp, gi) => gi !== g ? grp
-            : grp.map((reg, ri) => ri !== r ? reg : { ...reg, roi })) });
-      } else if ((activeTab === "selection" || activeTab === "hud") && activeRoiName) {
-        rois = { ...rois, [activeRoiName]: roi };
-      }
-      return;
-    }
-    if (wizardStep==="screens") {
-      const sn=SCREEN_NAMES[screenIdx];
-      if (activeRoiKey==="primary") {
-        tells=tells.map(t=>t.screen===sn?{...t,roi}:t);
-      } else if (activeRoiKey==="alt") {
-        tells=tells.map(t=>t.screen===sn?{...t,alt_roi:roi}:t);
-      } else if (activeRoiKey.startsWith("and_")) {
-        const idx=parseInt(activeRoiKey.slice(4));
-        tells=tells.map(t=>{
-          if (t.screen!==sn) return t;
-          return {...t,required_also:(t.required_also??[]).map((ra,i)=>i===idx?{...ra,roi}:ra)};
-        });
-      }
-    } else if (wizardStep==="selection") {
-      const k=SELECTION_ROIS[selectionIdx]?.key;
-      if (k) rois={...rois,[k]:roi};
-    } else if (wizardStep==="hud") {
-      const k=HUD_ROIS[hudIdx]?.key;
-      if (k) rois={...rois,[k]:roi};
+    if (!editingNode) return;
+    if (activeTab === "detection" && selectedNode) {
+      const g = activeRegion.group, r = activeRegion.region, sn = selectedNode;
+      tells = tells.map(t => t.screen !== sn ? t : { ...t,
+        groups: t.groups.map((grp, gi) => gi !== g ? grp
+          : grp.map((reg, ri) => ri !== r ? reg : { ...reg, roi })) });
+    } else if ((activeTab === "selection" || activeTab === "hud") && activeRoiName) {
+      rois = { ...rois, [activeRoiName]: roi };
     }
   }
 
   function saveCurrentRoi(roi) {
-    if (editingNode) {
-      if (activeTab === "detection" && selectedNode)
-        send({ type:"update_region", screen:selectedNode, group:activeRegion.group, region:activeRegion.region, roi });
-      else if (activeTab === "selection" || activeTab === "hud") {
-        const ck = _activeRoiConfigKey();
-        if (ck) send({ type:"update_config", key:ck, value:roi });
-      }
-      return;
-    }
-    if (wizardStep==="screens") {
-      const sn=SCREEN_NAMES[screenIdx];
-      if (activeRoiKey==="primary") send({type:"update_tell",screen:sn,roi});
-      else if (activeRoiKey==="alt") send({type:"update_tell",screen:sn,alt_roi:roi});
-      else if (activeRoiKey.startsWith("and_")) {
-        const idx=parseInt(activeRoiKey.slice(4));
-        const tell=tells.find(t=>t.screen===sn);
-        const requiredAlsoRois=(tell?.required_also??[]).map((ra,i)=>i===idx?roi:ra.roi);
-        send({type:"update_tell",screen:sn,required_also_rois:requiredAlsoRois});
-      }
-    } else if (wizardStep==="selection") {
-      const cfk=SELECTION_ROI_CONFIG_KEYS[SELECTION_ROIS[selectionIdx]?.key];
-      if (cfk) send({type:"update_config",key:cfk,value:roi});
-    } else if (wizardStep==="hud") {
-      const cfk=HUD_ROI_CONFIG_KEYS[HUD_ROIS[hudIdx]?.key];
-      if (cfk) send({type:"update_config",key:cfk,value:roi});
+    if (!editingNode) return;
+    if (activeTab === "detection" && selectedNode)
+      send({ type:"update_region", screen:selectedNode, group:activeRegion.group, region:activeRegion.region, roi });
+    else if (activeTab === "selection" || activeTab === "hud") {
+      const ck = _activeRoiConfigKey();
+      if (ck) send({ type:"update_config", key:ck, value:roi });
     }
   }
 
@@ -1061,26 +1003,12 @@
     if (_roiPollTimer) return;
     _roiPollTimer=setInterval(()=>{
       if (!trackerConnected) return;
-      if (editingNode) {
-        if (activeTab === "detection" && selectedNode)
-          send({type:"test_region",screen:selectedNode,group:activeRegion.group,region:activeRegion.region});
-        else if ((activeTab === "selection" || activeTab === "hud") && ROI_TEMPLATE_CAT[activeRoiName]) {
-          const item=ASSET_ITEMS[templateCategory]?.[templateItemIdx];
-          if (item) send({type:"get_asset_template",category:templateCategory,item_name:item.file});
-        }
-        return;
-      }
-      if (!wizardOpen) return;
-      if (wizardStep==="screens") {
-        send({type:"test_template",screen:SCREEN_NAMES[screenIdx],roi_key:activeRoiKey});
-      } else if (wizardStep==="templates") {
+      if (!editingNode) return;
+      if (activeTab === "detection" && selectedNode)
+        send({type:"test_region",screen:selectedNode,group:activeRegion.group,region:activeRegion.region});
+      else if ((activeTab === "selection" || activeTab === "hud") && ROI_TEMPLATE_CAT[activeRoiName]) {
         const item=ASSET_ITEMS[templateCategory]?.[templateItemIdx];
         if (item) send({type:"get_asset_template",category:templateCategory,item_name:item.file});
-      } else {
-        const roi=getCurrentRoi(); if (!roi) return;
-        const isCostume=wizardStep==="selection"&&SELECTION_ROIS[selectionIdx]?.key==="costume";
-        if (isCostume) send({type:"get_roi_preview",roi,use_edges:true});
-        else           send({type:"get_roi_preview",roi,binary_thresh:currentBinaryThresh});
       }
     },1000);
   }
@@ -1090,35 +1018,14 @@
   }
 
   function onThreshChange() {
-    if (editingNode) {
-      if (activeTab === "detection" && selectedNode && trackerConnected) {
-        const g = activeRegion.group, r = activeRegion.region, sn = selectedNode;
-        tells = tells.map(t => t.screen !== sn ? t : { ...t,
-          groups: t.groups.map((grp, gi) => gi !== g ? grp
-            : grp.map((reg, ri) => ri !== r ? reg : { ...reg, thresh: currentBinaryThresh })) });
-        send({ type:"update_region", screen:sn, group:g, region:r, thresh:currentBinaryThresh });
-        send({ type:"test_region", screen:sn, group:g, region:r });
-      }
-      return;
-    }
-    if (wizardStep==="screens"&&trackerConnected) {
-      const sn=SCREEN_NAMES[screenIdx];
-      if (activeRoiKey==="primary") {
-        tells=tells.map(t=>t.screen===sn?{...t,binary_thresh:currentBinaryThresh}:t);
-        send({type:"update_tell",screen:sn,binary_thresh:currentBinaryThresh});
-      } else if (activeRoiKey==="alt") {
-        tells=tells.map(t=>t.screen===sn?{...t,alt_binary_thresh:currentBinaryThresh}:t);
-        send({type:"update_tell",screen:sn,alt_binary_thresh:currentBinaryThresh});
-      } else if (activeRoiKey.startsWith("and_")) {
-        const idx=parseInt(activeRoiKey.slice(4));
-        tells=tells.map(t=>{
-          if (t.screen!==sn) return t;
-          return {...t,required_also:(t.required_also??[]).map((ra,i)=>i===idx?{...ra,thresh:currentBinaryThresh}:ra)};
-        });
-        const tell=tells.find(t=>t.screen===sn);
-        send({type:"update_tell",screen:sn,required_also_thresh:(tell?.required_also??[]).map(ra=>ra.thresh??170)});
-      }
-      send({type:"test_template",screen:sn,roi_key:activeRoiKey});
+    if (!editingNode) return;
+    if (activeTab === "detection" && selectedNode && trackerConnected) {
+      const g = activeRegion.group, r = activeRegion.region, sn = selectedNode;
+      tells = tells.map(t => t.screen !== sn ? t : { ...t,
+        groups: t.groups.map((grp, gi) => gi !== g ? grp
+          : grp.map((reg, ri) => ri !== r ? reg : { ...reg, thresh: currentBinaryThresh })) });
+      send({ type:"update_region", screen:sn, group:g, region:r, thresh:currentBinaryThresh });
+      send({ type:"test_region", screen:sn, group:g, region:r });
     }
   }
 
@@ -1193,93 +1100,12 @@
     send({type:"capture_asset_template",category:templateCategory,item_name:item.file});
   }
 
-  function prevItem() {
-    currentScore=null; liveCropImg=null; liveRoiCrop=null;
-    assetTemplateImg=null; assetLiveCrop=null; activeRoiKey="primary";
-    if (wizardStep==="camera") goStep("language");
-    else if (wizardStep==="screens") { if (screenIdx>0) screenIdx--; else goStep("camera"); }
-    else if (wizardStep==="selection") { if (selectionIdx>0) selectionIdx--; else goStep("screens"); }
-    else if (wizardStep==="hud") { if (hudIdx>0) hudIdx--; else goStep("selection"); }
-    else if (wizardStep==="templates") {
-      if (templateItemIdx>0) { templateItemIdx--; }
-      else {
-        const ci=ASSET_CATEGORIES.findIndex(c=>c.key===templateCategory);
-        if (ci>0) { templateCategory=ASSET_CATEGORIES[ci-1].key; templateItemIdx=ASSET_ITEMS[templateCategory].length-1; }
-        else goStep("hud");
-      }
-    }
-    syncThreshToScreen();
-  }
-
-  function nextItem() {
-    currentScore=null; liveCropImg=null; liveRoiCrop=null;
-    assetTemplateImg=null; assetLiveCrop=null; activeRoiKey="primary";
-    if (wizardStep==="screens") { if (screenIdx<SCREEN_NAMES.length-1) screenIdx++; else goStep("selection"); }
-    else if (wizardStep==="selection") { if (selectionIdx<SELECTION_ROIS.length-1) selectionIdx++; else goStep("hud"); }
-    else if (wizardStep==="hud") { if (hudIdx<HUD_ROIS.length-1) hudIdx++; else goStep("templates"); }
-    else if (wizardStep==="templates") {
-      const items=ASSET_ITEMS[templateCategory];
-      if (templateItemIdx<items.length-1) { templateItemIdx++; }
-      else {
-        const ci=ASSET_CATEGORIES.findIndex(c=>c.key===templateCategory);
-        if (ci<ASSET_CATEGORIES.length-1) { templateCategory=ASSET_CATEGORIES[ci+1].key; templateItemIdx=0; }
-        else goStep("done");
-      }
-    }
-    syncThreshToScreen();
-  }
-
   // ── Language handlers ─────────────────────────────────────────────────────────
   function onAppLanguageChange()   { send({type:"update_config",key:"app_language",   value:appLanguage}); }
   function onSwitch2LanguageChange(){ send({type:"update_config",key:"switch2_language",value:switch2Language}); }
 
   // ── Device / update ───────────────────────────────────────────────────────────
 
-  async function handleDeviceChange(e) {
-    const prevDevice = configuredDevice;
-    const prevBrowserId = selectedBrowserDeviceId;
-    configuredDevice = e.target.value;
-    send({type:"update_config",key:"camera_device",value:configuredDevice});
-    // Reset audio to auto when video device changes — new device may have no
-    // associated audio (e.g. OBS Virtual Camera). groupId matching in startCamera
-    // will pick up the right audio if one exists, otherwise no audio is used.
-    selectedAudioDeviceId = "";
-
-    // Match a browser device by label so the preview swaps too
-    if (browserDevices.length > 0) {
-      const lower = configuredDevice.toLowerCase();
-      const match = browserDevices.find(d =>
-        d.label.toLowerCase().replace(/\s*\([0-9a-f:]+\)\s*$/i,"").trim() === lower ||
-        d.label.toLowerCase().includes(lower) ||
-        lower.includes(d.label.toLowerCase().replace(/\s*\([0-9a-f:]+\)\s*$/i,"").trim())
-      );
-      selectedBrowserDeviceId = match ? match.deviceId : prevBrowserId;
-    }
-
-    // Give Python a moment to process the update_config message and write to SQLite
-    // before we kill it — otherwise it restarts reading the old device value.
-    deviceSwitching = true;
-    trackerConnected = false; trackerSpawned = false;
-    await new Promise(r => setTimeout(r, 300));
-    await invoke("restart_tracker");
-
-    // Swap browser preview in parallel with the restart
-    startCamera(selectedBrowserDeviceId || undefined);
-
-    // Revert if tracker doesn't come back within 10 s
-    const switchTimeout = setTimeout(() => {
-      if (deviceSwitching) {
-        deviceSwitching = false;
-        configuredDevice = prevDevice;
-        selectedBrowserDeviceId = prevBrowserId;
-        send({type:"update_config",key:"camera_device",value:prevDevice});
-        startCamera(prevBrowserId || undefined);
-      }
-    }, 10000);
-
-    // Clear timeout flag on ready (handled in handleMsg below)
-    _pendingDeviceSwitchTimeout = switchTimeout;
-  }
   async function handleCameraDeviceChange(e) {
     // Guard against rapid switches during an in-progress open. The `disabled`
     // attribute handles the normal case but has a Svelte reactivity timing gap;
@@ -1437,24 +1263,7 @@
   function tr(key) { return t(key,appLanguage); }
 
   function syncThreshToScreen() {
-    if (editingNode) {
-      currentBinaryThresh = activeRegionObj?.thresh ?? 170;
-      return;
-    }
-    if (wizardStep==="screens") {
-      const _t=tells.find(t=>t.screen===SCREEN_NAMES[screenIdx]);
-      if (!_t) { currentBinaryThresh=170; return; }
-      if (activeRoiKey==="primary") currentBinaryThresh=_t.binary_thresh??170;
-      else if (activeRoiKey==="alt") currentBinaryThresh=_t.alt_binary_thresh??170;
-      else if (activeRoiKey.startsWith("and_"))
-        currentBinaryThresh=_t.required_also?.[parseInt(activeRoiKey.slice(4))]?.thresh??170;
-      else currentBinaryThresh=170;
-    } else { currentBinaryThresh=170; }
-  }
-
-  $: if (wizardOpen&&wizardStep==="screens"&&trackerConnected) {
-    templateImg=null; liveCropImg=null;
-    send({type:"get_template_images",screen:SCREEN_NAMES[screenIdx],roi_key:activeRoiKey});
+    currentBinaryThresh = editingNode ? (activeRegionObj?.thresh ?? 170) : 170;
   }
 
   $: if (browserDevices.length>0&&configuredDevice) {
