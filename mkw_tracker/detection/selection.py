@@ -9,7 +9,7 @@ from typing import Callable, Dict, Optional
 from .screen import Screen
 from .templates import (
     load_template_dir, prepare_text_edges, prepare_roi,
-    match_best, purge_tight_pngs,
+    match_best, match_top_n, purge_tight_pngs,
 )
 
 # ---------------------------------------------------------------------------
@@ -112,6 +112,19 @@ SELECTION_MATCH_THRESHOLD = 0.7
 COSTUME_SEARCH_PAD = 8
 
 
+def top_candidates(score_map: Dict[str, float], n: int = 5) -> list:
+    """Return the top-N entries from a ``{name: score}`` map as a sorted list.
+
+    Returns a list of ``{"name": str, "score": float}`` dicts sorted by score
+    descending, capped at *n* entries.  Scores are rounded to 4 decimal places.
+    Returns an empty list when *score_map* is empty.
+    """
+    if not score_map:
+        return []
+    ranked = sorted(score_map.items(), key=lambda x: x[1], reverse=True)[:n]
+    return [{"name": name, "score": round(score, 4)} for name, score in ranked]
+
+
 def _load_lang_dir(lang_dir: str, **kwargs) -> dict:
     """Load templates from the language-specific directory. No base-path fallback."""
     return load_template_dir(lang_dir, **kwargs)
@@ -193,10 +206,41 @@ class SelectionTracker:
         self._char_pending:        str = ""
         self._char_confirm_streak: int = 0
 
+        # Per-field score maps: {name: score} from the most recent full scan.
+        # Populated by _update_*; empty until the first scan of that screen.
+        self._char_scores:    Dict[str, float] = {}
+        self._kart_scores:    Dict[str, float] = {}
+        self._course_scores:  Dict[str, float] = {}
+        self._costume_scores: Dict[str, float] = {}
+
         print(f"[SelectionTracker] {len(self._char_templates)} characters, "
               f"{len(self._costume_templates)} costumes, "
               f"{len(self._kart_templates)} karts, "
               f"{len(self._course_templates)} courses")
+
+    # ------------------------------------------------------------------
+    @property
+    def score_maps(self) -> dict:
+        """Return ranked candidates for each selection field.
+
+        Returns a dict::
+
+            {
+                "char":    [{"name": str, "score": float}, ...],
+                "kart":    [...],
+                "course":  [...],
+                "costume": [...],
+            }
+
+        Each list is sorted by score descending and contains at most 5 entries.
+        Lists are empty until the first scan of the relevant selection screen.
+        """
+        return {
+            "char":    top_candidates(self._char_scores),
+            "kart":    top_candidates(self._kart_scores),
+            "course":  top_candidates(self._course_scores),
+            "costume": top_candidates(self._costume_scores),
+        }
 
     # ------------------------------------------------------------------
     def _rebuild_costume_subset(self, character: str):
@@ -249,6 +293,11 @@ class SelectionTracker:
             threshold=0.4, reconfirm_name=self.state.character,
             reconfirm_threshold=0.80,
         )
+        # Retain full per-template scores for ranked candidates.
+        self._char_scores = dict(match_top_n(
+            None, self._char_templates, n=len(self._char_templates) or 1,
+            _prepared=char_crop,
+        ))
 
         if name and name != self.state.character:
             if name == self._char_pending:
@@ -287,6 +336,12 @@ class SelectionTracker:
                 threshold=0.3, reconfirm_threshold=0.5,
                 _prepared=cos_crop, reconfirm_name=self.state.costume,
             )
+            # Retain full per-costume scores for ranked candidates.
+            self._costume_scores = dict(match_top_n(
+                None, self._relevant_costumes,
+                n=len(self._relevant_costumes) or 1,
+                _prepared=cos_crop,
+            ))
             if cname and cname != self.state.costume:
                 self._costume_loss_streak = 0
                 self.state.costume      = cname
@@ -309,10 +364,16 @@ class SelectionTracker:
 
     # ------------------------------------------------------------------
     def _update_kart(self, frame: np.ndarray) -> bool:
+        kart_crop = prepare_roi(self._crop(frame, self._kart_name_roi))
         name, conf = match_best(
-            self._crop(frame, self._kart_name_roi), self._kart_templates,
+            None, self._kart_templates, _prepared=kart_crop,
             reconfirm_name=self.state.kart, reconfirm_threshold=0.9,
-        )
+        ) if kart_crop is not None else (None, 0.0)
+        if kart_crop is not None:
+            self._kart_scores = dict(match_top_n(
+                None, self._kart_templates, n=len(self._kart_templates) or 1,
+                _prepared=kart_crop,
+            ))
         if name and name != self.state.kart:
             self.state.kart      = name
             self.state.kart_conf = conf
@@ -324,10 +385,16 @@ class SelectionTracker:
 
     # ------------------------------------------------------------------
     def _update_course(self, frame: np.ndarray) -> bool:
+        course_crop = prepare_roi(self._crop(frame, self._course_name_roi))
         name, conf = match_best(
-            self._crop(frame, self._course_name_roi), self._course_templates,
+            None, self._course_templates, _prepared=course_crop,
             reconfirm_name=self.state.course, reconfirm_threshold=0.95,
-        )
+        ) if course_crop is not None else (None, 0.0)
+        if course_crop is not None:
+            self._course_scores = dict(match_top_n(
+                None, self._course_templates, n=len(self._course_templates) or 1,
+                _prepared=course_crop,
+            ))
         if name and name != self.state.course:
             self.state.course      = name
             self.state.course_conf = conf

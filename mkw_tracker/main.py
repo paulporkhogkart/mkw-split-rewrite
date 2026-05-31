@@ -138,8 +138,35 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
             _normalizer.mark_dirty()
 
     elif t == "get_state":
-        # Full snapshot emitted on next frame  - just mark as needed
-        pass
+        # Emit a full snapshot of all tracker states immediately.
+        sel   = tracker.state if tracker is not None else None
+        laps  = lifecycle._laps.state
+        coins = lifecycle._coins.state
+        ts    = lifecycle._ts.state
+        mush  = lifecycle._mush.state
+        from .detection.screen import Screen as _Screen
+        state_dict = {
+            "screen":   detector.current_screen.name if detector.current_screen is not None else "UNKNOWN",
+            # Selection
+            "character":     sel.character     if sel else None,
+            "character_conf": round(sel.character_conf, 4) if sel else 0.0,
+            "costume":       sel.costume       if sel else None,
+            "costume_conf":  round(sel.costume_conf, 4)  if sel else 0.0,
+            "kart":          sel.kart          if sel else None,
+            "kart_conf":     round(sel.kart_conf, 4)     if sel else 0.0,
+            "course":        sel.course        if sel else None,
+            "course_conf":   round(sel.course_conf, 4)   if sel else 0.0,
+            # Race
+            "current_lap": laps.current_lap,
+            "total_laps":  laps.total_laps,
+            "coins":       coins.coins,
+            "mushrooms":   mush.count,
+            # Ranked per-field selection candidates
+            "candidates": tracker.score_maps if tracker is not None else {
+                "char": [], "kart": [], "course": [], "costume": []
+            },
+        }
+        ipc.emit(emit_state(state_dict))
 
     elif t == "force_screen":
         screen_name = msg.get("screen", "")

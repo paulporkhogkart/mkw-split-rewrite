@@ -7,7 +7,7 @@ Messages are newline-delimited JSON on stdio (Python sidecar ↔ Tauri frontend)
 | `type` | Additional fields | Effect |
 |---|---|---|
 | `update_config` | `key`, `value` | Write to `config` table; hot-reload affected tracker |
-| `get_state` | — | Emit full `state` snapshot on next frame |
+| `get_state` | — | Emit full `state` snapshot immediately (includes `candidates` for per-field ranked matches) |
 | `force_screen` | `screen` (Screen enum name) | Call `detector.force_screen()` |
 | `toggle_debug` | `enabled` (bool) | Show/hide debug overlay |
 | `export_pb` | `course` | Emit `pb_export` event with `.mkwreplay` payload |
@@ -47,7 +47,7 @@ Messages are newline-delimited JSON on stdio (Python sidecar ↔ Tauri frontend)
 | `finish` | `result`, `total_time`, `splits` |
 | `pb_achieved` | `course`, `time` |
 | `pb_export` | `course`, `mkwreplay` (full payload dict) |
-| `state` | Full snapshot of all tracker states |
+| `state` | Full snapshot of all tracker states; includes `screen`, selection fields (`character`, `character_conf`, `costume`, `costume_conf`, `kart`, `kart_conf`, `course`, `course_conf`), race fields (`current_lap`, `total_laps`, `coins`, `mushrooms`), and `candidates: {char:[{name,score},…], kart:[…], course:[…], costume:[…]}` — ranked per-field top-5 template matches (score 0–1, sorted desc) from the most recent scan of each selection screen; empty lists until that screen has been scanned |
 | `replay_paths` | `course`, `paths` (list of `{"id": str, "points": [[cx, cy], ...]}`) — full-frame 1080p pixel coordinates; one entry per run that has recorded points |
 | `minimap_sample` | `course`, `png_b64` (base-64 PNG string or `null`) — the locked minimap icon template for the course's seed position, encoded as a small PNG; `null` when no live template is cached (no active race or template not yet locked) |
 | `calibration_result` | `ok`, `error`, `is_echo`, `gain_r`/`gain_g`/`gain_b`, `offset_r`/`offset_g`/`offset_b`, `gamma`, `fit_quality` (RMSE 0–255, lower is better; <10 great, 10–20 ok, >20 poor). `is_echo=true` for `get_calibration` replies; `false` for fresh auto-fit results |
