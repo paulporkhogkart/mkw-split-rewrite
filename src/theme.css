@@ -51,10 +51,14 @@ html, body {
 }
 #app { height: 100vh; }
 
-/* Thin scrollbars to match the app chrome (Chromium webview) */
-* { scrollbar-width: thin; scrollbar-color: var(--bd) transparent; }
-::-webkit-scrollbar { width: 6px; height: 6px; }
+/* Custom scrollbars (Chromium/WebView2). We deliberately do NOT set the standard
+   scrollbar-width/scrollbar-color, because Chromium ignores ::-webkit-scrollbar when
+   those are present. Elements that want NO scrollbar opt out with scrollbar-width: none. */
+::-webkit-scrollbar { width: 11px; height: 11px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--bd); border-radius: var(--r); }
-::-webkit-scrollbar-thumb:hover { background: var(--raised); }
+::-webkit-scrollbar-thumb {
+  background: var(--bd); border-radius: 6px;
+  border: 3px solid transparent; background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--tx-dim); background-clip: padding-box; }
 ::-webkit-scrollbar-corner { background: transparent; }
