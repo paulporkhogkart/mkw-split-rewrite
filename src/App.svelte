@@ -1693,10 +1693,6 @@
     if (match&&match.deviceId!==selectedBrowserDeviceId) selectedBrowserDeviceId=match.deviceId;
   }
 
-  $: sortedCandidates = Object.entries(candidateScores)
-    .sort((a,b)=>b[1]-a[1]).slice(0,8);
-
-  function confBar(v) { return Math.round((v||0)*100); }
   // scoreColor() lives in lib/format.js
 
   // ── Store mirrors (keep local vars unchanged; Rail/RaceSection/EventLog read stores) ──
@@ -2181,6 +2177,7 @@
                 <div class="device-row">
                   <label for="sv-aud">Audio</label>
                   <select id="sv-aud" on:change={handleAudioDeviceChange}>
+                    <option value="none" selected={!selectedAudioDeviceId||selectedAudioDeviceId==="none"}>— none —</option>
                     {#each audioDevices as d}
                       <option value={d.deviceId} selected={d.deviceId===selectedAudioDeviceId}>
                         {d.label||`Audio ${d.deviceId.slice(0,6)}…`}
@@ -2467,6 +2464,7 @@
                 <div class="device-row">
                   <label for="wiz-aud">Audio</label>
                   <select id="wiz-aud" on:change={handleAudioDeviceChange}>
+                    <option value="none" selected={!selectedAudioDeviceId||selectedAudioDeviceId==="none"}>— none —</option>
                     {#each audioDevices as d}
                       <option value={d.deviceId} selected={d.deviceId===selectedAudioDeviceId}>
                         {d.label||`Audio ${d.deviceId.slice(0,6)}…`}
