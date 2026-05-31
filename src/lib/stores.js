@@ -14,7 +14,7 @@ export const race       = writable({ curLap: null, totLap: null, coins: null, mu
                                      splits: {}, finishTime: null });
 export const minimap    = writable(null);                 // { cx, cy, radius, trackState } | null (current run only)
 export const replays    = writable([]);                   // [{ id, points: [[x,y],…] }] (from DB)
-export const sample     = writable(null);                 // data URL of the locked icon template | null
+export const sample     = writable(null);                 // raw base64 PNG (no data-URI prefix) of the locked icon template | null
 export const devices    = writable({ video: [], audio: [], selectedVideo: "", selectedAudio: "" });
 export const tells      = writable([]);                   // detection tell trees (list_tells)
 export const rois       = writable({});                   // selection/HUD config ROIs (list_rois)

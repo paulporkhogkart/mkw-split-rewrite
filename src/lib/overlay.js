@@ -198,11 +198,12 @@ export function drawOverlay(ctx, opts) {
     const iy      = mmR.y + INSET;
 
     ctx.save();
-    // Thin border.
+    // Draw image first so the border renders on top.
+    ctx.drawImage(sampleImg, ix, iy, SIZE, SIZE);
+    // Thin border on top.
     ctx.strokeStyle = C.txDim;
     ctx.lineWidth   = 1;
     ctx.strokeRect(ix, iy, SIZE, SIZE);
-    ctx.drawImage(sampleImg, ix, iy, SIZE, SIZE);
     ctx.restore();
   }
 

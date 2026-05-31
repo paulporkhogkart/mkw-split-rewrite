@@ -41,7 +41,7 @@
   let liveScore = 0.0;
   let candidateScores = {};
   let selectionCandidates = { char: [], kart: [], course: [], costume: [] };
-  let _lastFetchedCourse = null;
+  let _fetchedThisRace = false;
   let _tick = 0;
   $: backendAlive = trackerConnected && _tick >= 0 && (Date.now() - lastHeartbeatTs) < 4000;
   $: statusDot = !trackerConnected ? C.idle : backendAlive ? C.ok : C.warn;
@@ -766,6 +766,18 @@
           prevBackendScreen = msg.from;
         }
         backendScreen = msg.to ?? backendScreen;
+        // Fetch replay trail + minimap sample once each time we enter RACING (so a
+        // second race on the same course refreshes stale data).  Reset the guard
+        // whenever we leave RACING so the next entry re-fetches.
+        if (msg.to === "RACING") {
+          if (!_fetchedThisRace && selCourse) {
+            _fetchedThisRace = true;
+            send({ type: "get_replay_paths",   course: selCourse });
+            send({ type: "get_minimap_sample", course: selCourse });
+          }
+        } else if (msg.from === "RACING") {
+          _fetchedThisRace = false;
+        }
         break;
       case "selection_update":
         selChar    = msg.character ?? null; selCharConf    = msg.char_conf    ?? 0;
@@ -1730,12 +1742,9 @@
   $: tellsStore.set(tells);
   $: roisStore.set(rois);
 
-  // ── Fetch minimap replays + sample when course becomes known ──────────────────
-  $: if (selCourse && selCourse !== _lastFetchedCourse) {
-    _lastFetchedCourse = selCourse;
-    send({ type: "get_replay_paths",   course: selCourse });
-    send({ type: "get_minimap_sample", course: selCourse });
-  }
+  // Replay trail + minimap sample are fetched on RACING entry (see screen_change handler).
+  // The _fetchedThisRace guard ensures exactly one fetch per race, even for repeat
+  // races on the same course.
 </script>
 
 <!-- ═══════════════════════════════════════════════════════════════════════════ -->
