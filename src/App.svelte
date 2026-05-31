@@ -2806,7 +2806,7 @@
   .tree-group { border: 1px solid var(--bd); border-radius: 5px; padding: 6px; background: var(--panel-2); }
   .tree-group-hd { font-size: .58rem; text-transform: uppercase; letter-spacing: .06em; color: var(--accent-soft); margin-bottom: 4px; }
   .tree-region { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; background: var(--panel-2); border: 1px solid var(--bd); border-radius: 4px; padding: 4px 7px; margin-bottom: 3px; color: var(--tx-mut); font-family: inherit; font-size: .72rem; cursor: pointer; }
-  .tree-region:hover { border-color: var(--bd); }
+  .tree-region:hover { border-color: var(--accent-soft); }
   .tree-region.sel { border-color: var(--accent); background: var(--accent-bg); color: var(--tx); }
   .treg-dot { width: 9px; height: 9px; border-radius: 2px; flex: none; }
   .treg-name { flex: 1; }
@@ -2819,7 +2819,7 @@
   .reg-kind { font-size: .66rem; color: var(--tx-mut); display: flex; align-items: center; gap: 5px; }
   .reg-kind select { background: var(--panel-2); color: var(--tx); border: 1px solid var(--bd); border-radius: 3px; font-family: inherit; font-size: .7rem; padding: 2px 4px; }
   .reg-del { background: none; border: 1px solid var(--err); color: var(--err); border-radius: 3px; font-family: inherit; font-size: .64rem; padding: 3px 7px; cursor: pointer; }
-  .reg-del:hover { background: var(--err); }
+  .reg-del:hover { background: var(--err); color: #fff; }
   .reg-thumbs { display: flex; gap: 8px; }
   .reg-thumb { flex: 1; font-size: .58rem; color: var(--tx-mut); text-align: center; }
   .reg-thumb img, .reg-thumb-empty { display: block; width: 100%; height: 40px; object-fit: contain; background: var(--panel-2); border: 1px solid var(--bd); border-radius: 3px; margin-top: 2px; image-rendering: pixelated; }
@@ -2915,7 +2915,7 @@
     display: flex; align-items: center; gap: 3px; padding: 2px 3px;
     border-radius: 3px; transition: color .1s, background .1s; flex-shrink: 0;
   }
-  .fc-btn:hover { color: var(--tx-dim); background: var(--raised); }
+  .fc-btn:hover { color: var(--tx-mut); background: var(--raised); }
   .fc-icon {
     width: 14px; height: 14px; fill: none;
     stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;
@@ -3033,7 +3033,7 @@
   .split-val    { font-size: .75rem; color: var(--accent-soft); font-weight: normal; font-variant-numeric: tabular-nums; }
   .split-pending { color: var(--tx-dim) !important; }
   .hud-total-row { margin-top: 2px; }
-  .hud-total    { font-size: .82rem; color: var(--accent); font-weight: bold; font-variant-numeric: tabular-nums; }
+  .hud-total    { font-size: .82rem; color: var(--ok); font-weight: bold; font-variant-numeric: tabular-nums; }
   .mush-val { font-size: .75rem; }
 
   /* ── Startup view ─────────────────────────────────────────────── */
@@ -3201,7 +3201,7 @@
   }
   .cam-release-bar-released .cam-release-dot { background: var(--ok); }
   .cam-release-msg { flex: 1; font-size: .66rem; color: var(--warn); line-height: 1.45; transition: color .25s; }
-  .cam-release-bar-released .cam-release-msg { color: var(--accent); }
+  .cam-release-bar-released .cam-release-msg { color: var(--ok); }
   .cam-release-bar-error {
     background: rgba(207,91,78,.05); border-color: rgba(207,91,78,.2);
   }
