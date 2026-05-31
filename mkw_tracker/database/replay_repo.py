@@ -190,6 +190,40 @@ def save_friend_pb(
     conn.commit()
 
 
+def replay_paths(conn, course: str) -> list:
+    """Return replay trail paths for a given course.
+
+    Returns a list of dicts, one per replay run that has recorded points:
+        [{"id": <replay_id or label>, "points": [[cx, cy], ...]}, ...]
+
+    Points are full-frame 1080p pixel coordinates (the same space as
+    MinimapState.cx / MinimapState.cy).  Runs with no recorded points are
+    excluded.  All replay types (local, server, PB, history) are included.
+    """
+    rows = conn.execute(
+        """SELECT id, player, is_pb, total_time FROM replays
+           WHERE course = ?
+           ORDER BY recorded_at DESC""",
+        (course,),
+    ).fetchall()
+
+    result = []
+    for row in rows:
+        pts = conn.execute(
+            """SELECT cx, cy FROM replay_points
+               WHERE replay_id = ? ORDER BY t_ms""",
+            (row["id"],),
+        ).fetchall()
+        if not pts:
+            continue
+        label = str(row["id"])
+        result.append({
+            "id": label,
+            "points": [[p["cx"], p["cy"]] for p in pts],
+        })
+    return result
+
+
 def get_minimap_seed(course: str) -> Optional[dict]:
     """Return minimap seed for a course, or None."""
     conn = get_connection()

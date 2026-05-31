@@ -56,7 +56,8 @@ from .ipc.protocol import (parse_inbound, emit_ready, emit_screen_change, emit_s
                             emit_camera_paused, emit_camera_resumed, emit_camera_status,
                             emit_roi_preview, emit_asset_preview, emit_asset_saved,
                             emit_calibration_result, emit_calib_capture,
-                            emit_minimap_update, minimap_update_payload)
+                            emit_minimap_update, minimap_update_payload,
+                            emit_replay_paths, emit_minimap_sample)
 from .utils.camera import build_camera_source
 from .utils.normalize import Normalizer
 
@@ -176,6 +177,43 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
             msg.get("w", 0),
             msg.get("h", 0),
         )
+
+    elif t == "get_replay_paths":
+        from .database.replay_repo import replay_paths as _replay_paths
+        from .database.connection import get_connection as _get_conn
+        from .ipc.protocol import emit_replay_paths as _emit_rp
+        _course = msg.get("course", "")
+        _paths = _replay_paths(_get_conn(), _course)
+        ipc.emit(_emit_rp(_course, _paths))
+
+    elif t == "get_minimap_sample":
+        import base64 as _b64
+        from .database.replay_repo import get_minimap_seed as _get_seed
+        from .ipc.protocol import emit_minimap_sample as _emit_ms
+        _course = msg.get("course", "")
+        _seed = _get_seed(_course)
+        _png_b64 = None
+        if _seed is not None:
+            # The minimap_seeds table stores only (cx, cy, radius, conf) —
+            # no image blob.  The in-memory character template (float32
+            # HSV-CLAHE) is only available while a race is active.
+            # Try the live tracker first; fall back to null when unavailable.
+            _tmpl = getattr(minimap, "_char_template", None)
+            if _tmpl is not None:
+                try:
+                    import cv2 as _cv2
+                    import numpy as _np
+                    # Convert float32 HSV-CLAHE channels back to uint8 BGR for display
+                    _h = (_tmpl[:, :, 0] * 179.0).astype(_np.uint8)
+                    _s = (_tmpl[:, :, 1] * 255.0).astype(_np.uint8)
+                    _v = (_tmpl[:, :, 2] * 255.0).astype(_np.uint8)
+                    _hsv = _np.stack([_h, _s, _v], axis=2)
+                    _bgr = _cv2.cvtColor(_hsv, _cv2.COLOR_HSV2BGR)
+                    _, _buf = _cv2.imencode(".png", _bgr)
+                    _png_b64 = _b64.b64encode(_buf.tobytes()).decode("ascii")
+                except Exception:
+                    _png_b64 = None
+        ipc.emit(_emit_ms(_course, _png_b64))
 
     elif t == "mark_setup_complete":
         settings.update("setup_complete", 1)

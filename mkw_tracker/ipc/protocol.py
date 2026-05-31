@@ -248,6 +248,25 @@ def emit_minimap_update(state, roi: tuple) -> Optional[str]:
     return json.dumps(payload)
 
 
+def emit_replay_paths(course: str, paths: list) -> str:
+    """Outbound. Emits trail paths for every stored run on a course.
+
+    ``paths`` is a list of ``{"id": str, "points": [[cx, cy], ...]}`` dicts
+    where coordinates are full-frame 1080p pixels.
+    """
+    return _emit("replay_paths", course=course, paths=paths)
+
+
+def emit_minimap_sample(course: str, png_b64) -> str:
+    """Outbound. Emits the best available displayable image of the locked
+    minimap icon for a course's seed position.
+
+    ``png_b64`` is a base-64-encoded PNG string, or ``None`` if no usable
+    image is available for the course.
+    """
+    return _emit("minimap_sample", course=course, png_b64=png_b64)
+
+
 def emit_calibration_result(gain_r: float, gain_g: float, gain_b: float,
                             offset_r: int, offset_g: int, offset_b: int,
                             gamma: float, fit_quality: float,

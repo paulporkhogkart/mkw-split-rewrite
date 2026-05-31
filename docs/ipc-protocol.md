@@ -23,6 +23,8 @@ Messages are newline-delimited JSON on stdio (Python sidecar ↔ Tauri frontend)
 | `reset_tell` | `screen` | Restore one screen's tell (and aliases) to defaults; drops `tell_tree_*`; emits `tells_list` |
 | `reset_roi` | `key` (e.g. `char_name_roi`) | Restore one selection/HUD ROI to its packaged default; emits `rois_list` |
 | `capture_asset_template` / `get_asset_template` | `category`, `item_name` | Capture / preview a per-item reference image (characters/costumes/karts/courses/mushrooms) |
+| `get_replay_paths` | `course` | Emit `replay_paths` event with all stored trail paths for that course |
+| `get_minimap_sample` | `course` | Emit `minimap_sample` event with the best available displayable icon image for that course's seed; `png_b64` will be `null` if no live template is cached |
 
 > **Calibration (below) is disabled.** The backend handlers remain but the UI no longer sends them; image normalization is a no-op. The legacy `update_tell`/`add_alt`/`add_required_also`/`capture_template`/`test_template`/`get_template_images` commands were replaced by the region ops above.
 
@@ -46,6 +48,8 @@ Messages are newline-delimited JSON on stdio (Python sidecar ↔ Tauri frontend)
 | `pb_achieved` | `course`, `time` |
 | `pb_export` | `course`, `mkwreplay` (full payload dict) |
 | `state` | Full snapshot of all tracker states |
+| `replay_paths` | `course`, `paths` (list of `{"id": str, "points": [[cx, cy], ...]}`) — full-frame 1080p pixel coordinates; one entry per run that has recorded points |
+| `minimap_sample` | `course`, `png_b64` (base-64 PNG string or `null`) — the locked minimap icon template for the course's seed position, encoded as a small PNG; `null` when no live template is cached (no active race or template not yet locked) |
 | `calibration_result` | `ok`, `error`, `is_echo`, `gain_r`/`gain_g`/`gain_b`, `offset_r`/`offset_g`/`offset_b`, `gamma`, `fit_quality` (RMSE 0–255, lower is better; <10 great, 10–20 ok, >20 poor). `is_echo=true` for `get_calibration` replies; `false` for fresh auto-fit results |
 | `calib_capture` | `slot` (1 or 2), `captured` (bool), `error` (empty unless capture failed) |
 | `error` | `message` |
