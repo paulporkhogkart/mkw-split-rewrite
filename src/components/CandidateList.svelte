@@ -20,7 +20,7 @@
       <div class="bar-track">
         <div
           class="bar-fill"
-          style="width:{clamp(0, 100, c.score * 100)}%; background:{scoreColor(c.score)}"
+          style="width:{clamp(c.score * 100, 0, 100)}%; background:{scoreColor(c.score)}"
         ></div>
       </div>
       <span class="cand-score" style="color:{scoreColor(c.score)}">{fmtScore(c.score)}</span>
