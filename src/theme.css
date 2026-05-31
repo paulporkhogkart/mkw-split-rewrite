@@ -1,58 +1,59 @@
-/* Design tokens + globals — Neutral Graphite (OBS-style).
-   Single source of truth for CSS colors. JS/canvas/SVG colors are mirrored
-   in the `C` palette object in App.svelte (a <canvas> cannot read CSS vars).
-   Keep the two in sync. */
+/* Design tokens + globals — Neutral Graphite (OBS/Resolve-style), refined "v2".
+   Single source of truth for CSS colors. JS/canvas/SVG colors are mirrored in
+   src/lib/palette.js (a <canvas> cannot read CSS vars). Keep the two in sync.
+   Token NAMES are stable (referenced across components); only values are tuned. */
 :root {
   /* Surfaces & borders */
-  --bg:        #1b1c1e;
-  --panel:     #232427;
-  --panel-2:   #2a2b2f;
-  --raised:    #303135;
-  --bd:        #3a3b40;
-  --bd-soft:   #2e2f33;
-  --feed-bg:   #0c0d0f;
-  --track:     #0e0f11;
+  --bg:        #1b1c1e;   /* app background */
+  --panel:     #202023;   /* section-header bands · title bar · status bar */
+  --panel-2:   #26272b;   /* nested surfaces · graph nodes · active/open row */
+  --raised:    #2e2f33;   /* hover / pressed control background */
+  --well:      #161718;   /* recessed candidate-expansion well */
+  --bd:        #34353a;   /* hairline border */
+  --bd-soft:   #27282b;   /* subtle internal divider */
+  --feed-bg:   #0b0c0e;   /* camera-preview / canvas (near-black) */
+  --track:     #303135;   /* thin meter / progress-bar track */
 
   /* Text */
-  --tx:        #d8d9dc;
-  --tx-mut:    #9a9ca1;
-  --tx-dim:    #6b6d73;
+  --tx:        #d9dadd;   /* primary */
+  --tx-mut:    #9a9ca1;   /* secondary / labels */
+  --tx-dim:    #6b6d73;   /* tertiary / disabled / hints */
 
   /* Accent — the only decorative color (active / selected / primary action) */
   --accent:      #3d7cc2;
-  --accent-soft: #2d5e94;
-  --accent-bg:   #26303c;
+  --accent-soft: #2d5e94;   /* pressed / darker */
+  --accent-bg:   #26303c;   /* accent-tinted fill */
 
   /* Status — functional (tracking health) */
-  --ok:    #5aa86a;
-  --warn:  #c89a3e;
-  --err:   #cf5b4e;
-  --idle:  #56585e;
-  --close: #c4382a;
+  --ok:    #5aa86a;   /* healthy · high confidence · connected */
+  --warn:  #c89a3e;   /* marginal · low confidence */
+  --err:   #cf5b4e;   /* fail · error */
+  --idle:  #56585e;   /* inactive · no signal · disconnected */
+  --close: #c4382a;   /* window-close hover only */
 
   /* Typography */
-  --ui:   'Segoe UI', system-ui, -apple-system, sans-serif;
-  --mono: 'Cascadia Code', Consolas, ui-monospace, monospace;
+  --ui:   'Segoe UI', system-ui, -apple-system, sans-serif;   /* all chrome */
+  --mono: 'Cascadia Code', Consolas, ui-monospace, monospace; /* rare; data uses --ui + tnum */
 
   /* Geometry */
-  --r:    3px;
-  --r-sm: 2px;
+  --r:    4px;   /* panels · cards · buttons · inputs */
+  --r-sm: 2px;   /* chips · meter bars · small controls */
 }
 
-/* Universal reset — preserved from App.svelte's old :global(*) rule.
-   box-sizing must stay global or panel/feed widths shift. */
+/* Universal reset — box-sizing must stay global or panel/feed widths shift. */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 html, body {
   height: 100%;
   background: var(--bg); color: var(--tx);
   font-family: var(--ui); font-size: 13px;
+  /* Numbers align in columns via tabular figures — no monospace needed in chrome. */
+  font-variant-numeric: tabular-nums; font-feature-settings: "tnum";
   overflow: hidden;
 }
 #app { height: 100vh; }
 
-/* Thin native scrollbars, consistent everywhere (Chromium/WebView2 supports the
-   standard properties, which take precedence over ::-webkit-scrollbar — so we use
-   them directly and don't mix the two). Elements that want no bar opt out locally
-   with scrollbar-width: none (e.g. the wizard tab strip). */
+/* Thin native scrollbars, consistent everywhere (WebView2 honors the standard
+   properties, which take precedence over ::-webkit-scrollbar). Opt out locally
+   with scrollbar-width: none where a bar isn't wanted. */
 * { scrollbar-width: thin; scrollbar-color: var(--raised) transparent; }
