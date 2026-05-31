@@ -13,9 +13,11 @@
   import TitleBar from "./components/TitleBar.svelte";
   import StatusBar from "./components/StatusBar.svelte";
   import Rail from "./components/Rail.svelte";
+  import FeedOverlay from "./components/FeedOverlay.svelte";
   import { screen as screenStore, liveScore as liveScoreStore,
            candidates as candidatesStore, selection as selectionStore,
-           race as raceStore, logs as logsStore } from "./lib/stores.js";
+           race as raceStore, logs as logsStore,
+           tells as tellsStore, rois as roisStore } from "./lib/stores.js";
 
   let appWindow = null;
   function winMinimize()       { appWindow?.minimize(); }
@@ -298,7 +300,7 @@
   const HANDLE_HIT_RADIUS = 9;
 
   // ── Camera ────────────────────────────────────────────────────────────────────
-  let mainVideoEl = null, wizVideoEl = null, canvasEl = null, videoStream = null;
+  let wizVideoEl = null, canvasEl = null, videoStream = null;
   let cameraStatus = "idle";
   let trackerCameraPaused = false;
   let browserDevices = [], selectedBrowserDeviceId = "";
@@ -1620,7 +1622,6 @@
     if (trackerCameraPaused) send({type:"resume_camera"});
   });
 
-  $: if (mainVideoEl) mainVideoEl.srcObject=setupComplete ? (videoStream??null) : null;
   $: if (wizVideoEl)  wizVideoEl.srcObject =videoStream??null;
   // Coalesce ROI redraws into one per animation frame.  afterUpdate fires on every
   // reactive tick (engine frames stream at 10Hz, plus heartbeats and wheel bursts);
@@ -1709,6 +1710,8 @@
                           course: selCourse, courseConf: selCourseConf });
   $: raceStore.set({ curLap, totLap, coins, mushrooms,
                      splits: raceSplits, finishTime: raceFinishTime });
+  $: tellsStore.set(tells);
+  $: roisStore.set(rois);
 </script>
 
 <!-- ═══════════════════════════════════════════════════════════════════════════ -->
@@ -1914,9 +1917,12 @@
         </div>
       {:else}
       <div class="feed-area">
-        <video bind:this={mainVideoEl} autoplay playsinline muted
-          class="feed-video"
-          class:feed-hidden={!cameraOk || feedVideoHidden}></video>
+        <FeedOverlay
+          stream={setupComplete ? (videoStream ?? null) : null}
+          muted={feedMuted}
+          volume={feedVolume}
+          hidden={!cameraOk || feedVideoHidden}
+        />
         {#if !cameraOk || feedVideoHidden}
           <div class="feed-placeholder">
             {#if feedVideoHidden && cameraOk}
@@ -2693,10 +2699,6 @@
     flex: 1; min-height: 0; position: relative; overflow: hidden;
     background: var(--feed-bg);
   }
-  .feed-video {
-    width: 100%; height: 100%; object-fit: contain; display: block;
-  }
-  .feed-hidden { display: none; }
   .feed-placeholder {
     position: absolute; inset: 0;
     display: flex; flex-direction: column; align-items: center;
