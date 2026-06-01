@@ -42,7 +42,7 @@ DEFAULT_PATCHES: List[Tuple[int, int, int, int]] = [
 
 # Slot-keyed reference frames.  Switch HDR calibration walks the user through
 # 7 distinct test patterns; we exploit all of them.  Each slot is independent
-# — calibration works with any non-empty subset of shipped+captured slots.
+# - calibration works with any non-empty subset of shipped+captured slots.
 NUM_SLOTS: int = 7
 REF_PATHS: Dict[int, str] = {
     slot: f"images/calibration/switch_hdr_test_{slot}.png"
@@ -54,7 +54,7 @@ REF_PATHS: Dict[int, str] = {
 # it well-conditioned.
 _GAMMA_CANDIDATES: List[float] = [round(0.50 + 0.05 * i, 2) for i in range(31)]
 
-# Sanity bounds on the output transform — clamped here so wild fits from
+# Sanity bounds on the output transform - clamped here so wild fits from
 # degenerate patches don't produce unusable LUTs downstream.
 _GAIN_MIN,   _GAIN_MAX   = 0.30, 3.00
 _OFFSET_MIN, _OFFSET_MAX = -100, 100

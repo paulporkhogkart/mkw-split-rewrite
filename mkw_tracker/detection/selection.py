@@ -74,7 +74,7 @@ KNOWN_COSTUMES: Dict[str, list] = {
 # mismatch silently drops the costume and it can never be detected.  Remapping
 # each loaded key to its canonical KNOWN_COSTUMES name fixes detection and makes
 # the reported name canonical.  (Characters/courses share this latent issue but
-# are intentionally left alone for now — they need a DB migration first.)
+# are intentionally left alone for now - they need a DB migration first.)
 
 def _norm_name(s: str) -> str:
     """Lowercase + strip non-alphanumerics for separator/case-insensitive name
@@ -105,7 +105,7 @@ SELECTION_MATCH_THRESHOLD = 0.7
 
 # Costume name templates are full-ROI-width (the white_text path preserves letter
 # spacing), so matchTemplate has no room to slide and a few-px positional offset
-# between capture setups collapses the score — the same trap the screen tells had
+# between capture setups collapses the score - the same trap the screen tells had
 # before grayscale+slack.  Pad the live costume crop so the template can slide
 # +/- this many px.  (Character/kart/course templates are tight-cropped, so they
 # already slide within their ROI and don't need this.)
@@ -189,7 +189,7 @@ class SelectionTracker:
         self._kart_templates    = _load_lang_dir(kart_dir)
         self._course_templates  = _load_lang_dir(course_dir)
 
-        # ROIs — read from settings so wizard edits take effect after restart
+        # ROIs - read from settings so wizard edits take effect after restart
         from ..config.settings import get_settings as _gs
         _s = _gs()
         self._char_name_roi   = tuple(_s.get('char_name_roi',   list(CHAR_NAME_ROI)))

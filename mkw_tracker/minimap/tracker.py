@@ -12,7 +12,7 @@ Each frame during RACING:
 
 This inverts the old template-first design.  Ghosts that appear without a ring
 are automatically rejected at step 1.  The character template is only used for
-identity confirmation at a known ring position — so it never needs to slide
+identity confirmation at a known ring position - so it never needs to slide
 across the search window.
 """
 import math
@@ -256,7 +256,7 @@ class MinimapTracker:
         self.state.last_score = score
 
         if score < _MM_ACCEPT_SCORE:
-            # Ring found but wrong player — ignore it
+            # Ring found but wrong player - ignore it
             self._reacquire_streak = 0
             self._on_miss()
             self._sync_state_field()
@@ -275,7 +275,7 @@ class MinimapTracker:
 
         if self._ts in (_TrackState.TRACKING, _TrackState.RING_ONLY):
             if dist > _MM_MAX_JUMP_PX:
-                # Sudden large jump — require confirmation before committing
+                # Sudden large jump - require confirmation before committing
                 self._ts               = _TrackState.REACQUIRE
                 self._reacquire_streak = 1
                 self._on_miss()
@@ -294,10 +294,10 @@ class MinimapTracker:
                 self._publish(cx_r, cy_r, radius)
                 if confident and not self._calibrated:
                     self._calib_scores.append(score)
-            # else: still building streak — neither publish nor count as miss
+            # else: still building streak - neither publish nor count as miss
 
         elif self._ts == _TrackState.LOST:
-            # First ring+identity hit after going LOST — start fresh re-acquire
+            # First ring+identity hit after going LOST - start fresh re-acquire
             self._ts               = _TrackState.REACQUIRE
             self._reacquire_streak = 1
 
@@ -398,7 +398,7 @@ class MinimapTracker:
         """
         Single-point template correlation at the ring centre.
         Crops the character interior, normalises to the template canonical size,
-        and returns TM_CCORR_NORMED score (1×1 result — no sliding window).
+        and returns TM_CCORR_NORMED score (1×1 result - no sliding window).
         """
         interior = self._crop_interior(roi, float(cx_r), float(cy_r),
                                         float(radius))

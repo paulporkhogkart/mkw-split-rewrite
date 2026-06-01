@@ -1,4 +1,4 @@
-"""SyncClient stub — server upload/fetch for PBs and friends' PBs."""
+"""SyncClient stub - server upload/fetch for PBs and friends' PBs."""
 from typing import Optional
 
 
@@ -18,7 +18,7 @@ class SyncClient:
         """
         Upload a PB run to the server.
         Returns True on success, False on failure.
-        Not yet implemented — always returns False.
+        Not yet implemented - always returns False.
         """
         print("[SyncClient] upload_pb: not yet implemented")
         return False
@@ -27,7 +27,7 @@ class SyncClient:
         """
         Fetch friends' PBs for *course* from the server.
         Returns a list of mkwreplay dicts.
-        Not yet implemented — always returns [].
+        Not yet implemented - always returns [].
         """
         print("[SyncClient] fetch_friends_pbs: not yet implemented")
         return []

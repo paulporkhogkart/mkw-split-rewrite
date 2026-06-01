@@ -121,7 +121,13 @@ TRANSITIONS: Dict[Screen, Set[Screen]] = {
     Screen.UNKNOWN: {
         Screen.TITLE, Screen.MAIN_MENU, Screen.HOME, Screen.CHARACTER_SELECT,
         Screen.KART_SELECT, Screen.COURSE_SELECT, Screen.START_TIME_TRIAL,
-        Screen.RESET, Screen.GHOST_RESET, Screen.UNKNOWN_RESET,
+        # From an unknown context only the *ambiguous* reset is reachable. The
+        # three reset tells are byte-identical (dark_loading), so listing the
+        # confident RESET/GHOST_RESET here made all three match at once on any
+        # dark frame - and let a "cold" HOME (which folds in TRANSITIONS[UNKNOWN])
+        # jump straight to a confident reset. UNKNOWN_RESET self-resolves to the
+        # correct subtype via _RESET_TYPE_RESOLUTION once the next screen is known.
+        Screen.UNKNOWN_RESET,
         Screen.POST_TIME_TRIAL, Screen.UNKNOWN_RACE_ACTIVE,
         Screen.RACE_MENU, Screen.REPLAY_MENU, Screen.REPLAY_RACE_AGAINST,
         Screen.GALLERY, Screen.SINGLEPLAYER_MENU, Screen.TIME_TRIALS,
@@ -289,7 +295,7 @@ TELLS: list = [
 # scripts/gen_grayscale_templates.py; validated to reproduce every shipped
 # template at >=99.8% pixel agreement.  POST_TIME_TRIAL uses an en_uk PLACEHOLDER
 # (old_assets/posttimetrial.png) seeded into every language's screenshot dir for
-# now — replace per-language and regen later.
+# now - replace per-language and regen later.
 # ---------------------------------------------------------------------------
 
 SCREENSHOT_FILES: Dict[Screen, str] = {
@@ -315,6 +321,19 @@ SCREENSHOT_FILES: Dict[Screen, str] = {
 }
 
 
+# Reference screenshots for the edit-mode graph nodes. Superset of
+# SCREENSHOT_FILES: the RESET family has no template provenance (dark_loading
+# detection) but does have a representative reset screenshot, so the navigator
+# still shows an image card for it. Used by the get_screen_thumbs IPC only -
+# NOT by the template generator, which must keep using SCREENSHOT_FILES.
+GRAPH_NODE_SHOTS: Dict[Screen, str] = {
+    **SCREENSHOT_FILES,
+    Screen.RESET:         "reset.png",
+    Screen.GHOST_RESET:   "reset.png",
+    Screen.UNKNOWN_RESET: "reset.png",
+}
+
+
 # ---------------------------------------------------------------------------
 # Alias groups: canonical screen → screens that share the same tell.
 # Editing the canonical screen's ROI/thresh propagates to all aliases.
@@ -330,7 +349,7 @@ TELL_ALIAS_GROUPS: Dict[Screen, list] = {
 # Detection helpers
 # ---------------------------------------------------------------------------
 
-# Dark-loading (RESET) detection thresholds — see _detect_dark_loading.
+# Dark-loading (RESET) detection thresholds - see _detect_dark_loading.
 _DARK_MAX_MEAN: float = 40.0    # ROI brightness ceiling (dev loading ~20, aiden ~1)
 _DARK_MAX_STD:  float = 15.0    # ROI flatness ceiling (dev ~2.3, aiden ~0.3; menus >> this)
 _DARK_ICON_MIN_MAX: int = 150   # a bright mascot must be present (guards vs fade-to-black)
@@ -344,7 +363,7 @@ def _detect_dark_loading(frame: np.ndarray, roi: tuple,
 
     Some capture cards clip the loading screen's faint shadow pattern (values
     ~19-26) to pure black, leaving zero variance for a template to correlate
-    against — but "dark and flat" stays dark and flat regardless of black levels,
+    against - but "dark and flat" stays dark and flat regardless of black levels,
     and the bright mascot survives too.  The icon check guards against plain
     fade-to-black (dark, but no icon).  Returns (detected, score).
     """
@@ -376,7 +395,7 @@ def _match_tell(frame: np.ndarray, roi: tuple, template: np.ndarray,
     if grayscale:
         # Continuous-tone match.  Pad the crop (clamped to frame bounds) so
         # matchTemplate can slide the roi-sized template +/- search_pad px and
-        # take the best correlation — this absorbs the small positional offset
+        # take the best correlation - this absorbs the small positional offset
         # between capture setups.  TM_CCOEFF_NORMED is already mean/contrast
         # normalised, so no binarisation (and no calibration LUT) is needed to
         # tolerate exposure differences.  The original roi is always within the
@@ -482,7 +501,7 @@ class ScreenDetector:
             if self._pre_home_screen is None:
                 base |= self.transitions.get(Screen.UNKNOWN, set())
             else:
-                # Add the pre-home screen itself AND all its neighbours — we may
+                # Add the pre-home screen itself AND all its neighbours - we may
                 # have been mid-transition when HOME was pressed, so any screen
                 # reachable from the last known state is a valid landing point.
                 base.add(self._pre_home_screen)

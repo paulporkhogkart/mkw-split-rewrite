@@ -1,4 +1,4 @@
-"""EventBroadcaster — WebSocket pub-sub server for external subscribers.
+"""EventBroadcaster - WebSocket pub-sub server for external subscribers.
 
 Runs inside IpcServer's asyncio loop. All events emitted via IpcServer.emit()
 are broadcast to every connected client. Clients are read-only (subscribe-only);
@@ -88,7 +88,7 @@ def _crop_and_process(frame: np.ndarray, roi: tuple, thresh,
     x1, y1, x2, y2 = [int(v) for v in roi]
     crop = frame[y1:y2, x1:x2]
     if grayscale:
-        # Save the continuous-tone crop — grayscale tells match it directly.
+        # Save the continuous-tone crop - grayscale tells match it directly.
         return cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop
     if thresh is not None:
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop
@@ -164,7 +164,7 @@ class EventBroadcaster:
             import websockets  # type: ignore
         except ImportError:
             logger.error(
-                "websockets package not installed — event broadcaster disabled. "
+                "websockets package not installed - event broadcaster disabled. "
                 "Run: pip install websockets"
             )
             return
@@ -218,7 +218,7 @@ class EventBroadcaster:
             except Exception:
                 pass
 
-    # ── Autotemplate capture (runs in executor — blocking I/O OK) ─────────────
+    # ── Autotemplate capture (runs in executor - blocking I/O OK) ─────────────
 
     def _handle_at_command(self, msg: dict) -> dict:
         t = msg.get("type", "")
@@ -287,7 +287,7 @@ class EventBroadcaster:
         given YAML screen name, read from the live ScreenDetector.
 
         all_rois=False (used by tell): primary entry only.
-        all_rois=True  (used by roi):  all entries — primary + alt + required_also.
+        all_rois=True  (used by roi):  all entries - primary + alt + required_also.
 
         Special sub-entry modes ("alt", "required_0") always return their one entry
         regardless of all_rois.
@@ -338,7 +338,7 @@ class EventBroadcaster:
         roi = _roi_map.get(category)
         if not roi:
             return {"type": "at_error",
-                    "message": f"No ROI configured for category {category!r} — "
+                    "message": f"No ROI configured for category {category!r} - "
                                f"complete first-time setup first"}
 
         x1, y1, x2, y2 = [int(v) for v in roi]
@@ -439,7 +439,7 @@ class EventBroadcaster:
         template_path = self._out("images", "screens", lang, f"{filename}.png")
         if not os.path.exists(template_path):
             return {"type": "at_error",
-                    "message": f"Template not found — capture tell first: {template_path}"}
+                    "message": f"Template not found - capture tell first: {template_path}"}
 
         template = cv2.imread(template_path, cv2.IMREAD_GRAYSCALE)
         if template is None:
@@ -483,7 +483,7 @@ class EventBroadcaster:
             "char_name_roi" if category == "characters" else "kart_name_roi")
         if not roi:
             return {"type": "at_error",
-                    "message": f"No ROI configured for {category!r} — complete setup first"}
+                    "message": f"No ROI configured for {category!r} - complete setup first"}
 
         # ── Name score ──────────────────────────────────────────────────────────
         tmpl_path = self._out("images", category, lang, f"{name}.png")

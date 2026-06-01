@@ -215,12 +215,16 @@ def minimap_update_payload(state, roi: tuple) -> Optional[dict]:
     """Return a ``minimap_update`` payload dict or ``None`` if there is no usable lock.
 
     ``state`` is a :class:`mkw_tracker.minimap.tracker.MinimapState`.
-    ``roi`` is the ``MINIMAP_ROI`` constant ``(x, y, w, h)`` — kept as a parameter so
+    ``roi`` is the ``MINIMAP_ROI`` constant ``(x, y, w, h)`` - kept as a parameter so
     the function is a pure, testable helper with no module-level import cycle.
 
     ``state.cx`` / ``state.cy`` are already stored in **full-frame** pixel coordinates
     (the tracker's ``_publish()`` method adds the ROI origin before writing them), so
     no coordinate transform is applied here.
+
+    ``roi`` (the per-map ``(x, y, w, h)`` the tracker is actually using) is echoed back
+    in the payload so the UI draws the correct per-course ROI box instead of a stale
+    hardcoded rectangle.
 
     Returns ``None`` when:
     - ``state.tracking`` is False (idle / lost states)
@@ -236,6 +240,7 @@ def minimap_update_payload(state, roi: tuple) -> Optional[dict]:
         "cy":          int(state.cy),
         "radius":      int(state.radius),
         "track_state": state.track_state,
+        "roi":         [int(roi[0]), int(roi[1]), int(roi[2]), int(roi[3])],
     }
 
 
@@ -248,6 +253,14 @@ def emit_minimap_update(state, roi: tuple) -> Optional[str]:
     if payload is None:
         return None
     return json.dumps(payload)
+
+
+def emit_screen_thumbs(thumbs: dict) -> str:
+    """Serialise per-screen reference thumbnails for the edit-mode graph nodes.
+
+    ``thumbs`` is ``{SCREEN_NAME: base64_png}`` (small downscaled reference shots).
+    """
+    return _emit("screen_thumbs", thumbs=thumbs)
 
 
 def emit_replay_paths(course: str, paths: list) -> str:

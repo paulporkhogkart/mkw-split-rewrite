@@ -14,7 +14,7 @@ def prepare_text_edges(
     canny_high: int = 100,
 ) -> np.ndarray:
     """
-    Extract Canny edges from a BGR image — background-agnostic text detection.
+    Extract Canny edges from a BGR image - background-agnostic text detection.
     Templates and live ROI crops must both use this function for matching to work.
     """
     gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
@@ -46,9 +46,9 @@ def load_template_dir(
     """
     Load all PNGs from *directory* as grayscale templates keyed by display name.
 
-    tight=True  — tight-crop each template to non-zero bounding box (cached as
+    tight=True  - tight-crop each template to non-zero bounding box (cached as
                   <name>_tight.png).  Not applied when white_text=True.
-    white_text  — process with Canny edge detection instead of binary threshold.
+    white_text  - process with Canny edge detection instead of binary threshold.
                   Full-width templates preserved to keep relative letter spacing.
     """
     templates: Dict[str, np.ndarray] = {}
@@ -151,7 +151,7 @@ def match_best(
     Return (best_name, score) from template dict, or (None, score) if below threshold.
 
     If reconfirm_name is given, that template is checked first.  Only runs the
-    full scan when the reconfirm check fails — the common case (nothing changed)
+    full scan when the reconfirm check fails - the common case (nothing changed)
     costs exactly one template match.
 
     Pass _prepared to supply an already-processed ROI and skip BGR→gray→threshold.

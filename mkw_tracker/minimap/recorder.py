@@ -1,4 +1,4 @@
-"""MinimapRecorder — records minimap positions and saves to DB."""
+"""MinimapRecorder - records minimap positions and saves to DB."""
 import time
 from typing import Optional
 

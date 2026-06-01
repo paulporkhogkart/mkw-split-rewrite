@@ -191,7 +191,7 @@ class TimestampTracker:
             self._burst_candidate = current_read
             if self._burst_reads >= self._BURST_CONFIRM * 2:
                 print(f"  [WARN] Timestamp burst did not stabilise after "
-                      f"{self._burst_reads} reads — committing best guess")
+                      f"{self._burst_reads} reads - committing best guess")
                 if self._burst_is_finish:
                     self.record_finish(self._burst_lap)
                 else:

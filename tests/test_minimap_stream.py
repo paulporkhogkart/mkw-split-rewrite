@@ -27,6 +27,8 @@ def test_minimap_payload_tracking_emits_full_frame_coords():
     assert p["cx"] == 1500
     assert p["cy"] == 400
     assert p["radius"] == 20
+    # The per-map ROI is echoed back so the UI draws the correct box.
+    assert p["roi"] == [MINIMAP_ROI[0], MINIMAP_ROI[1], MINIMAP_ROI[2], MINIMAP_ROI[3]]
 
 
 def test_minimap_payload_ring_only_is_emitted():

@@ -1,4 +1,4 @@
-"""Replay storage — history, PB, and friends' PBs."""
+"""Replay storage - history, PB, and friends' PBs."""
 import json
 from typing import Optional
 from .connection import get_connection
@@ -193,12 +193,19 @@ def save_friend_pb(
 def replay_paths(conn, course: str) -> list:
     """Return replay trail paths for a given course.
 
-    Returns a list of dicts, one per replay run that has recorded points:
-        [{"id": <replay_id or label>, "points": [[cx, cy], ...]}, ...]
+    Returns a list of dicts, one per replay run that has recorded points::
 
-    Points are full-frame 1080p pixel coordinates (the same space as
-    MinimapState.cx / MinimapState.cy).  Runs with no recorded points are
-    excluded.  All replay types (local, server, PB, history) are included.
+        [{"id": str, "label": str, "is_pb": bool, "total_time": str|None,
+          "points": [[t_ms, cx, cy], ...]}, ...]
+
+    Each point carries its capture timestamp (``t_ms``) first so the UI can
+    animate a *moving dot* interpolated against race-elapsed time (mirroring
+    ``MinimapPlayer._interpolate``), rather than drawing a static polyline.
+    ``cx``/``cy`` are full-frame 1080p pixel coordinates (the same space as
+    ``MinimapState.cx`` / ``MinimapState.cy``).  ``is_pb`` lets the UI accent
+    personal-best dots; ``total_time is None`` marks an abandoned run (drawn as
+    an X at its final point).  Runs with no recorded points are excluded; all
+    replay types (local, server, PB, history) are included.
     """
     rows = conn.execute(
         """SELECT id, player, is_pb, total_time FROM replays
@@ -210,16 +217,19 @@ def replay_paths(conn, course: str) -> list:
     result = []
     for row in rows:
         pts = conn.execute(
-            """SELECT cx, cy FROM replay_points
+            """SELECT cx, cy, t_ms FROM replay_points
                WHERE replay_id = ? ORDER BY t_ms""",
             (row["id"],),
         ).fetchall()
         if not pts:
             continue
-        label = str(row["id"])
+        player = row["player"] if row["player"] is not None else ""
         result.append({
-            "id": label,
-            "points": [[p["cx"], p["cy"]] for p in pts],
+            "id":         str(row["id"]),
+            "label":      player or str(row["id"]),
+            "is_pb":      bool(row["is_pb"]),
+            "total_time": row["total_time"],
+            "points":     [[p["t_ms"], p["cx"], p["cy"]] for p in pts],
         })
     return result
 

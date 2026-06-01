@@ -1,4 +1,4 @@
-"""IpcServer — asyncio stdin reader + stdout writer for Tauri sidecar IPC."""
+"""IpcServer - asyncio stdin reader + stdout writer for Tauri sidecar IPC."""
 import asyncio
 import queue
 import sys

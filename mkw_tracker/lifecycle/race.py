@@ -1,4 +1,4 @@
-"""RaceLifecycle — screen-change callback that drives all race state transitions."""
+"""RaceLifecycle - screen-change callback that drives all race state transitions."""
 from typing import Optional
 
 from ..detection.screen import Screen
@@ -9,7 +9,7 @@ from ..minimap.player import MinimapPlayer
 from ..race.laps import LapTracker
 from ..race.coins import CoinTracker
 from ..race.timestamp import TimestampTracker
-from ..race.finish import FinishDetector
+from ..race.finish import FinishStillDetector
 from ..race.mushrooms import MushroomTracker
 from ..database.replay_repo import get_minimap_roi, get_minimap_seed, get_minimap_threshold
 
@@ -31,7 +31,7 @@ class RaceLifecycle:
         laps:       LapTracker,
         coins:      CoinTracker,
         ts:         TimestampTracker,
-        finish:     FinishDetector,
+        finish:     FinishStillDetector,
         mush:       MushroomTracker,
         minimap:    MinimapTracker,
         mm_rec:     MinimapRecorder,
@@ -76,7 +76,7 @@ class RaceLifecycle:
             else:
                 self._paused_from_racing = False
                 self._resuming_race      = False
-                completed = (new == Screen.POST_TIME_TRIAL) or self._finish.state.detected
+                completed = (new == Screen.POST_TIME_TRIAL) or self._finish.detected
                 self._finalize_recording(completed)
                 self._mm_player.stop()
                 self._clear_race_state()
@@ -86,9 +86,9 @@ class RaceLifecycle:
             if new == Screen.RACING:
                 self._resume()
             elif new in _PAUSE_SCREENS:
-                pass  # HOME ↔ RACE_MENU — still paused, do nothing
+                pass  # HOME ↔ RACE_MENU - still paused, do nothing
             else:
-                # Left the pause loop to a non-racing screen — race is over
+                # Left the pause loop to a non-racing screen - race is over
                 self._paused_from_racing = False
                 self._resuming_race      = False
                 self._finalize_recording(completed=False)
@@ -148,7 +148,9 @@ class RaceLifecycle:
 
         best_total_time: Optional[str] = None
         if completed:
-            best_total_time = self._ts.total_time or self._finish.state.total_time
+            # Total time comes from the TimestampTracker; FinishStillDetector only
+            # flags that the timer froze (it carries no time of its own).
+            best_total_time = self._ts.total_time
 
         if completed and best_total_time and not self._minimap._calibrated:
             new_threshold = self._minimap.calibrate_from_race()

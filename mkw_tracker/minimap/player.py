@@ -1,4 +1,4 @@
-"""MinimapPlayer — loads replays from DB and draws dots/bubbles."""
+"""MinimapPlayer - loads replays from DB and draws dots/bubbles."""
 import math
 import os
 import time
@@ -55,8 +55,8 @@ class MinimapPlayer:
     Loads and plays back minimap replays from the DB.
 
     Two modes:
-      "others"  — load friend PBs from DB (player != 'me')
-      "history" — load my own history + PB from DB
+      "others"  - load friend PBs from DB (player != 'me')
+      "history" - load my own history + PB from DB
     """
 
     HEAD_SIZE     = 40

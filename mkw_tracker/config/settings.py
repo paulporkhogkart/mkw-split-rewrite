@@ -5,7 +5,7 @@ from .defaults import Defaults
 from ..database.config_repo import get_config, set_config, ensure_defaults
 
 # All frames are normalised to this resolution before any detection, so
-# fractional ROI values are always scaled against these fixed constants —
+# fractional ROI values are always scaled against these fixed constants -
 # never against the raw camera dimensions.
 _REF_W, _REF_H = 1920, 1080
 
@@ -98,7 +98,7 @@ class Settings:
             self._data[key] = value
 
 
-# Module-level singleton — import and use directly.
+# Module-level singleton - import and use directly.
 settings: Optional[Settings] = None
 
 

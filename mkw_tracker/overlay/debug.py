@@ -26,9 +26,9 @@ def draw_debug_rois(
     """
     Draw tell ROI boxes on full-res *frame* and labels on resized *display*.
 
-    Green   — active tell matched
-    Orange  — active tell not matched
-    Cyan    — candidate next-screen ROIs
+    Green   - active tell matched
+    Orange  - active tell not matched
+    Cyan    - candidate next-screen ROIs
     """
     if current_screen != Screen.UNKNOWN:
         tell = tells_by_screen.get(current_screen)

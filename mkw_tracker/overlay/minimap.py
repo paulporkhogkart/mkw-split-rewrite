@@ -8,10 +8,10 @@ from ..minimap.tracker import MinimapState, MINIMAP_ROI
 from ..utils.image import DISPLAY_SCALE, draw_roi_box, draw_roi_label
 
 # Crosshair colours keyed by track_state
-_COLOUR_TRACKING  = (0, 255, 255)   # cyan   — full template + Hough
-_COLOUR_RING_ONLY = (0, 140, 255)   # orange — ring only (hazard / icon-swap)
-_COLOUR_REACQUIRE = (0, 220, 255)   # yellow — building re-acquire streak
-_COLOUR_MINIMAP   = (0, 255, 255)   # cyan   — ROI box default
+_COLOUR_TRACKING  = (0, 255, 255)   # cyan   - full template + Hough
+_COLOUR_RING_ONLY = (0, 140, 255)   # orange - ring only (hazard / icon-swap)
+_COLOUR_REACQUIRE = (0, 220, 255)   # yellow - building re-acquire streak
+_COLOUR_MINIMAP   = (0, 255, 255)   # cyan   - ROI box default
 
 
 def draw_minimap_crosshair(
@@ -23,7 +23,7 @@ def draw_minimap_crosshair(
 ):
     """
     Draw the minimap ROI boundary and crosshair at the smoothed player position.
-    *tracker* is optional — if supplied, the active (possibly custom) ROI is read from it.
+    *tracker* is optional - if supplied, the active (possibly custom) ROI is read from it.
 
     Crosshair colour indicates tracking confidence:
       cyan   → full tracking (template + Hough)

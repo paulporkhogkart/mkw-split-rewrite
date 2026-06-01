@@ -145,7 +145,7 @@ def apply_migrations(db_path: str | None = None):
     version_exists = cur.fetchone() is not None
 
     if not version_exists:
-        # Fresh DB — apply full v1 schema
+        # Fresh DB - apply full v1 schema
         conn.executescript(_SCHEMA_V1)
         conn.execute("INSERT INTO schema_version VALUES (1)")
         conn.commit()

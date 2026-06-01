@@ -24,18 +24,18 @@ class FinishStillDetector:
     neither stays still that long.
 
     The frame diff is restricted to the bright DIGIT pixels (grayscale above
-    BRIGHT_THRESHOLD in either frame), NOT the whole ROI — so a moving track behind
+    BRIGHT_THRESHOLD in either frame), NOT the whole ROI - so a moving track behind
     the semi-transparent HUD is ignored.  A white<->gold flash still changes the
     digit luma, so flashing (intermediate) pauses register as "changed".  This is a
-    cheap masked absdiff over a small ROI — lighter than template matching.
+    cheap masked absdiff over a small ROI - lighter than template matching.
 
     Tunables (validate against recorded footage):
-      STILL_SECONDS    — must exceed the gold flash period (~0.6s) but stay under the
+      STILL_SECONDS    - must exceed the gold flash period (~0.6s) but stay under the
                          ~8s final pause; 2.5s is safe.
-      DIFF_THRESHOLD   — mean abs diff over the digit pixels below which they count as
+      DIFF_THRESHOLD   - mean abs diff over the digit pixels below which they count as
                          still; raise it if capture noise / leftover background motion
                          false-resets stillness.
-      BRIGHT_THRESHOLD — grayscale cutoff isolating the (near-white / gold) digits from
+      BRIGHT_THRESHOLD - grayscale cutoff isolating the (near-white / gold) digits from
                          the background; raise it if bright moving background leaks in.
     """
     STILL_SECONDS    = 2.5

@@ -57,7 +57,7 @@ from .ipc.protocol import (parse_inbound, emit_ready, emit_screen_change, emit_s
                             emit_roi_preview, emit_asset_preview, emit_asset_saved,
                             emit_calibration_result, emit_calib_capture,
                             emit_minimap_update, minimap_update_payload,
-                            emit_replay_paths, emit_minimap_sample)
+                            emit_replay_paths, emit_minimap_sample, emit_screen_thumbs)
 from .utils.camera import build_camera_source
 from .utils.normalize import Normalizer
 
@@ -90,7 +90,7 @@ def _norm(frame):
     """Resize to 1920×1080 if needed.
 
     NOTE: the capture-normalization LUT (global gain/offset/gamma) is
-    intentionally DISABLED for this patch — see the commented block below.
+    intentionally DISABLED for this patch - see the commented block below.
     """
     if frame is None:
         return None
@@ -106,7 +106,7 @@ def _norm(frame):
                                interpolation=cv2.INTER_LINEAR)
     # --- TEMP DISABLED (this patch): global capture-calibration offsets --------
     # The per-channel gain/offset/gamma LUT is intentionally NOT applied, so the
-    # calibration sliders AND auto-calibration have zero effect on detection —
+    # calibration sliders AND auto-calibration have zero effect on detection -
     # even if non-identity values are saved in the DB.  Left commented (not
     # deleted) for easy restore: just uncomment the two lines below.  The
     # Normalizer object, calibration IPC, and wizard are all left intact.
@@ -213,6 +213,38 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
         _paths = _replay_paths(_get_conn(), _course)
         ipc.emit(_emit_rp(_course, _paths))
 
+    elif t == "get_screen_thumbs":
+        # Downscaled per-screen reference shots for the edit-mode graph nodes.
+        # Prefer the requested language, fall back to en_uk per file; user captures
+        # (data_dir) take precedence over the bundled copies.
+        import os as _os, base64 as _b64
+        from .utils.paths import resource_path as _rp, data_dir as _dd
+        from .detection.screen import GRAPH_NODE_SHOTS as _SHOTS
+        _lang = msg.get("lang") or "en_uk"
+        _thumbs = {}
+        for _scr, _file in _SHOTS.items():
+            _img = None
+            for _cand in (
+                _os.path.join(str(_dd()), "screenshots", _lang, _file),
+                _rp(_os.path.join("screenshots", _lang, _file)),
+                _os.path.join(str(_dd()), "screenshots", "en_uk", _file),
+                _rp(_os.path.join("screenshots", "en_uk", _file)),
+            ):
+                if _os.path.exists(_cand):
+                    _img = cv2.imread(_cand, cv2.IMREAD_COLOR)
+                    if _img is not None:
+                        break
+            if _img is None:
+                continue
+            _h, _w = _img.shape[:2]
+            _tw = 240
+            _th = max(1, int(round(_h * _tw / _w)))
+            _small = cv2.resize(_img, (_tw, _th), interpolation=cv2.INTER_AREA)
+            _ok, _buf = cv2.imencode(".png", _small)
+            if _ok:
+                _thumbs[_scr.name] = _b64.b64encode(_buf.tobytes()).decode("ascii")
+        ipc.emit(emit_screen_thumbs(_thumbs))
+
     elif t == "get_minimap_sample":
         import base64 as _b64
         from .database.replay_repo import get_minimap_seed as _get_seed
@@ -221,7 +253,7 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
         _seed = _get_seed(_course)
         _png_b64 = None
         if _seed is not None:
-            # The minimap_seeds table stores only (cx, cy, radius, conf) —
+            # The minimap_seeds table stores only (cx, cy, radius, conf) -
             # no image blob.  The in-memory character template (float32
             # HSV-CLAHE) is only available while a race is active.
             # Try the live tracker first; fall back to null when unavailable.
@@ -355,7 +387,7 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
         if frame is None:
             ipc.emit(emit_calibration_result(
                 1.0, 1.0, 1.0, 0, 0, 0, 1.0, 0.0,
-                ok=False, error="No camera frame available — open the camera first."))
+                ok=False, error="No camera frame available - open the camera first."))
             return
         from .utils.calibrate import solve_transform, load_reference_frames
         refs = load_reference_frames()
@@ -558,7 +590,7 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
         if os.path.exists(_tmpl_path):
             _tmpl = cv2.imread(_tmpl_path)
             if _tmpl is not None:
-                # Costumes are matched on Canny edges — show the edge-processed
+                # Costumes are matched on Canny edges - show the edge-processed
                 # template so the preview matches what the matcher actually sees.
                 if category == "costumes":
                     from .detection.templates import prepare_text_edges as _pte
@@ -818,7 +850,7 @@ def run(args):
     # sleep for up to 15.6ms  - the primary cause of variable input lag.
     _ctypes.windll.winmm.timeBeginPeriod(1)
 
-    # Camera is always deferred — the frontend picks the device after enumerating
+    # Camera is always deferred - the frontend picks the device after enumerating
     # both browser and Python sources, then sends open_camera with the matched name.
     # This guarantees both feeds always use the same physical device.
     cap = None
@@ -1030,6 +1062,13 @@ def run(args):
         finish_just_detected  = (finish.update(frame, screen, bool(_on_final_lap))
                                  and ts.total_time is None)
 
+        # Stop replay playback the instant the timer is detected as stopped (final
+        # time), not when the results graphic later appears / we leave RACING.
+        # (Recording already halts here too: mm_rec.update is gated on _race_complete
+        # = ts.total_time, which the finish burst populates.)
+        if finish_just_detected:
+            mm_player.stop()
+
         # ── Calibrate on finish detection ────────────────────────────────────
         if finish_just_detected and not minimap._calibrated:
             sel = selection
@@ -1130,23 +1169,31 @@ def run(args):
 
         # Minimap update: stream at ~15 Hz during RACING, skip unchanged state.
         # Only emits when screen == RACING (the tracker itself returns early on other
-        # screens, so mm_state stays stale — no point forwarding it).
+        # screens, so mm_state stays stale - no point forwarding it).
         if screen == Screen.RACING:
             if t_frame - _last_mm_emit >= _MM_EMIT_INTERVAL:
                 _last_mm_emit = t_frame
-                _mm_p = minimap_update_payload(mm_state, _MINIMAP_ROI)
+                # Send the actual per-map ROI the tracker is using (not the default
+                # constant) so the UI draws the correct box for the detected course.
+                _active_roi = (
+                    getattr(minimap, "_roi_x", _MINIMAP_ROI[0]),
+                    getattr(minimap, "_roi_y", _MINIMAP_ROI[1]),
+                    getattr(minimap, "_roi_w", _MINIMAP_ROI[2]),
+                    getattr(minimap, "_roi_h", _MINIMAP_ROI[3]),
+                )
+                _mm_p = minimap_update_payload(mm_state, _active_roi)
                 if _mm_p is not None:
-                    _mm_key = (_mm_p["cx"], _mm_p["cy"],
-                               _mm_p["radius"], _mm_p["track_state"])
+                    _mm_key = (_mm_p["cx"], _mm_p["cy"], _mm_p["radius"],
+                               _mm_p["track_state"], tuple(_mm_p["roi"]))
                     if _mm_key != _prev_mm_payload_key:
-                        ipc.emit(emit_minimap_update(mm_state, _MINIMAP_ROI))
+                        ipc.emit(emit_minimap_update(mm_state, _active_roi))
                         _prev_mm_payload_key = _mm_key
                 elif _prev_mm_payload_key is not None:
-                    # Lock lost / left RACING — clear dedup key; nothing emitted
+                    # Lock lost / left RACING - clear dedup key; nothing emitted
                     # (frontend stops receiving updates).
                     _prev_mm_payload_key = None
         elif _prev_mm_payload_key is not None:
-            # Left RACING — clear dedup so next race re-emits from scratch
+            # Left RACING - clear dedup so next race re-emits from scratch
             _prev_mm_payload_key = None
 
         # Arm the deferred finish emit when finish is first detected.
