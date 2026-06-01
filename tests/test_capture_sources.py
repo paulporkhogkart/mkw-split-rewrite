@@ -214,3 +214,67 @@ def test_prime_gate_from_disk_prevents_recapture(tmp_path):
     for _ in range(4):
         assert gate.observe(Screen.CHARACTER_SELECT, st) == []
     assert "mario" in gate.captured["characters"]
+
+
+def test_gate_unmark_allows_refire(tmp_path):
+    """A failed save un-marks the item so it can be re-captured."""
+    from mkw_tracker.detection.screen import Screen
+    gate = _gate(tmp_path, {"characters": ["mario"]}, min_conf=0.6, hold=1)
+    st = _state(character="Mario", character_conf=0.9)
+    assert gate.observe(Screen.CHARACTER_SELECT, st) == [("characters", "mario")]
+    assert gate.observe(Screen.CHARACTER_SELECT, st) == []      # deduped
+    gate.unmark("characters", "mario")
+    assert gate.observe(Screen.CHARACTER_SELECT, st) == [("characters", "mario")]
+
+
+# ---------------------------------------------------------------------------
+# Save encoding + beep tone (save/sound robustness)
+# ---------------------------------------------------------------------------
+
+def test_encode_png_returns_png_bytes():
+    import numpy as np
+    from mkw_tracker.tools.capture_sources import _encode_png
+    data = _encode_png(np.zeros((8, 8, 3), dtype=np.uint8))
+    assert data[:8] == b"\x89PNG\r\n\x1a\n"
+    assert len(data) > 8
+
+
+def test_encode_png_raises_clearly_on_empty_frame():
+    import numpy as np
+    import pytest
+    from mkw_tracker.tools.capture_sources import _encode_png
+    with pytest.raises(ValueError):
+        _encode_png(np.zeros((0, 0, 3), dtype=np.uint8))
+    with pytest.raises(ValueError):
+        _encode_png(None)
+
+
+def test_save_capture_writes_decodable_png(tmp_path):
+    import numpy as np
+    import cv2
+    from mkw_tracker.tools.capture_sources import _save_capture
+    frame = np.full((1080, 1920, 3), 127, dtype=np.uint8)
+    path = _save_capture(str(tmp_path / "captures"), "en_uk", "characters", "mario", frame)
+    assert path.endswith(os.path.join("en_uk", "characters", "mario.png"))
+    back = cv2.imread(path)
+    assert back is not None and back.shape == (1080, 1920, 3)
+
+
+def test_save_capture_handles_non_contiguous_frame(tmp_path):
+    """A non-contiguous view (a plausible real-camera frame) must still save."""
+    import numpy as np
+    import cv2
+    from mkw_tracker.tools.capture_sources import _save_capture
+    big = np.full((1080, 1920 * 2, 3), 80, dtype=np.uint8)
+    view = big[:, ::2, :]                      # non-contiguous view, shape (1080,1920,3)
+    assert not view.flags["C_CONTIGUOUS"]
+    path = _save_capture(str(tmp_path / "captures"), "en_uk", "karts", "hot_rod", view)
+    back = cv2.imread(path)
+    assert back is not None and back.shape == (1080, 1920, 3)
+
+
+def test_tone_wav_bytes_is_valid_wav():
+    from mkw_tracker.tools.capture_sources import _tone_wav_bytes
+    data = _tone_wav_bytes(freq=950, ms=60)
+    assert data[:4] == b"RIFF" and data[8:12] == b"WAVE"
+    assert len(data) > 44

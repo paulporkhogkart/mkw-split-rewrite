@@ -38,7 +38,7 @@ otherwise process them — that happens later, by hand/other tooling.
 |----------|-------|
 | Capture trigger | Auto-capture + manual override key |
 | Filename convention | Match existing templates (lowercase + underscores) |
-| Auto-capture confidence threshold (`--min-conf`) | **0.8** |
+| Auto-capture confidence threshold (`--min-conf`) | **0.6** (was 0.8) |
 | Output layout | **Split by language**: `captures/<lang>/<category>/` |
 | Sound on auto-capture | **Simple beep** (`winsound.Beep`) |
 
@@ -166,10 +166,12 @@ collapses every separator/case difference.
 
 ## 11. Sound
 
-- `winsound.Beep(1000, 90)` fired from a short-lived daemon thread (fire-and-forget,
-  never stalls the capture loop).
-- Wrapped in `try/except`; silently no-ops if `winsound` is unavailable or
-  `--no-sound` is set.
+- An in-memory sine-tone WAV played via `winsound.PlaySound(..., SND_MEMORY)` from a
+  short-lived daemon thread, so it routes to the user's **default audio device**.
+  (`winsound.Beep` was tried first but targets the PC-speaker / Beep-driver path,
+  which can be silent or sent to the wrong endpoint.)
+- Errors are printed (not swallowed); no-ops if `--no-sound` is set.
+- A startup test beep plays once on launch so audio is verifiable independent of captures.
 
 ## 12. HUD (OpenCV — functional / plain, matching the existing dev overlay)
 

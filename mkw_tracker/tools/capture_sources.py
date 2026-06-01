@@ -22,6 +22,7 @@ import time
 from typing import Dict, List, Optional, Set, Tuple
 
 import cv2
+import numpy as np
 
 from ..detection.selection import _norm_name
 from ..detection.screen import Screen
@@ -138,6 +139,10 @@ class CaptureGate:
     def mark_captured(self, category: str, base: str) -> None:
         self.captured[category].add(base)
 
+    def unmark(self, category: str, base: str) -> None:
+        """Undo a capture mark (e.g. after a failed save) so it can re-fire."""
+        self.captured[category].discard(base)
+
     def skip(self, category: str, base: str) -> None:
         self.skipped[category].add(base)
 
@@ -208,16 +213,48 @@ _STATUS_COLOR = {
 }
 
 
+# A short sine-tone WAV played through the DEFAULT audio device.  winsound.Beep
+# targets the PC-speaker / Beep-driver path, which on many systems is silent or
+# routed to the wrong endpoint; PlaySound(SND_MEMORY) of a real waveform reliably
+# reaches whatever output the user actually has selected.
+_BEEP_WAV: Optional[bytes] = None
+
+
+def _tone_wav_bytes(freq: int = 950, ms: int = 110, volume: float = 0.5,
+                    rate: int = 44100) -> bytes:
+    """Generate an in-memory mono 16-bit PCM WAV of a sine tone."""
+    import io, math, struct, wave
+    n = int(rate * ms / 1000)
+    amp = int(32767 * max(0.0, min(1.0, volume)))
+    frames = b"".join(
+        struct.pack("<h", int(amp * math.sin(2 * math.pi * freq * i / rate)))
+        for i in range(n)
+    )
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(frames)
+    return buf.getvalue()
+
+
 def _beep(enabled: bool = True) -> None:
-    """Fire a short beep off-thread (never stalls the loop). No-op if unavailable."""
+    """Play the capture tone off-thread on the default audio device.
+
+    Errors are printed (not swallowed) so a broken sound path stays visible.
+    """
     if not enabled:
         return
     def _ring():
+        global _BEEP_WAV
         try:
             import winsound
-            winsound.Beep(1000, 90)
-        except Exception:
-            pass
+            if _BEEP_WAV is None:
+                _BEEP_WAV = _tone_wav_bytes()
+            winsound.PlaySound(_BEEP_WAV, winsound.SND_MEMORY)
+        except Exception as e:
+            print(f"[capture] beep failed: {type(e).__name__}: {e}")
     threading.Thread(target=_ring, daemon=True).start()
 
 
@@ -229,12 +266,32 @@ def _resize_1080p(frame):
     return cv2.resize(frame, (_REF_W, _REF_H), interpolation=cv2.INTER_LINEAR)
 
 
+def _encode_png(frame) -> bytes:
+    """Encode a BGR frame to PNG bytes; raise ValueError with shape/dtype on failure.
+
+    Uses imencode + a contiguous copy so it works on non-contiguous camera views
+    and surfaces a clear error instead of cv2.imwrite's silent False / opaque raise.
+    """
+    if frame is None or getattr(frame, "size", 0) == 0:
+        raise ValueError(f"cannot encode empty frame: {frame!r}")
+    ok, buf = cv2.imencode(".png", np.ascontiguousarray(frame))
+    if not ok:
+        raise ValueError(f"PNG encode failed (shape={frame.shape}, dtype={frame.dtype})")
+    return buf.tobytes()
+
+
 def _save_capture(out_root: str, lang: str, category: str, base: str, frame) -> str:
-    """Write the full frame to out_root/lang/category/base.png; return the path."""
+    """Write the full frame to out_root/lang/category/base.png; return the path.
+
+    Encodes via _encode_png and writes the bytes directly - robust to path/locale
+    quirks and non-contiguous frames, and raises a clear error if it cannot save.
+    """
     directory = os.path.join(out_root, lang, category)
     os.makedirs(directory, exist_ok=True)
     path = os.path.join(directory, f"{base}.png")
-    cv2.imwrite(path, frame)
+    data = _encode_png(frame)
+    with open(path, "wb") as fh:
+        fh.write(data)
     return path
 
 
@@ -363,6 +420,10 @@ def run(args):
         print(f"[capture] camera open failed: {e}")
         return
 
+    _beep(not args.no_sound)
+    print("[capture] played a startup test beep - if you can't hear it, check your "
+          "default audio device / volume (capture beeps use the same path).")
+
     win = "MKW Capture"
     show_hud = True
     flash_text, flash_until = "", 0.0
@@ -385,10 +446,17 @@ def run(args):
             if t - last_observe >= _OBSERVE_INTERVAL:
                 last_observe = t
                 for cat, base in gate.observe(screen, state):
-                    path = _save_capture(out_root, lang, cat, base, frame)
-                    _beep(not args.no_sound)
-                    flash_text, flash_until = f"SAVED {cat}/{base}", t + 0.6
-                    print(f"[capture] saved {path}")
+                    try:
+                        path = _save_capture(out_root, lang, cat, base, frame)
+                        _beep(not args.no_sound)
+                        flash_text, flash_until = f"SAVED {cat}/{base}", t + 0.6
+                        print(f"[capture] saved {path}")
+                    except Exception as e:
+                        gate.unmark(cat, base)   # failed save -> let it retry
+                        flash_text, flash_until = f"SAVE FAILED {cat}/{base}", t + 1.5
+                        print(f"[capture] SAVE FAILED {cat}/{base} "
+                              f"(shape={getattr(frame, 'shape', None)} "
+                              f"dtype={getattr(frame, 'dtype', None)}): {type(e).__name__}: {e}")
 
             display = cv2.resize(frame, (1280, 720), interpolation=cv2.INTER_LINEAR)
             if show_hud:
@@ -401,11 +469,15 @@ def run(args):
                 break
             elif key == ord(" "):
                 for cat, base, conf, stat in gate.current_targets(screen, state):
-                    path = _save_capture(out_root, lang, cat, base, frame)
-                    gate.mark_captured(cat, base)
-                    _beep(not args.no_sound)
-                    flash_text, flash_until = f"FORCED {cat}/{base}", time.perf_counter() + 0.6
-                    print(f"[capture] forced {path}")
+                    try:
+                        path = _save_capture(out_root, lang, cat, base, frame)
+                        gate.mark_captured(cat, base)
+                        _beep(not args.no_sound)
+                        flash_text, flash_until = f"FORCED {cat}/{base}", time.perf_counter() + 0.6
+                        print(f"[capture] forced {path}")
+                    except Exception as e:
+                        flash_text, flash_until = f"SAVE FAILED {cat}/{base}", time.perf_counter() + 1.5
+                        print(f"[capture] FORCE SAVE FAILED {cat}/{base}: {type(e).__name__}: {e}")
             elif key == ord("s"):
                 for cat, base, conf, stat in gate.current_targets(screen, state):
                     gate.skip(cat, base)
@@ -435,8 +507,8 @@ def main():
                    help="Template language + output subfolder (default: switch2_language setting).")
     p.add_argument("--out", default=None,
                    help="Output root (default: <data_dir>/captures).")
-    p.add_argument("--min-conf", type=float, default=0.8, dest="min_conf",
-                   help="Min confidence to auto-capture (default 0.8).")
+    p.add_argument("--min-conf", type=float, default=0.6, dest="min_conf",
+                   help="Min confidence to auto-capture (default 0.6).")
     p.add_argument("--hold", type=int, default=3,
                    help="Consecutive stable scans before auto-capture (default 3).")
     p.add_argument("--no-sound", action="store_true", help="Disable the capture beep.")

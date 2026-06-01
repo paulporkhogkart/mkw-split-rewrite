@@ -27,7 +27,7 @@ python -m mkw_tracker --video temp/aiden.mp4 --video-fps 0 --video-once   # rip 
 # for rebuilding match templates. Hover items in-game on the live feed; it reuses
 # the existing detection to auto-label and save one full 1920×1080 PNG per item
 # into captures/<lang>/<category>/. Auto-grabs on confident+stable detection.
-python -m mkw_tracker.tools.capture_sources                       # defaults: saved device + language, min-conf 0.8
+python -m mkw_tracker.tools.capture_sources                       # defaults: saved device + language, min-conf 0.6
 python -m mkw_tracker.tools.capture_sources --min-conf 0.85 --hold 4 --no-sound
 
 # Legacy monolith (reference only — do not edit)
