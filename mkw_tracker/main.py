@@ -645,18 +645,26 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
         from .utils.paths import data_dir as _dd
         _save_path = str(_dd() / f"{_img_dir}/{item_name}.png")
         os.makedirs(os.path.dirname(_save_path), exist_ok=True)
-        if category == "costumes":
-            # Save raw colour  - load_template_dir applies edge processing at load time
-            cv2.imwrite(_save_path, _crop)
-        elif category == "mushrooms":
+        if category == "mushrooms":
             # Grayscale (continuous-tone) to match the grayscale mushroom matcher
             _gray = cv2.cvtColor(_crop, cv2.COLOR_BGR2GRAY) if len(_crop.shape) == 3 else _crop.copy()
             cv2.imwrite(_save_path, _gray)
         else:
-            # Binarise before saving so the on-disk template matches the live crop space
+            # Selection templates are grayscale crops; load_edge_template_groups applies
+            # the Canny edges at load time (identically to the live crop).  Costumes also
+            # get synthetic background variants so their variable banner background can't
+            # collapse the score (mirrors scripts/gen_selection_templates.py).
             _gray = cv2.cvtColor(_crop, cv2.COLOR_BGR2GRAY) if len(_crop.shape) == 3 else _crop.copy()
-            _, _binary = cv2.threshold(_gray, 170, 255, cv2.THRESH_BINARY)
-            cv2.imwrite(_save_path, _binary)
+            if category == "costumes":
+                import glob as _glob
+                from .detection.templates import synth_bg_variants
+                _basepath = _save_path[:-4]
+                for _stale in _glob.glob(f"{_basepath}__*.png"):
+                    os.remove(_stale)
+                for _suffix, _img in synth_bg_variants(_gray).items():
+                    cv2.imwrite(_save_path if _suffix == "" else f"{_basepath}__{_suffix}.png", _img)
+            else:
+                cv2.imwrite(_save_path, _gray)
         ipc.emit(emit_asset_saved(category, item_name))
 
 

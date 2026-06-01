@@ -29,7 +29,7 @@
   .log-body {
     flex: 1 1 0;
     min-height: 64px;
-    overflow-y: auto;
+    overflow: auto;   /* scroll both ways: vertical for entries, horizontal for long lines */
   }
 
   .log-row {
@@ -37,9 +37,10 @@
     font-family: var(--ui);
     color: var(--tx-mut);
     padding: 2px 12px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: nowrap;      /* never wrap a log line */
+    width: max-content;       /* grow past the body width so the h-scrollbar engages */
+    min-width: 100%;          /* short lines still span the full width */
+    box-sizing: border-box;
     line-height: 1.45;
   }
 </style>

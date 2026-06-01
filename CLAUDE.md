@@ -30,6 +30,15 @@ python -m mkw_tracker --video temp/aiden.mp4 --video-fps 0 --video-once   # rip 
 python -m mkw_tracker.tools.capture_sources                       # defaults: saved device + language, min-conf 0.6
 python -m mkw_tracker.tools.capture_sources --min-conf 0.85 --hold 4 --no-sound
 
+# DEV TOOL: rebuild char/kart/course/costume match templates from the captures
+# above. Cuts each capture at the category's selection ROI (read from settings, same
+# as the tracker) into a grayscale crop -> images/<category>/<lang>/*.png; the live
+# matcher Canny-edges both at load (detection/selection.py SELECTION_SEARCH_PAD).
+# Costumes also get synthetic background variants (<item>__bgdark.png etc.).
+python scripts/gen_selection_templates.py                         # all langs + categories
+python scripts/gen_selection_templates.py --lang en_uk --dry-run  # report only
+python scripts/gen_selection_templates.py --category costumes
+
 # Legacy monolith (reference only — do not edit)
 python "!!!FINAL-ab-new-bubbles.py"
 ```
@@ -67,7 +76,7 @@ Two-phase detection:
 `Screen` is an Enum. Each `Tell` is a **boolean tree**: `tell.groups` is a list of groups (ANDed) where each group is a list of `Region`s (ORed) — a screen matches when every group matches and a group matches when any region matches (`detect_tell` = `min` over groups of `max` over regions ≥ `match_threshold`). A `Region` is `kind="template"` (grayscale `TM_CCOEFF_NORMED` over a ±`search_pad` window) or `kind="dark_loading"` (crush-invariant dark-ROI + bright-icon statistical match, for the RESET family). Template images live in `images/screens/`. User edits persist as one `tell_tree_<SCREEN>` JSON blob per screen (config table); schema v3 (`database/tell_repo.py`) migrates the legacy `tell_roi_/tell_alt_/tell_req_also_*` keys.
 
 ### Selection Tracking (`detection/selection.py`)
-Scans ROIs at 10Hz max. Characters/karts/courses: binary threshold → `TM_CCOEFF_NORMED`. Costumes: Canny edge detection (background-agnostic). Requires `CHAR_CONFIRM_FRAMES=5` consecutive wins; `COSTUME_LOSS_FRAMES=8` consecutive misses before clearing. (Char/kart/course name matching is a candidate to move to the grayscale+slack approach once clean per-item screenshots exist.)
+Scans ROIs at 10Hz max. All four categories (characters, karts, courses, costumes) match the same way: a full-ROI grayscale crop is Canny-edged (`prepare_text_edges`, background-agnostic) and slid over a live crop padded by `SELECTION_SEARCH_PAD`, scored with `TM_CCOEFF_NORMED` (`match_variants`). Edges strip the shared name-plate background that made plain-grayscale cross-scores between similar names (Mario/Wario) sit at ~0.89; on edges they fall to ~0.5-0.66, so margins are 0.3-0.5 and similar names no longer nearly tie. Templates are rebuilt from `captures/` via `scripts/gen_selection_templates.py`. **Costumes** carry synthetic background variants (`<item>__bgdark/bgbright/bgsplit.png`) because their name banner's background varies (bright/dark/split); `match_variants` takes the best variant, so a costume scores high whatever the live background does (it never *misreads*, only under-scores - hence its low `SELECTION_COSTUME_FLOOR=0.30`). A confident character match commits immediately (the old multi-frame "pending" confirmation was dropped once edges made the character signal strong); `COSTUME_LOSS_FRAMES=4` (~0.4s) consecutive misses before a costume clears to Base. `SELECTION_RECONFIRM_THRESHOLD=0.80` holds the current selection only while it still scores above the worst cross-score, so a switch is never sticky.
 
 ### Race Telemetry (`race/`)
 All trackers run during `RACING` screen only, at 10Hz. `TimestampTracker` uses burst capture (3 consecutive scans, 2 identical required) triggered by a lap crossing or the final-finish event. The **final finish** is detected by `FinishStillDetector` (`race/finish.py`): on the final lap (`current_lap == total_laps`) the timer freezes on the total time with no gold/white flash, so a masked frame-diff of the bright digit pixels stays still for `STILL_SECONDS`. (The old `FinishDetector` 1st/2nd/3rd position-ROI scan is kept in code but disabled — re-enable by uncommenting `finish.update(...)` in `main.py` + restoring the HUD `finish` ROI.) The mushroom counter (`race/mushrooms.py`) matches grayscale templates (cropped from `old_assets/*mush.png`) with `search_pad`, not binary.

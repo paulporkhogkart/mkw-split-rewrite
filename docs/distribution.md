@@ -6,10 +6,18 @@ The distribution model treats **everything as one release artifact**: the Tauri 
 
 ```
 GitHub Release (v1.2.3)
-├── mkw-tracker-v1.2.3-windows-x64.zip   ← portable bundle (pre-Tauri / testing)
-├── mkw-tracker-v1.2.3-x64-setup.exe     ← NSIS installer  (post-Tauri)
+├── mkw-tracker-v1.2.3-windows-x64.zip   ← portable engine bundle (internal name; testing)
+├── pbenguin_1.2.3_x64-setup.exe         ← NSIS installer  (user-facing: "pbenguin")
 └── latest.json                           ← Tauri update manifest
 ```
+
+> **Naming split (intentional).** The user-facing app is **pbenguin** (`productName`):
+> the installer, Start Menu entry, Add/Remove Programs, and `pbenguin.exe` all show it.
+> The Tauri `identifier` (`com.paulporkhogkart.mkw-tracker`), the bundled Python engine
+> (`mkw-tracker-engine.exe`), and the data folder (`%APPDATA%/mkw-tracker/`) keep the
+> original internal name **on purpose** — that preserves the updater's app identity (so
+> existing installs upgrade in place, not side-by-side) and the user's settings/replays
+> across the rename. Only `productName` changed.
 
 ---
 

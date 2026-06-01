@@ -1,4 +1,11 @@
-"""Template loading and matching helpers shared across detection subsystems."""
+"""Edge-template loading and matching helpers for selection detection.
+
+Every selection category (characters, karts, courses, costumes) is matched the same
+way: a grayscale ROI crop on disk -> Canny edges (``prepare_text_edges``, which is
+background-agnostic) -> ``matchTemplate`` slid over a padded live crop.  Costumes
+additionally carry synthetic background variants (``synth_bg_variants``) so their
+variable name-banner background cannot collapse the score.
+"""
 import os
 import cv2
 import numpy as np
@@ -22,8 +29,38 @@ def prepare_text_edges(
     return cv2.Canny(blurred, canny_low, canny_high)
 
 
+def _text_mask(gray: np.ndarray) -> np.ndarray:
+    """Mask of the outlined text (bright fill OR dark outline), dilated to keep the
+    anti-aliased halo.  Works on any uniform background because outlined game text
+    always self-contrasts: white fill stands out on a dark plate, the dark outline
+    stands out on a bright one."""
+    m = ((gray >= 225) | (gray <= 120)).astype(np.uint8) * 255
+    return cv2.dilate(m, np.ones((3, 3), np.uint8), iterations=1)
+
+
+def synth_bg_variants(gray: np.ndarray) -> Dict[str, np.ndarray]:
+    """Return ``{suffix: gray_crop}`` keeping the text and replacing the background.
+
+    Costume name banners vary wildly in background (very bright, very dark, split),
+    which collapses a single edge template's score.  Cutting a few synthetic
+    background variants from the one capture and matching best-of restores the score
+    without re-capturing (the text edges are shared; only the background differs).
+    """
+    keep = _text_mask(gray) > 0
+    h, w = gray.shape[:2]
+    split = np.empty((h, w), np.uint8)
+    split[:, :w // 2] = 30
+    split[:, w // 2:] = 230
+    return {
+        "":         gray,
+        "bgdark":   np.where(keep, gray, np.uint8(30)),
+        "bgbright": np.where(keep, gray, np.uint8(245)),
+        "bgsplit":  np.where(keep, gray, split),
+    }
+
+
 def purge_tight_pngs(directory: str):
-    """Delete all _tight.png cache files in *directory*."""
+    """Delete all _tight.png cache files in *directory* (legacy binary-path caches)."""
     directory = resource_path(directory)
     if not os.path.exists(directory):
         return
@@ -36,156 +73,61 @@ def purge_tight_pngs(directory: str):
         print(f"[templates] Purged {count} _tight.png file(s) from {directory}")
 
 
-def load_template_dir(
-    directory: str,
-    tight: bool = False,
-    binary_thresh: int = 170,
-    thresh_type: int = cv2.THRESH_BINARY,
-    white_text: bool = False,
-) -> Dict[str, np.ndarray]:
-    """
-    Load all PNGs from *directory* as grayscale templates keyed by display name.
+def load_edge_template_groups(directory: str) -> Dict[str, list]:
+    """Load Canny-edge selection templates grouped by display name.
 
-    tight=True  - tight-crop each template to non-zero bounding box (cached as
-                  <name>_tight.png).  Not applied when white_text=True.
-    white_text  - process with Canny edge detection instead of binary threshold.
-                  Full-width templates preserved to keep relative letter spacing.
+    A file ``<base>__<variant>.png`` is a synthetic background variant of ``<base>``
+    (costume augmentation); all variants of a base collapse to one display name
+    mapping to a *list* of edge templates, matched best-of by ``match_variants``.
+    A plain ``<base>.png`` yields a one-element list.
     """
-    templates: Dict[str, np.ndarray] = {}
+    groups: Dict[str, list] = {}
     directory = resource_path(directory)
     if not os.path.exists(directory):
-        return templates
-
-    for filename in os.listdir(directory):
-        if not filename.lower().endswith('.png') or filename.lower().endswith('_tight.png'):
+        return groups
+    for filename in sorted(os.listdir(directory)):
+        low = filename.lower()
+        if not low.endswith(".png") or low.endswith("_tight.png"):
             continue
-        base = filename[:-4]
-        name = base.replace('_', ' ').title()
-        path = os.path.join(directory, filename)
-        tight_path = os.path.join(directory, f"{base}_tight.png")
-
-        if tight and not white_text:
-            if os.path.exists(tight_path):
-                img = cv2.imread(tight_path, cv2.IMREAD_GRAYSCALE)
-                if img is not None:
-                    templates[name] = img
-                    continue
-            src = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
-            if src is None:
-                print(f"[WARN] Could not load template: {path}")
-                continue
-            _, mask = cv2.threshold(src, binary_thresh, 255, thresh_type)
-            coords = cv2.findNonZero(mask)
-            if coords is None:
-                print(f"[WARN] Blank template after threshold, skipping: {path}")
-                continue
-            x, y, w, h = cv2.boundingRect(coords)
-            cropped = mask[y:y + h, x:x + w]
-            cv2.imwrite(tight_path, cropped)
-            templates[name] = cropped
-        elif white_text:
-            src = cv2.imread(path, cv2.IMREAD_COLOR)
-            if src is None:
-                print(f"[WARN] Could not load template: {path}")
-                continue
-            templates[name] = prepare_text_edges(src)
-        else:
-            img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
-            if img is not None:
-                templates[name] = img
-
-    return templates
+        base = filename[:-4].split("__")[0]          # strip variant suffix
+        name = base.replace("_", " ").title()
+        src = cv2.imread(os.path.join(directory, filename), cv2.IMREAD_COLOR)
+        if src is None:
+            print(f"[WARN] Could not load template: {filename}")
+            continue
+        groups.setdefault(name, []).append(prepare_text_edges(src))
+    return groups
 
 
-def prepare_roi(
-    roi_bgr: np.ndarray,
-    binary_thresh: int = 170,
-    thresh_type: int = cv2.THRESH_BINARY,
-) -> Optional[np.ndarray]:
-    """Convert a BGR ROI crop to thresholded grayscale ready for matchTemplate."""
-    if roi_bgr is None:
-        return None
-    gray = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2GRAY)
-    _, thresh = cv2.threshold(gray, binary_thresh, 255, thresh_type)
-    return thresh
-
-
-def match_top_n(
-    roi_bgr: np.ndarray,
-    templates: Dict[str, np.ndarray],
-    n: int = 5,
-    binary_thresh: int = 170,
-    thresh_type: int = cv2.THRESH_BINARY,
-    _prepared: Optional[np.ndarray] = None,
-) -> list:
-    """Return top-N [(name, score)] sorted by score descending (no threshold filter)."""
-    if _prepared is not None:
-        processed = _prepared
-    else:
-        processed = prepare_roi(roi_bgr, binary_thresh, thresh_type)
-        if processed is None:
-            return []
-
-    def _score(tmpl: np.ndarray) -> float:
-        if tmpl.shape[0] > processed.shape[0] or tmpl.shape[1] > processed.shape[1]:
-            return 0.0
-        result = cv2.matchTemplate(processed, tmpl, cv2.TM_CCOEFF_NORMED)
-        return float(cv2.minMaxLoc(result)[1])
-
-    scores = [(name, _score(tmpl)) for name, tmpl in templates.items()]
-    scores.sort(key=lambda x: x[1], reverse=True)
-    return scores[:n]
-
-
-def match_best(
-    roi_bgr: np.ndarray,
-    templates: Dict[str, np.ndarray],
-    binary_thresh: int = 170,
+def match_variants(
+    prepared: np.ndarray,
+    templates: Dict[str, list],
     threshold: float = 0.7,
-    thresh_type: int = cv2.THRESH_BINARY,
     reconfirm_name: Optional[str] = None,
     reconfirm_threshold: Optional[float] = None,
-    _prepared: Optional[np.ndarray] = None,
 ) -> tuple:
+    """Score *prepared* against name -> [templates], taking the best variant per name.
+
+    Returns ``(best_name_or_None, best_score, scores_map)``.  *scores_map* is the
+    full ``{name: best_variant_score}`` (for ranked candidates).  If *reconfirm_name*
+    still clears *reconfirm_threshold* it is returned without overriding it with a
+    higher scorer - the cheap hysteresis that stops the readout flickering.
     """
-    Return (best_name, score) from template dict, or (None, score) if below threshold.
+    def _best(tmpls: list) -> float:
+        s = 0.0
+        for t in tmpls:
+            if t.shape[0] <= prepared.shape[0] and t.shape[1] <= prepared.shape[1]:
+                s = max(s, float(cv2.minMaxLoc(cv2.matchTemplate(
+                    prepared, t, cv2.TM_CCOEFF_NORMED))[1]))
+        return s
 
-    If reconfirm_name is given, that template is checked first.  Only runs the
-    full scan when the reconfirm check fails - the common case (nothing changed)
-    costs exactly one template match.
+    scores = {name: _best(tmpls) for name, tmpls in templates.items()}
 
-    Pass _prepared to supply an already-processed ROI and skip BGR→gray→threshold.
-    """
-    if _prepared is not None:
-        processed = _prepared
-    else:
-        processed = prepare_roi(roi_bgr, binary_thresh, thresh_type)
-        if processed is None:
-            return None, 0.0
-
-    def _score(tmpl: np.ndarray) -> float:
-        if tmpl.shape[0] > processed.shape[0] or tmpl.shape[1] > processed.shape[1]:
-            return 0.0
-        result = cv2.matchTemplate(processed, tmpl, cv2.TM_CCOEFF_NORMED)
-        return float(cv2.minMaxLoc(result)[1])
-
-    _reconfirm_threshold = reconfirm_threshold if reconfirm_threshold is not None else threshold
-    reconfirm_score: float = 0.0
-    if reconfirm_name and reconfirm_name in templates:
-        reconfirm_score = _score(templates[reconfirm_name])
-        if reconfirm_score >= _reconfirm_threshold:
-            return reconfirm_name, reconfirm_score
-
-    best_name: Optional[str] = reconfirm_name if reconfirm_score >= threshold else None
-    best_score: float = reconfirm_score if reconfirm_score >= threshold else 0.0
-    for name, tmpl in templates.items():
-        if name == reconfirm_name:
-            continue
-        s = _score(tmpl)
-        if s > best_score:
-            best_score = s
-            best_name = name
-
-    if best_score < threshold:
-        return None, best_score
-    return best_name, best_score
+    rt = reconfirm_threshold if reconfirm_threshold is not None else threshold
+    if reconfirm_name and scores.get(reconfirm_name, 0.0) >= rt:
+        return reconfirm_name, scores[reconfirm_name], scores
+    if not scores:
+        return None, 0.0, scores
+    best_name = max(scores, key=scores.get)
+    best_score = scores[best_name]
+    return (best_name if best_score >= threshold else None), best_score, scores

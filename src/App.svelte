@@ -1517,7 +1517,7 @@
                   <p class="cam-prereq-body">Both feeds are connected to the same device. You're good to continue.</p>
                 {:else}
                   <span class="cam-prereq-title">Required - enable Windows camera sharing</span>
-                  <p class="cam-prereq-body">MKW Tracker needs simultaneous access to the same capture card as the app preview. Windows blocks this by default. Do this once before continuing:</p>
+                  <p class="cam-prereq-body">pbenguin needs simultaneous access to the same capture card as the app preview. Windows blocks this by default. Do this once before continuing:</p>
                   {#if trackerCameraPaused}
                     <div class="cam-release-bar cam-release-bar-released">
                       <span class="cam-release-dot"></span>

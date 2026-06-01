@@ -8,8 +8,7 @@ from typing import Callable, Dict, Optional
 
 from .screen import Screen
 from .templates import (
-    load_template_dir, prepare_text_edges, prepare_roi,
-    match_best, match_top_n, purge_tight_pngs,
+    load_edge_template_groups, prepare_text_edges, match_variants, purge_tight_pngs,
 )
 
 # ---------------------------------------------------------------------------
@@ -68,7 +67,7 @@ KNOWN_COSTUMES: Dict[str, list] = {
 # Costume name canonicalisation
 # ---------------------------------------------------------------------------
 # Costume template keys are derived from filenames via `_`->space + .title()
-# (templates.load_template_dir), which can't reproduce a literal hyphen: e.g.
+# (templates.load_edge_template_groups), which can't reproduce a literal hyphen: e.g.
 # all_terrain.png -> "All Terrain", but KNOWN_COSTUMES lists "All-Terrain".
 # _rebuild_costume_subset filters by exact membership in KNOWN_COSTUMES, so the
 # mismatch silently drops the costume and it can never be detected.  Remapping
@@ -89,7 +88,7 @@ _COSTUME_CANON: Dict[str, str] = {
 }
 
 
-def _canonicalize_costumes(templates: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+def _canonicalize_costumes(templates: Dict[str, list]) -> Dict[str, list]:
     """Remap filename-derived costume keys to their canonical KNOWN_COSTUMES name.
     Keys with no canonical match are kept unchanged."""
     return {_COSTUME_CANON.get(_norm_name(k), k): tmpl for k, tmpl in templates.items()}
@@ -101,15 +100,36 @@ COSTUME_ROI     = (1210, 916, 1770, 958)
 KART_NAME_ROI   = (1240, 830, 1740, 894)
 COURSE_NAME_ROI = (163,  387, 647,  462)
 
-SELECTION_MATCH_THRESHOLD = 0.7
+SELECTION_MATCH_THRESHOLD = 0.7   # screen-confidence gate (not a template score)
 
-# Costume name templates are full-ROI-width (the white_text path preserves letter
-# spacing), so matchTemplate has no room to slide and a few-px positional offset
-# between capture setups collapses the score - the same trap the screen tells had
-# before grayscale+slack.  Pad the live costume crop so the template can slide
-# +/- this many px.  (Character/kart/course templates are tight-cropped, so they
-# already slide within their ROI and don't need this.)
-COSTUME_SEARCH_PAD = 8
+# All four selection categories match the same way: a grayscale ROI crop on disk ->
+# Canny edges (background-agnostic) slid over a live crop padded +/- this many px.
+# The pad gives a full-ROI template room to slide, so a few-px capture-setup offset
+# can't tank the score (a 5px offset otherwise collapses it - see
+# test_capture_shift_robustness).  Matching on edges (not grayscale) strips the
+# shared name-plate background that made grayscale cross-scores between similar names
+# (Mario/Wario, Peach/Peepa, Wario/Peach Stadium) sit at ~0.89; on edges they fall
+# to ~0.5-0.66, so similar names no longer nearly tie.
+SELECTION_SEARCH_PAD = 8
+
+# Minimum score to accept a match.  Characters commit only after CHAR_CONFIRM_FRAMES,
+# so their floor can sit low; karts/courses commit on a single frame, so theirs sits
+# above the worst cross-score.  Costumes are intentionally low: their name banner's
+# background varies (bright/dark/split), so even with background-augmented templates
+# a correct match can score modestly - and discrimination (it never *misreads*, only
+# under-scores) is what protects them.
+SELECTION_CHAR_FLOOR    = 0.60
+SELECTION_KART_FLOOR    = 0.70
+SELECTION_COURSE_FLOOR  = 0.70
+SELECTION_COSTUME_FLOOR = 0.30
+
+# "Incumbent still matches?" hysteresis: keep the current selection (skipping the
+# full scan) while it still scores >= this.  Set above the worst cross-score between
+# similar names so a genuine switch always forces a rescan, and below the self-score
+# so the incumbent holds while unchanged.  Costumes use a lower value to match their
+# softer scores.
+SELECTION_RECONFIRM_THRESHOLD         = 0.80
+SELECTION_COSTUME_RECONFIRM_THRESHOLD = 0.50
 
 
 def top_candidates(score_map: Dict[str, float], n: int = 5) -> list:
@@ -123,11 +143,6 @@ def top_candidates(score_map: Dict[str, float], n: int = 5) -> list:
         return []
     ranked = sorted(score_map.items(), key=lambda x: x[1], reverse=True)[:n]
     return [{"name": name, "score": round(score, 4)} for name, score in ranked]
-
-
-def _load_lang_dir(lang_dir: str, **kwargs) -> dict:
-    """Load templates from the language-specific directory. No base-path fallback."""
-    return load_template_dir(lang_dir, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -153,8 +168,10 @@ class SelectionState:
 class SelectionTracker:
     """Tracks selected character/costume/kart/course by scanning ROIs at 10Hz."""
 
-    COSTUME_LOSS_FRAMES: int = 8
-    CHAR_CONFIRM_FRAMES: int = 5
+    # Consecutive non-matching scans (~0.1s each) before a costume clears to Base.
+    # Set instantly, cleared slowly: this rides over a momentary score dip from the
+    # variable costume banner background so the readout doesn't flicker off.
+    COSTUME_LOSS_FRAMES: int = 4
 
     def __init__(
         self,
@@ -184,10 +201,10 @@ class SelectionTracker:
             for d in (char_dir, costume_dir, kart_dir, course_dir):
                 purge_tight_pngs(d)
 
-        self._char_templates    = _load_lang_dir(char_dir)
-        self._costume_templates = _canonicalize_costumes(_load_lang_dir(costume_dir, white_text=True))
-        self._kart_templates    = _load_lang_dir(kart_dir)
-        self._course_templates  = _load_lang_dir(course_dir)
+        self._char_templates    = load_edge_template_groups(char_dir)
+        self._costume_templates = _canonicalize_costumes(load_edge_template_groups(costume_dir))
+        self._kart_templates    = load_edge_template_groups(kart_dir)
+        self._course_templates  = load_edge_template_groups(course_dir)
 
         # ROIs - read from settings so wizard edits take effect after restart
         from ..config.settings import get_settings as _gs
@@ -198,13 +215,11 @@ class SelectionTracker:
         self._course_name_roi = tuple(_s.get('course_name_roi', list(COURSE_NAME_ROI)))
 
         self._last_scan: float = 0.0
-        self._relevant_costumes: Dict[str, np.ndarray] = {}
+        self._relevant_costumes: Dict[str, list] = {}
         if self.state.character:
             self._rebuild_costume_subset(self.state.character)
 
         self._costume_loss_streak: int = 0
-        self._char_pending:        str = ""
-        self._char_confirm_streak: int = 0
 
         # Per-field score maps: {name: score} from the most recent full scan.
         # Populated by _update_*; empty until the first scan of that screen.
@@ -248,10 +263,6 @@ class SelectionTracker:
         self._relevant_costumes = {k: v for k, v in self._costume_templates.items()
                                    if k in valid}
 
-    def _crop(self, frame: np.ndarray, roi: tuple) -> np.ndarray:
-        x1, y1, x2, y2 = roi
-        return frame[y1:y2, x1:x2]
-
     def _crop_padded(self, frame: np.ndarray, roi: tuple, pad: int) -> np.ndarray:
         """Crop roi expanded by `pad` px on each side (clamped to frame bounds),
         giving matchTemplate room to slide a full-width template so a small
@@ -284,64 +295,34 @@ class SelectionTracker:
     # ------------------------------------------------------------------
     def _update_character(self, frame: np.ndarray) -> bool:
         changed = False
-        char_crop = prepare_roi(self._crop(frame, self._char_name_roi))
-        if char_crop is None:
-            return False
-
-        name, conf = match_best(
-            None, self._char_templates, _prepared=char_crop,
-            threshold=0.4, reconfirm_name=self.state.character,
-            reconfirm_threshold=0.80,
+        char_crop = prepare_text_edges(
+            self._crop_padded(frame, self._char_name_roi, SELECTION_SEARCH_PAD))
+        name, conf, self._char_scores = match_variants(
+            char_crop, self._char_templates,
+            threshold=SELECTION_CHAR_FLOOR, reconfirm_name=self.state.character,
+            reconfirm_threshold=SELECTION_RECONFIRM_THRESHOLD,
         )
-        # Retain full per-template scores for ranked candidates.
-        self._char_scores = dict(match_top_n(
-            None, self._char_templates, n=len(self._char_templates) or 1,
-            _prepared=char_crop,
-        ))
 
         if name and name != self.state.character:
-            if name == self._char_pending:
-                self._char_confirm_streak += 1
-            else:
-                self._char_pending = name
-                self._char_confirm_streak = 1
-
-            if self._char_confirm_streak >= self.CHAR_CONFIRM_FRAMES:
-                self.state.character      = name
-                self.state.character_conf = conf
-                self.state.costume        = None
-                self.state.costume_conf   = 0.0
-                self._costume_loss_streak = 0
-                self._char_pending        = ""
-                self._char_confirm_streak = 0
-                changed = True
-                print(f"  Character: {name} ({conf:.3f})")
-                self._rebuild_costume_subset(name)
-            else:
-                print(f"  Character pending: {name} ({conf:.3f}) "
-                      f"[{self._char_confirm_streak}/{self.CHAR_CONFIRM_FRAMES}]")
+            self.state.character      = name
+            self.state.character_conf = conf
+            self.state.costume        = None
+            self.state.costume_conf   = 0.0
+            self._costume_loss_streak = 0
+            changed = True
+            print(f"  Character: {name} ({conf:.3f})")
+            self._rebuild_costume_subset(name)
         elif name:
-            self.state.character_conf  = conf
-            self._char_pending         = ""
-            self._char_confirm_streak  = 0
-        else:
-            self._char_pending         = ""
-            self._char_confirm_streak  = 0
+            self.state.character_conf = conf
 
         if self.state.character and self._relevant_costumes:
             cos_crop = prepare_text_edges(
-                self._crop_padded(frame, self._costume_roi, COSTUME_SEARCH_PAD))
-            cname, cconf = match_best(
-                None, self._relevant_costumes,
-                threshold=0.3, reconfirm_threshold=0.5,
-                _prepared=cos_crop, reconfirm_name=self.state.costume,
+                self._crop_padded(frame, self._costume_roi, SELECTION_SEARCH_PAD))
+            cname, cconf, self._costume_scores = match_variants(
+                cos_crop, self._relevant_costumes,
+                threshold=SELECTION_COSTUME_FLOOR, reconfirm_name=self.state.costume,
+                reconfirm_threshold=SELECTION_COSTUME_RECONFIRM_THRESHOLD,
             )
-            # Retain full per-costume scores for ranked candidates.
-            self._costume_scores = dict(match_top_n(
-                None, self._relevant_costumes,
-                n=len(self._relevant_costumes) or 1,
-                _prepared=cos_crop,
-            ))
             if cname and cname != self.state.costume:
                 self._costume_loss_streak = 0
                 self.state.costume      = cname
@@ -364,16 +345,13 @@ class SelectionTracker:
 
     # ------------------------------------------------------------------
     def _update_kart(self, frame: np.ndarray) -> bool:
-        kart_crop = prepare_roi(self._crop(frame, self._kart_name_roi))
-        name, conf = match_best(
-            None, self._kart_templates, _prepared=kart_crop,
-            reconfirm_name=self.state.kart, reconfirm_threshold=0.9,
-        ) if kart_crop is not None else (None, 0.0)
-        if kart_crop is not None:
-            self._kart_scores = dict(match_top_n(
-                None, self._kart_templates, n=len(self._kart_templates) or 1,
-                _prepared=kart_crop,
-            ))
+        kart_crop = prepare_text_edges(
+            self._crop_padded(frame, self._kart_name_roi, SELECTION_SEARCH_PAD))
+        name, conf, self._kart_scores = match_variants(
+            kart_crop, self._kart_templates,
+            threshold=SELECTION_KART_FLOOR, reconfirm_name=self.state.kart,
+            reconfirm_threshold=SELECTION_RECONFIRM_THRESHOLD,
+        )
         if name and name != self.state.kart:
             self.state.kart      = name
             self.state.kart_conf = conf
@@ -385,16 +363,13 @@ class SelectionTracker:
 
     # ------------------------------------------------------------------
     def _update_course(self, frame: np.ndarray) -> bool:
-        course_crop = prepare_roi(self._crop(frame, self._course_name_roi))
-        name, conf = match_best(
-            None, self._course_templates, _prepared=course_crop,
-            reconfirm_name=self.state.course, reconfirm_threshold=0.95,
-        ) if course_crop is not None else (None, 0.0)
-        if course_crop is not None:
-            self._course_scores = dict(match_top_n(
-                None, self._course_templates, n=len(self._course_templates) or 1,
-                _prepared=course_crop,
-            ))
+        course_crop = prepare_text_edges(
+            self._crop_padded(frame, self._course_name_roi, SELECTION_SEARCH_PAD))
+        name, conf, self._course_scores = match_variants(
+            course_crop, self._course_templates,
+            threshold=SELECTION_COURSE_FLOOR, reconfirm_name=self.state.course,
+            reconfirm_threshold=SELECTION_RECONFIRM_THRESHOLD,
+        )
         if name and name != self.state.course:
             self.state.course      = name
             self.state.course_conf = conf
@@ -412,10 +387,10 @@ class SelectionTracker:
         costume_dir = f"images/costumes/{lang}"   if lang else "images/costumes"
         kart_dir    = f"images/karts/{lang}"      if lang else "images/karts"
         course_dir  = f"images/courses/{lang}"    if lang else "images/courses"
-        self._char_templates    = _load_lang_dir(char_dir)
-        self._costume_templates = _canonicalize_costumes(_load_lang_dir(costume_dir, white_text=True))
-        self._kart_templates    = _load_lang_dir(kart_dir)
-        self._course_templates  = _load_lang_dir(course_dir)
+        self._char_templates    = load_edge_template_groups(char_dir)
+        self._costume_templates = _canonicalize_costumes(load_edge_template_groups(costume_dir))
+        self._kart_templates    = load_edge_template_groups(kart_dir)
+        self._course_templates  = load_edge_template_groups(course_dir)
         if self.state.character:
             self._rebuild_costume_subset(self.state.character)
         print(f"[SelectionTracker] reloaded for lang={lang!r}: "

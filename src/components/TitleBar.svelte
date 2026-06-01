@@ -25,7 +25,7 @@
     </div>
   {:else}
     <div class="tb-brand" data-tauri-drag-region>
-      <span class="brand-name">MKW Tracker</span>
+      <span class="brand-name">pbenguin</span>
       {#if version}<span class="brand-ver">v{version}</span>{/if}
     </div>
   {/if}

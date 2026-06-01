@@ -21,17 +21,18 @@ from typing import List, Optional, Tuple
 
 import cv2
 
-from ..detection.selection import SelectionTracker, _norm_name, COSTUME_SEARCH_PAD
-from ..detection.templates import prepare_roi, prepare_text_edges, match_top_n
+from ..detection.selection import SelectionTracker, _norm_name, SELECTION_SEARCH_PAD
+from ..detection.templates import prepare_text_edges, match_variants
 from ..utils.paths import data_dir
 from .capture_sources import CATEGORIES
 
-# category -> (SelectionTracker templates attr, ROI attr, prepare mode)
+# category -> (SelectionTracker templates attr, ROI attr).  All four categories use
+# the same edge + slack matcher now, so there is no per-category prepare mode.
 _CAT_SPEC = {
-    "characters": ("_char_templates",    "_char_name_roi",   "binary"),
-    "karts":      ("_kart_templates",    "_kart_name_roi",   "binary"),
-    "courses":    ("_course_templates",  "_course_name_roi", "binary"),
-    "costumes":   ("_costume_templates", "_costume_roi",     "edges"),
+    "characters": ("_char_templates",    "_char_name_roi"),
+    "karts":      ("_kart_templates",    "_kart_name_roi"),
+    "courses":    ("_course_templates",  "_course_name_roi"),
+    "costumes":   ("_costume_templates", "_costume_roi"),
 }
 
 # Below this labeled score a confirmed match is still flagged for eyeballing.
@@ -40,19 +41,16 @@ _WEAK = {"characters": 0.70, "karts": 0.70, "courses": 0.70, "costumes": 0.50}
 
 
 def _ranked(tracker: SelectionTracker, category: str, frame) -> List[Tuple[str, float]]:
-    """Ranked [(display_name, score)] for *frame* in *category* (whole template set)."""
-    templ_attr, roi_attr, mode = _CAT_SPEC[category]
+    """Ranked [(display_name, score)] for *frame* in *category* (whole template set),
+    using the exact edge + slack matcher the SelectionTracker runs live."""
+    templ_attr, roi_attr = _CAT_SPEC[category]
     templ = getattr(tracker, templ_attr)
     roi = getattr(tracker, roi_attr)
     if not templ:
         return []
-    if mode == "edges":
-        crop = prepare_text_edges(tracker._crop_padded(frame, roi, COSTUME_SEARCH_PAD))
-    else:
-        crop = prepare_roi(tracker._crop(frame, roi))
-    if crop is None:
-        return []
-    return match_top_n(None, templ, n=len(templ), _prepared=crop)
+    crop = prepare_text_edges(tracker._crop_padded(frame, roi, SELECTION_SEARCH_PAD))
+    _, _, scores = match_variants(crop, templ)
+    return sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
 
 
 def _labeled_score(ranked: List[Tuple[str, float]], base: str) -> Optional[float]:

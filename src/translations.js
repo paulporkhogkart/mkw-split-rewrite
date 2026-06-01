@@ -1,5 +1,5 @@
 /**
- * UI translations for MKW Tracker.
+ * UI translations for pbenguin.
  * All languages fall back to English for any missing key.
  */
 
