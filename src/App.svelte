@@ -9,6 +9,7 @@
   import { t } from "./translations.js";
   import { C } from "./lib/palette.js";
   import { send } from "./lib/ipc.js";
+  import { screenLabel } from "./lib/format.js";
   import TitleBar from "./components/TitleBar.svelte";
   import StatusBar from "./components/StatusBar.svelte";
   import Rail from "./components/Rail.svelte";
@@ -1272,7 +1273,7 @@
   }
   $: screenStore.set(backendScreen);
   $: liveScoreStore.set(liveScore);
-  $: candidatesStore.set({ screen: rankedFrom(candidateScores),
+  $: candidatesStore.set({ screen: rankedFrom(candidateScores).map(c => ({ ...c, name: screenLabel(c.name) })),
                            char: selectionCandidates.char ?? [],
                            kart: selectionCandidates.kart ?? [],
                            course: selectionCandidates.course ?? [],
