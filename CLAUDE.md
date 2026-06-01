@@ -23,11 +23,20 @@ python -m mkw_tracker --no-ipc        # Disable stdin/stdout IPC (standalone mod
 python -m mkw_tracker --video temp/aiden.mp4                       # loops, paced to ~real time, shows overlay window
 python -m mkw_tracker --video temp/aiden.mp4 --video-fps 0 --video-once   # rip through once, as fast as possible
 
+# DEV TOOL: bulk-capture full screenshots of every character/costume/kart/course
+# for rebuilding match templates. Hover items in-game on the live feed; it reuses
+# the existing detection to auto-label and save one full 1920×1080 PNG per item
+# into captures/<lang>/<category>/. Auto-grabs on confident+stable detection.
+python -m mkw_tracker.tools.capture_sources                       # defaults: saved device + language, min-conf 0.8
+python -m mkw_tracker.tools.capture_sources --min-conf 0.85 --hold 4 --no-sound
+
 # Legacy monolith (reference only — do not edit)
 python "!!!FINAL-ab-new-bubbles.py"
 ```
 
 **Runtime keyboard shortcuts:** `q` quit · `Tab` toggle debug overlay · `m` toggle minimap frame logging · `d` dump debug crops to `debug_laps/`
+
+**Capture-tool keys** (`tools.capture_sources`): `SPACE` force-(re)capture current frame · `s` skip current item · `Tab` toggle HUD · `q` quit
 
 ## Package Structure
 

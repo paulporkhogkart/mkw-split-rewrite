@@ -215,8 +215,8 @@ The camera + HUD + main loop is the thin, untested I/O shell.
 
 ## 15. Notes / open items for implementation
 
-- `captures/` holds large generated PNGs and should almost certainly be
-  **gitignored** — confirm and add a `.gitignore` entry during implementation.
+- `captures/` is **tracked in git** (user decision, 2026-06-02) — no `.gitignore`
+  entry; the captured PNGs are committed alongside the code.
 - Language-split output keeps per-language capture sets isolated and mirrors the
   `images/<category>/<lang>/` layout, so a future template-build step can map a
   capture straight to its destination.
