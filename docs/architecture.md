@@ -69,7 +69,7 @@ Communication: `queue.SimpleQueue` — IPC thread puts inbound commands; main lo
 
 Two-phase detection avoids scanning all templates every frame:
 - **Phase 1** (every frame): re-confirm current screen with one template match
-- **Phase 2** (after `CONFIRM_LOSS_FRAMES=3` misses): scan all reachable candidates from `TRANSITIONS` graph
+- **Phase 2** (after `CONFIRM_LOSS_FRAMES=1` miss — the first lost frame): scan all reachable candidates from `TRANSITIONS` graph
 
 ## Minimap Tracking
 

@@ -449,7 +449,13 @@ class ScreenDetector:
     Phase 2 (after CONFIRM_LOSS_FRAMES misses): scan all candidate next-screens.
     """
 
-    CONFIRM_LOSS_FRAMES: int = 3
+    # Consecutive frames the current screen must fail to re-confirm before Phase 2
+    # re-scans candidates.  1 = scan on the very first lost frame (no delay), so a
+    # brief intermediary screen - e.g. the time-trials menu hover that bridges
+    # SINGLEPLAYER_MENU and CHARACTER_SELECT - is caught instead of being skipped
+    # while we wait.  Trade-off: a single below-threshold frame (loading flash,
+    # animation) now triggers an immediate candidate scan.
+    CONFIRM_LOSS_FRAMES: int = 1
 
     _RACE_TYPE_RESOLUTION: Dict[Screen, Screen] = {
         Screen.RACE_MENU:       Screen.RACING,

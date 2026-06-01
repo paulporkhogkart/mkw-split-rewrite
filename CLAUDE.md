@@ -71,7 +71,7 @@ Legacy JSON files (`minimap_seeds.json`, `minimap_rois.json`, `minimap_threshold
 ### Screen Detection (`detection/screen.py`)
 Two-phase detection:
 - **Phase 1** (every frame): re-confirm current screen with one template match
-- **Phase 2** (after `CONFIRM_LOSS_FRAMES=3` consecutive misses): scan all reachable candidates from `TRANSITIONS` directed graph
+- **Phase 2** (after `CONFIRM_LOSS_FRAMES=1` consecutive misses — i.e. the first lost frame): scan all reachable candidates from `TRANSITIONS` directed graph
 
 `Screen` is an Enum. Each `Tell` is a **boolean tree**: `tell.groups` is a list of groups (ANDed) where each group is a list of `Region`s (ORed) — a screen matches when every group matches and a group matches when any region matches (`detect_tell` = `min` over groups of `max` over regions ≥ `match_threshold`). A `Region` is `kind="template"` (grayscale `TM_CCOEFF_NORMED` over a ±`search_pad` window) or `kind="dark_loading"` (crush-invariant dark-ROI + bright-icon statistical match, for the RESET family). Template images live in `images/screens/`. User edits persist as one `tell_tree_<SCREEN>` JSON blob per screen (config table); schema v3 (`database/tell_repo.py`) migrates the legacy `tell_roi_/tell_alt_/tell_req_also_*` keys.
 
