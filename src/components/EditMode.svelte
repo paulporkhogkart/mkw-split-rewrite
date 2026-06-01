@@ -1,15 +1,16 @@
 <script>
   /**
-   * EditMode — the dedicated screen-editing view.
+   * EditMode - the dedicated screen-editing view.
    *
    * Layout: a ScreenGraph top strip, then a row with the RoiCanvas (center, flex)
-   * and the ToolsPanel (right). Purely presentational — every interaction is
+   * and the ToolsPanel (right). Purely presentational - every interaction is
    * forwarded to the parent (App.svelte), which holds the editor state + IPC.
    *
    * Props:
    *   currentScreen   {string|null}  live backend screen (graph highlight)
    *   selected        {string|null}  screen currently being edited (graph selection)
-   *   frame           {string|null}  engine-frame data-URL for the canvas background
+   *   stream          {MediaStream|null}  live browser camera stream - preferred canvas background
+   *   frame           {string|null}  engine-frame data-URL - fallback background when no stream
    *   rois            {Array}         [{ box:[x1,y1,x2,y2], role }] drawable ROIs
    *   activeBox       {Array|null}    [x1,y1,x2,y2] of the editable ROI (gets handles)
    *   frameW          {number}        logical frame width  (default 1920)
@@ -25,7 +26,7 @@
    *   selectBox                      RoiCanvas inactive-box click (payload = roi entry)
    *   tabChange                      ToolsPanel tab switch
    *   selectRegion, addRegion, addGroup, removeRegion, kindChange,
-   *   requestReset, cancelReset, resetDetection, capture, test,
+   *   requestReset, cancelReset, resetDetection, capture,
    *   selectRoi, selectItem, resetRoi   (ToolsPanel forwards)
    */
   import { createEventDispatcher } from "svelte";
@@ -35,7 +36,9 @@
 
   export let currentScreen  = null;
   export let selected       = null;
+  export let stream         = null;
   export let frame          = null;
+  export let thumbs         = {};
   export let rois           = [];
   export let activeBox      = null;
   export let frameW         = 1920;
@@ -60,6 +63,7 @@
       bind:this={graphEl}
       {currentScreen}
       {selected}
+      {thumbs}
       on:select={(e)=>dispatch("selectScreen", e.detail)}
     />
   </div>
@@ -69,6 +73,7 @@
     <div class="em-canvas">
       <RoiCanvas
         bind:this={canvasEl}
+        {stream}
         {frame}
         {rois}
         {activeBox}
@@ -94,7 +99,6 @@
         on:cancelReset
         on:resetDetection
         on:capture
-        on:test
         on:selectRoi
         on:selectItem
         on:resetRoi
@@ -111,9 +115,9 @@
     overflow: hidden;
   }
 
-  /* Graph strip — fixed height viewport at the top */
+  /* Graph strip - taller now that nodes are image cards (screenshots need room). */
   .em-graph {
-    flex: none; height: 248px;
+    flex: none; height: 332px;
     padding: 8px 8px 0;
     box-sizing: border-box;
   }
@@ -127,7 +131,7 @@
     box-sizing: border-box;
   }
 
-  /* Center canvas pane — flexes to fill, keeps the ROI overlay positioned */
+  /* Center canvas pane - flexes to fill, keeps the ROI overlay positioned */
   .em-canvas {
     flex: 1; min-width: 0; position: relative;
     background: var(--feed-bg);
@@ -136,7 +140,7 @@
     overflow: hidden;
   }
 
-  /* Right tools column — fixed width */
+  /* Right tools column - fixed width */
   .em-tools {
     flex: none; width: 320px; min-height: 0;
     border: 1px solid var(--bd);

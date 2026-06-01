@@ -20,8 +20,8 @@
     <button class="tb-back" on:click={onToggleView}>← Monitor</button>
     <div class="tb-editing" data-tauri-drag-region>
       <span class="editing-label">Editing</span>
-      <span class="editing-sep">—</span>
-      <span class="editing-screen">{editingScreen ?? "—"}</span>
+      <span class="editing-sep">·</span>
+      <span class="editing-screen">{editingScreen ?? "-"}</span>
     </div>
   {:else}
     <div class="tb-brand" data-tauri-drag-region>
@@ -50,27 +50,27 @@
 
 <style>
   .titlebar {
-    display: flex; align-items: center; height: 40px; flex-shrink: 0;
+    display: flex; align-items: center; height: 32px; flex-shrink: 0;
     background: var(--panel); border-bottom: 1px solid var(--bd);
     padding: 0 0 0 12px; gap: 8px;
     -webkit-app-region: drag; user-select: none;
   }
   .tb-brand { display: flex; align-items: baseline; gap: 5px; flex-shrink: 0; }
-  .brand-name { font-size: .85rem; font-weight: bold; color: var(--tx); letter-spacing: .02em; }
-  .brand-ver  { font-size: .65rem; color: var(--tx-dim); }
+  .brand-name { font-size: .82rem; font-weight: 600; color: var(--tx); letter-spacing: .01em; }
+  .brand-ver  { font-size: .68rem; color: var(--tx-dim); }
 
-  /* Edit-view left side: back button + "Editing — SCREEN" */
+  /* Edit-view left side: back button + "Editing - SCREEN" */
   .tb-back {
     -webkit-app-region: no-drag; flex-shrink: 0;
     background: var(--panel); border: 1px solid var(--bd); border-radius: var(--r);
-    color: var(--tx-mut); font-family: inherit; font-size: .7rem;
+    color: var(--tx-mut); font-family: inherit; font-size: .74rem;
     padding: 3px 10px; cursor: pointer; transition: background .12s, color .12s;
   }
   .tb-back:hover { background: var(--raised); color: var(--tx); }
   .tb-editing { display: flex; align-items: baseline; gap: 6px; flex-shrink: 0; }
-  .editing-label  { font-size: .72rem; color: var(--tx-mut); }
-  .editing-sep    { font-size: .72rem; color: var(--tx-dim); }
-  .editing-screen { font-size: .72rem; color: var(--tx); font-family: var(--mono); }
+  .editing-label  { font-size: .76rem; color: var(--tx-mut); }
+  .editing-sep    { font-size: .76rem; color: var(--tx-dim); }
+  .editing-screen { font-size: .76rem; color: var(--tx); font-family: var(--mono); }
 
   .tb-actions {
     display: flex; align-items: center; gap: 6px; flex-shrink: 0;
@@ -79,8 +79,8 @@
 
   /* "Edit screens" button (monitor view) */
   .btn-hdr {
-    background: var(--panel); border-radius: var(--r); padding: 3px 9px;
-    font-family: inherit; font-size: .68rem; cursor: pointer; white-space: nowrap;
+    background: var(--panel); border-radius: var(--r); padding: 3px 10px;
+    font-family: inherit; font-size: .74rem; cursor: pointer; white-space: nowrap;
     transition: background .12s; -webkit-app-region: no-drag;
   }
   .btn-edit       { color: var(--tx-mut); border: 1px solid var(--bd); }
@@ -89,7 +89,7 @@
   .win-controls { display: flex; flex-shrink: 0; margin-left: 0; }
   .win-btn {
     background: transparent; border: none; color: var(--tx-dim);
-    width: 46px; height: 40px; font-size: .78rem; cursor: pointer;
+    width: 46px; height: 32px; font-size: .82rem; cursor: pointer;
     display: flex; align-items: center; justify-content: center;
     transition: background .1s, color .1s; flex-shrink: 0;
     -webkit-app-region: no-drag;

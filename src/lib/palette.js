@@ -1,4 +1,4 @@
-// JS color palette — mirrors the CSS tokens in src/theme.css for contexts that
+// JS color palette - mirrors the CSS tokens in src/theme.css for contexts that
 // cannot read CSS vars: the canvas 2D context, inline SVG fills, JS-returned styles.
 // Keep in sync with theme.css :root.
 export const C = {
@@ -9,7 +9,7 @@ export const C = {
   ok:'#5aa86a', warn:'#c89a3e', err:'#cf5b4e', idle:'#56585e',
   roiCtx:'#82858b',   // neutral sibling/context ROI box on the feed overlay
 
-  // Minimap tracking states — mirror mkw_tracker/overlay/minimap.py semantics.
+  // Minimap tracking states - mirror mkw_tracker/overlay/minimap.py semantics.
   mmRingFace:'#e6c84a',   // tracking: ring + face confirmed (yellow)
   mmRingOnly:'#d98a3c',   // ring only: hazard / icon-swap (orange)
   mmReacquire:'#e0b84a',  // reacquiring after jump / respawn (amber)

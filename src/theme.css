@@ -1,4 +1,4 @@
-/* Design tokens + globals — Neutral Graphite (OBS/Resolve-style), refined "v2".
+/* Design tokens + globals - Neutral Graphite (OBS/Resolve-style), refined "v2".
    Single source of truth for CSS colors. JS/canvas/SVG colors are mirrored in
    src/lib/palette.js (a <canvas> cannot read CSS vars). Keep the two in sync.
    Token NAMES are stable (referenced across components); only values are tuned. */
@@ -19,12 +19,12 @@
   --tx-mut:    #9a9ca1;   /* secondary / labels */
   --tx-dim:    #6b6d73;   /* tertiary / disabled / hints */
 
-  /* Accent — the only decorative color (active / selected / primary action) */
+  /* Accent - the only decorative color (active / selected / primary action) */
   --accent:      #3d7cc2;
   --accent-soft: #2d5e94;   /* pressed / darker */
   --accent-bg:   #26303c;   /* accent-tinted fill */
 
-  /* Status — functional (tracking health) */
+  /* Status - functional (tracking health) */
   --ok:    #5aa86a;   /* healthy · high confidence · connected */
   --warn:  #c89a3e;   /* marginal · low confidence */
   --err:   #cf5b4e;   /* fail · error */
@@ -40,14 +40,14 @@
   --r-sm: 2px;   /* chips · meter bars · small controls */
 }
 
-/* Universal reset — box-sizing must stay global or panel/feed widths shift. */
+/* Universal reset - box-sizing must stay global or panel/feed widths shift. */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 html, body {
   height: 100%;
   background: var(--bg); color: var(--tx);
   font-family: var(--ui); font-size: 13px;
-  /* Numbers align in columns via tabular figures — no monospace needed in chrome. */
+  /* Numbers align in columns via tabular figures - no monospace needed in chrome. */
   font-variant-numeric: tabular-nums; font-feature-settings: "tnum";
   overflow: hidden;
 }
@@ -58,6 +58,33 @@ html, body {
    with scrollbar-width: none where a bar isn't wanted. */
 * { scrollbar-width: thin; scrollbar-color: var(--raised) transparent; }
 
-/* Status-indicator dot — used in App.svelte setup/startup views AND StatusBar.svelte.
+/* Status-indicator dot - used in App.svelte setup/startup views AND StatusBar.svelte.
    Must be global so Svelte scoping doesn't strip it in the host component. */
 .hb-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; transition: background .6s; }
+
+/* ── Form selects - themed app-wide ───────────────────────────────────────────
+   Native OS <select> chrome (white/grey) clashes with the dark UI. Drop it with
+   appearance:none and supply a custom chevron + dark surface. Applies everywhere
+   (device/language pickers, the detection kind select). Global so every <select>
+   matches without per-component overrides. */
+select {
+  appearance: none; -webkit-appearance: none;
+  background-color: var(--panel-2);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2 4L5 7L8 4' fill='none' stroke='%239a9ca1' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 9px;
+  color: var(--tx);
+  border: 1px solid var(--bd);
+  border-radius: var(--r-sm);
+  font-family: var(--ui);
+  font-size: 12px;
+  line-height: 1.3;
+  padding: 4px 26px 4px 8px;
+  cursor: pointer;
+  transition: border-color .12s, background-color .12s;
+}
+select:hover    { border-color: var(--accent-soft); }
+select:focus    { outline: none; border-color: var(--accent); }
+select:disabled { opacity: .5; cursor: default; }
+option { background: var(--panel-2); color: var(--tx); }

@@ -6,9 +6,9 @@
   export let value = "";
   /** Confidence/match score 0–1 (right cell) */
   export let score = 0;
-  /** True when there is no value — renders value dim + italic, score as 0.00 dim */
+  /** True when there is no value - renders value dim + italic, score as 0.00 dim */
   export let empty = false;
-  /** True when this row is expanded (shows candidates below) — triggers raised bg */
+  /** True when this row is expanded (shows candidates below) - triggers raised bg */
   export let expanded = false;
 
   const dispatch = createEventDispatcher();

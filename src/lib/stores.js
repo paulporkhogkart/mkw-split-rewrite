@@ -5,14 +5,14 @@ import { writable } from "svelte/store";
 // phase that builds the component consuming it (so the live app never breaks mid-refactor).
 
 export const connection = writable({ connected: false, spawned: false, fps: 0, lastHeartbeat: 0 });
-export const screen     = writable("—");                  // backend Screen enum name
+export const screen     = writable("-");                  // backend Screen enum name
 export const liveScore  = writable(0);
 export const candidates = writable({});                   // { screen:[{name,score}], char:[…], kart:[…], course:[…], costume:[…] }
 export const selection  = writable({ char: null, charConf: 0, costume: null, costumeConf: 0,
                                      kart: null, kartConf: 0, course: null, courseConf: 0 });
 export const race       = writable({ curLap: null, totLap: null, coins: null, mushrooms: 0,
                                      splits: {}, finishTime: null });
-export const minimap    = writable(null);                 // { cx, cy, radius, trackState } | null (current run only)
+export const minimap    = writable(null);                 // { cx, cy, radius, trackState, roi:[x,y,w,h] } | null (current run only)
 export const replays    = writable([]);                   // [{ id, points: [[x,y],…] }] (from DB)
 export const sample     = writable(null);                 // raw base64 PNG (no data-URI prefix) of the locked icon template | null
 export const devices    = writable({ video: [], audio: [], selectedVideo: "", selectedAudio: "" });

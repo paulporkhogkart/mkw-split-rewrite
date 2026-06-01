@@ -3,89 +3,67 @@
   import { C } from "../lib/palette.js";
   import { scoreColor, fmtScore } from "../lib/format.js";
 
-  /**
-   * The boolean-tree for the currently edited screen.
-   * Shape: Array<Array<{ kind: string, roi: number[]|null, thresh?: number, ... }>>
-   * Outer array = groups (ANDed); inner array = regions within a group (ORed).
-   */
+  /** Boolean tree for the edited screen: groups (ANDed) of regions (ORed). */
   export let groups = [];
-
-  /**
-   * The currently selected region: { group: number, region: number }
-   */
+  /** Currently selected region: { group, region }. */
   export let active = { group: 0, region: 0 };
-
-  /**
-   * Whether the reset-confirm gate is currently open (two-step confirm).
-   */
+  /** Whether the two-step reset-confirm gate is open. */
   export let resetPending = false;
-
-  /**
-   * The match score for the active region, or null if not yet tested.
-   * Shape: { score: number, threshold: number, matched: boolean } | null
-   */
+  /** Live match score for the active region: { score, threshold, matched } | null. */
   export let currentScore = null;
-
-  /**
-   * The screen name — shown in the reset-confirm message.
-   */
+  /** Screen name - shown in the reset-confirm message. */
   export let screenName = "";
 
   const dispatch = createEventDispatcher();
 
   function dotColor(gi, ri) {
-    const isActive = gi === active.group && ri === active.region;
-    if (isActive) return C.accent;
+    if (gi === active.group && ri === active.region) return C.accent;
     if (gi === active.group) return C.roiCtx;
     return C.warn;
   }
-
   function regionLabel(region, ri) {
     return region.kind === "dark_loading" ? "dark-loading" : `image ${ri + 1}`;
   }
-
   function isDeleteable() {
     if (!groups || groups.length === 0) return false;
     return groups.length > 1 || (groups[active.group]?.length ?? 0) > 1;
   }
 </script>
 
-<div class="det-tree">
+<div class="det">
   {#if groups && groups.length > 0}
-    <div class="tree-label">Detected when ALL groups match:</div>
+    <p class="det-cap">Detected when every group matches</p>
 
     {#each groups as group, gi}
-      {#if gi > 0}
-        <div class="tree-and">— AND —</div>
-      {/if}
-      <div class="tree-group">
-        <div class="tree-group-hd">Group {gi + 1} · any of</div>
+      {#if gi > 0}<div class="det-and"><span>AND</span></div>{/if}
+      <div class="grp">
+        <div class="grp-hd">Group {gi + 1} <span class="grp-any">· match any</span></div>
         {#each group as region, ri}
           <button
             type="button"
-            class="tree-region"
+            class="reg"
             class:sel={active.group === gi && active.region === ri}
             on:click={() => dispatch("selectRegion", { group: gi, region: ri })}
           >
-            <span class="treg-dot" style="background:{dotColor(gi, ri)}"></span>
-            <span class="treg-name">{regionLabel(region, ri)}</span>
+            <span class="reg-dot" style="background:{dotColor(gi, ri)}"></span>
+            <span class="reg-name">{regionLabel(region, ri)}</span>
             {#if active.group === gi && active.region === ri && currentScore}
-              <span class="treg-score" style="color:{scoreColor(currentScore.score)}">{fmtScore(currentScore.score)}</span>
+              <span class="reg-score" style="color:{scoreColor(currentScore.score)}">{fmtScore(currentScore.score)}</span>
             {/if}
           </button>
         {/each}
-        <button type="button" class="tree-add" on:click={() => dispatch("addRegion", gi)}>+ OR alternative image</button>
+        <button type="button" class="add" on:click={() => dispatch("addRegion", gi)}>+ Image</button>
       </div>
     {/each}
 
-    <button type="button" class="tree-add tree-add-and" on:click={() => dispatch("addGroup")}>+ AND condition group</button>
+    <button type="button" class="add add-grp" on:click={() => dispatch("addGroup")}>+ Group (AND)</button>
 
-    <!-- Active-region kind selector + delete control -->
+    <!-- Active-region kind + delete -->
     {#if groups[active.group]?.[active.region]}
       {@const activeRegionObj = groups[active.group][active.region]}
-      <div class="reg-controls">
-        <div class="reg-row">
-          <label class="reg-kind">Kind
+      <div class="reg-ctl">
+        <div class="reg-ctl-row">
+          <label class="kind">Kind
             <select
               value={activeRegionObj.kind}
               on:change={(e) => dispatch("kindChange", e.target.value)}
@@ -95,29 +73,25 @@
             </select>
           </label>
           {#if isDeleteable()}
-            <button type="button" class="reg-del" on:click={() => dispatch("removeRegion")}>
-              🗑 Delete region
-            </button>
+            <button type="button" class="remove" on:click={() => dispatch("removeRegion")}>Remove</button>
           {/if}
         </div>
         {#if activeRegionObj.kind === "dark_loading"}
-          <p class="hint">Dark-loading detects a near-black region plus a bright icon. Drag the main ROI on the feed; the icon ROI uses its default position.</p>
+          <p class="hint">Detects a near-black region plus a bright icon. Drag the main ROI on the feed; the icon ROI uses its default position.</p>
         {/if}
       </div>
     {/if}
 
     <!-- Reset detection to defaults (two-step confirm) -->
-    <div class="det-reset">
+    <div class="reset">
       {#if resetPending}
-        <p class="det-reset-q">
-          Reset <b>{screenName}</b>'s detection ROIs &amp; groups to defaults? This discards your custom regions for this screen.
-        </p>
-        <div class="det-reset-row">
-          <button type="button" class="btn-reset-confirm" on:click={() => dispatch("resetDetection")}>Yes, reset</button>
-          <button type="button" class="btn-nav" on:click={() => dispatch("cancelReset")}>Cancel</button>
+        <p class="reset-q">Reset <b>{screenName}</b> detection to defaults? Your custom regions for this screen are discarded.</p>
+        <div class="reset-row">
+          <button type="button" class="reset-yes" on:click={() => dispatch("resetDetection")}>Reset</button>
+          <button type="button" class="reset-no"  on:click={() => dispatch("cancelReset")}>Cancel</button>
         </div>
       {:else}
-        <button type="button" class="det-reset-btn" on:click={() => dispatch("requestReset")}>↺ Reset detection to defaults</button>
+        <button type="button" class="reset-btn" on:click={() => dispatch("requestReset")}>Reset to defaults</button>
       {/if}
     </div>
   {:else}
@@ -126,61 +100,76 @@
 </div>
 
 <style>
-  .det-tree { display: flex; flex-direction: column; gap: 6px; }
-  .tree-label { font-size: .66rem; text-transform: uppercase; letter-spacing: .08em; color: var(--tx-mut); }
-  .tree-and { text-align: center; font-size: .62rem; letter-spacing: .2em; color: var(--accent-soft); margin: 1px 0; }
-  .tree-group { border: 1px solid var(--bd); border-radius: var(--r); padding: 6px; background: var(--panel-2); }
-  .tree-group-hd { font-size: .58rem; text-transform: uppercase; letter-spacing: .06em; color: var(--accent-soft); margin-bottom: 4px; }
+  .det { display: flex; flex-direction: column; gap: 7px; }
 
-  .tree-region {
-    display: flex; align-items: center; gap: 6px; width: 100%; text-align: left;
-    background: var(--panel-2); border: 1px solid var(--bd); border-radius: var(--r);
-    padding: 4px 7px; margin-bottom: 3px; color: var(--tx-mut);
-    font-family: inherit; font-size: .72rem; cursor: pointer;
+  .det-cap { font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--tx-mut); margin: 0; }
+
+  /* AND divider between groups */
+  .det-and { display: flex; align-items: center; gap: 8px; margin: 1px 0; }
+  .det-and::before, .det-and::after { content: ""; flex: 1; height: 1px; background: var(--bd); }
+  .det-and span { font-size: 10px; letter-spacing: .14em; color: var(--tx-dim); }
+
+  /* Group card */
+  .grp { border: 1px solid var(--bd); border-radius: var(--r); padding: 7px; background: var(--panel-2); }
+  .grp-hd { font-size: 10.5px; font-weight: 600; color: var(--tx-mut); margin-bottom: 5px; }
+  .grp-any { font-weight: 400; color: var(--tx-dim); }
+
+  /* Region row */
+  .reg {
+    display: flex; align-items: center; gap: 7px; width: 100%; text-align: left;
+    background: var(--panel); border: 1px solid var(--bd); border-radius: var(--r-sm);
+    padding: 5px 8px; margin-bottom: 4px; color: var(--tx-mut);
+    font-family: inherit; font-size: 12px; cursor: pointer;
+    transition: border-color .12s, background .12s, color .12s;
   }
-  .tree-region:hover { border-color: var(--accent-soft); }
-  .tree-region.sel { border-color: var(--accent); background: var(--accent-bg); color: var(--tx); }
+  .reg:last-of-type { margin-bottom: 5px; }
+  .reg:hover { border-color: var(--accent-soft); color: var(--tx); }
+  .reg.sel { border-color: var(--accent); background: var(--accent-bg); color: var(--tx); }
+  .reg-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .reg-name { flex: 1; }
+  .reg-score { font-variant-numeric: tabular-nums; font-size: 11.5px; }
 
-  .treg-dot { width: 9px; height: 9px; border-radius: var(--r-sm); flex: none; }
-  .treg-name { flex: 1; }
-  .treg-score { font-family: var(--mono); font-size: .68rem; }
-
-  .tree-add {
-    width: 100%; background: none; border: 1px dashed var(--tx-dim); border-radius: var(--r);
-    color: var(--tx-mut); font-family: inherit; font-size: .64rem; padding: 3px; cursor: pointer;
+  /* Add buttons - solid subtle, not dashed */
+  .add {
+    width: 100%; background: var(--panel); border: 1px solid var(--bd); border-radius: var(--r-sm);
+    color: var(--tx-dim); font-family: inherit; font-size: 11.5px; padding: 5px; cursor: pointer;
+    transition: background .12s, color .12s, border-color .12s;
   }
-  .tree-add:hover { color: var(--tx-mut); border-color: var(--tx-dim); }
-  .tree-add-and { border-color: var(--bd); margin-top: 2px; }
+  .add:hover { color: var(--tx-mut); border-color: var(--accent-soft); background: var(--raised); }
+  .add-grp { margin-top: 1px; }
 
-  .reg-controls { border-top: 1px solid var(--bd); margin-top: 4px; padding-top: 8px; display: flex; flex-direction: column; gap: 8px; }
-  .reg-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  .reg-kind { font-size: .66rem; color: var(--tx-mut); display: flex; align-items: center; gap: 5px; }
-  .reg-kind select { background: var(--panel-2); color: var(--tx); border: 1px solid var(--bd); border-radius: var(--r); font-family: inherit; font-size: .7rem; padding: 2px 4px; }
-  .reg-del { background: none; border: 1px solid var(--err); color: var(--err); border-radius: var(--r); font-family: inherit; font-size: .64rem; padding: 3px 7px; cursor: pointer; }
-  .reg-del:hover { background: var(--err); color: #fff; }
-
-  .hint { font-size: .66rem; color: var(--tx-dim); line-height: 1.5; }
-
-  .det-reset { border-top: 1px solid var(--bd); margin-top: 4px; padding-top: 8px; }
-  .det-reset-btn {
-    width: 100%; background: none; border: 1px solid var(--bd); border-radius: var(--r);
-    color: var(--tx-mut); font-family: inherit; font-size: .66rem; padding: 5px; cursor: pointer;
+  /* Active-region controls */
+  .reg-ctl { border-top: 1px solid var(--bd); margin-top: 3px; padding-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+  .reg-ctl-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .kind { font-size: 11px; color: var(--tx-mut); display: flex; align-items: center; gap: 6px; }
+  /* <select> styling is global (theme.css) so it matches the device/language pickers. */
+  .remove {
+    background: none; border: 1px solid var(--bd); color: var(--tx-mut);
+    border-radius: var(--r-sm); font-family: inherit; font-size: 11px; padding: 4px 9px; cursor: pointer;
+    transition: background .12s, color .12s, border-color .12s;
   }
-  .det-reset-btn:hover { border-color: var(--err); color: var(--err); }
-  .det-reset-q { font-size: .68rem; color: var(--err); margin: 0 0 6px; }
-  .det-reset-row { display: flex; gap: 8px; }
+  .remove:hover { border-color: var(--err); color: var(--err); }
 
-  /* btn-reset-confirm and btn-nav mirror App.svelte's global definitions */
-  .btn-reset-confirm {
-    background: rgba(207,91,78,.12); border: 1px solid rgba(207,91,78,.35);
-    color: var(--err); font-size: .72rem; padding: .3rem .75rem;
-    border-radius: var(--r); cursor: pointer; font-family: inherit;
+  .hint { font-size: 11px; color: var(--tx-dim); line-height: 1.5; margin: 0; }
+
+  /* Reset */
+  .reset { border-top: 1px solid var(--bd); margin-top: 3px; padding-top: 8px; }
+  .reset-btn {
+    width: 100%; background: none; border: 1px solid var(--bd); border-radius: var(--r-sm);
+    color: var(--tx-dim); font-family: inherit; font-size: 11.5px; padding: 5px; cursor: pointer;
+    transition: color .12s, border-color .12s;
   }
-  .btn-reset-confirm:hover { background: rgba(207,91,78,.2); }
-  .btn-nav {
-    background: var(--panel-2); color: var(--tx-mut); border: 1px solid var(--bd);
-    border-radius: var(--r); padding: .24rem .7rem; font-family: inherit; font-size: .72rem;
-    cursor: pointer; flex-shrink: 0;
+  .reset-btn:hover { border-color: var(--err); color: var(--err); }
+  .reset-q { font-size: 11.5px; color: var(--err); margin: 0 0 7px; line-height: 1.5; }
+  .reset-row { display: flex; gap: 8px; }
+  .reset-yes {
+    background: rgba(207,91,78,.12); border: 1px solid rgba(207,91,78,.4); color: var(--err);
+    font-family: inherit; font-size: 11.5px; padding: 4px 12px; border-radius: var(--r-sm); cursor: pointer;
   }
-  .btn-nav:hover { background: var(--raised); color: var(--tx); }
+  .reset-yes:hover { background: rgba(207,91,78,.22); }
+  .reset-no {
+    background: var(--panel-2); border: 1px solid var(--bd); color: var(--tx-mut);
+    font-family: inherit; font-size: 11.5px; padding: 4px 12px; border-radius: var(--r-sm); cursor: pointer;
+  }
+  .reset-no:hover { background: var(--raised); color: var(--tx); }
 </style>

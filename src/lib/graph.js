@@ -1,39 +1,58 @@
 // Graph layout, edge list, and pan/zoom math for the screen-graph navigator.
-// Pure JS — no DOM, no Svelte. Used by both the footer graph in App.svelte
+// Pure JS - no DOM, no Svelte. Used by both the footer graph in App.svelte
 // and the standalone ScreenGraph.svelte component.
 
-// Node box dimensions
-export const NW = 88;
-export const NH = 24;
+// Node = an image card: a 16:9 reference screenshot + a label strip beneath.
+export const NW   = 130;   // card width
+export const NIMG = 73;    // screenshot-area height (≈ 16:9 of NW)
+export const NH   = 92;    // total card height (image + label strip)
 
-// Overall logical canvas dimensions (content bounding box at 1× zoom)
-export const GRAPH_W = 860;
-export const GRAPH_H = 205;
+// Logical canvas (content bounding box at 1× zoom).
+export const GRAPH_W = 1346;
+export const GRAPH_H = 316;
 
-// Screen graph nodes — each positioned in logical px on the GRAPH_W × GRAPH_H canvas.
+// Layout: nine column-groups, each a tight vertical stack capped at 3 rows tall,
+// so the graph is wide-and-short (fits the edit strip at a big zoom) with little
+// dead space. x = col·152, y = row·112. Columns L→R:
+//   0 Unknown   1 Entry(Title/Home/Gallery)   2 Top menus(+Time Trials)
+//   3 Selection(Char/Kart/Course)   4 Launch   5 Active race
+//   6 In-race menus   7 Reset   8 Post-TT
+// The two identical-tell families are each a single stacked column: the race
+// cluster (Racing/Ghost/Race(?)) in col 5 and the reset cluster
+// (Reset/Ghost Reset/Reset(?)) in col 7. Lone nodes (Unknown, Post-TT) are
+// vertically centred (y=112).
 export const GRAPH_NODES = [
-  { id:"UNKNOWN",            x:5,   y:175, label:"UNKNOWN"    },
-  { id:"TITLE",              x:5,   y:5,   label:"TITLE"      },
-  { id:"HOME",               x:5,   y:45,  label:"HOME"       },
-  { id:"GALLERY",            x:5,   y:85,  label:"GALLERY"    },
-  { id:"MAIN_MENU",          x:115, y:5,   label:"MAIN MENU"  },
-  { id:"SINGLEPLAYER_MENU",  x:225, y:5,   label:"SP MENU"    },
-  { id:"TIME_TRIALS",        x:225, y:31,  label:"SP [TT SEL]"},
-  { id:"CHARACTER_SELECT",   x:335, y:5,   label:"CHAR SEL"   },
-  { id:"KART_SELECT",        x:445, y:5,   label:"KART SEL"   },
-  { id:"COURSE_SELECT",      x:550, y:5,   label:"COURSE SEL" },
-  { id:"START_TIME_TRIAL",   x:760, y:41,  label:"START TT"   },
-  { id:"START_REPLAY",       x:760, y:81,  label:"START RPY"  },
-  { id:"RACING",             x:655, y:101, label:"RACING"     },
-  { id:"GHOST",              x:760, y:121, label:"GHOST"      },
-  { id:"UNKNOWN_RACE_ACTIVE",x:655, y:139, label:"UNK RACE"   },
-  { id:"RACE_MENU",          x:550, y:101, label:"RACE MENU"  },
-  { id:"REPLAY_MENU",        x:550, y:139, label:"REPLAY MENU"},
-  { id:"RESET",              x:445, y:139, label:"RESET"      },
-  { id:"GHOST_RESET",        x:445, y:175, label:"GHOST RST"  },
-  { id:"UNKNOWN_RESET",      x:335, y:139, label:"UNK RESET"  },
-  { id:"REPLAY_RACE_AGAINST",x:550, y:175, label:"REPLAY [RA]"},
-  { id:"POST_TIME_TRIAL",    x:655, y:175, label:"POST TT"    },
+  // col 0 - unknown (lone, far left)
+  { id:"UNKNOWN",            x:0,    y:112, label:"Unknown"     },
+  // col 1 - entry / Switch-overlay cluster
+  { id:"TITLE",              x:152,  y:0,   label:"Title"       },
+  { id:"HOME",               x:152,  y:112, label:"Home"        },
+  { id:"GALLERY",            x:152,  y:224, label:"Gallery"     },
+  // col 2 - top menus (+ Time Trials)
+  { id:"MAIN_MENU",          x:304,  y:0,   label:"Main Menu"   },
+  { id:"SINGLEPLAYER_MENU",  x:304,  y:112, label:"Singleplayer"},
+  { id:"TIME_TRIALS",        x:304,  y:224, label:"Time Trials" },
+  // col 3 - pre-race selection (vertical sub-flow)
+  { id:"CHARACTER_SELECT",   x:456,  y:0,   label:"Character"   },
+  { id:"KART_SELECT",        x:456,  y:112, label:"Kart"        },
+  { id:"COURSE_SELECT",      x:456,  y:224, label:"Course"      },
+  // col 4 - launch
+  { id:"START_TIME_TRIAL",   x:608,  y:0,   label:"Start TT"    },
+  { id:"START_REPLAY",       x:608,  y:112, label:"Start Replay"},
+  // col 5 - active race (identical-tell cluster, stacked)
+  { id:"RACING",             x:760,  y:0,   label:"Racing"      },
+  { id:"GHOST",              x:760,  y:112, label:"Ghost"       },
+  { id:"UNKNOWN_RACE_ACTIVE",x:760,  y:224, label:"Race (?)"    },
+  // col 6 - in-race menus
+  { id:"RACE_MENU",          x:912,  y:0,   label:"Race Menu"   },
+  { id:"REPLAY_MENU",        x:912,  y:112, label:"Replay Menu" },
+  { id:"REPLAY_RACE_AGAINST",x:912,  y:224, label:"Race Against"},
+  // col 7 - reset (identical-tell cluster, stacked)
+  { id:"RESET",              x:1064, y:0,   label:"Reset"       },
+  { id:"GHOST_RESET",        x:1064, y:112, label:"Ghost Reset" },
+  { id:"UNKNOWN_RESET",      x:1064, y:224, label:"Reset (?)"   },
+  // col 8 - post-time-trial (lone, far right)
+  { id:"POST_TIME_TRIAL",    x:1216, y:112, label:"Post-TT"     },
 ];
 
 // HOME edges: HOME↔TITLE and HOME↔GALLERY are constant (full opacity).
@@ -98,6 +117,26 @@ export const GRAPH_EDGES = [
 export const GRAPH_NODE_MAP = Object.fromEntries(GRAPH_NODES.map(n => [n.id, n]));
 
 /**
+ * Point on `node`'s border along the ray from its center toward (tx, ty).
+ * Used to terminate directed edges at the box edge so an arrowhead lands on the
+ * border instead of being buried under the node.
+ *
+ * @param {{x:number,y:number}} node  Node (top-left at x,y; size NW×NH)
+ * @param {number} tx  Target x (the other node's center)
+ * @param {number} ty  Target y
+ * @returns {{x:number,y:number}}
+ */
+export function edgePoint(node, tx, ty) {
+  const cx = node.x + NW / 2, cy = node.y + NH / 2;
+  const dx = tx - cx, dy = ty - cy;
+  if (dx === 0 && dy === 0) return { x: cx, y: cy };
+  const sx = dx !== 0 ? (NW / 2) / Math.abs(dx) : Infinity;
+  const sy = dy !== 0 ? (NH / 2) / Math.abs(dy) : Infinity;
+  const s = Math.min(sx, sy);
+  return { x: cx + dx * s, y: cy + dy * s };
+}
+
+/**
  * Compute the pan/zoom state that fits the graph inside a wrapper of size
  * (wrapW × wrapH), centering it, with a small initial zoom-in bias (×1 wheel
  * notch past the 80 % fit).
@@ -107,7 +146,9 @@ export const GRAPH_NODE_MAP = Object.fromEntries(GRAPH_NODES.map(n => [n.id, n])
  * @returns {{ zoom: number, panX: number, panY: number }}
  */
 export function fitToWrapper(wrapW, wrapH) {
-  const zoom = Math.max(0.4, 0.92 * wrapW / GRAPH_W);
+  // Contain: fit the whole card grid within the viewport (cards are large now,
+  // so fit by the tighter of width/height rather than width alone).
+  const zoom = Math.max(0.25, Math.min(wrapW * 0.96 / GRAPH_W, wrapH * 0.96 / GRAPH_H));
   const panX = (wrapW - GRAPH_W * zoom) / 2;
   const panY = (wrapH - GRAPH_H * zoom) / 2;
   return { zoom, panX, panY };

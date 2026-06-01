@@ -3,13 +3,16 @@
   import { C } from "../lib/palette.js";
   import {
     GRAPH_NODES, GRAPH_EDGES, GRAPH_NODE_MAP,
-    NW, NH, GRAPH_W,
-    fitToWrapper, zoomAt,
+    NW, NH, NIMG, GRAPH_W,
+    fitToWrapper, zoomAt, edgePoint,
   } from "../lib/graph.js";
+
+  /** Per-screen reference thumbnails: { SCREEN_NAME: dataURL }. Empty until fetched. */
+  export let thumbs = {};
 
   /**
    * The live backend screen name (highlighted with accent border/fill).
-   * Pass "—" or null when unknown.
+   * Pass "-" or null when unknown.
    */
   export let currentScreen = null;
 
@@ -111,7 +114,7 @@
     class:panning={_panning}
     xmlns="http://www.w3.org/2000/svg"
     role="img"
-    aria-label="Screen transition graph — click a node to select it for editing"
+    aria-label="Screen transition graph - click a node to select it for editing"
     tabindex="0"
     on:wheel|preventDefault={onWheel}
     on:mousedown={onDown}
@@ -120,28 +123,46 @@
     on:mouseleave={onUp}
     on:keydown={onKeyDown}
   >
+    <defs>
+      <!-- Directional arrowhead; sits on the target node's border. -->
+      <marker id="sg-arrow" viewBox="0 0 8 8" refX="7" refY="4"
+              markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+        <path d="M0 0 L8 4 L0 8 z" fill={C.txDim} />
+      </marker>
+      <!-- Clip the screenshot to the rounded top area of every card (local coords). -->
+      <clipPath id="sg-card-clip" clipPathUnits="userSpaceOnUse">
+        <rect x="1.5" y="1.5" width={NW - 3} height={NIMG} rx="3" ry="3" />
+      </clipPath>
+    </defs>
+
     <g transform="translate({panX} {panY}) scale({zoom})">
-      <!-- Edges -->
+      <!-- Directed edges - clipped to node borders so the arrowhead reads.
+           Dimmed HOME-cluster edges stay as faint lines (no arrowhead clutter). -->
       {#each GRAPH_EDGES as [from, to]}
         {@const a = GRAPH_NODE_MAP[from]}
         {@const b = GRAPH_NODE_MAP[to]}
         {#if a && b}
+          {@const dim = edgeDimmed(from, to)}
+          {@const p1 = edgePoint(a, b.x + NW / 2, b.y + NH / 2)}
+          {@const p2 = edgePoint(b, a.x + NW / 2, a.y + NH / 2)}
           <line
-            x1={a.x + NW / 2} y1={a.y + NH / 2}
-            x2={b.x + NW / 2} y2={b.y + NH / 2}
+            x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y}
             stroke={C.bd} stroke-width="1"
-            opacity={edgeDimmed(from, to) ? 0.12 : 1}
+            opacity={dim ? 0.1 : 0.65}
+            marker-end={dim ? null : "url(#sg-arrow)"}
           />
         {/if}
       {/each}
 
-      <!-- Nodes -->
+      <!-- Nodes - image cards: reference screenshot + label strip beneath. -->
       {#each GRAPH_NODES as node}
         {@const isActive  = node.id === currentScreen}
         {@const isSel     = node.id === selected}
         {@const isUnknown = node.id === "UNKNOWN"}
+        {@const thumb     = thumbs[node.id]}
         <g
           class="sg-node"
+          class:active={isActive}
           transform="translate({node.x},{node.y})"
           role="button"
           tabindex="0"
@@ -149,24 +170,40 @@
           on:keydown={(e) => nodeKeyDown(e, node.id)}
         >
           <rect
-            width={NW} height={NH} rx="3" ry="3"
+            width={NW} height={NH} rx="4" ry="4"
             fill={isActive ? C.accentBg : C.panel2}
             stroke={isSel ? C.tx : (isActive ? C.accent : C.bdSoft)}
-            stroke-width={isSel || isActive ? 1.5 : 1}
-            opacity={isUnknown ? 0.45 : 1}
+            stroke-width={isSel || isActive ? 1.6 : 1}
+            opacity={isUnknown ? 0.5 : 1}
           />
-          <text
-            x={NW / 2} y={NH / 2}
-            text-anchor="middle" dominant-baseline="central"
-            font-size="10" font-family="var(--mono)"
-            fill={isSel ? C.tx : (isActive ? C.accent : (isUnknown ? C.txDim : C.txMut))}
-            opacity={isUnknown ? 0.6 : 1}
-          >{node.label}</text>
+          {#if thumb}
+            <image
+              href={thumb} x="1.5" y="1.5" width={NW - 3} height={NIMG}
+              preserveAspectRatio="xMidYMid slice" clip-path="url(#sg-card-clip)"
+            />
+            <line x1="0.5" y1={NIMG + 1.5} x2={NW - 0.5} y2={NIMG + 1.5}
+                  stroke={C.bd} stroke-width="1" opacity="0.8" />
+            <text
+              x={NW / 2} y={NIMG + (NH - NIMG) / 2 + 1}
+              text-anchor="middle" dominant-baseline="central"
+              font-size="11" font-family="var(--ui)"
+              font-weight={isActive || isSel ? 600 : 400}
+              fill={isActive || isSel ? C.tx : C.txMut}
+            >{node.label}</text>
+          {:else}
+            <text
+              x={NW / 2} y={NH / 2}
+              text-anchor="middle" dominant-baseline="central"
+              font-size="11" font-family="var(--ui)"
+              font-weight={isActive || isSel ? 600 : 400}
+              fill={isActive || isSel ? C.tx : (isUnknown ? C.txDim : C.txMut)}
+              opacity={isUnknown ? 0.65 : 1}
+            >{node.label}</text>
+          {/if}
         </g>
       {/each}
     </g>
   </svg>
-  <div class="sg-hint">scroll = zoom · drag = pan · click to select</div>
 </div>
 
 <style>
@@ -188,15 +225,11 @@
   .sg-svg.panning { cursor: grabbing; }
   .sg-svg:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-  .sg-hint {
-    flex: none;
-    border-top: 1px solid var(--bd);
-    padding: 3px 8px;
-    font-size: .58rem;
-    color: var(--tx-mut);
-    text-align: right;
-  }
-
-  /* Node <g> elements — pointer so the SVG surface hint is visible */
+  /* Node <g> elements. Hover brightens the whole chip; the live (active) node
+     gets a soft accent glow. Filters live on different elements (group vs rect)
+     so they compose instead of overriding each other. */
   :global(.sg-node) { cursor: pointer; }
+  :global(.sg-node rect) { transition: fill .12s, stroke .12s; }
+  :global(.sg-node:hover) { filter: brightness(1.15); }
+  :global(.sg-node.active rect) { filter: drop-shadow(0 0 3px rgba(61,124,194,.4)); }
 </style>

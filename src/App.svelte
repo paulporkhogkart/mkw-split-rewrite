@@ -40,7 +40,7 @@
 
   // ── Backend health ────────────────────────────────────────────────────────────
   let backendFps = 0;
-  let backendScreen = "—";
+  let backendScreen = "-";
   let prevBackendScreen = null;
   let lastHeartbeatTs = 0;
   let liveScore = 0.0;
@@ -109,6 +109,9 @@
   ];
   let appLanguage     = "en_uk";
   let switch2Language = "en_uk";
+  // Edit-mode graph node thumbnails: { SCREEN_NAME: dataURL }, fetched from the backend.
+  let screenThumbs = {};
+  let _thumbsLang  = null;   // Switch language the loaded thumbs were fetched for
   $: appLangName  = LANGUAGES.find(l => l.id === appLanguage)?.name     ?? appLanguage;
   $: sw2LangName  = LANGUAGES.find(l => l.id === switch2Language)?.name ?? switch2Language;
 
@@ -307,7 +310,7 @@
 
   // ── ToolsPanel bundles ────────────────────────────────────────────────────────
   // ToolsPanel exposes two tabs: "detection" | "readout". The editor's internal
-  // activeTab is "detection" | "selection" | "hud" — map between them. A screen has
+  // activeTab is "detection" | "selection" | "hud" - map between them. A screen has
   // at most one readout tab (selection XOR hud), so "readout" resolves to whichever.
   $: readoutEnabled = !!(NODE_SELECTION[selectedNode] || NODE_HUD[selectedNode]);
   $: toolsActiveTab = activeTab === "detection" ? "detection" : "readout";
@@ -363,11 +366,7 @@
     if (activeTab === "detection") recaptureRegion();
     else captureAsset();
   }
-  // ToolsPanel "test" (Detection tab only) re-runs the region match.
-  function onToolsTest() {
-    if (activeTab === "detection" && selectedNode)
-      send({ type:"test_region", screen:selectedNode, group:activeRegion.group, region:activeRegion.region });
-  }
+  // (The region match score is now driven live by startRoiPoll - no manual test.)
 
   let tells = [];
   let rois = {};
@@ -430,7 +429,7 @@
   // Screen/tell/HUD/template editing now lives in the Edit Screens view.
   const RERUN_STEPS      = ["language", "camera"];
   const STEP_LABELS = {
-    language: "Language", camera: "Camera", screens: "Screens",
+    language: "Language", camera: "Video", screens: "Screens",
     selection: "Selection", hud: "HUD", templates: "Templates", done: "Done",
   };
   $: STEPS = setupComplete ? RERUN_STEPS : FIRST_TIME_STEPS;
@@ -528,13 +527,13 @@
     HOME:"The player profile selection screen shown after title.",
     MAIN_MENU:"Main menu with single player, multiplayer, etc.",
     SINGLEPLAYER_MENU:"Single player mode selector (Time Trials, Grand Prix…).",
-    TIME_TRIALS:"Time trials mode menu — character and course selection.",
+    TIME_TRIALS:"Time trials mode menu - character and course selection.",
     CHARACTER_SELECT:"The character/driver selection screen.",
     KART_SELECT:"The kart body, tires, and glider selection screen.",
     COURSE_SELECT:"The track/course selection grid.",
     START_TIME_TRIAL:"The 3-2-1 countdown before a time trial race begins.",
     START_REPLAY:"The 3-2-1 countdown before a ghost race begins.",
-    RACING:"Active racing — coin counter and flag icon visible bottom-left. Covers all race types.",
+    RACING:"Active racing - coin counter and flag icon visible bottom-left. Covers all race types.",
     GHOST:"Racing against a ghost replay.",
     UNKNOWN_RACE_ACTIVE:"An active race detected without clear type identification.",
     RACE_MENU:"The in-race pause menu.",
@@ -552,7 +551,7 @@
     { key:"course_name", label:"Course Name",      hint:"Course name displayed in the course selection screen." },
   ];
   const HUD_ROIS = [
-    { key:"lap_current", label:"Lap Counter (current)", hint:"Current lap digit — bottom-left race HUD." },
+    { key:"lap_current", label:"Lap Counter (current)", hint:"Current lap digit - bottom-left race HUD." },
     { key:"lap_total",   label:"Lap Counter (total)",   hint:"Total laps digit next to current lap." },
     { key:"coin_left",   label:"Coin Digit (tens)",     hint:"Left/tens coin counter digit." },
     { key:"coin_right",  label:"Coin Digit (units)",    hint:"Right/units coin counter digit." },
@@ -602,13 +601,13 @@
         break;
       case "spawned":
         trackerSpawned = true;
-        pushLog(`[app] engine process launched ${_elapsed()} — waiting for Python to initialise (Windows may be scanning files)`);
+        pushLog(`[app] engine process launched ${_elapsed()} - waiting for Python to initialise (Windows may be scanning files)`);
         break;
       case "ready":
         trackerSpawned = true;
         trackerConnected = true;
         lastHeartbeatTs = Date.now();
-        pushLog(`[app] tracker connected ${_elapsed()} — setup_complete=${msg.setup_complete}`);
+        pushLog(`[app] tracker connected ${_elapsed()} - setup_complete=${msg.setup_complete}`);
         if (_pendingDeviceSwitchTimeout) {
           clearTimeout(_pendingDeviceSwitchTimeout);
           _pendingDeviceSwitchTimeout = null;
@@ -646,7 +645,7 @@
               return clean === pyDev || clean.includes(pyDev) || pyDev.includes(clean);
             });
             if (match && match.deviceId !== selectedBrowserDeviceId) {
-              // Python opened a different device — force the browser to match it
+              // Python opened a different device - force the browser to match it
               selectedBrowserDeviceId = match.deviceId;
               if (wizardStep === "camera") startCamera(match.deviceId);
             } else if (wizardStep === "camera" && cameraStatus === "idle") {
@@ -658,12 +657,12 @@
         }
         break;
       case "frame_data":
-        // Discard frames that arrive while Python is mid-switch — they belong to the old camera.
+        // Discard frames that arrive while Python is mid-switch - they belong to the old camera.
         if (pythonCameraStatus !== "opening") engineFrame = `data:image/jpeg;base64,${msg.data}`;
         break;
       case "heartbeat":
         backendFps      = msg.fps    ?? 0;
-        backendScreen   = msg.screen ?? "—";
+        backendScreen   = msg.screen ?? "-";
         lastHeartbeatTs = Date.now();
         liveScore       = msg.current_score ?? 0;
         candidateScores = msg.candidate_scores ?? {};
@@ -739,7 +738,7 @@
       case "screen_change":
         pushLog(`[screen] ${msg.from} → ${msg.to}`);
         // HOME and its direct children (GALLERY, TITLE) are part of the Switch overlay
-        // cluster — leaving them back to HOME should not overwrite the game-state context.
+        // cluster - leaving them back to HOME should not overwrite the game-state context.
         const _homeCluster = new Set(["UNKNOWN","HOME","GALLERY"]);
         if (msg.from && !_homeCluster.has(msg.from)) {
           prevBackendScreen = msg.from;
@@ -763,10 +762,10 @@
         selCostume = msg.costume   ?? null; selCostumeConf = msg.costume_conf ?? 0;
         selKart    = msg.kart      ?? null; selKartConf    = msg.kart_conf    ?? 0;
         selCourse  = msg.course    ?? null; selCourseConf  = msg.course_conf  ?? 0;
-        pushLog(`[sel] ${msg.character ?? "—"} / ${msg.kart ?? "—"} / ${msg.course ?? "—"}${msg.costume ? ` / ${msg.costume}` : ""}`);
+        pushLog(`[sel] ${msg.character ?? "-"} / ${msg.kart ?? "-"} / ${msg.course ?? "-"}${msg.costume ? ` / ${msg.costume}` : ""}`);
         break;
       case "lap_update":
-        // Reset splits when lap 1 starts — marks the beginning of a fresh race
+        // Reset splits when lap 1 starts - marks the beginning of a fresh race
         if (msg.current === 1) { raceSplits = {}; raceFinishTime = null; }
         curLap = msg.current; totLap = msg.total;
         if (msg.split && msg.current != null)
@@ -782,11 +781,12 @@
       case "finish":
         raceFinishTime = msg.total_time ?? raceFinishTime;
         if (msg.splits) raceSplits = { ...raceSplits, ...msg.splits };
-        pushLog(`[finish] ${msg.result}  ${msg.total_time ?? "—"}`);
+        pushLog(`[finish] ${msg.result}  ${msg.total_time ?? "-"}`);
         break;
       case "error":  pushLog(`[ERR] ${msg.message}`); break;
       case "minimap_update":
-        minimapStore.set({ cx: msg.cx, cy: msg.cy, radius: msg.radius, trackState: msg.track_state });
+        minimapStore.set({ cx: msg.cx, cy: msg.cy, radius: msg.radius,
+                           trackState: msg.track_state, roi: msg.roi ?? null });
         break;
       case "replay_paths":
         replaysStore.set(msg.paths ?? []);
@@ -794,6 +794,13 @@
       case "minimap_sample":
         sampleStore.set(msg.png_b64 ?? null);
         break;
+      case "screen_thumbs": {
+        const _t = msg.thumbs ?? {};
+        screenThumbs = Object.fromEntries(
+          Object.entries(_t).map(([k, v]) => [k, `data:image/png;base64,${v}`])
+        );
+        break;
+      }
     }
   }
 
@@ -804,7 +811,7 @@
     await loadBrowserDevices();
     // Only auto-select a browser device when none is explicitly chosen yet.
     // If selectedBrowserDeviceId is already set (e.g. user picked from dropdown),
-    // honour it — don't override with a configuredDevice name match.
+    // honour it - don't override with a configuredDevice name match.
     if (!selectedBrowserDeviceId && browserDevices.length > 0) {
       if (configuredDevice) {
         const lower = configuredDevice.toLowerCase();
@@ -854,17 +861,17 @@
       : { width:{ ideal:1920 }, height:{ ideal:1080 } };
     try {
       // Resolve audio device in priority order:
-      //   1. "none" sentinel — user explicitly wants video-only, skip all audio logic
+      //   1. "none" sentinel - user explicitly wants video-only, skip all audio logic
       //   2. Specific device ID chosen by user this session
       //   3. Audio input sharing a non-empty groupId with the chosen video device
-      //   4. Video-only fallback — never grab the default mic
+      //   4. Video-only fallback - never grab the default mic
       const audioExplicitNone = selectedAudioDeviceId === "none";
       let resolvedAudioId = (!audioExplicitNone && selectedAudioDeviceId) ? selectedAudioDeviceId : null;
       if (!resolvedAudioId && !audioExplicitNone && deviceId) {
         try {
           const all = await navigator.mediaDevices.enumerateDevices();
           const vid = all.find(d => d.kind === "videoinput" && d.deviceId === deviceId);
-          // groupId is "" when permissions haven't been granted yet — skip in that case
+          // groupId is "" when permissions haven't been granted yet - skip in that case
           // to avoid accidentally matching unrelated devices that also have groupId "".
           if (vid && vid.groupId) {
             const aud = all.find(d => d.kind === "audioinput" && d.groupId === vid.groupId);
@@ -885,20 +892,20 @@
           videoStream = await navigator.mediaDevices.getUserMedia({ video:vc });
         }
       } else {
-        // No paired audio found — video only. Never grab a random mic.
+        // No paired audio found - video only. Never grab a random mic.
         videoStream = await navigator.mediaDevices.getUserMedia({ video:vc });
       }
       cameraStatus = "ok";
       await loadBrowserDevices();
       // If audio labels are blank (mic permission not yet granted), make a brief
       // audio-only request purely to unlock enumerateDevices labels, then stop it.
-      // This never keeps a mic stream open — it's discarded immediately.
+      // This never keeps a mic stream open - it's discarded immediately.
       if (audioDevices.some(d => !d.label)) {
         try {
           const tmp = await navigator.mediaDevices.getUserMedia({ audio: true });
           tmp.getTracks().forEach(t => t.stop());
           await loadBrowserDevices();
-        } catch { /* mic denied — labels stay blank */ }
+        } catch { /* mic denied - labels stay blank */ }
       }
       // Sync selectedAudioDeviceId to whatever was actually captured so the
       // Audio dropdown in Detection reflects the current state.
@@ -918,7 +925,7 @@
     cameraStatus = "idle";
   }
 
-  // Engine feed poll — runs continuously at 100ms so main view always has a fresh frame
+  // Engine feed poll - runs continuously at 100ms so main view always has a fresh frame
   function startFeedPoll() {
     if (_feedPollTimer) return;
     _feedPollTimer = setInterval(() => {
@@ -989,7 +996,7 @@
     trackerCameraPaused = false;
     pythonCameraStatus = "opening";
     engineFrame = null;
-    // Start both simultaneously — same pattern as the initial camera step open.
+    // Start both simultaneously - same pattern as the initial camera step open.
     // Don't wait for Python's camera_status to trigger the browser restart;
     // if Python fails the browser would be stuck idle indefinitely.
     startCamera(selectedBrowserDeviceId || undefined);
@@ -997,18 +1004,26 @@
   }
 
   // ── ROI preview poll ──────────────────────────────────────────────────────────
+  // Detection tab: re-score the selected region against the live feed at ~3 Hz so
+  // the RegionInspector match number + live crop track the moving camera image
+  // (replaces the old one-shot "Test" button). test_region returns score + crop +
+  // template in one message, so this single poll keeps the whole inspector live.
+  // The heavier asset template fetch (selection/HUD tab) stays ~1 Hz.
+  let _roiPollTick = 0;
   function startRoiPoll() {
     if (_roiPollTimer) return;
     _roiPollTimer=setInterval(()=>{
       if (!trackerConnected) return;
       if (!editingNode) return;
+      _roiPollTick++;
       if (activeTab === "detection" && selectedNode)
         send({type:"test_region",screen:selectedNode,group:activeRegion.group,region:activeRegion.region});
       else if ((activeTab === "selection" || activeTab === "hud") && ROI_TEMPLATE_CAT[activeRoiName]) {
+        if (_roiPollTick % 3 !== 0) return;
         const item=ASSET_ITEMS[templateCategory]?.[templateItemIdx];
         if (item) send({type:"get_asset_template",category:templateCategory,item_name:item.file});
       }
-    },1000);
+    },320);
   }
   function stopRoiPoll() {
     if (_roiPollTimer) { clearInterval(_roiPollTimer); _roiPollTimer=null; }
@@ -1041,7 +1056,7 @@
   function completeSetup() {
     send({type:"mark_setup_complete"}); setupComplete=true; closeWizard(); _setupAudio();
     // During setup, mic permission wasn't granted when the camera first opened so
-    // groupId pairing fell back to video-only. Now permission exists — restart the
+    // groupId pairing fell back to video-only. Now permission exists - restart the
     // stream so grouped audio is picked up automatically, matching reboot behaviour.
     if (!selectedAudioDeviceId) startCamera(selectedBrowserDeviceId || undefined);
   }
@@ -1090,12 +1105,12 @@
       return;
     }
     selectedBrowserDeviceId=e.target.value;
-    // Reset audio to auto — new device may have different associated audio.
+    // Reset audio to auto - new device may have different associated audio.
     selectedAudioDeviceId = "";
     // Clear stale frame and show "opening" immediately.
     engineFrame = null; pythonCameraStatus = "opening";
     if (!setupComplete&&wizardStep==="camera") {
-      // First-time setup: user explicitly chose a device — sync Python to match it
+      // First-time setup: user explicitly chose a device - sync Python to match it
       // directly (no auto-select logic needed), then open both simultaneously.
       stopCamera();
       const chosen = browserDevices.find(d => d.deviceId === selectedBrowserDeviceId);
@@ -1121,7 +1136,7 @@
   }
   async function handleAudioDeviceChange(e) {
     selectedAudioDeviceId = e.target.value;
-    // Persist the choice by label (not ID — IDs change between sessions).
+    // Persist the choice by label (not ID - IDs change between sessions).
     const label = selectedAudioDeviceId === "none"
       ? "none"
       : (audioDevices.find(d => d.deviceId === selectedAudioDeviceId)?.label ?? "");
@@ -1159,7 +1174,7 @@
     pushLog(`[app] v${version} starting… ${_elapsed()}`);
     await invoke("start_tracker");
     pushLog(`[app] tracker spawn requested ${_elapsed()}`);
-    // Pre-populate browser device lists now — Tauri grants camera+mic permissions
+    // Pre-populate browser device lists now - Tauri grants camera+mic permissions
     // before the webview loads, so labels and groupIds are available immediately.
     // This ensures the Detection > Audio dropdown shows real names from the start.
     loadBrowserDevices();
@@ -1175,9 +1190,9 @@
       if (trackerConnected) { clearInterval(_startupTimer); return; }
       const secs = Math.round((Date.now()-_t0)/1000);
       if (!trackerSpawned) {
-        pushLog(`[app] engine process has not spawned yet… (${secs}s elapsed) — antivirus may be blocking launch`);
+        pushLog(`[app] engine process has not spawned yet… (${secs}s elapsed) - antivirus may be blocking launch`);
       } else {
-        pushLog(`[app] engine launched but Python not ready yet… (${secs}s elapsed) — Windows Defender may still be scanning DLLs`);
+        pushLog(`[app] engine launched but Python not ready yet… (${secs}s elapsed) - Windows Defender may still be scanning DLLs`);
       }
       if (secs >= 120) { sidecarStartupError = true; clearInterval(_startupTimer); }
     }, 10000);
@@ -1226,6 +1241,13 @@
   // Load the stored template + live crop whenever the selected region changes.
   $: if (editingNode && activeTab === "detection" && selectedNode && activeRegion && trackerConnected) {
     send({ type:"get_region_images", screen:selectedNode, group:activeRegion.group, region:activeRegion.region });
+  }
+
+  // Fetch edit-mode graph thumbnails when the edit view opens; refetch if the
+  // Switch language changes (screenshots are per-language).
+  $: if ($viewStore === "edit" && trackerConnected && _thumbsLang !== switch2Language) {
+    _thumbsLang = switch2Language;
+    send({ type: "get_screen_thumbs", lang: switch2Language });
   }
 
   $: _=appLanguage;
@@ -1320,7 +1342,9 @@
       bind:this={editCanvas}
       currentScreen={backendScreen}
       selected={selectedNode}
+      stream={setupComplete ? (videoStream ?? null) : null}
       frame={engineFrame}
+      thumbs={screenThumbs}
       rois={canvasRois}
       activeBox={activeEditBox}
       frameW={pythonFrameW}
@@ -1342,7 +1366,6 @@
       on:cancelReset={()=>{ detResetPending=false; roiResetPending=false; }}
       on:resetDetection={resetDetection}
       on:capture={onToolsCapture}
-      on:test={onToolsTest}
       on:selectRoi={(e)=>selectRoiName(e.detail)}
       on:selectItem={(e)=>selectTplItem(e.detail)}
       on:resetRoi={resetActiveRoi}
@@ -1493,12 +1516,12 @@
                   <span class="cam-prereq-title cam-prereq-title-ok">Camera sharing is working</span>
                   <p class="cam-prereq-body">Both feeds are connected to the same device. You're good to continue.</p>
                 {:else}
-                  <span class="cam-prereq-title">Required — enable Windows camera sharing</span>
+                  <span class="cam-prereq-title">Required - enable Windows camera sharing</span>
                   <p class="cam-prereq-body">MKW Tracker needs simultaneous access to the same capture card as the app preview. Windows blocks this by default. Do this once before continuing:</p>
                   {#if trackerCameraPaused}
                     <div class="cam-release-bar cam-release-bar-released">
                       <span class="cam-release-dot"></span>
-                      <span class="cam-release-msg">App feeds released — also close OBS, Discord, and any other apps currently using the camera before proceeding.</span>
+                      <span class="cam-release-msg">App feeds released - also close OBS, Discord, and any other apps currently using the camera before proceeding.</span>
                     </div>
                   {:else}
                     <div class="cam-release-bar">
@@ -1545,14 +1568,14 @@
       </div>
     </div>
 
-    <!-- Engine log sidebar — always visible during first-time setup -->
+    <!-- Engine log sidebar - always visible during first-time setup -->
     <div class="setup-log-side">
       <div class="setup-log-hdr">
         <span class="hb-dot" style="background:{statusDot}; flex-shrink:0"></span>
         {#if trackerConnected}
           <span class="setup-log-status">Engine ready</span>
         {:else if trackerSpawned}
-          <span class="setup-log-status">Starting — Windows may be scanning files…</span>
+          <span class="setup-log-status">Starting - Windows may be scanning files…</span>
         {:else}
           <span class="setup-log-status">Launching engine…</span>
         {/if}
@@ -1594,7 +1617,7 @@
         {#if trackerConnected}
           <span class="setup-log-status">Engine ready</span>
         {:else if trackerSpawned}
-          <span class="setup-log-status">Starting — Windows may be scanning files…</span>
+          <span class="setup-log-status">Starting - Windows may be scanning files…</span>
         {:else}
           <span class="setup-log-status">Launching engine…</span>
         {/if}
@@ -1812,7 +1835,7 @@
     flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden;
     border-right: 1px solid var(--bd);
   }
-  /* Centre content vertically and horizontally; no scrollbar — content must fit */
+  /* Centre content vertically and horizontally; no scrollbar - content must fit */
   .setup-wiz-body {
     flex: 1; min-height: 0; padding: 1.25rem 1.5rem;
     display: flex; align-items: center; justify-content: center;
@@ -1820,7 +1843,7 @@
   }
   /* Constrain camera step width in setup view */
   .setup-wiz-body .cam-setup { width: 100%; max-width: 560px; }
-  /* Step indicator tabs are display-only in setup view — not keyboard or mouse navigable */
+  /* Step indicator tabs are display-only in setup view - not keyboard or mouse navigable */
   .setup-wiz-tabs { pointer-events: none; }
 
   /* Log sidebar shared by setup and startup views */

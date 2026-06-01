@@ -1,5 +1,5 @@
 <script>
-  // DeviceSelectors.svelte — Video and Audio device <select>s.
+  // DeviceSelectors.svelte - Video and Audio device <select>s.
   // All state is owned by App.svelte; this component reads it and dispatches
   // change events back using the same handler functions.
 
@@ -11,7 +11,7 @@
   export let cameraStatus = "idle";
   export let restartNeeded = false;
 
-  // Callbacks — pass the existing App.svelte handlers directly.
+  // Callbacks - pass the existing App.svelte handlers directly.
   export let onCameraDeviceChange = (e) => {};   // handleCameraDeviceChange
   export let onAudioDeviceChange  = (e) => {};   // handleAudioDeviceChange
   export let onRestartTracker     = ()  => {};   // restartTracker
@@ -19,7 +19,7 @@
 
 {#if browserDevices.length > 0}
   <div class="device-row">
-    <label for="ds-cam">Camera</label>
+    <label for="ds-cam">Video</label>
     {#if pythonCameraStatus === "opening" || cameraStatus === "requesting"}
       <div class="select-loading">
         <span class="spin">◌</span>
@@ -29,7 +29,7 @@
       <select id="ds-cam" on:change={onCameraDeviceChange}>
         {#each browserDevices as d}
           <option value={d.deviceId} selected={d.deviceId === selectedBrowserDeviceId}>
-            {d.label || `Camera ${d.deviceId.slice(0, 6)}…`}
+            {d.label || `Video ${d.deviceId.slice(0, 6)}…`}
           </option>
         {/each}
       </select>
@@ -44,7 +44,7 @@
   <div class="device-row">
     <label for="ds-aud">Audio</label>
     <select id="ds-aud" on:change={onAudioDeviceChange}>
-      <option value="none" selected={!selectedAudioDeviceId || selectedAudioDeviceId === "none"}>— none —</option>
+      <option value="none" selected={!selectedAudioDeviceId || selectedAudioDeviceId === "none"}>(none)</option>
       {#each audioDevices as d}
         <option value={d.deviceId} selected={d.deviceId === selectedAudioDeviceId}>
           {d.label || `Audio ${d.deviceId.slice(0, 6)}…`}
@@ -56,8 +56,11 @@
 
 <style>
   .device-row { display: flex; align-items: center; gap: .4rem; font-size: .72rem; flex-shrink: 0; }
-  .device-row label { color: var(--tx-dim); flex-shrink: 0; }
-  .select-loading { display: flex; align-items: center; gap: .3rem; color: var(--tx-mut); font-size: .72rem; font-style: italic; }
+  /* Fixed label width so the Video/Audio dropdowns share the same left edge... */
+  .device-row label { color: var(--tx-dim); flex-shrink: 0; min-width: 3rem; }
+  /* ...and a fixed select width so both dropdowns are exactly the same size. */
+  .device-row select { width: 14rem; flex: none; }
+  .select-loading { width: 14rem; display: flex; align-items: center; gap: .3rem; color: var(--tx-mut); font-size: .72rem; font-style: italic; overflow: hidden; }
   .spin { animation: spin 1.2s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .btn-sm {

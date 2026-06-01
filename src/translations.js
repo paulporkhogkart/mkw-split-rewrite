@@ -83,7 +83,7 @@ const EN = {
   "screens.score_live":      "Updating live score…",
 
   // ── Selection step ───────────────────────────────────────────────────────
-  "sel.edge_note":           "Edge detection (Canny) — background-agnostic",
+  "sel.edge_note":           "Edge detection (Canny) - background-agnostic",
   "sel.live_edges":          "Live Crop (edges)",
   "sel.live_crop":           "Live Crop",
 

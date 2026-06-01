@@ -1,10 +1,11 @@
 <script>
   /**
-   * RoiCanvas — zoomable/pannable canvas that draws an engine-frame background,
+   * RoiCanvas - zoomable/pannable canvas that draws an engine-frame background,
    * coloured ROI rectangles, and drag/resize handles on the active ROI.
    *
    * Props:
-   *   frame      {string|null}   data-URL of the background frame image (e.g. engineFrame)
+   *   stream     {MediaStream|null} live browser camera - preferred background, drawn each frame
+   *   frame      {string|null}   data-URL fallback background image (engineFrame) when no stream
    *   rois       {Array}         list of { box:[x1,y1,x2,y2], role:'active'|'sibling'|'other' }
    *   activeBox  {Array|null}    [x1,y1,x2,y2] of the currently-editable ROI (gets handles)
    *   frameW     {number}        logical frame width  (default 1920)
@@ -19,7 +20,8 @@
   import { createEventDispatcher, onMount, onDestroy, afterUpdate } from "svelte";
   import { C } from "../lib/palette.js";
 
-  export let frame     = null;        // data-URL string or null
+  export let stream    = null;        // MediaStream | null - live browser camera background
+  export let frame     = null;        // data-URL string or null (fallback background)
   export let rois      = [];          // { box:[x1,y1,x2,y2], role:'active'|'sibling'|'other' }
   export let activeBox = null;        // [x1,y1,x2,y2] or null
   export let frameW    = 1920;
@@ -53,6 +55,24 @@
 
   // ── Canvas element ────────────────────────────────────────────────────────────
   let canvasEl = null;
+
+  // ── Optional live-video background ──────────────────────────────────────────────
+  // When a MediaStream is supplied we draw the browser video each animation frame
+  // (smooth, matches the monitor feed). The engine-frame image is the fallback.
+  let _videoEl   = null;
+  let _videoLoop = 0;
+  $: if (_videoEl) _videoEl.srcObject = stream ?? null;
+  $: if (stream) startVideoLoop(); else stopVideoLoop();
+  function startVideoLoop() {
+    if (_videoLoop) return;
+    const tick = () => {
+      if (!stream) { _videoLoop = 0; return; }
+      redraw();
+      _videoLoop = requestAnimationFrame(tick);
+    };
+    _videoLoop = requestAnimationFrame(tick);
+  }
+  function stopVideoLoop() { if (_videoLoop) { cancelAnimationFrame(_videoLoop); _videoLoop = 0; } }
 
   // Cached Image object for the frame so we can drawImage without re-decoding.
   let _frameImg = null;
@@ -180,13 +200,15 @@
     const ctx = canvasEl.getContext("2d");
     ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
 
-    // ── Background frame ──────────────────────────────────────────────────────
-    if (_frameImg) {
-      // The frame fills the same letterboxed/pillarboxed area the transform math
-      // assumes, and the zoom/pan is applied on top.
+    // ── Background ────────────────────────────────────────────────────────────
+    // Prefer the live browser video; fall back to the engine-frame image. Both
+    // fill the same letterboxed area the transform assumes, with zoom/pan on top.
+    const _bg = (_videoEl && stream && _videoEl.readyState >= 2 && _videoEl.videoWidth > 0)
+      ? _videoEl : _frameImg;
+    if (_bg) {
       const { ox, oy, sx, sy, z, px, py } = t;
       const dw = (frameW || 1920) * sx, dh = (frameH || 1080) * sy;
-      ctx.drawImage(_frameImg, px + ox * z, py + oy * z, dw * z, dh * z);
+      ctx.drawImage(_bg, px + ox * z, py + oy * z, dw * z, dh * z);
     }
 
     // ── ROI boxes ─────────────────────────────────────────────────────────────
@@ -236,7 +258,7 @@
         e.preventDefault(); return;
       }
     }
-    // 2. Hit-test inactive ROIs — if a click lands on one, emit 'select' so
+    // 2. Hit-test inactive ROIs - if a click lands on one, emit 'select' so
     //    the parent can switch the active region (App.svelte task 5.4 will use this).
     for (const re of rois) {
       if (re.role === "active" || !re.box) continue;
@@ -313,6 +335,7 @@
     window.removeEventListener("mouseup", onMouseUp);
     if (canvasEl) canvasEl.removeEventListener("wheel", onWheel);
     if (_rafId) cancelAnimationFrame(_rafId);
+    stopVideoLoop();
   });
 
   $: fZoom, fPanX, fPanY, scheduleRedraw();
@@ -330,6 +353,10 @@
   on:mousemove={onMouseMove}
 ></canvas>
 
+<!-- Hidden live-video source; drawn onto the canvas each frame when `stream` is set. -->
+<!-- svelte-ignore a11y-media-has-caption -->
+<video bind:this={_videoEl} autoplay muted playsinline class="roi-video-src" aria-hidden="true"></video>
+
 {#if fZoom > 1}
   <button class="zoom-reset" on:click={resetView}>reset {fZoom.toFixed(1)}×</button>
 {/if}
@@ -340,6 +367,11 @@
     width: 100%;
     height: 100%;
     cursor: default;
+  }
+  /* Off-screen video source - decoded for drawImage(), never shown directly. */
+  .roi-video-src {
+    position: absolute; left: -9999px; top: 0;
+    width: 2px; height: 2px; opacity: 0; pointer-events: none;
   }
   .zoom-reset {
     position: absolute;

@@ -12,8 +12,8 @@
   export let alive = false;
   /** Whether a backend process has been spawned at all (trackerSpawned). */
   export let spawned = false;
-  /** Current backend screen enum name (e.g. "RACING") or "—" placeholder */
-  export let screenName = "—";
+  /** Current backend screen enum name (e.g. "RACING") or "-" placeholder */
+  export let screenName = "-";
   /** Latest live confidence score (0–1) */
   export let score = 0.0;
   /** Latest reported frames-per-second */

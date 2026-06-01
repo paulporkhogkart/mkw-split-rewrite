@@ -33,17 +33,17 @@
 
   <div class="row row-total">
     <span class="lbl-total">Total</span>
-    <span class="val">{$race.finishTime ?? "—"}</span>
+    <span class="val">{$race.finishTime ?? "-"}</span>
   </div>
 
   <div class="row">
     <span class="lbl">Coins</span>
-    <span class="val">{$race.coins ?? "—"}</span>
+    <span class="val">{$race.coins ?? "-"}</span>
   </div>
 
   <div class="row">
     <span class="lbl">Mushrooms</span>
-    <span class="val">{$race.mushrooms != null ? `×${$race.mushrooms}` : "—"}</span>
+    <span class="val">{$race.mushrooms != null ? `×${$race.mushrooms}` : "-"}</span>
   </div>
 {/if}
 

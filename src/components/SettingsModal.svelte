@@ -1,18 +1,18 @@
 <script>
-  // SettingsModal.svelte — wizard/settings modal shell.
+  // SettingsModal.svelte - wizard/settings modal shell.
   //
   // Rendering decisions:
   //   • Wizard dialog: shown when wizardOpen===true (replaces the inline {#if wizardOpen} block).
   //   • Returning user (setupComplete===true): shows SourceCheck + DeviceSelectors +
   //     LanguageSelectors all at once on the "camera" tab, and LanguageSelectors on the
-  //     "language" tab — matching the existing RERUN_STEPS = ["language","camera"] flow.
+  //     "language" tab - matching the existing RERUN_STEPS = ["language","camera"] flow.
   //   • First-run (setupComplete===false): Language → Camera → Done stepped flow,
   //     exactly as before.
   //
   // The <video> element for the browser feed is rendered here (inside SourceCheck via
   // bind:videoEl) so that App.svelte's reactive statement
   //   `$: if (wizVideoEl) wizVideoEl.srcObject = videoStream ?? null`
-  // continues to work — App passes `bind:wizVideoEl` which maps to `bind:videoEl` here.
+  // continues to work - App passes `bind:wizVideoEl` which maps to `bind:videoEl` here.
 
   import SourceCheck       from "./SourceCheck.svelte";
   import DeviceSelectors   from "./DeviceSelectors.svelte";
@@ -138,12 +138,12 @@
                     <span class="cam-prereq-title cam-prereq-title-ok">Camera sharing is working</span>
                     <p class="cam-prereq-body">Both feeds are connected to the same device. You're good to continue.</p>
                   {:else}
-                    <span class="cam-prereq-title">Required — enable Windows camera sharing</span>
+                    <span class="cam-prereq-title">Required - enable Windows camera sharing</span>
                     <p class="cam-prereq-body">MKW Tracker needs simultaneous access to the same capture card as the app preview. Windows blocks this by default. Do this once before continuing:</p>
                     {#if trackerCameraPaused}
                       <div class="cam-release-bar cam-release-bar-released">
                         <span class="cam-release-dot"></span>
-                        <span class="cam-release-msg">App feeds released — also close OBS, Discord, and any other apps currently using the camera before proceeding.</span>
+                        <span class="cam-release-msg">App feeds released - also close OBS, Discord, and any other apps currently using the camera before proceeding.</span>
                       </div>
                     {:else}
                       <div class="cam-release-bar">
@@ -241,9 +241,9 @@
     max-width: 560px; margin: 0 auto; padding: .5rem 0;
     display: flex; flex-direction: column; gap: .75rem;
   }
-  .step-centred h2 { color: var(--tx); font-size: 1.05rem; }
-  .step-centred p  { font-size: .78rem; color: var(--tx-mut); line-height: 1.65; }
-  .done-check { font-size: 2.2rem; color: var(--ok); }
+  .step-centred h2 { color: var(--tx); font-size: .95rem; font-weight: 600; letter-spacing: .01em; }
+  .step-centred p  { font-size: .76rem; color: var(--tx-mut); line-height: 1.6; }
+  .done-check { font-size: 2rem; color: var(--ok); }
 
   /* Camera step layout */
   .cam-setup { display: flex; flex-direction: column; gap: .9rem; }

@@ -38,7 +38,7 @@
   export let detection = { tree: {}, inspector: {} };
 
   /**
-   * Props bundle for the Readout tab — passed directly to ReadoutRoiEditor.
+   * Props bundle for the Readout tab - passed directly to ReadoutRoiEditor.
    * Shape: {
    *   roiKeys, roiMetas, activeRoiName, tabKind, templateCategory, categoryLabel,
    *   items, activeItemIdx, activeItemHint, assetTemplate, assetLiveCrop,
@@ -97,7 +97,6 @@
       <RegionInspector
         {...detection.inspector}
         on:capture
-        on:test
       />
     {:else}
       <ReadoutRoiEditor
@@ -122,7 +121,7 @@
     overflow: hidden;
   }
 
-  /* Tab chrome — inset-underline style from mockup */
+  /* Tab chrome - inset-underline style from mockup */
   .tabs {
     display: flex;
     border-bottom: 1px solid var(--bd);

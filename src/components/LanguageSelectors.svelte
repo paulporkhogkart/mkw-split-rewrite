@@ -1,5 +1,5 @@
 <script>
-  // LanguageSelectors.svelte — Application language + Switch system language selects.
+  // LanguageSelectors.svelte - Application language + Switch system language selects.
   // State is owned by App.svelte; changes are persisted via the passed callbacks
   // (which call send({ type:"update_config", ... }) exactly as before).
 
@@ -7,12 +7,12 @@
   export let appLanguage = "en_uk";
   export let switch2Language = "en_uk";
 
-  // Callbacks — pass onAppLanguageChange / onSwitch2LanguageChange from App.svelte.
+  // Callbacks - pass onAppLanguageChange / onSwitch2LanguageChange from App.svelte.
   export let onAppLanguageChange    = () => {};
   export let onSwitch2LanguageChange = () => {};
 
   // Optional: unique id prefix to avoid duplicate HTML ids when both wizard and
-  // settings modal render at the same time (they don't — only one is shown at a time —
+  // settings modal render at the same time (they don't - only one is shown at a time -
   // but a prefix keeps ids unique by convention).
   export let idPrefix = "ls";
 </script>

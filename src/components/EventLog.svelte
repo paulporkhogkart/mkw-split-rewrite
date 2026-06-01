@@ -23,8 +23,12 @@
 </div>
 
 <style>
+  /* Fills the (growable) Event-log section body and scrolls internally, so the
+     log occupies all remaining rail height instead of a fixed 140px sliver.
+     min-height keeps a usable strip if the rail is very short. */
   .log-body {
-    max-height: 140px;
+    flex: 1 1 0;
+    min-height: 64px;
     overflow-y: auto;
   }
 

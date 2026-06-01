@@ -1,5 +1,5 @@
 <script>
-  // SourceCheck.svelte — dual-feed source check panes.
+  // SourceCheck.svelte - dual-feed source check panes.
   // The left pane's <video> element is owned by App.svelte (to preserve the
   // `wizVideoEl` binding used by `$: wizVideoEl.srcObject = videoStream`).
   // App passes `bind:videoEl` so the bind:this wires into App's wizVideoEl.
@@ -33,7 +33,7 @@
       {:else if cameraStatus === "busy"}
         <div class="preview-placeholder">
           <span class="preview-icon">⊗</span>
-          <span class="cam-pane-err-label">Blocked — device in exclusive use</span>
+          <span class="cam-pane-err-label">Blocked - device in exclusive use</span>
         </div>
       {:else if cameraStatus === "error"}
         <div class="preview-placeholder">
