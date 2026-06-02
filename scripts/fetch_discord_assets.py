@@ -52,7 +52,7 @@ COURSE_ASSETS = [
     ("https://mario.wiki.gallery/images/thumb/8/88/MKWorld_Rainbow_Road_icon.png/120px-MKWorld_Rainbow_Road_icon.png", "rainbow_road"),
 ]
 SPLASH_URL = "https://image-assets.m.nintendo.com/985d81ae-7d37-4bd1-8732-f247f47f8821"
-PENGUIN_SRC = Path("src-tauri/icons/128x128@2x.png")
+PENGUIN_SRC = Path(__file__).resolve().parent.parent / "src-tauri" / "icons" / "128x128@2x.png"
 
 TARGET = 512  # Discord Art Assets require >= 512x512.
 
@@ -107,6 +107,10 @@ def main():
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
+    # Clear stale outputs (e.g. from an older version of this script) so a re-run
+    # never leaves undersized or duplicate-key files behind.
+    for old in (*out.glob("*.png"), *out.glob("*.jpg"), *out.glob("*.jpeg")):
+        old.unlink()
 
     for url, slug in COURSE_ASSETS:
         print(f"  {slug}")
