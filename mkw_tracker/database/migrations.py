@@ -65,15 +65,6 @@ CREATE TABLE IF NOT EXISTS replay_points (
 );
 
 CREATE INDEX IF NOT EXISTS idx_replay_points_id ON replay_points(replay_id);
-
-CREATE TABLE IF NOT EXISTS replay_splits (
-    replay_id  INTEGER NOT NULL REFERENCES replays(id) ON DELETE CASCADE,
-    lap        INTEGER NOT NULL,
-    split_ms   INTEGER,
-    split_text TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_replay_splits_id ON replay_splits(replay_id);
 """
 
 
@@ -144,6 +135,17 @@ INSERT OR IGNORE INTO minimap_rois (course, x, y, w, h) VALUES
 """
 
 
+_SCHEMA_V4 = """
+CREATE TABLE IF NOT EXISTS replay_splits (
+    replay_id  INTEGER NOT NULL REFERENCES replays(id) ON DELETE CASCADE,
+    lap        INTEGER NOT NULL,
+    split_ms   INTEGER,
+    split_text TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_replay_splits_id ON replay_splits(replay_id);
+"""
+
+
 def apply_migrations(db_path: str | None = None):
     """Apply pending schema migrations. Safe to call on every startup."""
     conn = get_connection(db_path)
@@ -188,3 +190,12 @@ def apply_migrations(db_path: str | None = None):
         conn.execute("UPDATE schema_version SET version=3")
         conn.commit()
         print(f"[DB] Migrated {n} tell override(s) to boolean-tree format (v3)")
+
+    cur.execute("SELECT version FROM schema_version")
+    row = cur.fetchone()
+    current = row[0] if row else 0
+    if current < 4:
+        conn.executescript(_SCHEMA_V4)
+        conn.execute("UPDATE schema_version SET version=4")
+        conn.commit()
+        print("[DB] Schema migrated to v4 (replay_splits)")
