@@ -310,7 +310,7 @@ def test_recorder_save_forwards_lap_splits(memdb, monkeypatch):
         captured.update(kwargs)
         return 1
 
-    monkeypatch.setattr(rec_mod, "save_run", lambda *a, **k: fake_save_run(*a, **k) if False else fake_save_run(**k))
+    monkeypatch.setattr(rec_mod, "save_run", fake_save_run)
 
     rec = rec_mod.MinimapRecorder.__new__(rec_mod.MinimapRecorder)
     rec._points = [(0, 1.0, 2.0, 0.9)]
@@ -412,7 +412,10 @@ import argparse, re, shutil, urllib.request
 from pathlib import Path
 
 def slugify(name: str) -> str:
-    return re.sub(r"_+$", "", re.sub(r"^_+", "", re.sub(r"[^a-z0-9]+", "_", name.lower())))
+    # Strip apostrophes first ("Wario's" -> "warios"), then turn remaining
+    # non-alphanumeric runs into single underscores.
+    s = name.lower().replace("'", "").replace("’", "")
+    return re.sub(r"_+$", "", re.sub(r"^_+", "", re.sub(r"[^a-z0-9]+", "_", s)))
 
 # (url, slug) — slugs match images/courses/*.png stems and slugify(display name).
 COURSE_ASSETS = [
@@ -825,7 +828,8 @@ Expected: FAIL — module not found.
 
 export function courseSlug(name) {
   if (!name) return null;
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  // Strip apostrophes first ("Wario's" -> "warios"), then non-alphanumeric runs -> "_".
+  return name.toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 }
 
 export function parseTime(str) {
