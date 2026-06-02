@@ -1,10 +1,14 @@
-"""Download MKW course icons + penguin/splash, named by Discord asset key (slug),
-into out/ ready to drag into the Discord Developer Portal -> Art Assets.
+"""Download MKW course icons + penguin/splash, normalize each to a 512x512 PNG
+(Discord Art Assets require >=512x512), named by Discord asset key (slug), into
+out/ ready to drag into the Discord Developer Portal -> Art Assets.
 
 Usage: python scripts/fetch_discord_assets.py [--out out_dir]
 """
-import argparse, re, shutil, urllib.request
+import argparse, re, urllib.request
 from pathlib import Path
+
+import cv2
+import numpy as np
 
 
 def slugify(name: str) -> str:
@@ -50,12 +54,51 @@ COURSE_ASSETS = [
 SPLASH_URL = "https://image-assets.m.nintendo.com/985d81ae-7d37-4bd1-8732-f247f47f8821"
 PENGUIN_SRC = Path("src-tauri/icons/128x128@2x.png")
 
+TARGET = 512  # Discord Art Assets require >= 512x512.
 
-def _download(url: str, dest_stem: Path):
-    ext = ".jpg" if url.lower().split("?")[0].endswith((".jpg", ".jpeg")) else ".png"
+
+def _enlarge_url(url: str) -> str:
+    """Bump a MediaWiki thumbnail URL to a high-res (1024px) source.
+    MediaWiki clamps to the original size, so we never request an upscale."""
+    return re.sub(r"/\d+px-", "/1024px-", url)
+
+
+def _download_bytes(url: str) -> bytes:
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req, timeout=30) as r:
-        dest_stem.with_suffix(ext).write_bytes(r.read())
+        return r.read()
+
+
+def _to_512(img: np.ndarray) -> np.ndarray:
+    """Pad to square (transparent letterbox) and resize to TARGET x TARGET BGRA."""
+    if img.ndim == 2:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGRA)
+    elif img.shape[2] == 3:
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
+    h, w = img.shape[:2]
+    side = max(h, w)
+    canvas = np.zeros((side, side, 4), np.uint8)  # transparent square
+    y0, x0 = (side - h) // 2, (side - w) // 2
+    canvas[y0:y0 + h, x0:x0 + w] = img
+    interp = cv2.INTER_AREA if side > TARGET else cv2.INTER_CUBIC
+    return cv2.resize(canvas, (TARGET, TARGET), interpolation=interp)
+
+
+def _fetch_512_png(url: str) -> bytes:
+    """Download (high-res first, original as fallback), normalize to 512x512 PNG."""
+    last_err = None
+    for u in (_enlarge_url(url), url):
+        try:
+            raw = _download_bytes(u)
+            img = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_UNCHANGED)
+            if img is None:
+                continue
+            ok, buf = cv2.imencode(".png", _to_512(img))
+            if ok:
+                return buf.tobytes()
+        except Exception as e:  # noqa: BLE001 - try the fallback URL
+            last_err = e
+    raise RuntimeError(f"failed to fetch/process {url}: {last_err}")
 
 
 def main():
@@ -64,13 +107,20 @@ def main():
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
+
     for url, slug in COURSE_ASSETS:
         print(f"  {slug}")
-        _download(url, out / slug)
-    _download(SPLASH_URL, out / "splash")
+        (out / f"{slug}.png").write_bytes(_fetch_512_png(url))
+
+    (out / "splash.png").write_bytes(_fetch_512_png(SPLASH_URL))
+
     if PENGUIN_SRC.exists():
-        shutil.copy(PENGUIN_SRC, out / "penguin.png")
-    print(f"Done -> {out} (drag these into the Discord portal Art Assets)")
+        peng = cv2.imread(str(PENGUIN_SRC), cv2.IMREAD_UNCHANGED)
+        ok, buf = cv2.imencode(".png", _to_512(peng))
+        if ok:
+            (out / "penguin.png").write_bytes(buf.tobytes())
+
+    print(f"Done -> {out} (all 512x512 PNGs; drag into the Discord portal Art Assets)")
 
 
 if __name__ == "__main__":

@@ -490,6 +490,8 @@ git commit -m "feat(assets): Discord art-asset fetch script + slug mapping"
 
 > **Manual (user, later):** run `python scripts/fetch_discord_assets.py`, then upload everything in `out/discord-assets/` to the Discord app's Art Assets (keys = filenames).
 
+> Note (from execution): Discord Art Assets require **>=512x512**, but the wiki URLs are 120px thumbnails. The committed script therefore fetches a 1024px source (`_enlarge_url`) and normalizes every asset to a **512x512 PNG** padded to square via cv2 (`_to_512`) — see `scripts/fetch_discord_assets.py`. A `_to_512` unit test guards the dimensions. (cv2 + numpy are already project deps.)
+
 ### Task B2: Discord setup guide (for the user)
 
 **Files:**

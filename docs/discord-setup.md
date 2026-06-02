@@ -9,7 +9,7 @@ Three steps: create a Discord application, give us its ID, and upload the images
 
 ## 2. Upload the art assets
 1. From the repo root, run: `python scripts/fetch_discord_assets.py`
-   - Downloads every course icon plus the penguin and splash into `out/discord-assets/`, named by asset key (`rainbow_road.png`, `penguin.png`, `splash.jpg`, ...).
+   - Downloads every course icon plus the penguin and splash into `out/discord-assets/` as **512x512 PNGs** (Discord's minimum size), named by asset key (`rainbow_road.png`, `penguin.png`, `splash.png`, ...).
 2. In the Developer Portal: open your app → left sidebar **Rich Presence** → **Art Assets** → **Add Image(s)**.
 3. Drag in **all** files from `out/discord-assets/`. Discord uses the **filename (lowercased, no extension)** as the asset key, so they line up automatically with what the app references.
 4. **Save Changes.** Assets can take a few minutes to process.
