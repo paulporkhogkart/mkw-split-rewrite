@@ -1,4 +1,5 @@
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 use discord_rich_presence::{activity, DiscordIpc, DiscordIpcClient};
 
 /// The "Mario Kart World" Discord Application ID (see docs/discord-setup.md).
@@ -15,11 +16,23 @@ pub struct Presence {
 }
 
 /// True when the next payload differs from the last one we sent. We push only on
-/// a real change and NEVER re-send an identical payload: re-sending makes Discord
-/// reset the activity (and its implicit elapsed indicator), which is the timer
-/// flicker we want to avoid. We also never set `timestamps`, so there is no timer.
+/// a real change and never re-send an identical payload (re-sending made Discord
+/// reset the activity, which restarted the elapsed timer on every screen change).
 pub fn changed(last: Option<&Presence>, next: &Presence) -> bool {
     last != Some(next)
+}
+
+/// App launch time as Unix epoch milliseconds (Discord's timestamp unit), captured
+/// once. Used as a FIXED activity start so Discord shows a continuous "since launch"
+/// elapsed timer that does not reset when the presence updates.
+static LAUNCH_MS: OnceLock<i64> = OnceLock::new();
+fn launch_ms() -> i64 {
+    *LAUNCH_MS.get_or_init(|| {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0)
+    })
 }
 
 struct State {
@@ -59,6 +72,7 @@ fn try_connect(st: &mut State) {
 pub fn discord_set_presence(payload: Presence) {
     let mut guard = STATE.lock().unwrap();
     let st = ensure_state(&mut guard);
+    launch_ms(); // prime the launch time at the first presence attempt (~app launch)
     try_connect(st);
     if !st.connected {
         st.last_payload = Some(payload); // retry on the next call
@@ -79,7 +93,6 @@ pub fn discord_set_presence(payload: Presence) {
     let blabel = payload.button_label.clone().unwrap_or_default();
     let burl = payload.button_url.clone().unwrap_or_default();
 
-    // Deliberately NO timestamps() — we never want an elapsed timer.
     let mut act = activity::Activity::new();
     if !details.is_empty() {
         act = act.details(&details);
@@ -98,6 +111,9 @@ pub fn discord_set_presence(payload: Presence) {
     if !blabel.is_empty() && !burl.is_empty() {
         act = act.buttons(vec![activity::Button::new(&blabel, &burl)]);
     }
+    // Fixed start = app launch, so the elapsed timer counts continuously since
+    // launch and never resets across presence updates.
+    act = act.timestamps(activity::Timestamps::new().start(launch_ms()));
 
     if let Some(c) = st.client.as_mut() {
         match c.set_activity(act) {
