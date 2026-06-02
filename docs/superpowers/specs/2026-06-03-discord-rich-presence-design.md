@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-03
 **Status:** Approved (design); pending implementation plan
-**Component:** Tauri frontend + a small Rust module (decoupled, plugin-like). No change to the Python engine's role beyond one small read-only PB-splits emit.
+**Component:** Tauri frontend + a small Rust module (decoupled, plugin-like). The one engine change is a small, generally-useful split-persistence addition (schema + save + a read-only emit) that the live PB delta depends on.
 
 ## 1. Goal
 
@@ -157,13 +157,15 @@ A repo script (`scripts/fetch_discord_assets.py` or similar) downloads the 30 co
 - Exposed as a writable/derived store, consumed by `discord.js`. App-owned (not Discord's concern), and available to surface elsewhere in the UI later.
 - Debounce: only count one reset per entry into a reset screen (not per frame) — the store transitions, so it naturally fires once per change.
 
-## 11. Live PB delta — small backend assist
+## 11. Live PB delta — requires persisting lap splits
 
-The delta compares the player's time at each completed lap to the PB's time at the same lap.
+**Storage gap (confirmed):** the engine already stores PBs (the `replays` row with `is_pb=1` — `total_time`/`total_time_ms`, character/costume/kart, plus a `replay_points` minimap trail) but stores **no per-lap split times** anywhere. `ts.splits` (`race/timestamp.py`) is emitted live in `finish`/`split_recorded` then discarded. The live delta needs the PB's per-lap splits, so we add split persistence — also the foundation for future split-history/sector features.
 
-- **New IPC:** command `get_pb_splits {course}` → event `pb_splits {course, splits:[ms,…], total_ms}` (or `splits:null` if no PB). This is a natural extension of the existing PB/replay IPC family (`pb_achieved`, `pb_export`, `replay_paths`) and keeps presentation out of Python — it only ships raw numbers.
-- **Frontend:** on entering `RACING`, `discord.js` (or the existing RACING-entry fetch hook in `App.svelte`) requests `get_pb_splits` for the current course and caches the result. At each `lap_update`, it compares the player's cumulative time at the just-completed lap to the PB's cumulative at that lap → signed delta → "ahead/behind" text.
-- Exact split arithmetic (per-lap vs cumulative) is resolved during implementation against the real `lap_update`/replay split semantics; the data needed and the ownership are fixed here.
+- **Schema:** new `replay_splits` table mirroring `replay_points`: `replay_id INTEGER REFERENCES replays(id) ON DELETE CASCADE`, `lap INTEGER`, `split_ms INTEGER`, `split_text TEXT`. Added via a migration.
+- **Capture:** `save_run(...)` (`database/replay_repo.py`) gains a `lap_splits` argument and inserts one row per lap. The data is already in hand at save time — `ts.splits` is already threaded to `MinimapRecorder.save(...)` (see `main.py` `lap_splits=ts.splits`).
+- **New IPC:** command `get_pb_splits {course}` → event `pb_splits {course, splits:{lap:split_ms,…}|null}`. Read-only, consistent with the existing PB/replay IPC family (`pb_achieved`, `pb_export`, `replay_paths`); ships raw numbers only.
+- **Frontend:** on entering `RACING`, request `get_pb_splits` for the current course and cache it. At each `lap_update` (a completed lap), compare the player's cumulative time through that lap to the PB's cumulative through the same lap → signed delta → "ahead/behind PB" text. Player cumulative comes from summing the live per-lap splits already arriving via `lap_update`.
+- **Migration caveat:** PBs already in the DB have no stored splits, so the live delta is unavailable for them until a fresh run is recorded; line 2 falls back to character/kart (the no-PB rule §7) meanwhile. New runs capture splits going forward.
 
 ## 12. Settings
 
@@ -198,6 +200,7 @@ Discord rate-limits activity updates (~5 per 20s). Our triggers (screen change, 
 
 - **Unit (JS):** slugify (all 30 display names → expected slugs), screen→payload mapping per row of §6, line-2 selection logic across lap states and no-PB, time/delta formatting (3 dp, trailing zeros, ahead/behind, ≥60s).
 - **Unit (Rust):** payload→Activity construction (button present/absent, fallback image), debounce/coalesce timing, graceful behaviour when connect fails.
+- **Unit (Python, pytest):** `save_run` persists lap splits into `replay_splits`; `get_pb_splits` returns the PB's splits (and `null` when no PB / no splits).
 - **Manual:** with Discord open, walk the lifecycle (menus → setup → race with/without PB → ghost → results), toggle the setting, set/clear the Twitch URL, and quit (presence clears).
 
 ## 17. Future (out of scope now)
