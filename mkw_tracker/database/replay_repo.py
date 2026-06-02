@@ -23,6 +23,7 @@ def save_run(
     kart: Optional[str] = None,
     player: str = "me",
     source: str = "local",
+    lap_splits: Optional[dict] = None,
 ) -> int:
     """
     Insert a new replay row and its points.  Returns the new replay id.
@@ -45,6 +46,12 @@ def save_run(
         conn.executemany(
             "INSERT INTO replay_points(replay_id, t_ms, cx, cy, score) VALUES(?,?,?,?,?)",
             [(replay_id, t, cx, cy, sc) for t, cx, cy, sc in points],
+        )
+
+    if lap_splits:
+        conn.executemany(
+            "INSERT INTO replay_splits(replay_id, lap, split_ms, split_text) VALUES(?,?,?,?)",
+            [(replay_id, int(lap), _to_ms(txt), txt) for lap, txt in sorted(lap_splits.items())],
         )
 
     conn.commit()
