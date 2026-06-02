@@ -17,6 +17,7 @@
   import DeviceSelectors   from "./DeviceSelectors.svelte";
   import LanguageSelectors from "./LanguageSelectors.svelte";
   import { invoke }        from "@tauri-apps/api/core";
+  import { discordEnabled, twitchUrl } from "../lib/discordSettings.js";
 
   // ── Modal open/close ──────────────────────────────────────────────────────────
   export let wizardOpen    = false;
@@ -98,6 +99,16 @@
               {onSwitch2LanguageChange}
               idPrefix="wiz"
             />
+            <div class="discord-section">
+              <h3 class="discord-heading">Discord</h3>
+              <label class="discord-row">
+                <input type="checkbox" bind:checked={$discordEnabled} />
+                <span>Show Discord Rich Presence</span>
+              </label>
+              <label class="discord-label" for="twitch-url">Twitch URL (optional)</label>
+              <input id="twitch-url" class="discord-input" type="text" bind:value={$twitchUrl}
+                placeholder="https://twitch.tv/yourname" />
+            </div>
             <button class="btn-primary btn-lg" on:click={() => onGoStep("camera")}>Continue</button>
           </div>
 
@@ -293,4 +304,29 @@
   .btn-sm:hover { background: var(--raised); color: var(--tx); }
 
   .hint { font-size: .7rem; color: var(--tx-dim); margin: 0; line-height: 1.55; }
+
+  /* Discord section */
+  .discord-section {
+    display: flex; flex-direction: column; gap: .35rem;
+    padding: .55rem .7rem; border-radius: var(--r);
+    background: var(--panel-2); border: 1px solid var(--bd);
+  }
+  .discord-heading {
+    font-size: .63rem; color: var(--tx-mut); font-weight: 600;
+    text-transform: uppercase; letter-spacing: .06em; margin: 0;
+  }
+  .discord-row {
+    display: flex; align-items: center; gap: .45rem;
+    font-size: .72rem; color: var(--tx); cursor: pointer;
+  }
+  .discord-row input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
+  .discord-label { font-size: .7rem; color: var(--tx-dim); margin: .1rem 0 0; }
+  .discord-input {
+    background: var(--panel); color: var(--tx); border: 1px solid var(--bd);
+    border-radius: var(--r); padding: .22rem .45rem;
+    font-family: inherit; font-size: .72rem; width: 100%; box-sizing: border-box;
+    transition: border-color .12s;
+  }
+  .discord-input:focus { outline: none; border-color: var(--accent); }
+  .discord-input::placeholder { color: var(--tx-dim); }
 </style>
