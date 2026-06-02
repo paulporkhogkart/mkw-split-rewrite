@@ -24,16 +24,13 @@ Run all pytest with: `python -m pytest tests/test_pb_splits.py -v` (from repo ro
 - Modify: `mkw_tracker/database/migrations.py` (schema string)
 - Test: `tests/test_pb_splits.py` (create)
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_pb_splits.py
 """Tests for per-lap split persistence and the get_pb_splits IPC."""
-import json
-from unittest.mock import MagicMock
-
 from mkw_tracker.database.connection import get_connection
-from mkw_tracker.database.replay_repo import save_run, get_pb_splits
+from mkw_tracker.database.migrations import apply_migrations
 
 
 def test_replay_splits_table_exists(memdb):
@@ -41,50 +38,71 @@ def test_replay_splits_table_exists(memdb):
         "SELECT name FROM sqlite_master WHERE type='table' AND name='replay_splits'"
     ).fetchone()
     assert row is not None
+
+
+def test_replay_splits_added_to_existing_db(memdb):
+    """Pre-v4 DBs must gain the table via migration, not only fresh DBs."""
+    conn = get_connection()
+    conn.execute("DROP TABLE IF EXISTS replay_splits")
+    conn.execute("UPDATE schema_version SET version=3")
+    conn.commit()
+    apply_migrations(memdb)
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='replay_splits'"
+    ).fetchone()
+    assert row is not None
 ```
 
-- [ ] **Step 2: Run it; verify it fails**
+(Later tasks in this file add their own imports — `json`, `MagicMock`, `save_run`, `get_pb_splits` — when first used.)
 
-Run: `python -m pytest tests/test_pb_splits.py::test_replay_splits_table_exists -v`
-Expected: FAIL — table missing (row is None) or import error for `get_pb_splits`.
+- [ ] **Step 2: Run; verify they fail**
 
-- [ ] **Step 3: Add the table to the schema**
+Run: `python -m pytest tests/test_pb_splits.py -v`
+Expected: FAIL — `replay_splits` does not exist.
 
-In `mkw_tracker/database/migrations.py`, inside the `_SCHEMA` string, after the `replay_points` table + its index, add:
+- [ ] **Step 3: Add a versioned migration**
 
-```sql
+The migrator (`apply_migrations`) is **sequential and versioned** — `_SCHEMA_V1` only runs on a fresh DB, so existing DBs (currently at v3) need a new version step. In `mkw_tracker/database/migrations.py`:
+
+(a) Add a module-level constant near the other schema strings:
+
+```python
+_SCHEMA_V4 = """
 CREATE TABLE IF NOT EXISTS replay_splits (
     replay_id  INTEGER NOT NULL REFERENCES replays(id) ON DELETE CASCADE,
     lap        INTEGER NOT NULL,
     split_ms   INTEGER,
     split_text TEXT
 );
-
 CREATE INDEX IF NOT EXISTS idx_replay_splits_id ON replay_splits(replay_id);
+"""
 ```
 
-(The schema is applied with `CREATE TABLE IF NOT EXISTS` on every startup, so existing DBs gain the table on next launch — no version bump needed.)
-
-- [ ] **Step 4: Add a temporary stub so the import resolves**
-
-In `mkw_tracker/database/replay_repo.py`, add a stub (replaced in A3) so `test_pb_splits.py` imports cleanly:
+(b) At the end of `apply_migrations`, after the `if current < 3:` block, add:
 
 ```python
-def get_pb_splits(course: str, player: str = "me"):
-    """Return {lap: split_ms} for the course PB, or None. (Implemented in A3.)"""
-    return None
+    cur.execute("SELECT version FROM schema_version")
+    row = cur.fetchone()
+    current = row[0] if row else 0
+    if current < 4:
+        conn.executescript(_SCHEMA_V4)
+        conn.execute("UPDATE schema_version SET version=4")
+        conn.commit()
+        print("[DB] Schema migrated to v4 (replay_splits)")
 ```
 
-- [ ] **Step 5: Run it; verify it passes**
+Fresh DBs reach it via v1→v4; existing v3 DBs via the v4 step. Do **not** put the DDL in `_SCHEMA_V1`.
 
-Run: `python -m pytest tests/test_pb_splits.py::test_replay_splits_table_exists -v`
-Expected: PASS.
+- [ ] **Step 4: Run; verify pass**
 
-- [ ] **Step 6: Commit**
+Run: `python -m pytest tests/test_pb_splits.py -v`
+Expected: PASS (both).
+
+- [ ] **Step 5: Commit**
 
 ```bash
-git add mkw_tracker/database/migrations.py mkw_tracker/database/replay_repo.py tests/test_pb_splits.py
-git commit -m "feat(db): add replay_splits table"
+git add mkw_tracker/database/migrations.py tests/test_pb_splits.py
+git commit -m "feat(db): add replay_splits table (schema v4)"
 ```
 
 ### Task A2: `save_run` persists `lap_splits`
@@ -145,7 +163,7 @@ git commit -m "feat(db): save_run persists per-lap splits"
 ### Task A3: `get_pb_splits` repo function
 
 **Files:**
-- Modify: `mkw_tracker/database/replay_repo.py` (replace the A1 stub)
+- Modify: `mkw_tracker/database/replay_repo.py` (add `get_pb_splits`, near `get_pb`)
 - Test: `tests/test_pb_splits.py`
 
 - [ ] **Step 1: Write the failing tests**
@@ -167,7 +185,7 @@ def test_get_pb_splits_none_when_no_pb(memdb):
 Run: `python -m pytest tests/test_pb_splits.py -k get_pb_splits -v`
 Expected: FAIL — stub returns None for the first test.
 
-- [ ] **Step 3: Implement (replace the A1 stub)**
+- [ ] **Step 3: Implement (add `get_pb_splits` near `get_pb`)**
 
 ```python
 def get_pb_splits(course: str, player: str = "me"):
