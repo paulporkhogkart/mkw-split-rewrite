@@ -2,7 +2,7 @@
 and slugify(display name) must equal the slug for every known course."""
 import numpy as np
 
-from scripts.fetch_discord_assets import COURSE_ASSETS, slugify, _to_512
+from scripts.fetch_discord_assets import COURSE_ASSETS, slugify, _normalize
 from mkw_tracker.detection.selection import KNOWN_COURSES
 
 
@@ -26,10 +26,12 @@ def test_slugify_matches_known_courses():
         assert slugify(name) == slug
 
 
-def test_to_512_normalizes_to_square_512_bgra():
-    # Landscape 3-channel input -> 512x512x4 (Discord requires >=512x512).
-    out = _to_512(np.zeros((100, 200, 3), np.uint8))
-    assert out.shape == (512, 512, 4)
-    # Already-square small input is upscaled, not left small.
-    out2 = _to_512(np.zeros((64, 64, 4), np.uint8))
+def test_normalize_keeps_aspect_min_512():
+    # Landscape 2:1 -> shorter side becomes 512, aspect preserved (rectangular).
+    out = _normalize(np.zeros((100, 200, 3), np.uint8))
+    assert out.shape == (512, 1024, 4)
+    # Square stays square at 512.
+    out2 = _normalize(np.zeros((64, 64, 4), np.uint8))
     assert out2.shape == (512, 512, 4)
+    # Both dimensions are at least Discord's 512 minimum.
+    assert min(out.shape[:2]) >= 512 and min(out2.shape[:2]) >= 512

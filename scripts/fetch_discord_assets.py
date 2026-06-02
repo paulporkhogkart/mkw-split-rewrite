@@ -69,19 +69,18 @@ def _download_bytes(url: str) -> bytes:
         return r.read()
 
 
-def _to_512(img: np.ndarray) -> np.ndarray:
-    """Center-crop to square (no stretching - sides are cropped off) and resize
-    to TARGET x TARGET BGRA."""
+def _normalize(img: np.ndarray) -> np.ndarray:
+    """Scale so the shorter side is TARGET px, preserving aspect ratio (rectangular -
+    no cropping, no stretching). Discord requires both dimensions >= 512."""
     if img.ndim == 2:
         img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGRA)
     elif img.shape[2] == 3:
         img = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
     h, w = img.shape[:2]
-    side = min(h, w)
-    y0, x0 = (h - side) // 2, (w - side) // 2
-    crop = img[y0:y0 + side, x0:x0 + side]
-    interp = cv2.INTER_AREA if side > TARGET else cv2.INTER_CUBIC
-    return cv2.resize(crop, (TARGET, TARGET), interpolation=interp)
+    scale = TARGET / min(h, w)
+    nh, nw = max(TARGET, round(h * scale)), max(TARGET, round(w * scale))
+    interp = cv2.INTER_AREA if scale < 1 else cv2.INTER_CUBIC
+    return cv2.resize(img, (nw, nh), interpolation=interp)
 
 
 def _fetch_512_png(url: str) -> bytes:
@@ -93,7 +92,7 @@ def _fetch_512_png(url: str) -> bytes:
             img = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_UNCHANGED)
             if img is None:
                 continue
-            ok, buf = cv2.imencode(".png", _to_512(img))
+            ok, buf = cv2.imencode(".png", _normalize(img))
             if ok:
                 return buf.tobytes()
         except Exception as e:  # noqa: BLE001 - try the fallback URL
@@ -120,7 +119,7 @@ def main():
 
     if PENGUIN_SRC.exists():
         peng = cv2.imread(str(PENGUIN_SRC), cv2.IMREAD_UNCHANGED)
-        ok, buf = cv2.imencode(".png", _to_512(peng))
+        ok, buf = cv2.imencode(".png", _normalize(peng))
         if ok:
             (out / "penguin.png").write_bytes(buf.tobytes())
 
