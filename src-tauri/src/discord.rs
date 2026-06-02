@@ -1,11 +1,8 @@
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
 use discord_rich_presence::{activity, DiscordIpc, DiscordIpcClient};
 
-/// Replace with the "Mario Kart World" Discord Application ID (see docs/discord-setup.md).
-const DISCORD_APP_ID: &str = "REPLACE_WITH_APPLICATION_ID";
-/// Minimum spacing between activity updates (Discord rate-limits ~5 / 20s).
-const MIN_INTERVAL: Duration = Duration::from_millis(2500);
+/// The "Mario Kart World" Discord Application ID (see docs/discord-setup.md).
+const DISCORD_APP_ID: &str = "1511489327291564134";
 
 #[derive(Clone, Default, PartialEq, serde::Deserialize)]
 pub struct Presence {
@@ -17,18 +14,17 @@ pub struct Presence {
     pub button_url: Option<String>,
 }
 
-/// Pure debounce decision: send if enough time passed OR the payload changed.
-pub fn should_send(now: Instant, last_sent: Option<Instant>, changed: bool) -> bool {
-    match last_sent {
-        None => true,
-        Some(t) => changed || now.duration_since(t) >= MIN_INTERVAL,
-    }
+/// True when the next payload differs from the last one we sent. We push only on
+/// a real change and NEVER re-send an identical payload: re-sending makes Discord
+/// reset the activity (and its implicit elapsed indicator), which is the timer
+/// flicker we want to avoid. We also never set `timestamps`, so there is no timer.
+pub fn changed(last: Option<&Presence>, next: &Presence) -> bool {
+    last != Some(next)
 }
 
 struct State {
     client: Option<DiscordIpcClient>,
     connected: bool,
-    last_sent: Option<Instant>,
     last_payload: Option<Presence>,
 }
 
@@ -36,12 +32,7 @@ static STATE: Mutex<Option<State>> = Mutex::new(None);
 
 fn ensure_state(s: &mut Option<State>) -> &mut State {
     if s.is_none() {
-        *s = Some(State {
-            client: None,
-            connected: false,
-            last_sent: None,
-            last_payload: None,
-        });
+        *s = Some(State { client: None, connected: false, last_payload: None });
     }
     s.as_mut().unwrap()
 }
@@ -70,15 +61,17 @@ pub fn discord_set_presence(payload: Presence) {
     let st = ensure_state(&mut guard);
     try_connect(st);
     if !st.connected {
-        st.last_payload = Some(payload);
+        st.last_payload = Some(payload); // retry on the next call
         return;
     }
 
-    let changed = st.last_payload.as_ref() != Some(&payload);
-    if !should_send(Instant::now(), st.last_sent, changed) {
+    // Only push when the rendered content actually changed; never re-send the
+    // same payload (avoids resetting Discord's activity / elapsed indicator).
+    if !changed(st.last_payload.as_ref(), &payload) {
         return;
     }
 
+    // Hold owned strings so the borrowed Activity stays valid for set_activity.
     let details = payload.details.clone().unwrap_or_default();
     let state_str = payload.state.clone().unwrap_or_default();
     let large = payload.large_image.clone().unwrap_or_default();
@@ -86,6 +79,7 @@ pub fn discord_set_presence(payload: Presence) {
     let blabel = payload.button_label.clone().unwrap_or_default();
     let burl = payload.button_url.clone().unwrap_or_default();
 
+    // Deliberately NO timestamps() — we never want an elapsed timer.
     let mut act = activity::Activity::new();
     if !details.is_empty() {
         act = act.details(&details);
@@ -107,10 +101,7 @@ pub fn discord_set_presence(payload: Presence) {
 
     if let Some(c) = st.client.as_mut() {
         match c.set_activity(act) {
-            Ok(_) => {
-                st.last_sent = Some(Instant::now());
-                st.last_payload = Some(payload);
-            }
+            Ok(_) => st.last_payload = Some(payload),
             Err(e) => {
                 log::debug!("[discord] set_activity failed: {e}");
                 st.connected = false;
@@ -129,6 +120,7 @@ pub fn discord_clear_presence() {
     st.last_payload = None;
 }
 
+/// Called on app exit.
 pub fn shutdown() {
     if let Ok(mut guard) = STATE.lock() {
         if let Some(st) = guard.as_mut() {
@@ -143,19 +135,22 @@ pub fn shutdown() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
-    fn first_send_always_allowed() {
-        assert!(should_send(Instant::now(), None, false));
+    fn first_payload_is_a_change() {
+        assert!(changed(None, &Presence::default()));
     }
+
     #[test]
-    fn changed_payload_sends_immediately() {
-        let now = Instant::now();
-        assert!(should_send(now, Some(now), true));
+    fn identical_payload_is_not_a_change() {
+        let p = Presence { details: Some("Idle".into()), ..Default::default() };
+        assert!(!changed(Some(&p), &p.clone()));
     }
+
     #[test]
-    fn unchanged_payload_waits_for_interval() {
-        let now = Instant::now();
-        assert!(!should_send(now, Some(now), false));
-        assert!(should_send(now + MIN_INTERVAL, Some(now), false));
+    fn different_payload_is_a_change() {
+        let a = Presence { details: Some("Idle".into()), ..Default::default() };
+        let b = Presence { details: Some("In the menus".into()), ..Default::default() };
+        assert!(changed(Some(&a), &b));
     }
 }
