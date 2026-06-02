@@ -425,13 +425,15 @@
   $: if (_gainNode) _gainNode.gain.value = feedMuted ? 0 : feedVolume;
 
   // ── Wizard step definitions ───────────────────────────────────────────────────
-  const FIRST_TIME_STEPS = ["language", "camera", "done"];
+  // First-run finishes straight into the live app from the camera step - no
+  // separate "done" confirmation screen (the running app is its own confirmation).
+  const FIRST_TIME_STEPS = ["language", "camera"];
   // Post-setup, the ⚙ modal is a slim Settings panel: Language + Camera only.
   // Screen/tell/HUD/template editing now lives in the Edit Screens view.
   const RERUN_STEPS      = ["language", "camera"];
   const STEP_LABELS = {
     language: "Language", camera: "Video", screens: "Screens",
-    selection: "Selection", hud: "HUD", templates: "Templates", done: "Done",
+    selection: "Selection", hud: "HUD", templates: "Templates",
   };
   $: STEPS = setupComplete ? RERUN_STEPS : FIRST_TIME_STEPS;
 
@@ -1469,7 +1471,7 @@
       </nav>
 
       <div class="wiz-body setup-wiz-body">
-        <!-- language / camera / done steps -->
+        <!-- language / camera steps -->
         {#if wizardStep === "language"}
           <div class="step-centred">
             <h2>{tr("lang.title")}</h2>
@@ -1514,11 +1516,11 @@
               />
               <div class="cam-prereq" class:cam-prereq-ok={bothCamerasOk}>
                 {#if bothCamerasOk}
-                  <span class="cam-prereq-title cam-prereq-title-ok">Camera sharing is working</span>
-                  <p class="cam-prereq-body">Both feeds are connected to the same device. You're good to continue.</p>
+                  <span class="cam-prereq-title cam-prereq-title-ok">Camera sharing enabled</span>
+                  <p class="cam-prereq-body">Both feeds are reading the same device.</p>
                 {:else}
-                  <span class="cam-prereq-title">Required - enable Windows camera sharing</span>
-                  <p class="cam-prereq-body">pbenguin needs simultaneous access to the same capture card as the app preview. Windows blocks this by default. Do this once before continuing:</p>
+                  <span class="cam-prereq-title">Camera sharing · required</span>
+                  <p class="cam-prereq-body">pbenguin needs simultaneous access to the same capture card as the app preview. Windows blocks this by default. Set it once before continuing:</p>
                   {#if trackerCameraPaused}
                     <div class="cam-release-bar cam-release-bar-released">
                       <span class="cam-release-dot"></span>
@@ -1535,13 +1537,13 @@
                     </div>
                   {/if}
                   <ol class="cam-steps">
-                    <li>Click <strong>Open Windows Camera Settings</strong> below</li>
-                    <li>Find your capture card → <strong>Advanced camera options</strong> → <strong>Edit</strong></li>
+                    <li>Click <strong>Open Windows camera settings</strong> below</li>
+                    <li>Find your capture card, open <strong>Advanced camera options</strong>, then <strong>Edit</strong></li>
                     <li>Turn on <strong>"Allow multiple apps to use camera at the same time"</strong></li>
                     <li>Return here, then <button class="btn-sm" on:click={retryNow}>Retry</button></li>
                   </ol>
                   <div class="cam-prereq-actions">
-                    <button class="btn-primary" on:click={() => invoke("open_url",{url:"ms-settings:camera"}).catch(()=>{})}>Open Windows Camera Settings →</button>
+                    <button class="btn-primary" on:click={() => invoke("open_url",{url:"ms-settings:camera"}).catch(()=>{})}>Open Windows camera settings</button>
                   </div>
                 {/if}
               </div>
@@ -1549,22 +1551,15 @@
               <div class="cam-actions">
                 <p class="hint">Both feeds must show your capture card output before you can continue.</p>
                 <div class="cam-nav">
-                  <button class="btn-nav" on:click={()=>goStep("language")}>← Back</button>
-                  <button class="btn-primary" disabled={!bothCamerasOk} on:click={()=>goStep("done")}>
-                    Next →
+                  <button class="btn-nav" on:click={()=>goStep("language")}>Back</button>
+                  <button class="btn-primary" disabled={!bothCamerasOk} on:click={completeSetup}>
+                    Finish setup
                   </button>
                 </div>
               </div>
             </div>
           </div>
 
-        {:else if wizardStep === "done"}
-          <div class="step-centred">
-            <div class="done-check">✓</div>
-            <h2>Setup Complete</h2>
-            <p>Your templates are saved and ready.</p>
-            <button class="btn-primary btn-lg" on:click={completeSetup}>Start Tracking →</button>
-          </div>
         {/if}
       </div>
     </div>
@@ -1668,7 +1663,6 @@
   {STEP_LABELS}
   onGoStep={goStep}
   onClose={closeWizard}
-  onComplete={completeSetup}
   bind:wizVideoEl
   {cameraOk}
   {cameraStatus}
@@ -1808,7 +1802,7 @@
     min-height: 0;
   }
 
-  .log-line  { font-size: .65rem; color: var(--accent-soft); white-space: pre-wrap; word-break: break-all; line-height: 1.5; padding: 0 2px; font-family: var(--mono); }
+  .log-line  { font-size: .65rem; color: var(--tx-mut); white-space: pre-wrap; word-break: break-all; line-height: 1.5; padding: 0 2px; font-family: var(--mono); }
   .log-empty { font-size: .65rem; color: var(--tx-dim); font-style: italic; padding: 4px 2px; }
   .log-error { color: var(--err); font-style: normal; }
 
@@ -1875,14 +1869,15 @@
     cursor: pointer; white-space: nowrap; transition: color .12s, background .12s;
   }
   .wiz-tab:hover { background: var(--panel-2); color: var(--tx-mut); }
-  .wiz-tab.active { background: var(--raised); color: var(--accent); border-bottom: 2px solid var(--accent); margin-bottom: -1px; }
+  /* Active step: neutral text + thin accent underline (matches ToolsPanel .tab.on),
+     not blue text. The accent is only ever a sliver in this app. */
+  .wiz-tab.active { color: var(--tx); box-shadow: inset 0 -2px 0 var(--accent); }
   .wiz-body { flex: 1; overflow: auto; padding: 1rem; min-height: 0; }
 
   /* Step: centred */
   .step-centred { max-width: 560px; margin: 0 auto; padding: .5rem 0; display: flex; flex-direction: column; gap: .75rem; }
-  .step-centred h2 { color: var(--tx); font-size: 1.05rem; }
+  .step-centred h2 { color: var(--tx); font-size: .95rem; font-weight: 600; letter-spacing: .01em; }
   .step-centred p  { font-size: .78rem; color: var(--tx-mut); line-height: 1.65; }
-  .done-check { font-size: 2.2rem; color: var(--ok); }
 
   /* Camera step (preview panes live in SourceCheck.svelte) */
   .cam-setup { display: flex; flex-direction: column; gap: .9rem; }
@@ -1891,10 +1886,10 @@
   .cam-nav     { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
   .cam-prereq {
     padding: .55rem .7rem; border-radius: var(--r);
-    background: rgba(61,124,194,.07); border: 1px solid rgba(61,124,194,.25);
+    background: var(--panel-2); border: 1px solid var(--bd);
     display: flex; flex-direction: column; gap: .3rem;
   }
-  .cam-prereq-title        { font-size: .72rem; color: var(--accent); font-weight: 600; }
+  .cam-prereq-title        { font-size: .63rem; color: var(--tx-mut); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
   .cam-prereq-title-ok     { color: var(--ok); }
   .cam-prereq-ok           { background: rgba(90,168,106,.05); border-color: rgba(90,168,106,.2); }
   .cam-prereq-body    { font-size: .68rem; color: var(--tx-dim); margin: 0; line-height: 1.55; }
@@ -1920,12 +1915,14 @@
 
 
   /* Buttons */
+  /* Primary action: neutral text on a subtle accent-tint fill + accent border
+     (the app's .reg.sel idiom), never blue text. */
   .btn-primary {
-    background: var(--accent-bg); color: var(--accent); border: 1px solid var(--bd); border-radius: var(--r);
+    background: var(--accent-bg); color: var(--tx); border: 1px solid var(--accent); border-radius: var(--r);
     padding: .28rem .7rem; font-family: inherit; font-size: .72rem;
-    cursor: pointer; white-space: nowrap; transition: background .12s;
+    cursor: pointer; white-space: nowrap; transition: background .12s, border-color .12s;
   }
-  .btn-primary:hover:not(:disabled) { background: var(--bd); }
+  .btn-primary:hover:not(:disabled) { background: var(--raised); }
   .btn-primary:disabled { opacity: .35; cursor: default; }
   .btn-primary.btn-lg { padding: .45rem 1.1rem; font-size: .85rem; margin-top: .5rem; }
   .btn-nav {

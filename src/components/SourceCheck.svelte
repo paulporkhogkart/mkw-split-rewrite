@@ -3,7 +3,6 @@
   // The left pane's <video> element is owned by App.svelte (to preserve the
   // `wizVideoEl` binding used by `$: wizVideoEl.srcObject = videoStream`).
   // App passes `bind:videoEl` so the bind:this wires into App's wizVideoEl.
-  import { C } from "../lib/palette.js";
 
   export let videoEl = null;      // bind:videoEl → wizVideoEl in App.svelte
 
@@ -32,16 +31,14 @@
         <div class="preview-placeholder"><span class="spin">◌</span><span>Opening…</span></div>
       {:else if cameraStatus === "busy"}
         <div class="preview-placeholder">
-          <span class="preview-icon">⊗</span>
           <span class="cam-pane-err-label">Blocked - device in exclusive use</span>
         </div>
       {:else if cameraStatus === "error"}
         <div class="preview-placeholder">
-          <span class="preview-icon">⊗</span><span class="cam-pane-err-label">Camera error</span>
+          <span class="cam-pane-err-label">Camera error</span>
         </div>
       {:else if trackerCameraPaused}
         <div class="preview-placeholder">
-          <span class="preview-icon" style="color:{C.txMut}">○</span>
           <span class="cam-pane-err-label">Camera released</span>
         </div>
       {:else}
@@ -65,12 +62,10 @@
         <img src={engineFrame} alt="Engine feed" class="preview-video" style="object-fit:contain"/>
       {:else if trackerCameraPaused}
         <div class="preview-placeholder">
-          <span class="preview-icon" style="color:{C.txMut}">○</span>
           <span class="cam-pane-err-label">Camera released</span>
         </div>
       {:else if pythonCameraStatus === "error"}
         <div class="preview-placeholder">
-          <span class="preview-icon">⊗</span>
           <span class="cam-pane-err-label">Can't access device{pythonCameraError ? `: ${pythonCameraError}` : ""}</span>
         </div>
       {:else}
@@ -112,7 +107,6 @@
     gap: .35rem; font-size: .75rem; color: var(--tx-dim);
     padding: 0 .75rem; box-sizing: border-box; text-align: center;
   }
-  .preview-icon { font-size: 1.4rem; line-height: 1; }
   .spin { animation: spin 1.2s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
 </style>

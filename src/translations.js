@@ -33,7 +33,7 @@ const EN = {
   "lang.app_label":          "Application Language",
   "lang.sw2_label":          "Nintendo Switch 2 System Language",
   "lang.sw2_hint":           "Determines which image templates are used for detection (characters, courses, menus, etc.).",
-  "lang.continue":           "Continue →",
+  "lang.continue":           "Continue",
 
   // ── Camera step ──────────────────────────────────────────────────────────
   "camera.browser_label":    "Browser / App Input",

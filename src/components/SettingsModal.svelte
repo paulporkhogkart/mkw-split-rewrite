@@ -1,13 +1,12 @@
 <script>
-  // SettingsModal.svelte - wizard/settings modal shell.
+  // SettingsModal.svelte - returning-user Settings modal shell.
   //
   // Rendering decisions:
-  //   • Wizard dialog: shown when wizardOpen===true (replaces the inline {#if wizardOpen} block).
-  //   • Returning user (setupComplete===true): shows SourceCheck + DeviceSelectors +
-  //     LanguageSelectors all at once on the "camera" tab, and LanguageSelectors on the
-  //     "language" tab - matching the existing RERUN_STEPS = ["language","camera"] flow.
-  //   • First-run (setupComplete===false): Language → Camera → Done stepped flow,
-  //     exactly as before.
+  //   • Shown when wizardOpen===true, which only happens post-setup (the title-bar
+  //     gear calls openSettings → openWizard with setupComplete===true). First-time
+  //     setup uses the full-screen inline view in App.svelte, not this modal.
+  //   • Two tabs (RERUN_STEPS = ["language","camera"]): LanguageSelectors on the
+  //     "language" tab; SourceCheck + DeviceSelectors on the "camera" tab.
   //
   // The <video> element for the browser feed is rendered here (inside SourceCheck via
   // bind:videoEl) so that App.svelte's reactive statement
@@ -24,13 +23,12 @@
   export let setupComplete = false;
 
   // ── Step gating ───────────────────────────────────────────────────────────────
-  export let wizardStep = "language";   // "language" | "camera" | "done"
+  export let wizardStep = "language";   // "language" | "camera"
   export let STEPS      = [];
   export let STEP_LABELS = {};
 
   export let onGoStep   = (step) => {};
   export let onClose    = ()     => {};
-  export let onComplete = ()     => {};   // completeSetup (first-run Done)
 
   // ── Camera / device state (read-only from App) ────────────────────────────────
   export let wizVideoEl            = null;   // bind:wizVideoEl → SourceCheck bind:videoEl
@@ -100,7 +98,7 @@
               {onSwitch2LanguageChange}
               idPrefix="wiz"
             />
-            <button class="btn-primary btn-lg" on:click={() => onGoStep("camera")}>Continue →</button>
+            <button class="btn-primary btn-lg" on:click={() => onGoStep("camera")}>Continue</button>
           </div>
 
         <!-- ── CAMERA step ────────────────────────────────────────────────── -->
@@ -135,11 +133,11 @@
               {#if !setupComplete}
                 <div class="cam-prereq" class:cam-prereq-ok={bothCamerasOk}>
                   {#if bothCamerasOk}
-                    <span class="cam-prereq-title cam-prereq-title-ok">Camera sharing is working</span>
-                    <p class="cam-prereq-body">Both feeds are connected to the same device. You're good to continue.</p>
+                    <span class="cam-prereq-title cam-prereq-title-ok">Camera sharing enabled</span>
+                    <p class="cam-prereq-body">Both feeds are reading the same device.</p>
                   {:else}
-                    <span class="cam-prereq-title">Required - enable Windows camera sharing</span>
-                    <p class="cam-prereq-body">pbenguin needs simultaneous access to the same capture card as the app preview. Windows blocks this by default. Do this once before continuing:</p>
+                    <span class="cam-prereq-title">Camera sharing · required</span>
+                    <p class="cam-prereq-body">pbenguin needs simultaneous access to the same capture card as the app preview. Windows blocks this by default. Set it once before continuing:</p>
                     {#if trackerCameraPaused}
                       <div class="cam-release-bar cam-release-bar-released">
                         <span class="cam-release-dot"></span>
@@ -156,13 +154,13 @@
                       </div>
                     {/if}
                     <ol class="cam-steps">
-                      <li>Click <strong>Open Windows Camera Settings</strong> below</li>
-                      <li>Find your capture card → <strong>Advanced camera options</strong> → <strong>Edit</strong></li>
+                      <li>Click <strong>Open Windows camera settings</strong> below</li>
+                      <li>Find your capture card, open <strong>Advanced camera options</strong>, then <strong>Edit</strong></li>
                       <li>Turn on <strong>"Allow multiple apps to use camera at the same time"</strong></li>
                       <li>Return here, then <button class="btn-sm" on:click={onRetryNow}>Retry</button></li>
                     </ol>
                     <div class="cam-prereq-actions">
-                      <button class="btn-primary" on:click={() => invoke("open_url", { url: "ms-settings:camera" }).catch(() => {})}>Open Windows Camera Settings →</button>
+                      <button class="btn-primary" on:click={() => invoke("open_url", { url: "ms-settings:camera" }).catch(() => {})}>Open Windows camera settings</button>
                     </div>
                   {/if}
                 </div>
@@ -171,27 +169,13 @@
               <div class="cam-actions">
                 <p class="hint">Both feeds must show your capture card output before you can continue.</p>
                 <div class="cam-nav">
-                  <button class="btn-nav" on:click={() => onGoStep("language")}>← Back</button>
-                  {#if setupComplete}
-                    <button class="btn-primary" on:click={onClose}>Done</button>
-                  {:else}
-                    <button class="btn-primary" disabled={!bothCamerasOk} on:click={() => onGoStep("done")}>
-                      Next →
-                    </button>
-                  {/if}
+                  <button class="btn-nav" on:click={() => onGoStep("language")}>Back</button>
+                  <button class="btn-primary" on:click={onClose}>Done</button>
                 </div>
               </div>
             </div>
           </div>
 
-        <!-- ── DONE step (first-run only) ────────────────────────────────── -->
-        {:else if wizardStep === "done"}
-          <div class="step-centred">
-            <div class="done-check">✓</div>
-            <h2>Setup Complete</h2>
-            <p>Your templates are saved and ready.</p>
-            <button class="btn-primary btn-lg" on:click={onComplete}>Start Tracking →</button>
-          </div>
         {/if}
 
       </div><!-- /wiz-body -->
@@ -227,7 +211,8 @@
     cursor: pointer; white-space: nowrap; transition: color .12s, background .12s;
   }
   .wiz-tab:hover { background: var(--panel-2); color: var(--tx-mut); }
-  .wiz-tab.active { background: var(--raised); color: var(--accent); border-bottom: 2px solid var(--accent); margin-bottom: -1px; }
+  /* Active tab: neutral text + thin accent underline (matches ToolsPanel .tab.on). */
+  .wiz-tab.active { color: var(--tx); box-shadow: inset 0 -2px 0 var(--accent); }
   .wiz-tab-close {
     margin-left: auto; background: transparent; color: var(--tx-dim); border: none;
     padding: 7px 14px; font-family: inherit; font-size: .78rem; cursor: pointer;
@@ -243,7 +228,6 @@
   }
   .step-centred h2 { color: var(--tx); font-size: .95rem; font-weight: 600; letter-spacing: .01em; }
   .step-centred p  { font-size: .76rem; color: var(--tx-mut); line-height: 1.6; }
-  .done-check { font-size: 2rem; color: var(--ok); }
 
   /* Camera step layout */
   .cam-setup { display: flex; flex-direction: column; gap: .9rem; }
@@ -253,10 +237,10 @@
 
   .cam-prereq {
     padding: .55rem .7rem; border-radius: var(--r);
-    background: rgba(61,124,194,.07); border: 1px solid rgba(61,124,194,.25);
+    background: var(--panel-2); border: 1px solid var(--bd);
     display: flex; flex-direction: column; gap: .3rem;
   }
-  .cam-prereq-title     { font-size: .72rem; color: var(--accent); font-weight: 600; }
+  .cam-prereq-title     { font-size: .63rem; color: var(--tx-mut); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
   .cam-prereq-title-ok  { color: var(--ok); }
   .cam-prereq-ok        { background: rgba(90,168,106,.05); border-color: rgba(90,168,106,.2); }
   .cam-prereq-body      { font-size: .68rem; color: var(--tx-dim); margin: 0; line-height: 1.55; }
@@ -285,12 +269,14 @@
   .cam-steps strong { color: var(--tx-mut); }
 
   /* Buttons */
+  /* Primary action: neutral text on a subtle accent-tint fill + accent border
+     (the app's .reg.sel idiom), never blue text. */
   .btn-primary {
-    background: var(--accent-bg); color: var(--accent); border: 1px solid var(--bd); border-radius: var(--r);
+    background: var(--accent-bg); color: var(--tx); border: 1px solid var(--accent); border-radius: var(--r);
     padding: .28rem .7rem; font-family: inherit; font-size: .72rem;
-    cursor: pointer; white-space: nowrap; transition: background .12s;
+    cursor: pointer; white-space: nowrap; transition: background .12s, border-color .12s;
   }
-  .btn-primary:hover:not(:disabled) { background: var(--bd); }
+  .btn-primary:hover:not(:disabled) { background: var(--raised); }
   .btn-primary:disabled { opacity: .35; cursor: default; }
   .btn-primary.btn-lg { padding: .45rem 1.1rem; font-size: .85rem; margin-top: .5rem; }
   .btn-nav {
