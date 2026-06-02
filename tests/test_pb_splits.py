@@ -81,6 +81,18 @@ def test_dispatch_get_pb_splits(memdb):
     assert evt["splits"] == {"1": 41000, "2": 83456}
 
 
+def test_maybe_update_pb_returns_bool(memdb):
+    from mkw_tracker.database.replay_repo import _maybe_update_pb
+    conn = get_connection()
+    def _ins(ms):
+        return conn.execute(
+            "INSERT INTO replays(player,source,course,total_time,total_time_ms,is_pb) "
+            "VALUES('me','local','X','t',?,0)", (ms,)).lastrowid
+    assert _maybe_update_pb("X", _ins(60000), 60000, conn) is True    # no prior PB -> new PB
+    assert _maybe_update_pb("X", _ins(120000), 120000, conn) is False # slower -> not PB
+    assert _maybe_update_pb("X", _ins(59000), 59000, conn) is True    # faster -> new PB
+
+
 def test_recorder_save_forwards_lap_splits(memdb, monkeypatch):
     import mkw_tracker.minimap.recorder as rec_mod
     captured = {}

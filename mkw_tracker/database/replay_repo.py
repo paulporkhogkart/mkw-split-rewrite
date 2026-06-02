@@ -63,8 +63,11 @@ def save_run(
     return replay_id
 
 
-def _maybe_update_pb(course: str, new_id: int, new_ms: int, conn):
-    """Mark new_id as PB if it beats the existing PB for this course."""
+def _maybe_update_pb(course: str, new_id: int, new_ms: int, conn) -> bool:
+    """Mark new_id as PB if it beats the existing PB for this course.
+
+    Returns True when new_id becomes the new PB, False otherwise.
+    """
     existing = conn.execute(
         "SELECT id, total_time_ms FROM replays WHERE player='me' AND course=? AND is_pb=1",
         (course,),
@@ -78,6 +81,8 @@ def _maybe_update_pb(course: str, new_id: int, new_ms: int, conn):
         )
         conn.execute("UPDATE replays SET is_pb=1 WHERE id=?", (new_id,))
         conn.commit()
+        return True
+    return False
 
 
 def _prune_history(course: str, conn):

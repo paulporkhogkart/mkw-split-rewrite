@@ -1225,6 +1225,12 @@ def run(args):
                 _want_finish_emit = False
                 _prev_finish      = True
 
+        # Emit a PB-achieved event when the lifecycle flags a fresh personal best.
+        if getattr(lifecycle, "pending_pb_event", None) is not None:
+            _pb_course, _pb_time = lifecycle.pending_pb_event
+            ipc.emit(emit_pb_achieved(_pb_course, _pb_time))
+            lifecycle.pending_pb_event = None
+
         # Reset race-specific prev-state when the lap tracker clears (new race)
         if lap_key == (None, None) and _prev_lap != (None, None):
             _prev_lap         = (None, None)

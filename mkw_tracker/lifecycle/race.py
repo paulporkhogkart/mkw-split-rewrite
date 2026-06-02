@@ -57,6 +57,9 @@ class RaceLifecycle:
         self._paused_from_racing = False
         self._resuming_race      = False
 
+        # Set to (course, time_str) when a run sets a new PB; cleared by main loop.
+        self.pending_pb_event = None
+
         # The most recent full frame (set externally each loop iteration)
         self.current_frame = None
 
@@ -159,9 +162,14 @@ class RaceLifecycle:
                 from ..database.replay_repo import set_minimap_threshold
                 set_minimap_threshold(course, character, costume or "", new_threshold)
 
-        self._mm_rec.save(course, character=character, costume=costume,
-                          kart=sel.kart, total_time=best_total_time,
-                          lap_splits=dict(self._ts.splits))
+        replay_id = self._mm_rec.save(course, character=character, costume=costume,
+                                      kart=sel.kart, total_time=best_total_time,
+                                      lap_splits=dict(self._ts.splits))
+        if completed and best_total_time and course and replay_id is not None:
+            from ..database.replay_repo import get_pb
+            pb = get_pb(course)
+            if pb and pb.get("id") == replay_id:
+                self.pending_pb_event = (course, best_total_time)
 
     def _start_race(self, old: Screen):
         sel       = self._selection.state
