@@ -213,6 +213,12 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
         _paths = _replay_paths(_get_conn(), _course)
         ipc.emit(_emit_rp(_course, _paths))
 
+    elif t == "get_pb_splits":
+        from .database.replay_repo import get_pb_splits as _get_pb_splits
+        from .ipc.protocol import emit_pb_splits as _emit_pbs
+        _course = msg.get("course", "")
+        ipc.emit(_emit_pbs(_course, _get_pb_splits(_course)))
+
     elif t == "get_screen_thumbs":
         # Downscaled per-screen reference shots for the edit-mode graph nodes.
         # Prefer the requested language, fall back to en_uk per file; user captures
