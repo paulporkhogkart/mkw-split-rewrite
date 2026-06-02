@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { get } from "svelte/store";
 import { screen, selection, race, pbSplits } from "./stores.js";
 import { resets } from "./resets.js";
-import { discordEnabled, twitchUrl } from "./discordSettings.js";
+import { discordEnabled, twitchButtonEnabled, twitchLabel, twitchUrl } from "./discordSettings.js";
 import { computePresence, UNCHANGED } from "./discordPayload.js";
 import { parseTime } from "./discordFormat.js";
 
@@ -24,6 +24,7 @@ function snapshot() {
     playerSplits, pbSplits: get(pbSplits),
     finalTime: r.finishTime,
     twitchUrl: get(twitchUrl),
+    twitchButtonEnabled: get(twitchButtonEnabled), twitchLabel: get(twitchLabel),
   };
 }
 
@@ -35,6 +36,6 @@ function push() {
 }
 
 export function initDiscordPresence() {
-  [screen, selection, race, pbSplits, resets, discordEnabled, twitchUrl]
+  [screen, selection, race, pbSplits, resets, discordEnabled, twitchButtonEnabled, twitchLabel, twitchUrl]
     .forEach((s) => s.subscribe(() => push()));
 }

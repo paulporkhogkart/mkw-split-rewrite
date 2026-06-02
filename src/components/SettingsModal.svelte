@@ -17,7 +17,7 @@
   import DeviceSelectors   from "./DeviceSelectors.svelte";
   import LanguageSelectors from "./LanguageSelectors.svelte";
   import { invoke }        from "@tauri-apps/api/core";
-  import { discordEnabled, twitchUrl } from "../lib/discordSettings.js";
+  import { discordEnabled, twitchButtonEnabled, twitchLabel, twitchUrl } from "../lib/discordSettings.js";
 
   // ── Modal open/close ──────────────────────────────────────────────────────────
   export let wizardOpen    = false;
@@ -66,11 +66,10 @@
 {#if wizardOpen}
   <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
   <div class="modal-backdrop wiz-backdrop"
-    on:click|self={setupComplete ? onClose : undefined}
     on:keydown|self={(e) => { if (e.key === 'Escape' && setupComplete) onClose(); }}
     role="dialog" aria-modal="true"
     tabindex="-1">
-    <div class="wiz-dialog" class:wiz-dialog-narrow={wizardStep === "language"}>
+    <div class="wiz-dialog" class:wiz-dialog-narrow={wizardStep === "language" || wizardStep === "discord"}>
 
       <!-- Wizard tab bar -->
       <nav class="wiz-tabs">
@@ -99,16 +98,6 @@
               {onSwitch2LanguageChange}
               idPrefix="wiz"
             />
-            <div class="discord-section">
-              <h3 class="discord-heading">Discord</h3>
-              <label class="discord-row">
-                <input type="checkbox" bind:checked={$discordEnabled} />
-                <span>Show Discord Rich Presence</span>
-              </label>
-              <label class="discord-label" for="twitch-url">Twitch URL (optional)</label>
-              <input id="twitch-url" class="discord-input" type="text" bind:value={$twitchUrl}
-                placeholder="https://twitch.tv/yourname" />
-            </div>
             <button class="btn-primary btn-lg" on:click={() => onGoStep("camera")}>Continue</button>
           </div>
 
@@ -184,6 +173,39 @@
                   <button class="btn-primary" on:click={onClose}>Done</button>
                 </div>
               </div>
+            </div>
+          </div>
+
+        <!-- ── DISCORD step ───────────────────────────────────────────────── -->
+        {:else if wizardStep === "discord"}
+          <div class="step-centred">
+            <h2>Discord</h2>
+            <p>Show your current Mario Kart World screen, course and run as a Discord status. The elapsed time counts from when pbenguin launched.</p>
+
+            <label class="discord-row discord-master">
+              <input type="checkbox" bind:checked={$discordEnabled} />
+              <span>Enable Discord Rich Presence</span>
+            </label>
+
+            <div class="discord-section" class:discord-dim={!$discordEnabled}>
+              <h3 class="discord-heading">Twitch button</h3>
+              <label class="discord-row">
+                <input type="checkbox" bind:checked={$twitchButtonEnabled} disabled={!$discordEnabled} />
+                <span>Show a button linking to your stream</span>
+              </label>
+              <div class="discord-fields" class:discord-dim={!$discordEnabled || !$twitchButtonEnabled}>
+                <label class="discord-label" for="tw-label">Button text</label>
+                <input id="tw-label" class="discord-input" type="text" bind:value={$twitchLabel}
+                  placeholder="Watch on Twitch" disabled={!$discordEnabled || !$twitchButtonEnabled} />
+                <label class="discord-label" for="tw-url">Links to</label>
+                <input id="tw-url" class="discord-input" type="text" bind:value={$twitchUrl}
+                  placeholder="https://twitch.tv/yourname" disabled={!$discordEnabled || !$twitchButtonEnabled} />
+              </div>
+              <p class="discord-note">Appears on every screen except idle. You may not see it on your own profile, but others will.</p>
+            </div>
+
+            <div class="cam-nav" style="justify-content:flex-end">
+              <button class="btn-primary" on:click={onClose}>Done</button>
             </div>
           </div>
 
@@ -329,4 +351,9 @@
   }
   .discord-input:focus { outline: none; border-color: var(--accent); }
   .discord-input::placeholder { color: var(--tx-dim); }
+  .discord-input:disabled { opacity: .6; cursor: not-allowed; }
+  .discord-master { font-size: .8rem; }
+  .discord-fields { display: flex; flex-direction: column; gap: .35rem; }
+  .discord-note { font-size: .66rem; color: var(--tx-dim); margin: .1rem 0 0; line-height: 1.5; }
+  .discord-dim { opacity: .45; transition: opacity .15s; }
 </style>

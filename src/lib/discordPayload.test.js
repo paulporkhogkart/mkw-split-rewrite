@@ -5,7 +5,7 @@ const base = {
   screen: "RACING", course: "Rainbow Road", character: "Mario", kart: "Pipe Frame",
   resets: 12, curLap: 3, totLap: 3,
   playerSplits: { 1: 40000, 2: 80000 }, pbSplits: { 1: 40420, 2: 80310, 3: 120000 },
-  finalTime: null, isNewPb: false, twitchUrl: "",
+  finalTime: null, twitchUrl: "", twitchButtonEnabled: true, twitchLabel: "Watch on Twitch",
 };
 
 describe("computePresence", () => {
@@ -81,9 +81,31 @@ describe("computePresence", () => {
     expect(p.state).toBe("2:00.500 · Mario · Pipe Frame");
   });
 
-  it("twitch url adds a button on racing", () => {
+  it("twitch button shows on racing when enabled + url set", () => {
     const p = computePresence({ ...base, twitchUrl: "https://twitch.tv/me" });
     expect(p.button_label).toBe("Watch on Twitch");
     expect(p.button_url).toBe("https://twitch.tv/me");
+  });
+
+  it("twitch button shows on non-racing states too (menus, setup)", () => {
+    const menu = computePresence({ ...base, screen: "MAIN_MENU", twitchUrl: "https://twitch.tv/me" });
+    expect(menu.button_url).toBe("https://twitch.tv/me");
+    const setup = computePresence({ ...base, screen: "CHARACTER_SELECT", twitchUrl: "https://twitch.tv/me" });
+    expect(setup.button_url).toBe("https://twitch.tv/me");
+  });
+
+  it("no button on idle even with a url", () => {
+    const p = computePresence({ ...base, screen: "UNKNOWN", twitchUrl: "https://twitch.tv/me" });
+    expect(p.button_url).toBeUndefined();
+  });
+
+  it("no button when the button toggle is off, even with a url", () => {
+    const p = computePresence({ ...base, twitchUrl: "https://twitch.tv/me", twitchButtonEnabled: false });
+    expect(p.button_url).toBeUndefined();
+  });
+
+  it("custom button label", () => {
+    const p = computePresence({ ...base, twitchUrl: "https://twitch.tv/me", twitchLabel: "Join my stream!" });
+    expect(p.button_label).toBe("Join my stream!");
   });
 });

@@ -13,8 +13,12 @@ const SETUP = {
   COURSE_SELECT: "Choosing a track",
 };
 
-function withButton(p, twitchUrl) {
-  if (twitchUrl) { p.button_label = "Watch on Twitch"; p.button_url = twitchUrl; }
+// The Twitch button appears on every non-idle state when enabled + a URL is set.
+function withButton(p, s) {
+  if (s.twitchButtonEnabled && s.twitchUrl) {
+    p.button_label = s.twitchLabel || "Watch on Twitch";
+    p.button_url = s.twitchUrl;
+  }
   return p;
 }
 function lastCompletedDelta(s) {
@@ -28,28 +32,23 @@ function charKart(s) { return `${s.character ?? "?"} · ${s.kart ?? "?"}`; }
 export function computePresence(s) {
   const screen = s.screen;
   if (IGNORE.has(screen)) return UNCHANGED;
+  if (screen === "UNKNOWN") return { large_image: "penguin", details: "Idle" }; // idle: never a button
 
-  if (screen === "UNKNOWN") return { large_image: "penguin", details: "Idle" };
-  if (SETUP[screen]) return { large_image: "penguin", details: SETUP[screen] };
-
-  if (screen === "RACING") {
+  let p;
+  if (SETUP[screen]) {
+    p = { large_image: "penguin", details: SETUP[screen] };
+  } else if (screen === "RACING") {
     const slug = courseSlug(s.course) || "splash";
     const resets = `${s.resets} reset${s.resets === 1 ? "" : "s"}`;
     const delta = lastCompletedDelta(s);
     const line2 = delta != null
       ? `Lap ${s.curLap}/${s.totLap} · ${formatDelta(delta)}`
       : `Lap ${s.curLap}/${s.totLap} · ${charKart(s)}`;
-    return withButton({ large_image: slug, small_image: "penguin",
-                        details: `${s.course} · ${resets}`, state: line2 }, s.twitchUrl);
-  }
-
-  if (screen === "GHOST") {
+    p = { large_image: slug, small_image: "penguin", details: `${s.course} · ${resets}`, state: line2 };
+  } else if (screen === "GHOST") {
     const slug = courseSlug(s.course) || "splash";
-    return withButton({ large_image: slug, small_image: "penguin",
-                        details: s.course || "", state: "Watching a ghost" }, s.twitchUrl);
-  }
-
-  if (screen === "POST_TIME_TRIAL") {
+    p = { large_image: slug, small_image: "penguin", details: s.course || "", state: "Watching a ghost" };
+  } else if (screen === "POST_TIME_TRIAL") {
     const slug = courseSlug(s.course) || "splash";
     let suffix;
     if (s.pbSplits && Object.keys(s.pbSplits).length) {
@@ -58,10 +57,11 @@ export function computePresence(s) {
       const myMs = parseTime(s.finalTime);
       suffix = (myMs != null) ? formatDelta(myMs - pbTotal) : charKart(s);
     } else suffix = charKart(s);
-    return withButton({ large_image: slug, small_image: "penguin",
-                        details: `${s.course} · finished`, state: `${s.finalTime} · ${suffix}` }, s.twitchUrl);
+    p = { large_image: slug, small_image: "penguin", details: `${s.course} · finished`, state: `${s.finalTime} · ${suffix}` };
+  } else {
+    // TITLE / MAIN_MENU / SINGLEPLAYER_MENU / TIME_TRIALS / START_TIME_TRIAL / GALLERY / anything else
+    p = { large_image: "penguin", details: "In the menus" };
   }
 
-  // TITLE / MAIN_MENU / SINGLEPLAYER_MENU / TIME_TRIALS / START_TIME_TRIAL / GALLERY / anything else
-  return { large_image: "penguin", details: "In the menus" };
+  return withButton(p, s); // button on all non-idle states
 }
