@@ -25,6 +25,7 @@
            tells as tellsStore, rois as roisStore,
            view as viewStore,
            minimap as minimapStore, replays as replaysStore, sample as sampleStore } from "./lib/stores.js";
+  import { pbSplits as pbSplitsStore, newPbThisRun as newPbStore } from "./lib/stores.js";
 
   let appWindow = null;
   function winMinimize()       { appWindow?.minimize(); }
@@ -751,6 +752,8 @@
         // second race on the same course refreshes stale data).  Reset the guard
         // whenever we leave RACING so the next entry re-fetches.
         if (msg.to === "RACING") {
+          newPbStore.set(false);
+          if (selCourse) send({ type: "get_pb_splits", course: selCourse });
           if (!_fetchedThisRace && selCourse) {
             _fetchedThisRace = true;
             send({ type: "get_replay_paths",   course: selCourse });
@@ -785,6 +788,13 @@
         raceFinishTime = msg.total_time ?? raceFinishTime;
         if (msg.splits) raceSplits = { ...raceSplits, ...msg.splits };
         pushLog(`[finish] ${msg.result}  ${msg.total_time ?? "-"}`);
+        break;
+      case "pb_splits":
+        pbSplitsStore.set(msg.splits ?? null);
+        break;
+      case "pb_achieved":
+        newPbStore.set(true);
+        pushLog(`[pb] ${msg.course}  ${msg.time}`);
         break;
       case "error":  pushLog(`[ERR] ${msg.message}`); break;
       case "minimap_update":
