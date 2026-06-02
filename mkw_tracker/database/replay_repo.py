@@ -107,6 +107,24 @@ def get_pb(course: str, player: str = "me") -> Optional[dict]:
     return _load_replay(dict(row), conn)
 
 
+def get_pb_splits(course: str, player: str = "me"):
+    """Return {lap: split_ms} for the course PB, or None if no PB / no splits."""
+    conn = get_connection()
+    pb = conn.execute(
+        "SELECT id FROM replays WHERE player=? AND course=? AND is_pb=1",
+        (player, course),
+    ).fetchone()
+    if pb is None:
+        return None
+    rows = conn.execute(
+        "SELECT lap, split_ms FROM replay_splits WHERE replay_id=? AND split_ms IS NOT NULL ORDER BY lap",
+        (pb["id"],),
+    ).fetchall()
+    if not rows:
+        return None
+    return {int(r["lap"]): int(r["split_ms"]) for r in rows}
+
+
 def get_history(course: str, limit: int = 100) -> list:
     """Return up to *limit* history runs for 'me' (newest first)."""
     conn = get_connection()
