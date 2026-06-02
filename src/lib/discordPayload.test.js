@@ -65,15 +65,20 @@ describe("computePresence", () => {
     expect(p.state).toBe("Watching a ghost");
   });
 
-  it("results new PB", () => {
-    const p = computePresence({ ...base, screen: "POST_TIME_TRIAL", finalTime: "1:57.812", isNewPb: true });
+  it("results beating PB -> ahead delta (no 'New personal best')", () => {
+    const p = computePresence({ ...base, screen: "POST_TIME_TRIAL", finalTime: "1:59.600" });
     expect(p.details).toBe("Rainbow Road · finished");
-    expect(p.state).toBe("1:57.812 · New personal best");
+    expect(p.state).toBe("1:59.600 · 0.400s ahead of PB"); // 119600 - 120000
   });
 
-  it("results not a PB -> delta vs PB total", () => {
-    const p = computePresence({ ...base, screen: "POST_TIME_TRIAL", finalTime: "2:00.500", isNewPb: false });
+  it("results not a PB -> behind delta vs PB total", () => {
+    const p = computePresence({ ...base, screen: "POST_TIME_TRIAL", finalTime: "2:00.500" });
     expect(p.state).toBe("2:00.500 · 0.500s behind PB"); // 120500 - 120000
+  });
+
+  it("results with no PB -> character / kart", () => {
+    const p = computePresence({ ...base, screen: "POST_TIME_TRIAL", finalTime: "2:00.500", pbSplits: null });
+    expect(p.state).toBe("2:00.500 · Mario · Pipe Frame");
   });
 
   it("twitch url adds a button on racing", () => {

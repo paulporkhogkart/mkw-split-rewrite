@@ -23,4 +23,3 @@ export const view       = writable("monitor");            // "monitor" | "edit" 
 export const setup      = writable({ complete: null, open: false, step: "language" });
 export const language   = writable({ app: "en_uk", switch2: "en_uk" });
 export const pbSplits     = writable(null);  // {lap: split_ms} for current course PB | null
-export const newPbThisRun = writable(false); // set by pb_achieved, cleared on race start

@@ -52,8 +52,7 @@ export function computePresence(s) {
   if (screen === "POST_TIME_TRIAL") {
     const slug = courseSlug(s.course) || "splash";
     let suffix;
-    if (s.isNewPb) suffix = "New personal best";
-    else if (s.pbSplits && Object.keys(s.pbSplits).length) {
+    if (s.pbSplits && Object.keys(s.pbSplits).length) {
       const lastLap = Math.max(...Object.keys(s.pbSplits).map(Number));
       const pbTotal = s.pbSplits[lastLap];
       const myMs = parseTime(s.finalTime);
