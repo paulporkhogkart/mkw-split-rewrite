@@ -64,6 +64,38 @@ def test_match_variants_takes_max_and_reconfirms():
     assert name3 is None
 
 
+def test_accept_match_relative_margin():
+    """A clear winner below the absolute threshold is accepted by RELATIVE gap (a
+    fraction of its own score), so a background-shrunk absolute gap still passes; a
+    thin lead or sub-min_abs noise is not."""
+    from mkw_tracker.detection.templates import _accept_match
+    # Mario/Wario on a dark stage: absolute gap only 0.19, but relative gap is 0.38
+    assert _accept_match(0.50, 0.31, threshold=0.60, rel_margin=0.25, min_abs=0.30) is True
+    # genuinely ambiguous (runner-up nearly as high) -> reject
+    assert _accept_match(0.50, 0.45, threshold=0.60, rel_margin=0.25, min_abs=0.30) is False
+    # clear winner but pure noise (below min_abs) -> reject even at a big relative gap
+    assert _accept_match(0.18, 0.02, threshold=0.60, rel_margin=0.25, min_abs=0.30) is False
+    # clears the absolute threshold -> accept regardless of gap
+    assert _accept_match(0.95, 0.90, threshold=0.60, rel_margin=0.25, min_abs=0.30) is True
+    # rel_margin disabled -> only the absolute threshold matters
+    assert _accept_match(0.50, 0.10, threshold=0.60, rel_margin=0.0, min_abs=0.30) is False
+
+
+def test_match_variants_accepts_relative_clear_winner():
+    """match_variants wires the relative-gap path through: a confident winner is
+    returned even when no score can reach the (here impossibly high) threshold."""
+    import numpy as np
+    from mkw_tracker.detection.templates import match_variants
+    prepared = np.zeros((30, 40), np.uint8); prepared[10:20, 10:30] = 255
+    a = prepared.copy()                                   # ~1.0
+    b = np.zeros((30, 40), np.uint8); b[24:29, 34:39] = 255
+    name, _, _ = match_variants(prepared, {"A": [a], "B": [b]},
+                                threshold=1.5, rel_margin=0.25, min_abs=0.3)
+    assert name == "A"                                    # accepted via the relative-gap path
+    name2, _, _ = match_variants(prepared, {"A": [a], "B": [b]}, threshold=1.5, rel_margin=0.0)
+    assert name2 is None                                  # gap path off + unreachable threshold
+
+
 # ---------------------------------------------------------------------------
 # Capture-backed discrimination (skips without the LFS captures/ data)
 # ---------------------------------------------------------------------------

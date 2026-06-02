@@ -131,6 +131,18 @@ SELECTION_COSTUME_FLOOR = 0.30
 SELECTION_RECONFIRM_THRESHOLD         = 0.80
 SELECTION_COSTUME_RECONFIRM_THRESHOLD = 0.50
 
+# Background-robust acceptance.  The semi-transparent name plate lets the game scene
+# bleed through, so the absolute edge score swings with the background - a name can
+# drop to ~0.5 on a dark stage, and Mario's absolute lead over Wario shrinks to ~0.19.
+# But that lead is ~38% of the score on the dark stage and ~41% on the clean one: the
+# *fraction* is background-stable even though the absolute gap is not.  So accept a
+# clear winner - leading the runner-up by >= SELECTION_REL_MARGIN of its own score
+# while scoring >= SELECTION_MIN_ABS - even when it is below the per-category floor.
+# REL_MARGIN sits below the worst real relative gap (course Wario/Peach Stadium 0.34);
+# a transition frame has no clear winner, so it is still correctly rejected.
+SELECTION_REL_MARGIN = 0.25
+SELECTION_MIN_ABS    = 0.30
+
 
 def top_candidates(score_map: Dict[str, float], n: int = 5) -> list:
     """Return the top-N entries from a ``{name: score}`` map as a sorted list.
@@ -301,6 +313,7 @@ class SelectionTracker:
             char_crop, self._char_templates,
             threshold=SELECTION_CHAR_FLOOR, reconfirm_name=self.state.character,
             reconfirm_threshold=SELECTION_RECONFIRM_THRESHOLD,
+            rel_margin=SELECTION_REL_MARGIN, min_abs=SELECTION_MIN_ABS,
         )
 
         if name and name != self.state.character:
@@ -322,6 +335,7 @@ class SelectionTracker:
                 cos_crop, self._relevant_costumes,
                 threshold=SELECTION_COSTUME_FLOOR, reconfirm_name=self.state.costume,
                 reconfirm_threshold=SELECTION_COSTUME_RECONFIRM_THRESHOLD,
+                rel_margin=SELECTION_REL_MARGIN, min_abs=SELECTION_MIN_ABS,
             )
             if cname and cname != self.state.costume:
                 self._costume_loss_streak = 0
@@ -351,6 +365,7 @@ class SelectionTracker:
             kart_crop, self._kart_templates,
             threshold=SELECTION_KART_FLOOR, reconfirm_name=self.state.kart,
             reconfirm_threshold=SELECTION_RECONFIRM_THRESHOLD,
+            rel_margin=SELECTION_REL_MARGIN, min_abs=SELECTION_MIN_ABS,
         )
         if name and name != self.state.kart:
             self.state.kart      = name
@@ -369,6 +384,7 @@ class SelectionTracker:
             course_crop, self._course_templates,
             threshold=SELECTION_COURSE_FLOOR, reconfirm_name=self.state.course,
             reconfirm_threshold=SELECTION_RECONFIRM_THRESHOLD,
+            rel_margin=SELECTION_REL_MARGIN, min_abs=SELECTION_MIN_ABS,
         )
         if name and name != self.state.course:
             self.state.course      = name

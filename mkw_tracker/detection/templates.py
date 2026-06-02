@@ -99,12 +99,31 @@ def load_edge_template_groups(directory: str) -> Dict[str, list]:
     return groups
 
 
+def _accept_match(best: float, second: float, threshold: float,
+                  rel_margin: float, min_abs: float) -> bool:
+    """Accept the top candidate if it clears the absolute *threshold*, or if it is a
+    clear winner - leading the runner-up by >= *rel_margin* as a FRACTION of its own
+    score (``best - second >= rel_margin * best``) while scoring >= *min_abs*.
+
+    The *relative* gap is the point: a semi-transparent name plate over a different
+    game background scales every score down together, so the *absolute* gap shrinks
+    (Mario leads Wario by only ~0.19 on a dark stage) while the *fraction* is
+    background-stable (~0.38 dark vs ~0.41 on the clean stage).  *min_abs* rejects
+    pure noise, which can show a large relative gap by chance at tiny absolute scores.
+    """
+    if best >= threshold:
+        return True
+    return rel_margin > 0.0 and best >= min_abs and (best - second) >= rel_margin * best
+
+
 def match_variants(
     prepared: np.ndarray,
     templates: Dict[str, list],
     threshold: float = 0.7,
     reconfirm_name: Optional[str] = None,
     reconfirm_threshold: Optional[float] = None,
+    rel_margin: float = 0.0,
+    min_abs: float = 0.0,
 ) -> tuple:
     """Score *prepared* against name -> [templates], taking the best variant per name.
 
@@ -112,6 +131,11 @@ def match_variants(
     full ``{name: best_variant_score}`` (for ranked candidates).  If *reconfirm_name*
     still clears *reconfirm_threshold* it is returned without overriding it with a
     higher scorer - the cheap hysteresis that stops the readout flickering.
+
+    Acceptance (``_accept_match``): the top name is returned when it clears
+    *threshold*, OR - when *rel_margin* > 0 - when it leads the runner-up by that
+    fraction of its own score and scores >= *min_abs*, so a clearly-ranked match
+    survives a background-depressed absolute score.
     """
     def _best(tmpls: list) -> float:
         s = 0.0
@@ -130,4 +154,6 @@ def match_variants(
         return None, 0.0, scores
     best_name = max(scores, key=scores.get)
     best_score = scores[best_name]
-    return (best_name if best_score >= threshold else None), best_score, scores
+    second = sorted(scores.values(), reverse=True)[1] if len(scores) > 1 else 0.0
+    accepted = _accept_match(best_score, second, threshold, rel_margin, min_abs)
+    return (best_name if accepted else None), best_score, scores
