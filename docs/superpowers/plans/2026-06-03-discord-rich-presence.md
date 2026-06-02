@@ -547,8 +547,10 @@ git commit -m "docs: Discord Rich Presence user setup guide"
 In `src-tauri/Cargo.toml` under `[dependencies]`:
 
 ```toml
-discord-rich-presence = "0.2"
+discord-rich-presence = "1.1"
 ```
+
+> Note (from execution): the crate's current major is **1.x**, where `DiscordIpcClient::new(app_id)` is **infallible** (returns `Self`, not `Result`) — so `try_connect` constructs the client directly (`st.client = Some(DiscordIpcClient::new(DISCORD_APP_ID))`) rather than matching on a `Result`. The rest of the API (`connect`/`set_activity`/`clear_activity`/`close`, `Activity`/`Assets`/`Button`) matches the snippets below.
 
 - [ ] **Step 2: Write the module with a unit-testable debounce + payload**
 
