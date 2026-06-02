@@ -194,7 +194,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .invoke_handler(tauri::generate_handler![start_tracker, stop_tracker, restart_tracker, send_to_tracker, open_url])
+        .invoke_handler(tauri::generate_handler![start_tracker, stop_tracker, restart_tracker, send_to_tracker, open_url, discord::discord_set_presence, discord::discord_clear_presence])
         .setup(|app| {
             app.manage(SidecarState(Mutex::new(None)));
             #[cfg(target_os = "windows")]
@@ -212,6 +212,7 @@ pub fn run() {
                         }
                     }
                 }
+                discord::shutdown();
             }
         });
 }
