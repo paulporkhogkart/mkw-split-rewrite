@@ -1,3 +1,5 @@
+mod discord;
+
 use std::sync::Mutex;
 use tauri::{Emitter, Manager};
 use log::{error, info, warn};
