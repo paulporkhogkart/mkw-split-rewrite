@@ -65,6 +65,15 @@ CREATE TABLE IF NOT EXISTS replay_points (
 );
 
 CREATE INDEX IF NOT EXISTS idx_replay_points_id ON replay_points(replay_id);
+
+CREATE TABLE IF NOT EXISTS replay_splits (
+    replay_id  INTEGER NOT NULL REFERENCES replays(id) ON DELETE CASCADE,
+    lap        INTEGER NOT NULL,
+    split_ms   INTEGER,
+    split_text TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_replay_splits_id ON replay_splits(replay_id);
 """
 
 

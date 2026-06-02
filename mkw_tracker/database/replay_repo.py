@@ -88,6 +88,11 @@ def _prune_history(course: str, conn):
     conn.commit()
 
 
+def get_pb_splits(course: str, player: str = "me"):
+    """Return {lap: split_ms} for the course PB, or None. (Implemented in a later task.)"""
+    return None
+
+
 def get_pb(course: str, player: str = "me") -> Optional[dict]:
     """Return the PB replay (metadata + points) or None."""
     conn = get_connection()
