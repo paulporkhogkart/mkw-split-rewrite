@@ -70,18 +70,18 @@ def _download_bytes(url: str) -> bytes:
 
 
 def _to_512(img: np.ndarray) -> np.ndarray:
-    """Pad to square (transparent letterbox) and resize to TARGET x TARGET BGRA."""
+    """Center-crop to square (no stretching - sides are cropped off) and resize
+    to TARGET x TARGET BGRA."""
     if img.ndim == 2:
         img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGRA)
     elif img.shape[2] == 3:
         img = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
     h, w = img.shape[:2]
-    side = max(h, w)
-    canvas = np.zeros((side, side, 4), np.uint8)  # transparent square
-    y0, x0 = (side - h) // 2, (side - w) // 2
-    canvas[y0:y0 + h, x0:x0 + w] = img
+    side = min(h, w)
+    y0, x0 = (h - side) // 2, (w - side) // 2
+    crop = img[y0:y0 + side, x0:x0 + side]
     interp = cv2.INTER_AREA if side > TARGET else cv2.INTER_CUBIC
-    return cv2.resize(canvas, (TARGET, TARGET), interpolation=interp)
+    return cv2.resize(crop, (TARGET, TARGET), interpolation=interp)
 
 
 def _fetch_512_png(url: str) -> bytes:
