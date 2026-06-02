@@ -80,6 +80,7 @@ class MinimapRecorder:
         character: Optional[str] = None,
         costume:   Optional[str] = None,
         kart:      Optional[str] = None,
+        lap_splits: Optional[dict] = None,
     ) -> Optional[int]:
         """
         Persist the recorded run to the DB.  Returns the replay_id, or None.
@@ -104,6 +105,7 @@ class MinimapRecorder:
             kart=kart,
             player="me",
             source="local",
+            lap_splits=lap_splits,
         )
         status = f"time={total_time}" if total_time else "aborted"
         print(f"  [Replay] Saved to DB ({status}, {len(points_out)} pts) id={replay_id}")

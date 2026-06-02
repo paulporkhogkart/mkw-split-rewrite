@@ -79,3 +79,24 @@ def test_dispatch_get_pb_splits(memdb):
     assert evt["course"] == "Mario Circuit"
     # JSON object keys are strings.
     assert evt["splits"] == {"1": 41000, "2": 83456}
+
+
+def test_recorder_save_forwards_lap_splits(memdb, monkeypatch):
+    import mkw_tracker.minimap.recorder as rec_mod
+    captured = {}
+
+    def fake_save_run(**kwargs):
+        captured.update(kwargs)
+        return 1
+
+    monkeypatch.setattr(rec_mod, "save_run", fake_save_run)
+
+    rec = rec_mod.MinimapRecorder.__new__(rec_mod.MinimapRecorder)
+    rec._points = [(0, 1.0, 2.0, 0.9)]
+    rec._recording = False
+    rec._pause_start = None
+
+    rec.save("Mario Circuit", total_time="1:23.456",
+             character="Mario", kart="Pipe Frame",
+             lap_splits={1: "0:41.000"})
+    assert captured.get("lap_splits") == {1: "0:41.000"}

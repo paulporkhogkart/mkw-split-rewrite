@@ -160,7 +160,8 @@ class RaceLifecycle:
                 set_minimap_threshold(course, character, costume or "", new_threshold)
 
         self._mm_rec.save(course, character=character, costume=costume,
-                          kart=sel.kart, total_time=best_total_time)
+                          kart=sel.kart, total_time=best_total_time,
+                          lap_splits=dict(self._ts.splits))
 
     def _start_race(self, old: Screen):
         sel       = self._selection.state
