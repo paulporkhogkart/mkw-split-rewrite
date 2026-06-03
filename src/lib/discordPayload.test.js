@@ -71,19 +71,19 @@ describe("computePresence", () => {
 
   it("final time on RACING -> finished card (course - time / Finished delta)", () => {
     const p = computePresence({ ...base, finalTime: "1:59.600" });
-    expect(p.details).toBe("Rainbow Road - 1:59.600");
+    expect(p.details).toBe("Rainbow Road · 1:59.600");
     expect(p.state).toBe("Finished 0.400s ahead of PB"); // 119600 - 120000
   });
 
   it("POST_TIME_TRIAL renders the same finished card (no-op transition)", () => {
     const p = computePresence({ ...base, screen: "POST_TIME_TRIAL", finalTime: "2:00.500" });
-    expect(p.details).toBe("Rainbow Road - 2:00.500");
+    expect(p.details).toBe("Rainbow Road · 2:00.500");
     expect(p.state).toBe("Finished 0.500s behind PB"); // 120500 - 120000
   });
 
   it("finished with no PB -> Finished + character / kart", () => {
     const p = computePresence({ ...base, finalTime: "2:00.500", pbTotalMs: null });
-    expect(p.details).toBe("Rainbow Road - 2:00.500");
+    expect(p.details).toBe("Rainbow Road · 2:00.500");
     expect(p.state).toBe("Finished · Mario · Pipe Frame");
   });
 

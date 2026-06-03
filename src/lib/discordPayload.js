@@ -39,7 +39,7 @@ function finishedCard(s) {
   const line2 = (s.finalTime && s.pbTotalMs != null)
     ? `Finished ${formatDelta(parseTime(s.finalTime) - s.pbTotalMs)}`
     : `Finished · ${charKart(s)}`;
-  return { large_image: slug, small_image: "penguin", details: `${s.course} - ${time}`, state: line2 };
+  return { large_image: slug, small_image: "penguin", details: `${s.course} · ${time}`, state: line2 };
 }
 
 export function computePresence(s) {
