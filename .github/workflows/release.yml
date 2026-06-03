@@ -123,7 +123,10 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: '22'
+          # node 24 ships npm 11, matching the npm major that authors package-lock.json
+          # locally. npm 10 (node 22) rejects the npm-11 lock as "out of sync" (the vitest
+          # esbuild/@emnapi subtree is resolved differently across npm majors).
+          node-version: '24'
           cache: npm
 
       - uses: actions/setup-python@v6
