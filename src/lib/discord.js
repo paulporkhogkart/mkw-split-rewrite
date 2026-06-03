@@ -2,7 +2,7 @@
 // via the pure mapping, and calls the Rust commands. Reads only — no UI mutation.
 import { invoke } from "@tauri-apps/api/core";
 import { get } from "svelte/store";
-import { screen, selection, race, pbSplits } from "./stores.js";
+import { screen, selection, race, pbSplits, pbTotalMs } from "./stores.js";
 import { resets } from "./resets.js";
 import { discordEnabled, twitchButtonEnabled, twitchLabel, twitchUrl } from "./discordSettings.js";
 import { computePresence, UNCHANGED } from "./discordPayload.js";
@@ -21,7 +21,7 @@ function snapshot() {
     course: sel.course, character: sel.char, kart: sel.kart,
     resets: get(resets),
     curLap: r.curLap, totLap: r.totLap,
-    playerSplits, pbSplits: get(pbSplits),
+    playerSplits, pbSplits: get(pbSplits), pbTotalMs: get(pbTotalMs),
     finalTime: r.finishTime,
     twitchUrl: get(twitchUrl),
     twitchButtonEnabled: get(twitchButtonEnabled), twitchLabel: get(twitchLabel),
@@ -36,6 +36,6 @@ function push() {
 }
 
 export function initDiscordPresence() {
-  [screen, selection, race, pbSplits, resets, discordEnabled, twitchButtonEnabled, twitchLabel, twitchUrl]
+  [screen, selection, race, pbSplits, pbTotalMs, resets, discordEnabled, twitchButtonEnabled, twitchLabel, twitchUrl]
     .forEach((s) => s.subscribe(() => push()));
 }

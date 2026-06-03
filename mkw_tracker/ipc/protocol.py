@@ -121,8 +121,8 @@ def emit_pb_export(course: str, mkwreplay: dict) -> str:
     return _emit("pb_export", course=course, mkwreplay=mkwreplay)
 
 
-def emit_pb_splits(course: str, splits) -> str:
-    return _emit("pb_splits", course=course, splits=splits)
+def emit_pb_splits(course: str, splits, total_ms=None) -> str:
+    return _emit("pb_splits", course=course, splits=splits, total_ms=total_ms)
 
 
 def emit_state(state_dict: dict) -> str:

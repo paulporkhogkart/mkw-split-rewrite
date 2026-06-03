@@ -23,3 +23,4 @@ export const view       = writable("monitor");            // "monitor" | "edit" 
 export const setup      = writable({ complete: null, open: false, step: "language" });
 export const language   = writable({ app: "en_uk", switch2: "en_uk" });
 export const pbSplits     = writable(null);  // {lap: split_ms} for current course PB | null
+export const pbTotalMs    = writable(null);  // PB total time in ms | null

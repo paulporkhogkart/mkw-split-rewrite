@@ -29,6 +29,21 @@ function lastCompletedDelta(s) {
 }
 function charKart(s) { return `${s.character ?? "?"} · ${s.kart ?? "?"}`; }
 
+// The finished card: shown the moment a final time lands (still on RACING, after
+// the timer freezes) AND on POST_TIME_TRIAL. Both render identically, so the
+// RACING->POST transition is a no-op. Delta is vs the PB's true total time.
+function finishedCard(s) {
+  const slug = courseSlug(s.course) || "splash";
+  const suffix = (s.finalTime && s.pbTotalMs != null)
+    ? formatDelta(parseTime(s.finalTime) - s.pbTotalMs)
+    : charKart(s);
+  return {
+    large_image: slug, small_image: "penguin",
+    details: `${s.course} · finished`,
+    state: s.finalTime ? `${s.finalTime} · ${suffix}` : charKart(s),
+  };
+}
+
 export function computePresence(s) {
   const screen = s.screen;
   if (IGNORE.has(screen)) return UNCHANGED;
@@ -37,7 +52,8 @@ export function computePresence(s) {
   let p;
   if (SETUP[screen]) {
     p = { large_image: "penguin", details: SETUP[screen] };
-  } else if (screen === "RACING") {
+  } else if (screen === "RACING" && !s.finalTime) {
+    // Active race: lap + live delta (or character/kart on lap 1 / no PB).
     const slug = courseSlug(s.course) || "splash";
     const resets = `${s.resets} reset${s.resets === 1 ? "" : "s"}`;
     const delta = lastCompletedDelta(s);
@@ -45,19 +61,13 @@ export function computePresence(s) {
       ? `Lap ${s.curLap}/${s.totLap} · ${formatDelta(delta)}`
       : `Lap ${s.curLap}/${s.totLap} · ${charKart(s)}`;
     p = { large_image: slug, small_image: "penguin", details: `${s.course} · ${resets}`, state: line2 };
+  } else if (screen === "RACING" || screen === "POST_TIME_TRIAL") {
+    // Finished (final time in), whether the freeze is still on RACING or we've
+    // advanced to the results screen.
+    p = finishedCard(s);
   } else if (screen === "GHOST") {
     const slug = courseSlug(s.course) || "splash";
     p = { large_image: slug, small_image: "penguin", details: s.course || "", state: "Watching a ghost" };
-  } else if (screen === "POST_TIME_TRIAL") {
-    const slug = courseSlug(s.course) || "splash";
-    let suffix;
-    if (s.pbSplits && Object.keys(s.pbSplits).length) {
-      const lastLap = Math.max(...Object.keys(s.pbSplits).map(Number));
-      const pbTotal = s.pbSplits[lastLap];
-      const myMs = parseTime(s.finalTime);
-      suffix = (myMs != null) ? formatDelta(myMs - pbTotal) : charKart(s);
-    } else suffix = charKart(s);
-    p = { large_image: slug, small_image: "penguin", details: `${s.course} · finished`, state: `${s.finalTime} · ${suffix}` };
   } else {
     // TITLE / MAIN_MENU / SINGLEPLAYER_MENU / TIME_TRIALS / START_TIME_TRIAL / GALLERY / anything else
     p = { large_image: "penguin", details: "In the menus" };

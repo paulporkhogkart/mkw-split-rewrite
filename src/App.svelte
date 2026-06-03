@@ -25,7 +25,7 @@
            tells as tellsStore, rois as roisStore,
            view as viewStore,
            minimap as minimapStore, replays as replaysStore, sample as sampleStore } from "./lib/stores.js";
-  import { pbSplits as pbSplitsStore } from "./lib/stores.js";
+  import { pbSplits as pbSplitsStore, pbTotalMs as pbTotalStore } from "./lib/stores.js";
   import { initDiscordPresence } from "./lib/discord.js";
 
   let appWindow = null;
@@ -791,6 +791,7 @@
         break;
       case "pb_splits":
         pbSplitsStore.set(msg.splits ?? null);
+        pbTotalStore.set(msg.total_ms ?? null);
         break;
       case "pb_achieved":
         pushLog(`[pb] ${msg.course}  ${msg.time}`);

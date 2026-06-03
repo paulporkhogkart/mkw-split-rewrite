@@ -5,7 +5,7 @@ const base = {
   screen: "RACING", course: "Rainbow Road", character: "Mario", kart: "Pipe Frame",
   resets: 12, curLap: 3, totLap: 3,
   playerSplits: { 1: 40000, 2: 80000 }, pbSplits: { 1: 40420, 2: 80310, 3: 120000 },
-  finalTime: null, twitchUrl: "", twitchButtonEnabled: true, twitchLabel: "Watch on Twitch",
+  finalTime: null, pbTotalMs: 120000, twitchUrl: "", twitchButtonEnabled: true, twitchLabel: "Watch on Twitch",
 };
 
 describe("computePresence", () => {
@@ -65,19 +65,20 @@ describe("computePresence", () => {
     expect(p.state).toBe("Watching a ghost");
   });
 
-  it("results beating PB -> ahead delta (no 'New personal best')", () => {
-    const p = computePresence({ ...base, screen: "POST_TIME_TRIAL", finalTime: "1:59.600" });
+  it("final time on RACING -> finished card + delta vs PB total", () => {
+    const p = computePresence({ ...base, finalTime: "1:59.600" });
     expect(p.details).toBe("Rainbow Road · finished");
     expect(p.state).toBe("1:59.600 · 0.400s ahead of PB"); // 119600 - 120000
   });
 
-  it("results not a PB -> behind delta vs PB total", () => {
+  it("POST_TIME_TRIAL renders the same finished card (no-op transition)", () => {
     const p = computePresence({ ...base, screen: "POST_TIME_TRIAL", finalTime: "2:00.500" });
+    expect(p.details).toBe("Rainbow Road · finished");
     expect(p.state).toBe("2:00.500 · 0.500s behind PB"); // 120500 - 120000
   });
 
-  it("results with no PB -> character / kart", () => {
-    const p = computePresence({ ...base, screen: "POST_TIME_TRIAL", finalTime: "2:00.500", pbSplits: null });
+  it("finished with no PB -> character / kart", () => {
+    const p = computePresence({ ...base, finalTime: "2:00.500", pbTotalMs: null });
     expect(p.state).toBe("2:00.500 · Mario · Pipe Frame");
   });
 

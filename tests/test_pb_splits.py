@@ -79,6 +79,7 @@ def test_dispatch_get_pb_splits(memdb):
     assert evt["course"] == "Mario Circuit"
     # JSON object keys are strings.
     assert evt["splits"] == {"1": 41000, "2": 83456}
+    assert evt["total_ms"] == 83456  # the PB's stored total time
 
 
 def test_maybe_update_pb_returns_bool(memdb):

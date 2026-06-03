@@ -215,9 +215,15 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
 
     elif t == "get_pb_splits":
         from .database.replay_repo import get_pb_splits as _get_pb_splits
+        from .database.connection import get_connection as _get_conn
         from .ipc.protocol import emit_pb_splits as _emit_pbs
         _course = msg.get("course", "")
-        ipc.emit(_emit_pbs(_course, _get_pb_splits(_course)))
+        _row = _get_conn().execute(
+            "SELECT total_time_ms FROM replays WHERE player='me' AND course=? AND is_pb=1",
+            (_course,),
+        ).fetchone()
+        _total = _row["total_time_ms"] if _row else None
+        ipc.emit(_emit_pbs(_course, _get_pb_splits(_course), _total))
 
     elif t == "get_screen_thumbs":
         # Downscaled per-screen reference shots for the edit-mode graph nodes.
