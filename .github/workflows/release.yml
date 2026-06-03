@@ -123,9 +123,6 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          # node 24 ships npm 11, matching the npm major that authors package-lock.json
-          # locally. npm 10 (node 22) rejects the npm-11 lock as "out of sync" (the vitest
-          # esbuild/@emnapi subtree is resolved differently across npm majors).
           node-version: '24'
           cache: npm
 
@@ -168,7 +165,12 @@ jobs:
         run: python scripts/gen_icons.py
 
       - name: Install npm dependencies
-        run: npm ci
+        # npm install (not ci): package-lock.json is authored by a different npm minor than
+        # CI runs (node 25/npm 11.6.2 locally vs the runner's npm), and they disagree about
+        # which optional wasm-runtime deps (@emnapi/*, esbuild platform binaries) must be
+        # pinned in the lock — so `npm ci`'s strict in-sync gate aborts. `npm install`
+        # reconciles the lock against package.json and installs, which is fine for a build.
+        run: npm install --no-audit --no-fund
 
       - name: Build Tauri NSIS installer
         run: npm run tauri build -- --bundles nsis
