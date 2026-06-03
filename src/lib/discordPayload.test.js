@@ -30,6 +30,10 @@ describe("computePresence", () => {
     expect(computePresence({ ...base, screen: "MAIN_MENU" }).details).toBe("In the menus");
   });
 
+  it("start time trial -> 'Starting time trial'", () => {
+    expect(computePresence({ ...base, screen: "START_TIME_TRIAL" }).details).toBe("Starting time trial");
+  });
+
   it("ignore screens -> UNCHANGED", () => {
     for (const s of ["RACE_MENU", "RESET", "GHOST_RESET", "UNKNOWN_RESET", "HOME"])
       expect(computePresence({ ...base, screen: s })).toBe(UNCHANGED);
@@ -65,21 +69,22 @@ describe("computePresence", () => {
     expect(p.state).toBe("Watching a ghost");
   });
 
-  it("final time on RACING -> finished card + delta vs PB total", () => {
+  it("final time on RACING -> finished card (course - time / Finished delta)", () => {
     const p = computePresence({ ...base, finalTime: "1:59.600" });
-    expect(p.details).toBe("Rainbow Road · finished");
-    expect(p.state).toBe("1:59.600 · 0.400s ahead of PB"); // 119600 - 120000
+    expect(p.details).toBe("Rainbow Road - 1:59.600");
+    expect(p.state).toBe("Finished 0.400s ahead of PB"); // 119600 - 120000
   });
 
   it("POST_TIME_TRIAL renders the same finished card (no-op transition)", () => {
     const p = computePresence({ ...base, screen: "POST_TIME_TRIAL", finalTime: "2:00.500" });
-    expect(p.details).toBe("Rainbow Road · finished");
-    expect(p.state).toBe("2:00.500 · 0.500s behind PB"); // 120500 - 120000
+    expect(p.details).toBe("Rainbow Road - 2:00.500");
+    expect(p.state).toBe("Finished 0.500s behind PB"); // 120500 - 120000
   });
 
-  it("finished with no PB -> character / kart", () => {
+  it("finished with no PB -> Finished + character / kart", () => {
     const p = computePresence({ ...base, finalTime: "2:00.500", pbTotalMs: null });
-    expect(p.state).toBe("2:00.500 · Mario · Pipe Frame");
+    expect(p.details).toBe("Rainbow Road - 2:00.500");
+    expect(p.state).toBe("Finished · Mario · Pipe Frame");
   });
 
   it("twitch button shows on racing when enabled + url set", () => {

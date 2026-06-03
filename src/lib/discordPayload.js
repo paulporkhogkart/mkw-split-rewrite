@@ -30,18 +30,16 @@ function lastCompletedDelta(s) {
 function charKart(s) { return `${s.character ?? "?"} · ${s.kart ?? "?"}`; }
 
 // The finished card: shown the moment a final time lands (still on RACING, after
-// the timer freezes) AND on POST_TIME_TRIAL. Both render identically, so the
-// RACING->POST transition is a no-op. Delta is vs the PB's true total time.
+// the timer freezes) AND on POST_TIME_TRIAL - both render identically, so the
+// RACING->POST transition is a no-op. Line 1 = "{course} - {time}"; line 2 =
+// "Finished {delta vs PB total}" (or character/kart when there's no stored PB).
 function finishedCard(s) {
   const slug = courseSlug(s.course) || "splash";
-  const suffix = (s.finalTime && s.pbTotalMs != null)
-    ? formatDelta(parseTime(s.finalTime) - s.pbTotalMs)
-    : charKart(s);
-  return {
-    large_image: slug, small_image: "penguin",
-    details: `${s.course} · finished`,
-    state: s.finalTime ? `${s.finalTime} · ${suffix}` : charKart(s),
-  };
+  const time = s.finalTime || "finished";
+  const line2 = (s.finalTime && s.pbTotalMs != null)
+    ? `Finished ${formatDelta(parseTime(s.finalTime) - s.pbTotalMs)}`
+    : `Finished · ${charKart(s)}`;
+  return { large_image: slug, small_image: "penguin", details: `${s.course} - ${time}`, state: line2 };
 }
 
 export function computePresence(s) {
@@ -52,6 +50,8 @@ export function computePresence(s) {
   let p;
   if (SETUP[screen]) {
     p = { large_image: "penguin", details: SETUP[screen] };
+  } else if (screen === "START_TIME_TRIAL") {
+    p = { large_image: "penguin", details: "Starting time trial" };
   } else if (screen === "RACING" && !s.finalTime) {
     // Active race: lap + live delta (or character/kart on lap 1 / no PB).
     const slug = courseSlug(s.course) || "splash";
@@ -69,7 +69,7 @@ export function computePresence(s) {
     const slug = courseSlug(s.course) || "splash";
     p = { large_image: slug, small_image: "penguin", details: s.course || "", state: "Watching a ghost" };
   } else {
-    // TITLE / MAIN_MENU / SINGLEPLAYER_MENU / TIME_TRIALS / START_TIME_TRIAL / GALLERY / anything else
+    // TITLE / MAIN_MENU / SINGLEPLAYER_MENU / TIME_TRIALS / GALLERY / anything else
     p = { large_image: "penguin", details: "In the menus" };
   }
 
