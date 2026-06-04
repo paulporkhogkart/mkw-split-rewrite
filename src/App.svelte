@@ -433,9 +433,9 @@
   const FIRST_TIME_STEPS = ["language", "camera"];
   // Post-setup, the ⚙ modal is a slim Settings panel: Language + Camera only.
   // Screen/tell/HUD/template editing now lives in the Edit Screens view.
-  const RERUN_STEPS      = ["language", "camera", "discord"];
+  const RERUN_STEPS      = ["language", "camera", "discord", "sync"];
   const STEP_LABELS = {
-    language: "Language", camera: "Video", discord: "Discord", screens: "Screens",
+    language: "Language", camera: "Video", discord: "Discord", sync: "Sync", screens: "Screens",
     selection: "Selection", hud: "HUD", templates: "Templates",
   };
   $: STEPS = setupComplete ? RERUN_STEPS : FIRST_TIME_STEPS;

@@ -18,6 +18,7 @@
   import LanguageSelectors from "./LanguageSelectors.svelte";
   import { invoke }        from "@tauri-apps/api/core";
   import { discordEnabled, twitchButtonEnabled, twitchLabel, twitchUrl } from "../lib/discordSettings.js";
+  import { serverUrl, authToken, cc } from "../lib/syncSettings.js";
 
   // ── Modal open/close ──────────────────────────────────────────────────────────
   export let wizardOpen    = false;
@@ -69,7 +70,7 @@
     on:keydown|self={(e) => { if (e.key === 'Escape' && setupComplete) onClose(); }}
     role="dialog" aria-modal="true"
     tabindex="-1">
-    <div class="wiz-dialog" class:wiz-dialog-narrow={wizardStep === "language" || wizardStep === "discord"}>
+    <div class="wiz-dialog" class:wiz-dialog-narrow={wizardStep === "language" || wizardStep === "discord" || wizardStep === "sync"}>
 
       <!-- Wizard tab bar -->
       <nav class="wiz-tabs">
@@ -203,6 +204,29 @@
               </div>
               <p class="discord-note">Appears on every screen except idle. You may not see it on your own profile, but others will.</p>
             </div>
+
+            <div class="cam-nav" style="justify-content:flex-end">
+              <button class="btn-primary" on:click={onClose}>Done</button>
+            </div>
+          </div>
+
+        <!-- ── SYNC step ──────────────────────────────────────────────────── -->
+        {:else if wizardStep === "sync"}
+          <div class="step-centred">
+            <h2>Sync</h2>
+            <p>Upload your runs to the competition server so they appear on the leaderboard and broadcast. Get your token from whoever runs the server.</p>
+
+            <div class="discord-fields">
+              <label class="discord-label" for="sync-url">Server URL</label>
+              <input id="sync-url" class="discord-input" type="text" bind:value={$serverUrl}
+                placeholder="https://your-server.example" />
+              <label class="discord-label" for="sync-token">Your token</label>
+              <input id="sync-token" class="discord-input" type="password" bind:value={$authToken}
+                placeholder="paste your token" />
+              <label class="discord-label" for="sync-cc">Engine class (cc)</label>
+              <input id="sync-cc" class="discord-input" type="number" bind:value={$cc} min="50" step="50" />
+            </div>
+            <p class="discord-note">Runs queue locally and upload when the server is reachable, so a flaky connection is fine. Leave the URL blank to disable uploading.</p>
 
             <div class="cam-nav" style="justify-content:flex-end">
               <button class="btn-primary" on:click={onClose}>Done</button>
