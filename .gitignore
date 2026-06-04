@@ -26,6 +26,9 @@ debug_laps/
 # Legacy monolith reference (local only)
 \!!!FINAL-ab-new-bubbles.py
 
+# Copied legacy server (reference only; contains secrets: service_account_key.json, .env)
+legacy/
+
 # Probe / scratch files
 probe_*.py
 probe_*.png
