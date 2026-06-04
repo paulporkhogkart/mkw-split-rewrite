@@ -2,30 +2,32 @@
 
 **Date:** 2026-06-04
 **Status:** Approved (design); pending implementation plan
-**Component:** A new TypeScript/Node server on the Pi (HTTP API + WebSocket event hub) over the sub-project A SQLite store, per-player token auth, and the Python engine's client→server upload path (live push + offline outbox). This is sub-project **B** of the client→server shift. The OBS overlays + public website that consume this are sub-project **C**.
+**Component:** A new TypeScript/Node server on the Pi that becomes the **canonical source of truth** for race results, plus the client **write path** under a revised architecture: the Python engine becomes a **pure detector** that emits one finalized-run event per attempt, and the **Tauri/Rust app** forwards those to the server through a resilient offline outbox. This is sub-project **B** of the client→server shift; the OBS overlays + public website that consume the data are sub-project **C**.
 
 ## 1. Goal
 
-Stand up the home server that receives every friend's race attempts, stores them in the A canonical store, and pushes **event notifications** ("X started a run", "X PB'd, now #1", "X beat the WR") to live consumers — plus the public read API the website and clients use. Each client identifies itself with a per-player token; uploads survive a flaky network via a local outbox.
+Make the Pi server the authoritative store for every friend's race attempts, fed by a resilient client write path, and have it push **event notifications** ("X started a run", "X PB'd — now #1", "X beat the WR") to live consumers plus a public read API. Each client identifies with a per-player token; uploads survive a flaky network via a local outbox.
+
+The architecture shift (decided during design): durable race data leaves the engine. The engine's job is detection; the server owns race results. See §6.
 
 ## 2. Non-goals (deferred)
 
-- **Live in-progress telemetry** — streaming a remote friend's run *as it happens* (live position/splits). B builds the foundation (uploader + server + `WS /v1/events`) so this is a clean later addition (a second WS topic + a continuous stream from the engine), not a rework. The local player's live data already exists locally (engine IPC + `ipc/broadcaster.py`).
-- **The OBS overlays + public website** that consume the API/events — sub-project **C**.
-- **The WR scraper** (server-side ingestion of external WRs) — later; the `world_records` table is append-ready.
-- **cc screen-detection** — until it exists, the client tags runs with a **cc setting (default 150)**.
-- **Auth beyond a per-player bearer token** — no accounts/login/OAuth.
+- **Phase 2 — client read-migration.** Moving the monitor's *own-player* reads (PB splits, history, own ghost trails) off the engine's local DB onto the server/cache, and then **removing the engine's race-data tier** (`replays` / `replay_points` / `replay_splits`). Deferred deliberately so B does not big-bang the just-merged frontend. In Phase 1 (this spec) the engine keeps writing its local race store **solely to keep today's monitor display working unchanged**.
+- **Live in-progress telemetry** — streaming a remote friend's run *as it happens*. B builds the foundation (uploader + server + `WS /v1/events`); this is a clean later addition.
+- **OBS overlays + public website** that consume the API/events — sub-project **C** (friends'-PB *rendering* on the local monitor also lands here / Phase 2, since it's a consumption/UI concern).
+- **WR scraper** — later; the `world_records` table is append-ready.
+- **cc screen-detection** — until it exists, runs are tagged with a **cc setting (default 150)**.
+- **Auth beyond a per-player bearer token.**
 
 ## 3. Stack decision & rationale
 
-**TypeScript on Node**, not the legacy Python/FastAPI. The reasoning is impartial to familiarity, dev-effort, and reuse (all explicitly out of scope as deciding factors):
+**TypeScript on Node**, chosen impartially (familiarity, dev-effort, and legacy/A reuse explicitly excluded as factors):
 
-- The **interactive frontend is unavoidably JS/TS** — OBS overlays are browser sources and the public website is a browser app, both needing live WS-driven updates. That is a hard constraint, not a preference.
-- The system's actual risk is **contract/type drift between what the API/WS emits and what the live frontend renders** — not throughput, memory, or concurrency, which are trivial at ~5 uploaders + modest public reads. A TS backend gives a **single compile-time-checked contract** spanning SQLite row → API response → WS event → website/overlay prop, eliminating that drift natively.
-- Go's genuine strengths (single static binary, low memory, concurrency) target bottlenecks this project never hits, and force a two-language type boundary to the mandatory TS frontend. Python's only edges here were the discarded reuse/familiarity. Rust is the heaviest build for performance that isn't needed.
+- The interactive frontend (OBS overlays = browser sources; the public website) is **unavoidably JS/TS** and needs live WS-driven updates — a hard constraint, not a preference.
+- This system's real risk is **contract/type drift between what the API/WS emits and what the live frontend renders**, not throughput/memory/concurrency (trivial at ~5 uploaders + modest public reads). A TS backend gives a **single compile-time-checked contract** from SQLite row → API → WS event → website/overlay prop, eliminating that drift natively.
+- Go's strengths (static binary, low memory, concurrency) target bottlenecks this project never hits and force a two-language type boundary to the mandatory TS frontend. Python's edges here were the discarded reuse/familiarity. Rust is the heaviest build for performance that isn't needed.
 
-**Runtime:** Node (most battle-tested for an unattended 24/7 Pi service). Bun is a noted future option (built-in SQLite + WS, compiles to a standalone binary) if minimal-ops becomes a priority.
-**Libraries:** **Hono** (HTTP API + WebSockets — tiny, fast, first-class TS) and **better-sqlite3** (synchronous, ideal for a single-process server). SvelteKit serves the website + overlays in **C**.
+**Runtime:** Node (battle-tested for an unattended 24/7 Pi service; Bun noted as a future option). **Libraries:** **Hono** (HTTP + WebSockets) and **better-sqlite3** (synchronous, ideal single-process). SvelteKit serves the website + overlays in **C**.
 
 ## 4. Repo shape (TS monorepo, pnpm workspaces, under `pi/`)
 
@@ -44,66 +46,76 @@ pi/
 
 ## 5. Relationship to sub-project A
 
-- **`server/schema.sql` stays the single source of truth.** `pi/packages/db` reads and applies it (idempotent `CREATE IF NOT EXISTS`); A's Python importer reads the same file. No second schema.
-- **A's importer stays a one-shot Python CLI** (`python -m server.importer`), run on the Pi at cutover. It never needed to match the server language.
-- A's Python `queries.py` remains used **only by the importer**. The TS `db` package **re-expresses the few runtime queries** (ingest upsert, `is_pb` recompute, leaderboards) over the same schema. Mild, intentional duplication separated by time (one-shot migration vs live serving).
-- **The engine stays Python**, talking JSON to the API.
+- **`server/schema.sql` stays the single source of truth.** `pi/packages/db` reads/applies it (idempotent); A's Python importer reads the same file.
+- **A's importer stays a one-shot Python CLI** (`python -m server.importer`), run on the Pi at cutover.
+- A's Python `queries.py` is used **only by the importer**; the TS `db` re-expresses the runtime queries (ingest upsert, `is_pb` recompute, leaderboards). Mild duplication separated by time (one-shot migration vs live serving).
+- **A's note about "reconciling the client's local DB" resolves here as the Phase 2 teardown:** the client's local race-data tier becomes legacy and is removed once reads move to the server.
 
-## 6. Architecture & data flow
+## 6. Target architecture & the phased turn
+
+**End state.** Three clean tiers:
+- **Engine (Python) = pure detector.** Emits a rich IPC event stream including a new consolidated **`run_finalized`** event carrying the whole attempt. Keeps only *detection config* (the `config` table, minimap seeds/ROIs/thresholds, tell overrides — the tuning it needs to detect). Owns **no race data**, does **no network**.
+- **Tauri app (Rust) = resilient client edge.** Forwards finalized runs to the server through a persistent outbox; holds the server URL + token; (Phase 2) reads back from the server for display with a small local cache.
+- **Server (TS) = source of truth.** Stores every attempt, derives events, serves the read API + WS.
+
+**Phase 1 = this spec (B):** stand up the server, and the **write path** (engine emits `run_finalized` → Rust outbox → server). The engine *temporarily* keeps writing its existing local race store so the current monitor display is untouched.
+
+**Phase 2 = deferred:** repoint the monitor's own-player reads at the server/app-cache, render friends from the server, then delete the engine's race-data tables. The engine becomes fully pure.
+
+## 7. Data flow (Phase 1)
 
 ```
- friend's PC (Python engine)        Pi — Node/TS, Cloudflare tunnel (HTTPS)      consumers (C)
- ┌───────────────────────┐  POST /v1/runs   ┌──────────────────────────────┐
- │ SyncClient + outbox DB │ ───(token)─────► │ apps/api (Hono)              │  WS /v1/events
- │  (mkw_tracker)         │  per attempt     │  • auth: token → player      │ ──────────────► OBS overlays
- │                        │ ◄─GET friends────│  • ingest → packages/db → SQLite                (SvelteKit, C)
- └───────────────────────┘   leaderboard    │  • derive events on ingest   │ ──────────────► website (C)
-                                             │  • event hub → WS fan-out    │ ◄── GET /v1/leaderboard
-                                             └──────────────────────────────┘
+ Python engine (pure detector)        Tauri app (Rust)               Pi — Node/TS (Cloudflare tunnel)
+ ┌───────────────────────┐  run_finalized   ┌──────────────────┐  POST /v1/runs   ┌──────────────────┐
+ │ detect → emit events  │ ───(IPC stdout)─►│ sync.rs:         │ ──(token)──────► │ apps/api (Hono)  │
+ │ (mints attempt_id)    │                  │  • rusqlite      │                  │  ingest → SQLite │
+ │ [keeps local store    │                  │    outbox        │ ◄── 200 {is_pb,  │  derive events   │
+ │  for own display only]│                  │  • POST + retry  │      rank,gaps}  │  WS fan-out ─────┼─► C
+ └───────────────────────┘                  │  • holds url+token│                 └──────────────────┘
+                                            └──────────────────┘
 ```
 
-## 7. Connectivity & security
+The engine builds the full payload once; **Rust forwards it opaquely** (stores + POSTs the JSON, keyed by `attempt_id`) — so the payload's *shape* is a single engine(Python)→server(TS) contract, with Rust as a dumb resilient pipe (no payload re-modeling).
 
-- **Cloudflare Tunnel** (already configured on the Pi for the legacy app) exposes the API at an HTTPS hostname — no router config, TLS terminated by Cloudflare.
-- **Reads are public** (the website needs them; no secrets in leaderboards/WRs/events).
-- **Writes are token-gated** — a client can only upload as the player its token maps to.
-- Basic abuse protection is left to Cloudflare in front; no app-level rate limiting in B (revisit if the public site sees real traffic).
+## 8. Connectivity & security
 
-## 8. Identity / auth
+- **Cloudflare Tunnel** (already on the Pi) exposes the API over HTTPS — no router config, TLS terminated by Cloudflare.
+- **Reads public** (the website needs them; no secrets). **Writes token-gated** (a client uploads only as its own player). Abuse protection left to Cloudflare; no app-level rate limiting in B.
 
-- Add column `players.auth_token_hash TEXT UNIQUE` to `server/schema.sql` (A reserved "auth columns added in B"); fresh server DBs created at/after cutover include it.
-- A Pi-side admin script (e.g. `pnpm --filter api mint-token <player-name>`) generates a random token, stores its **sha256 hash** on the player row, and prints the **plaintext token once** for the friend to paste into the app's settings.
-- Requests authenticate with `Authorization: Bearer <token>`; the server hashes it, looks up the player, and attributes writes to that `player_id`. No token → reads only.
-- The client stores its token in app config (the `SyncClient(server_url, auth_token)` constructor already takes it); it is configured during first-time setup.
+## 9. Identity / auth
 
-## 9. Wire protocol — endpoints (`/v1`)
+- Add column `players.auth_token_hash TEXT UNIQUE` to `server/schema.sql` (A reserved this); fresh server DBs created at/after cutover include it.
+- A Pi-side admin script (e.g. `pnpm --filter api mint-token <player-name>`) generates a random token, stores its **sha256 hash**, and prints the **plaintext once** for the friend.
+- Requests send `Authorization: Bearer <token>`; the server hashes → looks up the player → attributes writes to that `player_id`. No token → reads only.
+- **The token + server URL live in the Tauri app's settings** (a small "Sync" settings tab, mirroring the Discord tab) — not the engine. The engine never sees them.
 
-**Writes (require Bearer token):**
+## 10. Wire protocol — endpoints (`/v1`)
+
+**Writes (Bearer token):**
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/v1/runs` | Upload one attempt. Idempotent by client `attempt_id`. Server attributes `player` (token), `season` (active), `provenance='live'`; upserts; recomputes `is_pb`; derives + emits events. Returns `{is_pb, rank, gap_to_leader_ms, gap_to_wr_ms}`. |
-| `POST` | `/v1/runs/start` | Ephemeral "run started" ping (`course`, `cc`, `attempt_id`) → emits `run_started`. No DB write. |
+| `POST` | `/v1/runs` | Upload one attempt. Idempotent by `attempt_id`. Server attributes `player` (token) + `season` (active) + `provenance='live'`; upserts; recomputes `is_pb`; derives events. Returns `{is_pb, rank, gap_to_leader_ms, gap_to_wr_ms}`. |
+| `POST` | `/v1/runs/start` | Ephemeral "run started" ping → emits `run_started`. No DB write. |
 
 **Reads (public):**
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/v1/leaderboard?season&course&cc` | Per-(course, cc) leaderboard (each rostered player's PB, ordered). |
-| `GET` | `/v1/leaderboard/overall?season&cc` | Aggregate standings (total time, points tiebreak). |
-| `GET` | `/v1/friends-pbs?season&course&cc` | Roster's PBs for a course (the client's `fetch_friends_pbs`). |
-| `GET` | `/v1/players/:id/pbs?season&cc` | One player's PBs across courses. |
-| `GET` | `/v1/world-records?course&cc` | Current WR (+ history). |
-| `GET` | `/v1/seasons` | Season list. |
-| `GET` | `/health` | Liveness. |
+| `GET` | `/v1/leaderboard?season&course&cc` | Per-(course, cc) leaderboard |
+| `GET` | `/v1/leaderboard/overall?season&cc` | Aggregate standings |
+| `GET` | `/v1/friends-pbs?season&course&cc` | Roster's PBs for a course |
+| `GET` | `/v1/players/:id/pbs?season&cc` | One player's PBs across courses |
+| `GET` | `/v1/world-records?course&cc` | Current WR (+ history) |
+| `GET` | `/v1/seasons`, `GET /health` | — |
 
-**Live (public, read-only):** `WS /v1/events` — subscribe-only; server fans out event notifications.
+**Live (public, read-only):** `WS /v1/events` — subscribe-only fan-out.
 
-## 10. Upload payload
+## 11. Upload payload (built by the engine, forwarded by Rust)
 
 ```json
 {
-  "attempt_id": "uuid",            // client-assigned; idempotency key
+  "attempt_id": "uuid",            // engine-minted; idempotency key
   "course": "Wario's Galleon",     // display name; slugified server-side → courses.slug
   "cc": 150,
   "status": "finished",            // "finished" | "reset" | "dnf"
@@ -114,18 +126,18 @@ pi/
   "points": [ [t_ms, cx, cy, score] ]
 }
 ```
-Server stamps `player_id` (token), `season_id` (active), `provenance='live'`; maps `course` via the same slugify rule as A. Missing `cc` defaults to 150.
+Server stamps `player_id` (token), `season_id` (active), `provenance='live'`; maps `course` via A's slugify; missing `cc` defaults to 150.
 
-## 11. Ingest + event derivation (server, on `POST /v1/runs`)
+## 12. Ingest + event derivation (server, on `POST /v1/runs`)
 
-1. Validate token + payload; resolve `course` slug → `course_id` (fail 400 on unknown).
-2. **Upsert** the run by `attempt_id` (re-sends are no-ops/updates) with `provenance='live'`, plus its `run_laps` / `run_points`.
+1. Validate token + payload; resolve `course` slug → `course_id` (400 on unknown).
+2. **Upsert** by `attempt_id` (re-sends are no-ops/updates), `provenance='live'`, plus `run_laps` / `run_points`.
 3. If `status='finished'`: recompute `is_pb` for `(active_season, player, course, cc)`.
-4. Compute deltas vs the pre-upsert state: became a PB? new course #1 (lead change)? beats the current external WR?
-5. Publish the resulting event(s) to the in-process **event hub**, which fans out to all `WS /v1/events` subscribers.
+4. Compute vs pre-upsert state: became a PB? new course #1? beats the WR?
+5. Publish event(s) to the in-process **event hub** → fan out to all `WS /v1/events` subscribers.
 6. Resets/DNFs upsert silently (no events).
 
-## 12. WS event types (`packages/shared`, typed)
+## 13. WS event types (`packages/shared`, typed)
 
 | Event | Payload (essentials) |
 |---|---|
@@ -135,34 +147,46 @@ Server stamps `player_id` (token), `season_id` (active), `provenance='live'`; ma
 | `lead_change` | course, cc, new_leader, prev_leader, total_time |
 | `wr_beaten` | player, course, cc, total_time, wr_time |
 
-## 13. Client half (`mkw_tracker`, Python)
+## 14. Client write path (the three pieces)
 
-- **`sync/client.py`** — implement `SyncClient`: `upload_attempt(payload) -> bool`, `fetch_friends_pbs(course) -> list`, `notify_start(...)`. Stdlib `urllib.request` with timeouts (zero new dependencies).
-- **Outbox** — new local table `upload_outbox(attempt_id PRIMARY KEY, payload_json, created_at, attempts, last_error, sent)` in `mkw_tracker.db`. On each attempt-end the lifecycle saves locally (existing `save_run`) **and** enqueues the payload.
-- **Sync-worker thread** — a daemon thread (mirrors the IPC daemon thread) drains the outbox: POST each unsent row; on success mark `sent`; on failure increment `attempts`, record `last_error`, back off, retry; flush on reconnect. Idempotent server upsert makes re-sends safe.
-- **Wiring** — `lifecycle/race.py` already fires on start/finalize: on finalize → build payload + enqueue; on start → optional `notify_start`. On app start / course change → `fetch_friends_pbs` → existing `save_friend_pb` (friends' ghosts render on the monitor). The client *may* also subscribe to `WS /v1/events` to live-refresh friends' data (optional).
-- **cc** — a client setting (default 150) included in the payload until screen-detection lands.
+1. **Engine (`mkw_tracker`, Python)** — add a consolidated **`run_finalized`** IPC emit (the §11 payload) fired from `lifecycle/race.py` on every attempt-finalize; the engine **mints the `attempt_id`**. No network, no new deps. (It nearly does this already via `pb_export`, which emits the full mkwreplay for PBs — extend to every attempt with the richer fields.) In Phase 1 it also keeps its existing local `save_run` so the monitor is unaffected.
+2. **Tauri app (`src-tauri/src/sync.rs`, Rust)** — a decoupled module (mirrors `discord.rs`): the existing sidecar-stdout reader routes `run_finalized` lines into it → persist to a **rusqlite outbox** (`outbox(attempt_id PK, payload TEXT, attempts INT, last_error TEXT, created_at)`) → a background task POSTs each unsent row with the bearer token → delete on `2xx`, else increment `attempts` + record `last_error` + back off + retry; flush on reconnect. Idempotent server upsert makes re-sends safe.
+3. **App settings** — a "Sync" tab storing `server_url` + `auth_token` (Tauri settings), plus a connection indicator. Removing the one `sync::init()` line disables the feature with no other effect (same isolation property as the Discord plugin).
 
-## 14. Idempotency & provenance
+`POST /v1/runs/start` (the `run_started` ping) is fired by `sync.rs` when the engine emits its RACING-entered event.
 
-- The client mints a stable `attempt_id` (UUID) per attempt; the server upserts on it, so retries from the outbox never duplicate.
-- All client uploads are `provenance='live'`, so the A importer's wipe-and-reload (which only touches `legacy_import`/`carryover`) never disturbs live data — the two ingest paths coexist cleanly.
+## 15. Idempotency & provenance
 
-## 15. Testing
+- The **engine** mints a stable `attempt_id` (UUID) per attempt; the Rust outbox is keyed by it; the server upserts on it — so retries never duplicate.
+- All client uploads are `provenance='live'`, so A's importer wipe-and-reload (only `legacy_import`/`carryover`) never disturbs live data — the two ingest paths coexist.
 
-- **TS** — `packages/db`: idempotent upsert, `is_pb` recompute, leaderboard/friends queries (temp SQLite). `apps/api`: route tests via Hono's test client (auth required/anon reads), event-derivation assertions, WS fan-out. One end-to-end: real Hono on a random port ← fake client POST → assert DB row + emitted event.
-- **Python** — `SyncClient` against a mock HTTP server; outbox enqueue/flush/retry/backoff; payload construction; lifecycle wiring (on finalize → outbox row).
+## 16. What stays vs moves (phasing)
 
-## 16. Execution staging
+| | Phase 1 (this spec / B) | Phase 2 (deferred) |
+|---|---|---|
+| **Engine** | adds `run_finalized` emit; keeps local race store for own-display | local race store (`replays`/`replay_points`/`replay_splits`) **removed**; pure detector |
+| **Tauri app** | new `sync.rs` outbox + upload; Sync settings | adds read-back + local cache; renders own + friends' data |
+| **Server** | source of truth (writes + reads + events) | unchanged (already authoritative) |
+| **Monitor reads** | own data still from engine DB (unchanged) | repointed to server/app-cache |
 
-Larger than A; expected to become **two implementation plans** sharing this one spec:
-1. **Server** (`pi/packages/{db,shared}` + `pi/apps/api`) — buildable and testable standalone (curl + the TS tests) before any client change.
-2. **Client integration** (`mkw_tracker/sync` + outbox + lifecycle wiring) — depends on the server's API.
+## 17. Testing
 
-## 17. Decided judgment calls
+- **TS** — `packages/db`: idempotent upsert, `is_pb` recompute, leaderboard/friends queries (temp SQLite). `apps/api`: route tests (Hono test client; auth required / anon reads), event-derivation, WS fan-out. One end-to-end: real Hono on a random port ← fake POST → assert DB row + emitted event.
+- **Engine (Python)** — `run_finalized` emitted on finalize with the correct payload (every attempt, incl. reset); `attempt_id` stable.
+- **Rust (`sync.rs`)** — outbox persist/flush/retry/backoff against a mock HTTP server; graceful no-op when `server_url`/token unset; survives restart (outbox is durable).
+
+## 18. Execution staging
+
+Two implementation plans share this spec:
+1. **Server** (`pi/packages/{db,shared}` + `pi/apps/api`) — buildable/testable standalone (curl + TS tests) before any client change.
+2. **Client write path** (engine `run_finalized` emit + `src-tauri/src/sync.rs` outbox/upload + Sync settings).
+
+## 19. Decided judgment calls
 
 - TS monorepo under `pi/`; `server/schema.sql` is the single schema source the TS `db` reads.
-- Token stored as a **sha256 hash**, minted by a Pi-side admin script.
+- **Server is the source of truth; the engine is a pure detector; the Tauri/Rust app does the pushing** (resilient outbox in **rusqlite**).
+- Engine emits one consolidated **`run_finalized`** per attempt and mints the `attempt_id`; Rust forwards the payload opaquely.
+- Token + server URL live in **app settings**; token stored server-side as a **sha256 hash**, minted by a Pi-side script.
 - **cc = client setting (default 150)** until detection exists.
-- `run_started` is an **ephemeral event** via a lightweight start ping (kept).
-- Client HTTP via **stdlib `urllib`** (no new dependency).
+- `run_started` is an **ephemeral** event via a lightweight start ping.
+- **Phase 1 keeps the engine's local race store** for monitor display; its removal + read-migration is **Phase 2**, out of scope here.
