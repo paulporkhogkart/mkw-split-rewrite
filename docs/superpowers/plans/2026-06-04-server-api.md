@@ -1173,10 +1173,11 @@ describe('WS /v1/events', () => {
     injectWebSocket(server);
     const addr = server.address() as { port: number };
 
+    let wsClient!: WebSocket;
     const evt = await new Promise<any>((resolve) => {
-      const ws = new WebSocket(`ws://127.0.0.1:${addr.port}/v1/events`);
-      ws.onmessage = (ev) => resolve(JSON.parse((ev as MessageEvent).data.toString()));
-      ws.onopen = () => {
+      wsClient = new WebSocket(`ws://127.0.0.1:${addr.port}/v1/events`);
+      wsClient.onmessage = (ev) => resolve(JSON.parse((ev as MessageEvent).data.toString()));
+      wsClient.onopen = () => {
         fetch(`http://127.0.0.1:${addr.port}/v1/runs`, {
           method: 'POST',
           headers: { 'content-type': 'application/json', authorization: `Bearer ${c.token}` },
@@ -1186,6 +1187,9 @@ describe('WS /v1/events', () => {
     });
 
     expect(['run_finished', 'pb_achieved']).toContain(evt.type);
+    // Close the client + open connections first, else server.close()'s callback never fires.
+    wsClient.close();
+    server.closeAllConnections();
     await new Promise<void>((r) => server.close(() => r()));
   });
 });
