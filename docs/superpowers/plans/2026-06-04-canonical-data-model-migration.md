@@ -489,7 +489,7 @@ def _build():
     rows = [
         (1, 1, cid, 150, "finished", "live", 110000, "2025-01-01"),
         (1, 1, cid, 150, "finished", "live", 108000, "2025-02-01"),
-        (2, 1, cid, 150, "finished", "live", 112000, "2025-01-15"),
+        (1, 2, cid, 150, "finished", "live", 112000, "2025-01-15"),
         (1, 1, cid, 150, "reset",    "live", None,   "2025-02-02"),
     ]
     conn.executemany(
