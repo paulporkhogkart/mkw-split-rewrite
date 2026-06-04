@@ -18,6 +18,19 @@ fn build_upload_body(line: &str, cc: i64) -> Option<String> {
     serde_json::to_string(&v).ok()
 }
 
+/// True if the line is a run_finalized IPC event. Whitespace-agnostic: the engine
+/// emits standard `json.dumps` output (a space after each colon), so parse and check
+/// the `type` field rather than substring-match a specific formatting.
+fn is_run_finalized(line: &str) -> bool {
+    if !line.contains("run_finalized") {
+        return false; // cheap reject for the overwhelming majority of lines
+    }
+    serde_json::from_str::<serde_json::Value>(line)
+        .ok()
+        .and_then(|v| v.get("type").and_then(|t| t.as_str()).map(|s| s == "run_finalized"))
+        .unwrap_or(false)
+}
+
 fn ensure_outbox(conn: &Connection) {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS outbox (
@@ -56,8 +69,8 @@ static OUTBOX: Mutex<Option<Connection>> = Mutex::new(None);
 
 /// Called by lib.rs for every sidecar stdout line. Enqueues run_finalized events; ignores the rest.
 pub fn on_line(line: &str) {
-    if !line.contains("\"type\":\"run_finalized\"") {
-        return; // cheap pre-filter
+    if !is_run_finalized(line) {
+        return;
     }
     let Some(id) = attempt_id_of(line) else { return };
     if let Ok(mut guard) = OUTBOX.lock() {
@@ -135,7 +148,8 @@ pub fn init(app: tauri::AppHandle) {
 mod tests {
     use super::*;
 
-    const LINE: &str = r#"{"type":"run_finalized","attempt_id":"a1","course":"Rainbow Road","status":"finished","total_time":"1:50.000"}"#;
+    // Realistic engine output: standard json.dumps spacing (a space after each colon).
+    const LINE: &str = r#"{"type": "run_finalized", "attempt_id": "a1", "course": "Rainbow Road", "status": "finished", "total_time": "1:50.000"}"#;
 
     #[test]
     fn attempt_id_is_extracted() {
@@ -162,5 +176,14 @@ mod tests {
         assert_eq!(outbox_pending(&conn).len(), 1);
         outbox_delete(&conn, "a1");
         assert_eq!(outbox_pending(&conn).len(), 0);
+    }
+
+    #[test]
+    fn detects_run_finalized_regardless_of_spacing() {
+        // Regression: the engine emits json.dumps output WITH a space after each colon.
+        assert!(is_run_finalized(r#"{"type": "run_finalized", "attempt_id": "x"}"#));
+        assert!(is_run_finalized(r#"{"type":"run_finalized","attempt_id":"x"}"#));
+        assert!(!is_run_finalized(r#"{"type": "screen_change", "from": "RACING", "to": "RESET"}"#));
+        assert!(!is_run_finalized("not json"));
     }
 }
