@@ -1,4 +1,5 @@
 mod discord;
+mod sync;
 
 use std::sync::Mutex;
 use tauri::{Emitter, Manager};
