@@ -89,6 +89,7 @@ fn do_spawn_sidecar(app: tauri::AppHandle, state: &SidecarState) {
                         CommandEvent::Stdout(line) => {
                             let msg = String::from_utf8_lossy(&line);
                             let _ = handle.emit("tracker-event", msg.as_ref());
+                            sync::on_line(msg.as_ref());
                         }
                         CommandEvent::Stderr(line) => {
                             let text = String::from_utf8_lossy(&line);
@@ -195,11 +196,12 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .invoke_handler(tauri::generate_handler![start_tracker, stop_tracker, restart_tracker, send_to_tracker, open_url, discord::discord_set_presence, discord::discord_clear_presence])
+        .invoke_handler(tauri::generate_handler![start_tracker, stop_tracker, restart_tracker, send_to_tracker, open_url, discord::discord_set_presence, discord::discord_clear_presence, sync::sync_set_config])
         .setup(|app| {
             app.manage(SidecarState(Mutex::new(None)));
             #[cfg(target_os = "windows")]
             grant_media_permissions(&app.get_webview_window("main").expect("main window"));
+            sync::init(app.handle().clone());
             Ok(())
         })
         .build(tauri::generate_context!())
