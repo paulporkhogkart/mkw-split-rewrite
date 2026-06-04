@@ -159,3 +159,29 @@ def import_legacy(legacy_db_path: str, conn, cutover_iso: str | None = None) -> 
         legacy.close()
     return ImportReport(players=len(player_map), courses=n_courses,
                         s0_runs=n_pb, world_records=n_wr, carryover_seeds=n_carry)
+
+
+def main() -> None:
+    import argparse
+    ap = argparse.ArgumentParser(
+        description="Import the legacy kart-off hogkart.db into the canonical server DB.")
+    ap.add_argument("--legacy-db", required=True, help="Path to a copy of hogkart.db")
+    ap.add_argument("--out", required=True, help="Path to the server SQLite DB (created/updated)")
+    ap.add_argument("--cutover", default=None,
+                    help="ISO-8601 cutover timestamp (default: now, UTC)")
+    args = ap.parse_args()
+
+    from server.db import connect
+    conn = connect(args.out)
+    rep = import_legacy(args.legacy_db, conn, args.cutover)
+    conn.close()
+    print("Legacy import complete:")
+    print(f"  players:         {rep.players}")
+    print(f"  courses:         {rep.courses}")
+    print(f"  S0 runs:         {rep.s0_runs}")
+    print(f"  world_records:   {rep.world_records}")
+    print(f"  carryover seeds: {rep.carryover_seeds}")
+
+
+if __name__ == "__main__":
+    main()
