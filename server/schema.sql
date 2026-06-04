@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS courses (
 
 CREATE TABLE IF NOT EXISTS runs (
     id             INTEGER PRIMARY KEY,
+    attempt_id     TEXT UNIQUE,
     season_id      INTEGER NOT NULL REFERENCES seasons(id),
     player_id      INTEGER NOT NULL REFERENCES players(id),
     course_id      INTEGER NOT NULL REFERENCES courses(id),
