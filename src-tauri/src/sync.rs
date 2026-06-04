@@ -46,6 +46,91 @@ fn outbox_delete(conn: &Connection, attempt_id: &str) {
     conn.execute("DELETE FROM outbox WHERE attempt_id = ?1", rusqlite::params![attempt_id]).ok();
 }
 
+use std::sync::Mutex;
+
+#[derive(Default, Clone)]
+struct Config { server_url: String, token: String, cc: i64 }
+
+static CONFIG: Mutex<Config> = Mutex::new(Config { server_url: String::new(), token: String::new(), cc: 150 });
+static OUTBOX: Mutex<Option<Connection>> = Mutex::new(None);
+
+/// Called by lib.rs for every sidecar stdout line. Enqueues run_finalized events; ignores the rest.
+pub fn on_line(line: &str) {
+    if !line.contains("\"type\":\"run_finalized\"") {
+        return; // cheap pre-filter
+    }
+    let Some(id) = attempt_id_of(line) else { return };
+    if let Ok(mut guard) = OUTBOX.lock() {
+        if let Some(conn) = guard.as_ref() {
+            outbox_insert(conn, &id, line);
+        } else {
+            log::warn!("[sync] outbox not initialised; dropping run_finalized");
+        }
+    }
+}
+
+#[tauri::command]
+pub fn sync_set_config(server_url: String, token: String, cc: i64) {
+    if let Ok(mut c) = CONFIG.lock() {
+        *c = Config { server_url, token, cc };
+    }
+}
+
+/// Open the outbox DB in the app data dir, then spawn the drain loop.
+pub fn init(app: tauri::AppHandle) {
+    use tauri::Manager;
+    let dir = match app.path().app_data_dir() {
+        Ok(d) => d,
+        Err(e) => { log::error!("[sync] no app_data_dir: {e}"); return; }
+    };
+    let _ = std::fs::create_dir_all(&dir);
+    let conn = match Connection::open(dir.join("sync_outbox.db")) {
+        Ok(c) => c,
+        Err(e) => { log::error!("[sync] open outbox failed: {e}"); return; }
+    };
+    ensure_outbox(&conn);
+    *OUTBOX.lock().unwrap() = Some(conn);
+
+    // A dedicated OS thread (not the tokio runtime) running a blocking loop:
+    // rusqlite is sync and reqwest::blocking manages its own runtime, so this
+    // avoids any dependency on Tauri's async runtime having a time driver.
+    std::thread::spawn(move || {
+        let client = reqwest::blocking::Client::new();
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(3));
+            let cfg = CONFIG.lock().unwrap().clone();
+            if cfg.server_url.is_empty() || cfg.token.is_empty() {
+                continue;
+            }
+            // Snapshot pending rows WITHOUT holding the lock during the blocking POSTs.
+            let pending: Vec<(String, String)> = {
+                let guard = OUTBOX.lock().unwrap();
+                match guard.as_ref() { Some(c) => outbox_pending(c), None => Vec::new() }
+            };
+            for (id, line) in pending {
+                let Some(body) = build_upload_body(&line, cfg.cc) else {
+                    // Unparseable row: drop it so it doesn't wedge the queue.
+                    if let Some(c) = OUTBOX.lock().unwrap().as_ref() { outbox_delete(c, &id); }
+                    continue;
+                };
+                let url = format!("{}/v1/runs", cfg.server_url.trim_end_matches('/'));
+                match client.post(&url)
+                    .bearer_auth(&cfg.token)
+                    .header("content-type", "application/json")
+                    .body(body)
+                    .send()
+                {
+                    Ok(resp) if resp.status().is_success() => {
+                        if let Some(c) = OUTBOX.lock().unwrap().as_ref() { outbox_delete(c, &id); }
+                    }
+                    Ok(resp) => log::debug!("[sync] {id}: server {}", resp.status()),
+                    Err(e) => log::debug!("[sync] {id}: {e}"),
+                }
+            }
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
