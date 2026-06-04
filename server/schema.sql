@@ -8,9 +8,10 @@ CREATE TABLE IF NOT EXISTS seasons (
 );
 
 CREATE TABLE IF NOT EXISTS players (
-    id            INTEGER PRIMARY KEY,
-    display_name  TEXT NOT NULL UNIQUE,
-    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    id              INTEGER PRIMARY KEY,
+    display_name    TEXT NOT NULL UNIQUE,
+    auth_token_hash TEXT UNIQUE,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS season_rosters (
