@@ -32,6 +32,11 @@ class MinimapRecorder:
     def is_paused(self) -> bool:
         return self._pause_start is not None
 
+    @property
+    def points(self) -> list:
+        """Read-only copy of the recorded points (list of (t_ms, cx, cy, score))."""
+        return list(self._points)
+
     def start(self):
         """Call when RACING begins (new race instance)."""
         self._points       = []

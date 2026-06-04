@@ -121,6 +121,15 @@ def emit_pb_export(course: str, mkwreplay: dict) -> str:
     return _emit("pb_export", course=course, mkwreplay=mkwreplay)
 
 
+def emit_run_finalized(run: dict) -> str:
+    """Serialise the full finalized-attempt payload for the Tauri app to upload.
+
+    ``run`` carries: attempt_id, course, status, character, kart, costume,
+    started_at, ended_at, total_time, laps [{lap, time_ms}], points [[t_ms,cx,cy,score]].
+    """
+    return json.dumps({"type": "run_finalized", **run})
+
+
 def emit_pb_splits(course: str, splits, total_ms=None) -> str:
     return _emit("pb_splits", course=course, splits=splits, total_ms=total_ms)
 
