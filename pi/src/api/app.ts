@@ -13,3 +13,20 @@ export function createApp(db: DatabaseSync, hub: EventHub): Hono<Env> {
   app.route('/', readsRoutes(db));
   return app;
 }
+
+import { createNodeWebSocket } from '@hono/node-ws';
+
+/** Attach the /v1/events WebSocket route. Returns { injectWebSocket } to call on the Node server. */
+export function makeWs(app: Hono<Env>, hub: EventHub) {
+  const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
+  app.get('/v1/events', upgradeWebSocket(() => {
+    let unsub = () => {};
+    return {
+      onOpen(_e: unknown, ws: { send: (data: string) => void }) {
+        unsub = hub.subscribe((evt) => ws.send(JSON.stringify(evt)));
+      },
+      onClose() { unsub(); },
+    };
+  }));
+  return { injectWebSocket };
+}
