@@ -172,13 +172,13 @@ Steps (single transaction):
 2. Ensure `seasons` (S0, S1) and `season_rosters`.
 3. Seed `courses` (the canonical 30: slug + display_name).
 4. Map legacy `players` → `players` by case-insensitive name (create if missing); add to rosters.
-5. Map legacy `tracks` → `courses` by **slug-normalize** (lowercase, runs of non-alphanumeric → `_`, trim) **+ the explicit alias `Wario Shipyard → warios_galleon`**. **Fail loudly** if any legacy track does not map.
+5. Map legacy `tracks` → `courses` by **`slugify`** (lowercase, **strip apostrophes**, then collapse runs of non-alphanumeric → `_`, trim) **+ the explicit alias `Wario Shipyard → warios_galleon`**. **Fail loudly** if any legacy track does not map. (Stripping apostrophes is what makes `Bowser's Castle → bowsers_castle` and `Toad's Factory → toads_factory` line up with the image-asset slugs — a plain non-alphanumeric rule would wrongly yield `bowser_s_castle`.)
 6. Import `personal_bests` → `runs` (S0, `legacy_import`, `finished`, cc=150, `total_time*`, original `achieved_at` → `ended_at`/`created_at`; character/kart/costume/laps/points left null).
 7. Import `world_records` → `world_records` (global, `legacy_import`, cc=150; preserve holder/character/vehicle/video_url/achieved_at; UTF-8).
 8. Recompute S0 `is_pb` (current best per player×course×cc).
 9. Build the S1 carry-over seeds from final S0 PBs (§7).
 
-The slug-normalize rule is the same `slugify` the app already uses for course assets (verified to produce the existing `images/courses/<lang>/<slug>.png` stems for all 30 courses).
+`slugify` produces the existing `images/courses/<lang>/<slug>.png` stems for all 30 courses. It strips apostrophes so the legacy display names (which keep `'` / `.` / `?`) map onto the same slugs the client's already-apostrophe-free course names do.
 
 ## 9. Validation / acceptance
 
