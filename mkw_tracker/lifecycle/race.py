@@ -162,6 +162,29 @@ class RaceLifecycle:
                 from ..database.replay_repo import set_minimap_threshold
                 set_minimap_threshold(course, character, costume or "", new_threshold)
 
+        # Emit the full finalized-attempt payload for the Tauri app to upload.
+        # (Pure detector: emit only; no network. Built before save() clears points.)
+        if self._ipc is not None and course:
+            import uuid
+            from datetime import datetime, timezone
+            from ..ipc.protocol import emit_run_finalized
+            from ..database.replay_repo import _to_ms
+            laps = [{"lap": int(lap), "time_ms": _to_ms(txt)}
+                    for lap, txt in sorted(self._ts.splits.items())]
+            self._ipc.emit(emit_run_finalized({
+                "attempt_id": uuid.uuid4().hex,
+                "course":     course,
+                "status":     "finished" if completed else "reset",
+                "character":  character,
+                "kart":       sel.kart,
+                "costume":    costume,
+                "started_at": None,
+                "ended_at":   datetime.now(timezone.utc).isoformat(),
+                "total_time": best_total_time,
+                "laps":       laps,
+                "points":     [[t, cx, cy, sc] for (t, cx, cy, sc) in self._mm_rec.points],
+            }))
+
         replay_id = self._mm_rec.save(course, character=character, costume=costume,
                                       kart=sel.kart, total_time=best_total_time,
                                       lap_splits=dict(self._ts.splits))
