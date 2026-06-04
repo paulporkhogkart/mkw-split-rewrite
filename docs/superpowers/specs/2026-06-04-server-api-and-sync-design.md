@@ -58,6 +58,8 @@ pi/
 - **Tauri app (Rust) = resilient client edge.** Forwards finalized runs to the server through a persistent outbox; holds the server URL + token; (Phase 2) reads back from the server for display with a small local cache.
 - **Server (TS) = source of truth.** Stores every attempt, derives events, serves the read API + WS.
 
+**Invariant — the app is the engine's only runtime peer.** The engine communicates solely over its IPC stream (stdin/stdout) with the Tauri/Rust app; it does no network and is never contacted directly by the server or any consumer (overlays/website talk to the *server*, never the engine). The engine's optional `--ws-port` broadcaster — used today by local overlays + the dev autotemplate tool — becomes redundant for production once overlays consume the server in C; retiring it or fencing it to the dev-only autotemplate workflow is a small cleanup item (tracked, not in B's write-path scope).
+
 **Phase 1 = this spec (B):** stand up the server, and the **write path** (engine emits `run_finalized` → Rust outbox → server). The engine *temporarily* keeps writing its existing local race store so the current monitor display is untouched.
 
 **Phase 2 = deferred:** repoint the monitor's own-player reads at the server/app-cache, render friends from the server, then delete the engine's race-data tables. The engine becomes fully pure.
