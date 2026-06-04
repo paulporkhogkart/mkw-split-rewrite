@@ -27,6 +27,7 @@
            minimap as minimapStore, replays as replaysStore, sample as sampleStore } from "./lib/stores.js";
   import { pbSplits as pbSplitsStore, pbTotalMs as pbTotalStore } from "./lib/stores.js";
   import { initDiscordPresence } from "./lib/discord.js";
+  import { initSync } from "./lib/sync.js";
 
   let appWindow = null;
   function winMinimize()       { appWindow?.minimize(); }
@@ -1221,6 +1222,7 @@
     checkForUpdate();
     startFeedPoll();
     initDiscordPresence();
+    initSync();
   });
 
   onDestroy(()=>{
