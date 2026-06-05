@@ -40,3 +40,12 @@ export function overallLeaderboard(db: DatabaseSync, seasonId: number, cc: numbe
      GROUP BY p.id ORDER BY total_time_ms ASC`
   ).all(seasonId, cc);
 }
+
+export function myPbs(db: DatabaseSync, seasonId: number, playerId: number) {
+  return db.prepare(
+    `SELECT c.slug AS course_slug, r.cc, r.total_time_ms
+     FROM runs r JOIN courses c ON c.id = r.course_id
+     WHERE r.season_id=? AND r.player_id=? AND r.is_pb=1 AND r.total_time_ms IS NOT NULL
+     ORDER BY c.slug`
+  ).all(seasonId, playerId);
+}
