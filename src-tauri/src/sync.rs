@@ -9,12 +9,14 @@ fn attempt_id_of(line: &str) -> Option<String> {
     v.get("attempt_id")?.as_str().map(|s| s.to_string())
 }
 
-/// Turn a stored run_finalized line into the POST body: drop `type`, set `cc`.
-fn build_upload_body(line: &str, cc: i64) -> Option<String> {
+/// Turn a stored run_finalized line into the POST body: drop the IPC `type` tag and
+/// forward everything else as-is. `cc` is NOT injected — it isn't a client setting;
+/// the engine will include it per run if MKW ever ships more than 150cc, and the
+/// server defaults to 150 when it's absent.
+fn build_upload_body(line: &str) -> Option<String> {
     let mut v: serde_json::Value = serde_json::from_str(line).ok()?;
     let obj = v.as_object_mut()?;
     obj.remove("type");
-    obj.insert("cc".into(), serde_json::json!(cc));
     serde_json::to_string(&v).ok()
 }
 
@@ -62,9 +64,9 @@ fn outbox_delete(conn: &Connection, attempt_id: &str) {
 use std::sync::Mutex;
 
 #[derive(Default, Clone)]
-struct Config { server_url: String, token: String, cc: i64 }
+struct Config { server_url: String, token: String }
 
-static CONFIG: Mutex<Config> = Mutex::new(Config { server_url: String::new(), token: String::new(), cc: 150 });
+static CONFIG: Mutex<Config> = Mutex::new(Config { server_url: String::new(), token: String::new() });
 static OUTBOX: Mutex<Option<Connection>> = Mutex::new(None);
 
 /// Called by lib.rs for every sidecar stdout line. Enqueues run_finalized events; ignores the rest.
@@ -83,9 +85,61 @@ pub fn on_line(line: &str) {
 }
 
 #[tauri::command]
-pub fn sync_set_config(server_url: String, token: String, cc: i64) {
+pub fn sync_set_config(server_url: String, token: String) {
     if let Ok(mut c) = CONFIG.lock() {
-        *c = Config { server_url, token, cc };
+        *c = Config { server_url, token };
+    }
+}
+
+/// Probe the configured server and report a human-readable result.
+///
+/// Reads the SAME `CONFIG` the uploader's drain loop uses, so it also reveals
+/// whether the Sync settings actually reached the uploader (boundary check):
+/// an empty URL/token here means the frontend → Rust config push isn't landing.
+///
+/// Network checks are non-destructive:
+///   1. `GET /health`  — reachability + correct base URL (no auth).
+///   2. `POST /v1/runs` with an empty `{}` body — `requireToken` runs first, so an
+///      invalid token yields 401; a valid token falls through to the payload check
+///      and yields 400 ("bad payload") without ever writing a run.
+#[tauri::command]
+pub async fn sync_test_connection() -> Result<String, String> {
+    let cfg = { CONFIG.lock().unwrap().clone() };
+    if cfg.server_url.trim().is_empty() {
+        return Err("The uploader has no server URL. If you've entered one above, the \
+                    settings aren't reaching the uploader — close and reopen Settings, \
+                    then try again.".into());
+    }
+    if cfg.token.trim().is_empty() {
+        return Err("The uploader has no token. Paste your token above, then try again.".into());
+    }
+    let base = cfg.server_url.trim_end_matches('/').to_string();
+    let client = reqwest::Client::new();
+
+    // 1. Reachability (no auth).
+    match client.get(format!("{base}/health"))
+        .timeout(std::time::Duration::from_secs(8)).send().await
+    {
+        Err(e) => return Err(format!("Couldn't reach {base} — {e}")),
+        Ok(r) if !r.status().is_success() =>
+            return Err(format!("{base}/health returned HTTP {}.", r.status().as_u16())),
+        Ok(_) => {}
+    }
+
+    // 2. Auth (non-destructive: empty body never writes a run).
+    match client.post(format!("{base}/v1/runs"))
+        .bearer_auth(&cfg.token)
+        .header("content-type", "application/json")
+        .body("{}")
+        .timeout(std::time::Duration::from_secs(8))
+        .send().await
+    {
+        Err(e) => Err(format!("Server reachable, but the runs endpoint errored — {e}")),
+        Ok(r) => match r.status().as_u16() {
+            400 => Ok(format!("Connected to {base}. Server is up and your token is valid.")),
+            401 => Err("Reached the server, but it rejected your token (401). Check the token.".into()),
+            other => Err(format!("Reached the server, but /v1/runs replied HTTP {other} (expected 400/401).")),
+        },
     }
 }
 
@@ -121,7 +175,7 @@ pub fn init(app: tauri::AppHandle) {
                 match guard.as_ref() { Some(c) => outbox_pending(c), None => Vec::new() }
             };
             for (id, line) in pending {
-                let Some(body) = build_upload_body(&line, cfg.cc) else {
+                let Some(body) = build_upload_body(&line) else {
                     // Unparseable row: drop it so it doesn't wedge the queue.
                     if let Some(c) = OUTBOX.lock().unwrap().as_ref() { outbox_delete(c, &id); }
                     continue;
@@ -158,13 +212,13 @@ mod tests {
     }
 
     #[test]
-    fn upload_body_drops_type_and_sets_cc() {
-        let body = build_upload_body(LINE, 150).unwrap();
+    fn upload_body_drops_type_and_forwards_fields() {
+        let body = build_upload_body(LINE).unwrap();
         let v: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert!(v.get("type").is_none());
-        assert_eq!(v["cc"], 150);
         assert_eq!(v["attempt_id"], "a1");
         assert_eq!(v["course"], "Rainbow Road");
+        assert_eq!(v["status"], "finished");
     }
 
     #[test]
