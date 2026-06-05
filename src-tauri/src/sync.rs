@@ -3,6 +3,35 @@
 //! and a background task uploads them to the server. The engine never sees the network.
 use rusqlite::Connection;
 
+/// Mirror of the server's `slugify` (pi/src/db/slug.ts): lowercase, drop apostrophes,
+/// collapse any other non-alphanumeric run to a single underscore, trim underscores.
+fn slugify(name: &str) -> String {
+    let mut out = String::new();
+    let mut prev_us = false;
+    for ch in name.to_lowercase().chars() {
+        if ch == '\'' || ch == '\u{2019}' { continue; }      // straight + curly apostrophe
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch);
+            prev_us = false;
+        } else if !prev_us {
+            out.push('_');
+            prev_us = true;
+        }
+    }
+    out.trim_matches('_').to_string()
+}
+
+/// Parse "M:SS.mmm" -> milliseconds. Returns None on any other shape.
+fn parse_time_ms(t: &str) -> Option<i64> {
+    let (m, rest) = t.trim().split_once(':')?;
+    let (s, ms) = rest.split_once('.')?;
+    if s.len() != 2 || ms.len() != 3 { return None; }
+    let m: i64 = m.parse().ok()?;
+    let s: i64 = s.parse().ok()?;
+    let ms: i64 = ms.parse().ok()?;
+    Some(m * 60_000 + s * 1_000 + ms)
+}
+
 /// Extract the `attempt_id` from a run_finalized JSON line.
 fn attempt_id_of(line: &str) -> Option<String> {
     let v: serde_json::Value = serde_json::from_str(line).ok()?;
@@ -239,5 +268,19 @@ mod tests {
         assert!(is_run_finalized(r#"{"type":"run_finalized","attempt_id":"x"}"#));
         assert!(!is_run_finalized(r#"{"type": "screen_change", "from": "RACING", "to": "RESET"}"#));
         assert!(!is_run_finalized("not json"));
+    }
+
+    #[test]
+    fn slugify_matches_server_rule() {
+        assert_eq!(slugify("Rainbow Road"), "rainbow_road");
+        assert_eq!(slugify("Bowser's Castle"), "bowsers_castle");   // apostrophe dropped
+        assert_eq!(slugify("  Mario  Circuit "), "mario_circuit");  // collapse + trim
+    }
+
+    #[test]
+    fn parse_time_ms_handles_mmss() {
+        assert_eq!(parse_time_ms("1:50.123"), Some(110123));
+        assert_eq!(parse_time_ms("0:36.400"), Some(36400));
+        assert_eq!(parse_time_ms("nope"), None);
     }
 }
