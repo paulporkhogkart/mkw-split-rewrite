@@ -187,9 +187,9 @@ class RaceLifecycle:
                 "points":     [[t, cx, cy, sc] for (t, cx, cy, sc) in self._mm_rec.points],
             }))
 
-        replay_id = self._mm_rec.save(course, character=character, costume=costume,
-                                      kart=sel.kart, total_time=best_total_time,
-                                      lap_splits=dict(self._ts.splits))
+        self._mm_rec.save(course, character=character, costume=costume,
+                          kart=sel.kart, total_time=best_total_time,
+                          lap_splits=dict(self._ts.splits))
 
     def _start_race(self, old: Screen):
         from datetime import datetime, timezone
