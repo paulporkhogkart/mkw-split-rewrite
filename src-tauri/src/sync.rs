@@ -118,6 +118,26 @@ fn pb_cache_put(conn: &Connection, slug: &str, cc: i64, ms: i64) {
     ).ok();
 }
 
+/// Parse a `/v1/me/pbs` JSON body into (course_slug, cc, best_ms) rows. Tolerant: skips
+/// malformed entries.
+fn parse_me_pbs(body: &str) -> Vec<(String, i64, i64)> {
+    let v: serde_json::Value = match serde_json::from_str(body) { Ok(v) => v, Err(_) => return Vec::new() };
+    let arr = match v.as_array() { Some(a) => a, None => return Vec::new() };
+    arr.iter().filter_map(|e| {
+        Some((
+            e.get("course_slug")?.as_str()?.to_string(),
+            e.get("cc")?.as_i64()?,
+            e.get("total_time_ms")?.as_i64()?,
+        ))
+    }).collect()
+}
+
+/// Replace the cache contents with the server's authoritative bests.
+fn seed_pb_cache(conn: &Connection, rows: &[(String, i64, i64)]) {
+    conn.execute("DELETE FROM pb_cache", []).ok();
+    for (slug, cc, ms) in rows { pb_cache_put(conn, slug, *cc, *ms); }
+}
+
 /// True if `ms` beats the cached best (or there is none). On true, lowers the cache
 /// immediately so consecutive offline PBs are each detected.
 fn is_new_pb(conn: &Connection, slug: &str, cc: i64, ms: i64) -> bool {
@@ -222,6 +242,7 @@ pub fn init(app: tauri::AppHandle) {
         Err(e) => { log::error!("[sync] open outbox failed: {e}"); return; }
     };
     ensure_outbox(&conn);
+    ensure_pb_cache(&conn);
     *OUTBOX.lock().unwrap() = Some(conn);
 
     // A dedicated OS thread (not the tokio runtime) running a blocking loop:
@@ -229,11 +250,24 @@ pub fn init(app: tauri::AppHandle) {
     // avoids any dependency on Tauri's async runtime having a time driver.
     std::thread::spawn(move || {
         let client = reqwest::blocking::Client::new();
+        let mut seeded = false;
         loop {
             std::thread::sleep(std::time::Duration::from_secs(3));
             let cfg = CONFIG.lock().unwrap().clone();
             if cfg.server_url.is_empty() || cfg.token.is_empty() {
                 continue;
+            }
+            if !seeded {
+                let url = format!("{}/v1/me/pbs", cfg.server_url.trim_end_matches('/'));
+                if let Ok(resp) = client.get(&url).bearer_auth(&cfg.token).send() {
+                    if resp.status().is_success() {
+                        if let Ok(body) = resp.text() {
+                            let rows = parse_me_pbs(&body);
+                            if let Some(c) = OUTBOX.lock().unwrap().as_ref() { seed_pb_cache(c, &rows); }
+                            seeded = true;
+                        }
+                    }
+                }
             }
             // Snapshot pending rows WITHOUT holding the lock during the blocking POSTs.
             let pending: Vec<(String, String)> = {
@@ -255,6 +289,7 @@ pub fn init(app: tauri::AppHandle) {
                 {
                     Ok(resp) if resp.status().is_success() => {
                         if let Some(c) = OUTBOX.lock().unwrap().as_ref() { outbox_delete(c, &id); }
+                        seeded = false;
                     }
                     Ok(resp) => log::debug!("[sync] {id}: server {}", resp.status()),
                     Err(e) => log::debug!("[sync] {id}: {e}"),
@@ -319,6 +354,15 @@ mod tests {
         assert_eq!(parse_time_ms("1:50.123"), Some(110123));
         assert_eq!(parse_time_ms("0:36.400"), Some(36400));
         assert_eq!(parse_time_ms("nope"), None);
+    }
+
+    #[test]
+    fn parse_me_pbs_reads_rows() {
+        let body = r#"[{"course_slug":"rainbow_road","cc":150,"total_time_ms":110000},
+                       {"course_slug":"mario_circuit","cc":150,"total_time_ms":95000}]"#;
+        let rows = parse_me_pbs(body);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0], ("rainbow_road".to_string(), 150, 110000));
     }
 
     #[test]
