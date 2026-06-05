@@ -177,18 +177,25 @@ def test_build_carryover_one_seed_per_player_course(legacy_db, server_db):
     n = importer.build_carryover(server_db, s0, s1, CUTOVER)
     # Paul@Bowser, Luke@Bowser, Paul@Wario = 3 carry-over seeds.
     assert n == 3
+    # Each seed mirrors its source S0 PB's started_at/ended_at (the original
+    # achievement time), NOT the cutover stamp; only created_at marks row birth.
+    src = {(r["player_id"], r["course_id"]): r for r in server_db.execute(
+        "SELECT player_id, course_id, started_at, ended_at FROM runs "
+        "WHERE season_id=? AND is_pb=1", (s0,)).fetchall()}
     seeds = server_db.execute(
-        "SELECT provenance, status, is_pb, cc, total_time_ms, started_at, ended_at, created_at "
+        "SELECT player_id, course_id, provenance, status, is_pb, cc, total_time_ms, "
+        "started_at, ended_at, created_at "
         "FROM runs WHERE season_id=? ORDER BY total_time_ms", (s1,)).fetchall()
     assert [s["total_time_ms"] for s in seeds] == [108000, 112000, 120000]
     for s in seeds:
+        o = src[(s["player_id"], s["course_id"])]
         assert s["provenance"] == "carryover"
         assert s["status"] == "finished"
         assert s["is_pb"] == 1
         assert s["cc"] == 150
-        assert s["started_at"] == CUTOVER
-        assert s["ended_at"] == CUTOVER
-        assert s["created_at"] == CUTOVER
+        assert s["started_at"] == o["started_at"]   # NULL for legacy imports
+        assert s["ended_at"] == o["ended_at"]        # original achievement time, not cutover
+        assert s["created_at"] == CUTOVER            # row birth = cutover
 
 
 def test_import_legacy_full_run_report(legacy_db):

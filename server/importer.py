@@ -114,16 +114,23 @@ def import_world_records(conn, legacy, course_map) -> int:
 
 
 def build_carryover(conn, s0_id, s1_id, cutover_iso) -> int:
-    """Seed Season 1 from each player's final Season 0 PB, timestamped at cutover."""
+    """Seed Season 1 from each player's final Season 0 PB.
+
+    The seed mirrors the source PB's started_at/ended_at so it reflects when the run
+    actually happened (the original achievement time), not the cutover. Only
+    created_at marks the row's birth at cutover.
+    """
     rows = conn.execute(
-        "SELECT player_id, course_id, cc, total_time_ms, total_time_str "
+        "SELECT player_id, course_id, cc, total_time_ms, total_time_str, "
+        "started_at, ended_at "
         "FROM runs WHERE season_id=? AND is_pb=1", (s0_id,)).fetchall()
     for r in rows:
         conn.execute(
             "INSERT INTO runs(season_id, player_id, course_id, cc, status, provenance, "
             "started_at, ended_at, total_time_ms, total_time_str, is_pb, created_at) "
             "VALUES (?,?,?,?,'finished','carryover',?,?,?,?,1,?)",
-            (s1_id, r["player_id"], r["course_id"], r["cc"], cutover_iso, cutover_iso,
+            (s1_id, r["player_id"], r["course_id"], r["cc"],
+             r["started_at"], r["ended_at"],
              r["total_time_ms"], r["total_time_str"], cutover_iso),
         )
     return len(rows)
