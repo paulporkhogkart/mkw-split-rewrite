@@ -50,7 +50,7 @@ from .lifecycle.race import RaceLifecycle
 from .ipc.sidecar import IpcServer
 from .ipc.protocol import (parse_inbound, emit_ready, emit_screen_change, emit_selection_update,
                             emit_lap_update, emit_coin_update, emit_mush_update, emit_finish, emit_split_recorded,
-                            emit_pb_achieved, emit_pb_export, emit_state, emit_devices_list,
+                            emit_pb_export, emit_state, emit_devices_list,
                             emit_error, emit_heartbeat, emit_frame_data, emit_template_score,
                             emit_template_saved, emit_template_images, emit_tells_list, emit_rois_list,
                             emit_camera_paused, emit_camera_resumed, emit_camera_status,
@@ -1230,12 +1230,6 @@ def run(args):
                 ipc.emit(emit_finish(_finish_result, ts.total_time, dict(ts.splits)))
                 _want_finish_emit = False
                 _prev_finish      = True
-
-        # Emit a PB-achieved event when the lifecycle flags a fresh personal best.
-        if getattr(lifecycle, "pending_pb_event", None) is not None:
-            _pb_course, _pb_time = lifecycle.pending_pb_event
-            ipc.emit(emit_pb_achieved(_pb_course, _pb_time))
-            lifecycle.pending_pb_event = None
 
         # Reset race-specific prev-state when the lap tracker clears (new race)
         if lap_key == (None, None) and _prev_lap != (None, None):
