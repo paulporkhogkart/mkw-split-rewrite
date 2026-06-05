@@ -57,6 +57,10 @@ class RaceLifecycle:
         self._paused_from_racing = False
         self._resuming_race      = False
 
+        # Wall-clock ISO timestamp of the current race's fresh start (set by
+        # _start_race, consumed by _finalize_recording as the run's started_at).
+        self._race_started_at: Optional[str] = None
+
         # Set to (course, time_str) when a run sets a new PB; cleared by main loop.
         self.pending_pb_event = None
 
@@ -136,6 +140,7 @@ class RaceLifecycle:
         self._finish.reset()
         self._mush.reset()
         self._minimap.reset()
+        self._race_started_at = None
         print("  [reset] Race stats cleared")
 
     def _finalize_recording(self, completed: bool):
@@ -178,7 +183,7 @@ class RaceLifecycle:
                 "character":  character,
                 "kart":       sel.kart,
                 "costume":    costume,
-                "started_at": None,
+                "started_at": self._race_started_at,
                 "ended_at":   datetime.now(timezone.utc).isoformat(),
                 "total_time": best_total_time,
                 "laps":       laps,
@@ -195,6 +200,9 @@ class RaceLifecycle:
                 self.pending_pb_event = (course, best_total_time)
 
     def _start_race(self, old: Screen):
+        from datetime import datetime, timezone
+        self._race_started_at = datetime.now(timezone.utc).isoformat()
+
         sel       = self._selection.state
         course    = sel.course
         character = sel.character

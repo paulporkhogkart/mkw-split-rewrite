@@ -73,6 +73,18 @@ def test_finish_emits_run_finalized():
     assert evt["points"] == [[0, 1.0, 2.0, 0.9]]
     assert isinstance(evt["attempt_id"], str) and len(evt["attempt_id"]) >= 8
     assert evt["ended_at"] is not None
+    assert evt["started_at"] is None             # no _start_race ran in this shortcut
+
+
+def test_run_finalized_includes_started_at_from_race_start():
+    ipc = _FakeIpc()
+    lc = _lifecycle(ipc, total_time="1:23.456", splits={1: "0:41.000"})
+    # _start_race sets this on a fresh RACING entry; set it directly so the test
+    # doesn't need the DB-backed minimap seed/ROI lookups _start_race performs.
+    lc._race_started_at = "2026-06-05T12:00:00+00:00"
+    lc.on_screen_change(Screen.RACING, Screen.POST_TIME_TRIAL)
+    evt = _run_finalized(ipc)
+    assert evt["started_at"] == "2026-06-05T12:00:00+00:00"
 
 
 def test_reset_emits_run_finalized_with_null_total():
