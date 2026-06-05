@@ -147,6 +147,22 @@ fn is_new_pb(conn: &Connection, slug: &str, cc: i64, ms: i64) -> bool {
     }
 }
 
+/// If `line` is a finished run that beats the cached best for its course, returns a
+/// `pb_achieved` JSON line (and optimistically lowers the cache). cc is 150 until the
+/// engine reports it (server default matches).
+fn pb_event_for(conn: &Connection, line: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(line).ok()?;
+    if v.get("status")?.as_str()? != "finished" { return None; }
+    let course = v.get("course")?.as_str()?;
+    let time = v.get("total_time")?.as_str()?;
+    let ms = parse_time_ms(time)?;
+    if is_new_pb(conn, &slugify(course), 150, ms) {
+        Some(serde_json::json!({ "type": "pb_achieved", "course": course, "time": time }).to_string())
+    } else {
+        None
+    }
+}
+
 use std::sync::Mutex;
 
 #[derive(Default, Clone)]
@@ -155,19 +171,17 @@ struct Config { server_url: String, token: String }
 static CONFIG: Mutex<Config> = Mutex::new(Config { server_url: String::new(), token: String::new() });
 static OUTBOX: Mutex<Option<Connection>> = Mutex::new(None);
 
-/// Called by lib.rs for every sidecar stdout line. Enqueues run_finalized events; ignores the rest.
-pub fn on_line(line: &str) {
+/// Called by lib.rs for every sidecar stdout line. Enqueues run_finalized events and
+/// returns a `pb_achieved` event to emit when the run is a new PB.
+pub fn on_line(line: &str) -> Option<String> {
     if !is_run_finalized(line) {
-        return;
+        return None;
     }
-    let Some(id) = attempt_id_of(line) else { return };
-    if let Ok(mut guard) = OUTBOX.lock() {
-        if let Some(conn) = guard.as_ref() {
-            outbox_insert(conn, &id, line);
-        } else {
-            log::warn!("[sync] outbox not initialised; dropping run_finalized");
-        }
-    }
+    let id = attempt_id_of(line)?;
+    let guard = OUTBOX.lock().ok()?;
+    let conn = guard.as_ref()?;
+    outbox_insert(conn, &id, line);
+    pb_event_for(conn, line)
 }
 
 #[tauri::command]
@@ -378,5 +392,19 @@ mod tests {
         // Faster → PB, cache lowers (handles back-to-back offline PBs).
         assert!(is_new_pb(&conn, "rainbow_road", 150, 108500));
         assert_eq!(pb_cache_best(&conn, "rainbow_road", 150), Some(108500));
+    }
+
+    #[test]
+    fn pb_event_for_finished_run_with_empty_cache() {
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_pb_cache(&conn);
+        let line = r#"{"type":"run_finalized","attempt_id":"a1","course":"Rainbow Road","status":"finished","total_time":"1:50.000"}"#;
+        let ev = pb_event_for(&conn, line).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&ev).unwrap();
+        assert_eq!(v["type"], "pb_achieved");
+        assert_eq!(v["course"], "Rainbow Road");
+        assert_eq!(v["time"], "1:50.000");
+        // A reset, or a second slower finish, yields no event.
+        assert!(pb_event_for(&conn, r#"{"type":"run_finalized","attempt_id":"r","course":"Rainbow Road","status":"reset"}"#).is_none());
     }
 }

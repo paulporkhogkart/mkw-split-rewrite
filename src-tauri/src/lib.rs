@@ -89,7 +89,9 @@ fn do_spawn_sidecar(app: tauri::AppHandle, state: &SidecarState) {
                         CommandEvent::Stdout(line) => {
                             let msg = String::from_utf8_lossy(&line);
                             let _ = handle.emit("tracker-event", msg.as_ref());
-                            sync::on_line(msg.as_ref());
+                            if let Some(ev) = sync::on_line(msg.as_ref()) {
+                                let _ = handle.emit("tracker-event", &ev);
+                            }
                         }
                         CommandEvent::Stderr(line) => {
                             let text = String::from_utf8_lossy(&line);
