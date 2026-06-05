@@ -3,7 +3,8 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { Env } from './app';
 import { activeSeasonId, listSeasons, courseIdBySlug } from '../db/seasons';
 import { slugify } from '../db/slug';
-import { courseLeaderboard, overallLeaderboard, friendsPbs, playerPbs, currentWr } from '../db/reads';
+import { courseLeaderboard, overallLeaderboard, friendsPbs, playerPbs, currentWr, myPbs } from '../db/reads';
+import { requireToken } from './auth';
 
 const num = (v: string | undefined, d: number) => (v ? Number(v) : d);
 
@@ -27,5 +28,6 @@ export function readsRoutes(db: DatabaseSync): Hono<Env> {
     return c.json(currentWr(db, cid, num(c.req.query('cc'), 150)));
   });
   r.get('/v1/seasons', (c) => c.json(listSeasons(db)));
+  r.get('/v1/me/pbs', requireToken(db), (c) => c.json(myPbs(db, activeSeasonId(db), c.get('playerId'))));
   return r;
 }
