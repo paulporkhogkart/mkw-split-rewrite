@@ -90,6 +90,43 @@ fn outbox_delete(conn: &Connection, attempt_id: &str) {
     conn.execute("DELETE FROM outbox WHERE attempt_id = ?1", rusqlite::params![attempt_id]).ok();
 }
 
+fn ensure_pb_cache(conn: &Connection) {
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS pb_cache (
+            course_slug TEXT NOT NULL,
+            cc          INTEGER NOT NULL,
+            best_ms     INTEGER NOT NULL,
+            PRIMARY KEY (course_slug, cc)
+        )",
+        [],
+    ).expect("create pb_cache");
+}
+
+fn pb_cache_best(conn: &Connection, slug: &str, cc: i64) -> Option<i64> {
+    conn.query_row(
+        "SELECT best_ms FROM pb_cache WHERE course_slug=?1 AND cc=?2",
+        rusqlite::params![slug, cc],
+        |r| r.get::<_, i64>(0),
+    ).ok()
+}
+
+fn pb_cache_put(conn: &Connection, slug: &str, cc: i64, ms: i64) {
+    conn.execute(
+        "INSERT INTO pb_cache(course_slug, cc, best_ms) VALUES (?1,?2,?3)
+         ON CONFLICT(course_slug, cc) DO UPDATE SET best_ms=excluded.best_ms",
+        rusqlite::params![slug, cc, ms],
+    ).ok();
+}
+
+/// True if `ms` beats the cached best (or there is none). On true, lowers the cache
+/// immediately so consecutive offline PBs are each detected.
+fn is_new_pb(conn: &Connection, slug: &str, cc: i64, ms: i64) -> bool {
+    match pb_cache_best(conn, slug, cc) {
+        Some(best) if ms >= best => false,
+        _ => { pb_cache_put(conn, slug, cc, ms); true }
+    }
+}
+
 use std::sync::Mutex;
 
 #[derive(Default, Clone)]
@@ -282,5 +319,20 @@ mod tests {
         assert_eq!(parse_time_ms("1:50.123"), Some(110123));
         assert_eq!(parse_time_ms("0:36.400"), Some(36400));
         assert_eq!(parse_time_ms("nope"), None);
+    }
+
+    #[test]
+    fn is_new_pb_optimistically_lowers_the_cache() {
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_pb_cache(&conn);
+        // No entry → it's a PB, and the cache now holds it.
+        assert!(is_new_pb(&conn, "rainbow_road", 150, 110000));
+        assert_eq!(pb_cache_best(&conn, "rainbow_road", 150), Some(110000));
+        // Slower → not a PB, cache unchanged.
+        assert!(!is_new_pb(&conn, "rainbow_road", 150, 111000));
+        assert_eq!(pb_cache_best(&conn, "rainbow_road", 150), Some(110000));
+        // Faster → PB, cache lowers (handles back-to-back offline PBs).
+        assert!(is_new_pb(&conn, "rainbow_road", 150, 108500));
+        assert_eq!(pb_cache_best(&conn, "rainbow_road", 150), Some(108500));
     }
 }
