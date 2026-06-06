@@ -67,23 +67,52 @@ fn ensure_outbox(conn: &Connection) {
         "CREATE TABLE IF NOT EXISTS outbox (
             attempt_id TEXT PRIMARY KEY,
             body       TEXT NOT NULL,
+            status     TEXT NOT NULL DEFAULT 'ready',
             created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
         )",
         [],
     ).expect("create outbox");
+    // Migrate a pre-existing table (Phase A had no status column). Errors if the
+    // column already exists — ignored.
+    conn.execute("ALTER TABLE outbox ADD COLUMN status TEXT NOT NULL DEFAULT 'ready'", []).ok();
 }
 
-fn outbox_insert(conn: &Connection, attempt_id: &str, body: &str) {
+fn outbox_insert(conn: &Connection, attempt_id: &str, body: &str, status: &str) {
     conn.execute(
-        "INSERT OR REPLACE INTO outbox(attempt_id, body) VALUES (?1, ?2)",
-        rusqlite::params![attempt_id, body],
+        "INSERT OR REPLACE INTO outbox(attempt_id, body, status) VALUES (?1, ?2, ?3)",
+        rusqlite::params![attempt_id, body, status],
     ).ok();
 }
 
 fn outbox_pending(conn: &Connection) -> Vec<(String, String)> {
-    let mut stmt = conn.prepare("SELECT attempt_id, body FROM outbox ORDER BY created_at").unwrap();
+    let mut stmt = conn.prepare(
+        "SELECT attempt_id, body FROM outbox WHERE status='ready' ORDER BY created_at"
+    ).unwrap();
     let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))).unwrap();
     rows.filter_map(|r| r.ok()).collect()
+}
+
+fn outbox_list_pending(conn: &Connection) -> Vec<(String, String)> {
+    let mut stmt = conn.prepare(
+        "SELECT attempt_id, body FROM outbox WHERE status='pending_review' ORDER BY created_at"
+    ).unwrap();
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))).unwrap();
+    rows.filter_map(|r| r.ok()).collect()
+}
+
+fn outbox_get_body(conn: &Connection, attempt_id: &str) -> Option<String> {
+    conn.query_row(
+        "SELECT body FROM outbox WHERE attempt_id=?1",
+        rusqlite::params![attempt_id],
+        |r| r.get::<_, String>(0),
+    ).ok()
+}
+
+fn outbox_update_ready(conn: &Connection, attempt_id: &str, body: &str) {
+    conn.execute(
+        "UPDATE outbox SET body=?2, status='ready' WHERE attempt_id=?1",
+        rusqlite::params![attempt_id, body],
+    ).ok();
 }
 
 fn outbox_delete(conn: &Connection, attempt_id: &str) {
@@ -180,7 +209,7 @@ pub fn on_line(line: &str) -> Option<String> {
     let id = attempt_id_of(line)?;
     let guard = OUTBOX.lock().ok()?;
     let conn = guard.as_ref()?;
-    outbox_insert(conn, &id, line);
+    outbox_insert(conn, &id, line, "ready");
     pb_event_for(conn, line)
 }
 
@@ -340,8 +369,8 @@ mod tests {
     fn outbox_is_idempotent_by_attempt_id() {
         let conn = Connection::open_in_memory().unwrap();
         ensure_outbox(&conn);
-        outbox_insert(&conn, "a1", LINE);
-        outbox_insert(&conn, "a1", LINE);          // same id → replace, not duplicate
+        outbox_insert(&conn, "a1", LINE, "ready");
+        outbox_insert(&conn, "a1", LINE, "ready");  // same id → replace, not duplicate
         assert_eq!(outbox_pending(&conn).len(), 1);
         outbox_delete(&conn, "a1");
         assert_eq!(outbox_pending(&conn).len(), 0);
@@ -406,5 +435,28 @@ mod tests {
         assert_eq!(v["time"], "1:50.000");
         // A reset, or a second slower finish, yields no event.
         assert!(pb_event_for(&conn, r#"{"type":"run_finalized","attempt_id":"r","course":"Rainbow Road","status":"reset"}"#).is_none());
+    }
+
+    #[test]
+    fn outbox_status_routes_ready_vs_pending() {
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_outbox(&conn);
+        outbox_insert(&conn, "a1", LINE, "ready");
+        outbox_insert(&conn, "a2", LINE, "pending_review");
+        let pend: Vec<_> = outbox_pending(&conn).into_iter().map(|(id, _)| id).collect();
+        assert_eq!(pend, vec!["a1"]);
+        let review: Vec<_> = outbox_list_pending(&conn).into_iter().map(|(id, _)| id).collect();
+        assert_eq!(review, vec!["a2"]);
+    }
+
+    #[test]
+    fn outbox_update_ready_merges_body_and_flips_status() {
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_outbox(&conn);
+        outbox_insert(&conn, "a2", LINE, "pending_review");
+        outbox_update_ready(&conn, "a2", r#"{"type":"run_finalized","attempt_id":"a2","course":"X"}"#);
+        assert_eq!(outbox_pending(&conn).len(), 1);
+        assert_eq!(outbox_list_pending(&conn).len(), 0);
+        assert_eq!(outbox_get_body(&conn, "a2").unwrap(), r#"{"type":"run_finalized","attempt_id":"a2","course":"X"}"#);
     }
 }
