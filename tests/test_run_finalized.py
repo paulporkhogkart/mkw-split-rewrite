@@ -131,3 +131,22 @@ def test_run_finalized_includes_total_laps_and_per_lap_stats():
         {"lap": 1, "time_ms": 41000, "time_str": "0:41.000", "coins": 5, "shrooms": 2},
         {"lap": 2, "time_ms": 83456, "time_str": "1:23.456", "coins": -1, "shrooms": 0},
     ]
+
+
+def test_reset_with_unknown_identity_still_emits_for_review():
+    # The whole point of run-review is to CATCH incomplete runs - including a reset
+    # where the engine detected nothing (no course/character/kart). The emit must NOT
+    # be gated on `course`, or such runs silently vanish (no run_finalized -> no popup).
+    ipc = _FakeIpc()
+    lc = _lifecycle(ipc, total_time=None, splits={})
+    lc._selection.state.course    = None
+    lc._selection.state.character = None
+    lc._selection.state.kart      = None
+    lc._selection.state.costume   = None
+    lc.on_screen_change(Screen.RACING, Screen.RESET)
+    evt = _run_finalized(ipc)            # raises StopIteration if nothing was emitted
+    assert evt["status"] == "reset"
+    assert evt["course"] is None
+    assert evt["character"] is None
+    assert evt["kart"] is None
+    assert isinstance(evt["attempt_id"], str) and len(evt["attempt_id"]) >= 8

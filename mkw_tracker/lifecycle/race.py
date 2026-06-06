@@ -187,7 +187,11 @@ class RaceLifecycle:
 
         # Emit the full finalized-attempt payload for the Tauri app to upload.
         # (Pure detector: emit only; no network. Built before save() clears points.)
-        if self._ipc is not None and course:
+        # NOT gated on `course`: an incomplete run - even one where nothing was
+        # detected - must still emit so the app can hold it for review and the user
+        # can fill in the missing course/character/kart. The Rust side decides
+        # ready-vs-held; unidentified runs are held (pending_review), never auto-uploaded.
+        if self._ipc is not None:
             import uuid
             from datetime import datetime, timezone
             from ..ipc.protocol import emit_run_finalized
