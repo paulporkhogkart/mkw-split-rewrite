@@ -113,15 +113,35 @@
   // ── Race clock: drives replay-dot interpolation ───────────────────────────────
   // Starts when the active window opens, so dot positions map to race-elapsed time
   // (mirrors MinimapPlayer.start / _race_start).
-  let raceStartMs = null;
-  let _wasActive  = false;
-  let _raf        = 0;
+  // Pause screens mirror the engine's _PAUSE_SCREENS: leaving RACING to one of these
+  // is a pause (freeze the clock so replay dots resume in place); leaving to anything
+  // else ends the race (the clock resets on the next fresh RACING entry).
+  const PAUSE_SCREENS = new Set(["RACE_MENU", "HOME"]);
+  let raceStartMs   = null;
+  let frozenElapsed = 0;     // elapsed (ms) captured at a pause, resumed from on return
+  let _wasActive    = false;
+  let _prevScreen   = null;
+  let _raf          = 0;
 
-  $: onActiveChange(mmActive);
-  function onActiveChange(active) {
-    if (active && !_wasActive) { raceStartMs = performance.now(); startLoop(); }
-    else if (!active && _wasActive) { stopLoop(); raceStartMs = null; redraw(); }
-    _wasActive = active;
+  $: onActiveChange(mmActive, currentScreen);
+  function onActiveChange(active, screen) {
+    if (active && !_wasActive) {
+      // Resume continues from where the pause froze; any other entry is a fresh race.
+      const resuming = PAUSE_SCREENS.has(_prevScreen);
+      raceStartMs = resuming ? performance.now() - frozenElapsed : performance.now();
+      if (!resuming) frozenElapsed = 0;
+      startLoop();
+    } else if (!active && _wasActive) {
+      stopLoop();
+      // Freeze the clock for a pause; drop it for a finish/reset (end of race).
+      frozenElapsed = (PAUSE_SCREENS.has(screen) && raceStartMs != null)
+        ? performance.now() - raceStartMs
+        : 0;
+      raceStartMs = null;
+      redraw();
+    }
+    _wasActive  = active;
+    _prevScreen = screen;
   }
 
   function startLoop() {
