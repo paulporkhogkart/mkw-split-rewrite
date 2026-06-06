@@ -68,19 +68,20 @@ fn ensure_outbox(conn: &Connection) {
             attempt_id TEXT PRIMARY KEY,
             body       TEXT NOT NULL,
             status     TEXT NOT NULL DEFAULT 'ready',
+            is_pb      INTEGER NOT NULL DEFAULT 0,
             created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
         )",
         [],
     ).expect("create outbox");
-    // Migrate a pre-existing table (Phase A had no status column). Errors if the
-    // column already exists — ignored.
+    // Migrate pre-existing tables. Errors if the column already exists — ignored.
     conn.execute("ALTER TABLE outbox ADD COLUMN status TEXT NOT NULL DEFAULT 'ready'", []).ok();
+    conn.execute("ALTER TABLE outbox ADD COLUMN is_pb INTEGER NOT NULL DEFAULT 0", []).ok();
 }
 
-fn outbox_insert(conn: &Connection, attempt_id: &str, body: &str, status: &str) {
+fn outbox_insert(conn: &Connection, attempt_id: &str, body: &str, status: &str, is_pb: bool) {
     conn.execute(
-        "INSERT OR REPLACE INTO outbox(attempt_id, body, status) VALUES (?1, ?2, ?3)",
-        rusqlite::params![attempt_id, body, status],
+        "INSERT OR REPLACE INTO outbox(attempt_id, body, status, is_pb) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![attempt_id, body, status, is_pb as i64],
     ).ok();
 }
 
@@ -92,11 +93,13 @@ fn outbox_pending(conn: &Connection) -> Vec<(String, String)> {
     rows.filter_map(|r| r.ok()).collect()
 }
 
-fn outbox_list_pending(conn: &Connection) -> Vec<(String, String)> {
+fn outbox_list_pending(conn: &Connection) -> Vec<(String, String, bool)> {
     let mut stmt = conn.prepare(
-        "SELECT attempt_id, body FROM outbox WHERE status='pending_review' ORDER BY created_at"
+        "SELECT attempt_id, body, is_pb FROM outbox WHERE status='pending_review' ORDER BY created_at"
     ).unwrap();
-    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))).unwrap();
+    let rows = stmt.query_map([], |r| Ok((
+        r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)? != 0,
+    ))).unwrap();
     rows.filter_map(|r| r.ok()).collect()
 }
 
@@ -228,7 +231,7 @@ fn route_line(conn: &Connection, line: &str) -> Option<String> {
     let is_pb = is_finished_new_pb(conn, &v);
     let missing = missing_fields(&v, is_pb);
     if missing.is_empty() {
-        outbox_insert(conn, &id, line, "ready");
+        outbox_insert(conn, &id, line, "ready", is_pb);
         if is_pb {
             let course = v.get("course").and_then(|x| x.as_str()).unwrap_or("");
             let time = v.get("total_time").and_then(|x| x.as_str()).unwrap_or("");
@@ -236,7 +239,7 @@ fn route_line(conn: &Connection, line: &str) -> Option<String> {
         }
         None
     } else {
-        outbox_insert(conn, &id, line, "pending_review");
+        outbox_insert(conn, &id, line, "pending_review", is_pb);
         let mut run = v.clone();
         if let Some(o) = run.as_object_mut() { o.remove("type"); }
         Some(serde_json::json!({
@@ -349,16 +352,16 @@ pub fn sync_discard_pending(attempt_id: String) {
     }
 }
 
-/// JSON array of `{attempt_id, run}` for every held (pending_review) run, for the UI to
+/// JSON array of `{attempt_id, run, is_pb}` for every held (pending_review) run, for the UI to
 /// resurface on launch. `type` is stripped from each run.
 #[tauri::command]
 pub fn sync_list_pending() -> String {
     if let Ok(guard) = OUTBOX.lock() {
         if let Some(conn) = guard.as_ref() {
-            let arr: Vec<serde_json::Value> = outbox_list_pending(conn).iter().filter_map(|(id, body)| {
+            let arr: Vec<serde_json::Value> = outbox_list_pending(conn).iter().filter_map(|(id, body, is_pb)| {
                 let mut v: serde_json::Value = serde_json::from_str(body).ok()?;
                 if let Some(o) = v.as_object_mut() { o.remove("type"); }
-                Some(serde_json::json!({ "attempt_id": id, "run": v }))
+                Some(serde_json::json!({ "attempt_id": id, "run": v, "is_pb": is_pb }))
             }).collect();
             return serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into());
         }
@@ -463,8 +466,8 @@ mod tests {
     fn outbox_is_idempotent_by_attempt_id() {
         let conn = Connection::open_in_memory().unwrap();
         ensure_outbox(&conn);
-        outbox_insert(&conn, "a1", LINE, "ready");
-        outbox_insert(&conn, "a1", LINE, "ready");  // same id → replace, not duplicate
+        outbox_insert(&conn, "a1", LINE, "ready", false);
+        outbox_insert(&conn, "a1", LINE, "ready", false);  // same id → replace, not duplicate
         assert_eq!(outbox_pending(&conn).len(), 1);
         outbox_delete(&conn, "a1");
         assert_eq!(outbox_pending(&conn).len(), 0);
@@ -547,11 +550,11 @@ mod tests {
     fn outbox_status_routes_ready_vs_pending() {
         let conn = Connection::open_in_memory().unwrap();
         ensure_outbox(&conn);
-        outbox_insert(&conn, "a1", LINE, "ready");
-        outbox_insert(&conn, "a2", LINE, "pending_review");
+        outbox_insert(&conn, "a1", LINE, "ready", false);
+        outbox_insert(&conn, "a2", LINE, "pending_review", false);
         let pend: Vec<_> = outbox_pending(&conn).into_iter().map(|(id, _)| id).collect();
         assert_eq!(pend, vec!["a1"]);
-        let review: Vec<_> = outbox_list_pending(&conn).into_iter().map(|(id, _)| id).collect();
+        let review: Vec<_> = outbox_list_pending(&conn).into_iter().map(|(id, _, _)| id).collect();
         assert_eq!(review, vec!["a2"]);
     }
 
@@ -559,7 +562,7 @@ mod tests {
     fn outbox_update_ready_merges_body_and_flips_status() {
         let conn = Connection::open_in_memory().unwrap();
         ensure_outbox(&conn);
-        outbox_insert(&conn, "a2", LINE, "pending_review");
+        outbox_insert(&conn, "a2", LINE, "pending_review", false);
         outbox_update_ready(&conn, "a2", r#"{"type":"run_finalized","attempt_id":"a2","course":"X"}"#);
         assert_eq!(outbox_pending(&conn).len(), 1);
         assert_eq!(outbox_list_pending(&conn).len(), 0);
@@ -597,7 +600,7 @@ mod tests {
         ensure_outbox(&conn);
         outbox_insert(&conn, "b1",
             r#"{"type":"run_finalized","attempt_id":"b1","course":"Rainbow Road","character":"Mario","kart":null,"status":"finished"}"#,
-            "pending_review");
+            "pending_review", false);
         let filled: serde_json::Value = serde_json::from_str(r#"{"kart":"Standard Kart"}"#).unwrap();
         resolve_in_outbox(&conn, "b1", &filled);
         let body = outbox_get_body(&conn, "b1").unwrap();
@@ -605,5 +608,23 @@ mod tests {
         assert_eq!(v["kart"], "Standard Kart");
         assert_eq!(outbox_pending(&conn).len(), 1);            // now ready
         assert_eq!(outbox_list_pending(&conn).len(), 0);
+    }
+
+    #[test]
+    fn list_pending_includes_persisted_is_pb() {
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_outbox(&conn);
+        // A held PB and a held non-PB.
+        outbox_insert(&conn, "pb1",
+            r#"{"type":"run_finalized","attempt_id":"pb1","course":"Rainbow Road","status":"finished"}"#,
+            "pending_review", true);
+        outbox_insert(&conn, "np1",
+            r#"{"type":"run_finalized","attempt_id":"np1","course":"Mario Circuit","status":"reset"}"#,
+            "pending_review", false);
+        let rows = outbox_list_pending(&conn);
+        let pb = rows.iter().find(|(id, _, _)| id == "pb1").unwrap();
+        let np = rows.iter().find(|(id, _, _)| id == "np1").unwrap();
+        assert_eq!(pb.2, true);
+        assert_eq!(np.2, false);
     }
 }
