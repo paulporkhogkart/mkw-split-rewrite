@@ -5,6 +5,9 @@ Capture is delegated to the mkw_tracker app (which already owns the capture card
 The runner connects to the tracker's WebSocket broadcaster and sends autotemplate
 commands; the tracker crops, processes, and saves the files on Windows.
 
+The broadcaster is OFF by default, so start the tracker with the port explicitly:
+    python -m mkw_tracker --ws-port 8765
+
 Runs in WSL2 with sudo (nxbt requires Bluetooth root access).
 
 Usage:

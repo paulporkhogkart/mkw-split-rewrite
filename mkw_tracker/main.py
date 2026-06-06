@@ -752,7 +752,7 @@ def _do_cleanup(ctypes_lib, cap, ipc):
     except Exception:
         pass
     try:
-        ipc.stop()          # cancels WS server task → releases port 8765
+        ipc.stop()          # cancels the WS broadcaster task (if any) → releases its port
     except Exception:
         pass
     try:
@@ -807,9 +807,14 @@ def run(args):
     lapstats  = LapStatsTracker()
 
     # ── IPC server ───────────────────────────────────────────────────────────
-    from .ipc.broadcaster import EventBroadcaster
-    ws_port = args.ws_port if args.ws_port is not None else 8765
-    broadcaster = EventBroadcaster(port=ws_port)
+    # The WebSocket broadcaster is dev-only: the autotemplate tool subscribes to
+    # ws://localhost:<port> to drive template capture. The Tauri app talks to the
+    # engine over stdio and never opts in, so the server is OFF unless --ws-port
+    # is given explicitly (no port is bound in normal operation).
+    broadcaster = None
+    if args.ws_port is not None:
+        from .ipc.broadcaster import EventBroadcaster
+        broadcaster = EventBroadcaster(port=args.ws_port)
 
     ipc = IpcServer(broadcaster=broadcaster)
     if not args.no_ipc:
@@ -818,7 +823,8 @@ def run(args):
     import ctypes as _ctypes
     import atexit as _atexit
 
-    # Register cleanup so the WS port is released even on unexpected exits.
+    # Register cleanup so the camera/DB (and the WS port, if any) are released
+    # even on unexpected exits.
     # cap is None here but gets updated via _cap_ref before the loop runs.
     _cap_ref = [None]
 
@@ -895,8 +901,9 @@ def run(args):
     cam_paused    = [False]  # True while setup wizard holds the camera
 
     from .utils.paths import resource_path as _rp
-    broadcaster.enable_autotemplate(current_frame, settings, detector,
-                                    os.path.dirname(_rp("images")))
+    if broadcaster is not None:
+        broadcaster.enable_autotemplate(current_frame, settings, detector,
+                                        os.path.dirname(_rp("images")))
     del _rp
 
     # Previous-state snapshots for on-change IPC emission
@@ -1341,7 +1348,9 @@ def main():
     parser.add_argument("--no-ipc", action="store_true",
                         help="Disable stdin/stdout IPC (run as standalone).")
     parser.add_argument("--ws-port", type=int, metavar="PORT", default=None,
-                        help="Broadcast all events on a local WebSocket (e.g. 8765).")
+                        help="DEV: also broadcast all events on a local WebSocket at "
+                             "this port, for the autotemplate tool (e.g. 8765). "
+                             "Off unless given; the app uses stdio.")
     parser.add_argument("--no-display", action="store_true",
                         help="Suppress OpenCV window (headless mode for Tauri).")
     parser.add_argument("--video", metavar="PATH", default=None,

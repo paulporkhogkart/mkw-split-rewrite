@@ -56,7 +56,7 @@ fn do_spawn_sidecar(app: tauri::AppHandle, state: &SidecarState) {
             .expect("project root");
         shell
             .command("python")
-            .args(["-m", "mkw_tracker", "--ws-port", "8765", "--no-display"])
+            .args(["-m", "mkw_tracker", "--no-display"])
             .current_dir(project_root)
             .spawn()
     };
@@ -70,7 +70,7 @@ fn do_spawn_sidecar(app: tauri::AppHandle, state: &SidecarState) {
             .to_path_buf();
         shell
             .command(exe_dir.join("bin/mkw-tracker-engine.exe").to_string_lossy().as_ref())
-            .args(["--ws-port", "8765", "--no-display"])
+            .args(["--no-display"])
             .spawn()
     };
 
