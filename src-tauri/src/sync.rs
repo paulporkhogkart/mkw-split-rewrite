@@ -211,19 +211,38 @@ fn missing_fields(v: &serde_json::Value, is_pb: bool) -> Vec<String> {
     missing
 }
 
-/// If `line` is a finished run that beats the cached best for its course, returns a
-/// `pb_achieved` JSON line (and optimistically lowers the cache). cc is 150 until the
-/// engine reports it (server default matches).
-fn pb_event_for(conn: &Connection, line: &str) -> Option<String> {
+/// True if this is a finished run whose time beats the cached best (lowers the cache).
+fn is_finished_new_pb(conn: &Connection, v: &serde_json::Value) -> bool {
+    if v.get("status").and_then(|x| x.as_str()) != Some("finished") { return false; }
+    let Some(course) = v.get("course").and_then(|x| x.as_str()) else { return false; };
+    let Some(ms) = v.get("total_time").and_then(|x| x.as_str()).and_then(parse_time_ms) else { return false; };
+    is_new_pb(conn, &slugify(course), 150, ms)
+}
+
+/// Route one run_finalized line: store it with the right status and return the event to
+/// emit. Complete → `ready` (+ `pb_achieved` if a PB); incomplete → `pending_review`
+/// (+ `run_needs_review`).
+fn route_line(conn: &Connection, line: &str) -> Option<String> {
+    let id = attempt_id_of(line)?;
     let v: serde_json::Value = serde_json::from_str(line).ok()?;
-    if v.get("status")?.as_str()? != "finished" { return None; }
-    let course = v.get("course")?.as_str()?;
-    let time = v.get("total_time")?.as_str()?;
-    let ms = parse_time_ms(time)?;
-    if is_new_pb(conn, &slugify(course), 150, ms) {
-        Some(serde_json::json!({ "type": "pb_achieved", "course": course, "time": time }).to_string())
-    } else {
+    let is_pb = is_finished_new_pb(conn, &v);
+    let missing = missing_fields(&v, is_pb);
+    if missing.is_empty() {
+        outbox_insert(conn, &id, line, "ready");
+        if is_pb {
+            let course = v.get("course").and_then(|x| x.as_str()).unwrap_or("");
+            let time = v.get("total_time").and_then(|x| x.as_str()).unwrap_or("");
+            return Some(serde_json::json!({"type":"pb_achieved","course":course,"time":time}).to_string());
+        }
         None
+    } else {
+        outbox_insert(conn, &id, line, "pending_review");
+        let mut run = v.clone();
+        if let Some(o) = run.as_object_mut() { o.remove("type"); }
+        Some(serde_json::json!({
+            "type": "run_needs_review", "attempt_id": id, "is_pb": is_pb,
+            "missing": missing, "run": run,
+        }).to_string())
     }
 }
 
@@ -235,17 +254,13 @@ struct Config { server_url: String, token: String }
 static CONFIG: Mutex<Config> = Mutex::new(Config { server_url: String::new(), token: String::new() });
 static OUTBOX: Mutex<Option<Connection>> = Mutex::new(None);
 
-/// Called by lib.rs for every sidecar stdout line. Enqueues run_finalized events and
-/// returns a `pb_achieved` event to emit when the run is a new PB.
+/// Called by lib.rs for every sidecar stdout line. Gates run_finalized events (see
+/// route_line) and returns the event to emit, if any.
 pub fn on_line(line: &str) -> Option<String> {
-    if !is_run_finalized(line) {
-        return None;
-    }
-    let id = attempt_id_of(line)?;
+    if !is_run_finalized(line) { return None; }
     let guard = OUTBOX.lock().ok()?;
     let conn = guard.as_ref()?;
-    outbox_insert(conn, &id, line, "ready");
-    pb_event_for(conn, line)
+    route_line(conn, line)
 }
 
 #[tauri::command]
@@ -459,17 +474,29 @@ mod tests {
     }
 
     #[test]
-    fn pb_event_for_finished_run_with_empty_cache() {
+    fn route_line_complete_pb_goes_ready_with_pb_achieved() {
         let conn = Connection::open_in_memory().unwrap();
-        ensure_pb_cache(&conn);
-        let line = r#"{"type":"run_finalized","attempt_id":"a1","course":"Rainbow Road","status":"finished","total_time":"1:50.000"}"#;
-        let ev = pb_event_for(&conn, line).unwrap();
-        let v: serde_json::Value = serde_json::from_str(&ev).unwrap();
-        assert_eq!(v["type"], "pb_achieved");
-        assert_eq!(v["course"], "Rainbow Road");
-        assert_eq!(v["time"], "1:50.000");
-        // A reset, or a second slower finish, yields no event.
-        assert!(pb_event_for(&conn, r#"{"type":"run_finalized","attempt_id":"r","course":"Rainbow Road","status":"reset"}"#).is_none());
+        ensure_outbox(&conn); ensure_pb_cache(&conn);
+        let line = r#"{"type":"run_finalized","attempt_id":"a1","course":"Rainbow Road","character":"Mario","kart":"K","status":"finished","total_time":"1:50.000","total_laps":1,"laps":[{"lap":1,"time_str":"1:50.000","coins":3,"shrooms":1}]}"#;
+        let ev: serde_json::Value = serde_json::from_str(&route_line(&conn, line).unwrap()).unwrap();
+        assert_eq!(ev["type"], "pb_achieved");
+        assert_eq!(outbox_pending(&conn).len(), 1);        // ready → will drain
+        assert_eq!(outbox_list_pending(&conn).len(), 0);
+    }
+
+    #[test]
+    fn route_line_incomplete_goes_pending_review() {
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_outbox(&conn); ensure_pb_cache(&conn);
+        // missing kart → held
+        let line = r#"{"type":"run_finalized","attempt_id":"b1","course":"Rainbow Road","character":"Mario","kart":"","status":"finished","total_time":"1:50.000"}"#;
+        let ev: serde_json::Value = serde_json::from_str(&route_line(&conn, line).unwrap()).unwrap();
+        assert_eq!(ev["type"], "run_needs_review");
+        assert_eq!(ev["attempt_id"], "b1");
+        assert!(ev["missing"].as_array().unwrap().iter().any(|m| m == "kart"));
+        assert!(ev["run"].get("type").is_none());          // type stripped from the embedded run
+        assert_eq!(outbox_pending(&conn).len(), 0);        // NOT uploaded
+        assert_eq!(outbox_list_pending(&conn).len(), 1);   // held for review
     }
 
     #[test]
