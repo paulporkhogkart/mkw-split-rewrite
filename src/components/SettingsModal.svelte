@@ -284,6 +284,7 @@
     display: flex; flex-shrink: 0; background: var(--panel);
     border-bottom: 1px solid var(--bd); overflow-x: auto; scrollbar-width: none;
   }
+  .wiz-tabs::-webkit-scrollbar { display: none; }   /* keep this strip's bar hidden on Chromium < 121 too */
   .wiz-tab {
     background: transparent; color: var(--tx-dim); border: none;
     border-right: 1px solid var(--bd);

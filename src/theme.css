@@ -53,10 +53,23 @@ html, body {
 }
 #app { height: 100vh; }
 
-/* Thin native scrollbars, consistent everywhere (WebView2 honors the standard
-   properties, which take precedence over ::-webkit-scrollbar). Opt out locally
-   with scrollbar-width: none where a bar isn't wanted. */
+/* Thin dark scrollbars, consistent everywhere. Two layers so it renders on every
+   WebView2/Chromium build:
+   - Standard props (Chromium >= 121): thin bar, raised thumb, transparent track.
+   - ::-webkit-scrollbar fallback (Chromium < 121, which ignore the standard props
+     and would otherwise show the chunky default OS bars). Once scrollbar-color/width
+     are set, Chromium >= 121 ignores the webkit pseudo-elements, so there is no
+     double-styling / regression on current runtimes.
+   Opt out locally with scrollbar-width: none where a bar isn't wanted. */
 * { scrollbar-width: thin; scrollbar-color: var(--raised) transparent; }
+::-webkit-scrollbar        { width: 8px; height: 8px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  {
+  background: var(--raised); border-radius: 6px;
+  border: 2px solid transparent; background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--bd); }
+::-webkit-scrollbar-corner { background: transparent; }
 
 /* Status-indicator dot - used in App.svelte setup/startup views AND StatusBar.svelte.
    Must be global so Svelte scoping doesn't strip it in the host component. */
