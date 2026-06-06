@@ -26,7 +26,8 @@
            tells as tellsStore, rois as roisStore,
            view as viewStore,
            minimap as minimapStore, replays as replaysStore, sample as sampleStore } from "./lib/stores.js";
-  import { pbSplits as pbSplitsStore, pbTotalMs as pbTotalStore } from "./lib/stores.js";
+  import { pbSplits as pbSplitsStore, pbTotalMs as pbTotalStore,
+           friendsTrails as friendsTrailsStore, friendsPbs as friendsPbsStore } from "./lib/stores.js";
   import { initDiscordPresence } from "./lib/discord.js";
   import { initSync } from "./lib/sync.js";
 
@@ -609,6 +610,22 @@
     }
   })();
 
+  // Pull a course's reads (PB splits + own/friends trails + friends PBs) from the Rust
+  // read-back/cache and fan them into the stores. Own trail feeds the existing minimap
+  // overlay (mapped to its [x,y] shape); friends' data is made available but not drawn.
+  async function loadCourseReads(course) {
+    try {
+      const r = JSON.parse(await invoke("sync_course_reads", { course }));
+      pbSplitsStore.set(r.pb_splits?.splits ?? null);
+      pbTotalStore.set(r.pb_splits?.total_ms ?? null);
+      const trails = r.trails ?? [];
+      const own = trails.find((t) => t.is_me);
+      replaysStore.set(own ? [{ id: "me", points: own.points.map((p) => [p[1], p[2]]) }] : []);
+      friendsTrailsStore.set(trails.filter((t) => !t.is_me));
+      friendsPbsStore.set(r.friends_pbs ?? []);
+    } catch (_) { /* offline / unconfigured: leave stores as-is */ }
+  }
+
   function handleMsg(msg) {
     switch (msg.type) {
       case "stderr":
@@ -763,11 +780,12 @@
         // second race on the same course refreshes stale data).  Reset the guard
         // whenever we leave RACING so the next entry re-fetches.
         if (msg.to === "RACING") {
-          if (selCourse) send({ type: "get_pb_splits", course: selCourse });
+          // PB splits + own/friends trails + friends PBs now come from the server via
+          // the Rust read-back/cache (Phase 2), not the engine's local race store.
+          if (selCourse) loadCourseReads(selCourse);
           if (!_fetchedThisRace && selCourse) {
             _fetchedThisRace = true;
-            send({ type: "get_replay_paths",   course: selCourse });
-            send({ type: "get_minimap_sample", course: selCourse });
+            send({ type: "get_minimap_sample", course: selCourse });   // seed-derived, still engine
           }
         } else if (msg.from === "RACING") {
           _fetchedThisRace = false;
