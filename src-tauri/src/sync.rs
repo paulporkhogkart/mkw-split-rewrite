@@ -412,10 +412,23 @@ pub fn sync_list_pending() -> String {
 
 const EMPTY_COURSE_READS: &str = r#"{"pb_splits":{"total_ms":null,"splits":{}},"trails":[],"friends_pbs":[]}"#;
 
-/// Fetch the course's PB splits + trails + friends-PBs and combine into one payload.
-/// Err on empty config / any non-2xx / network error. Parses via text()+serde_json so
-/// no reqwest "json" feature is required.
-async fn fetch_course_reads(cfg: &Config, course: &str) -> Result<String, String> {
+/// Per-player trail selection passed from the frontend's Trails settings.
+#[derive(serde::Deserialize)]
+pub struct PlayerTrailCfg { pub player_id: i64, pub mode: String, pub n: i64 }
+
+/// Tag each run in a /v1/players/:id/trails response with its player_id for the combined payload.
+fn tag_runs_with_player(player_id: i64, runs: &serde_json::Value) -> Vec<serde_json::Value> {
+    runs.as_array().map(|arr| arr.iter().map(|run| {
+        let mut r = run.clone();
+        if let Some(o) = r.as_object_mut() { o.insert("player_id".into(), serde_json::json!(player_id)); }
+        r
+    }).collect()).unwrap_or_default()
+}
+
+/// Fetch the caller's PB splits + each configured player's trails + friends-PBs and combine
+/// into one payload. Err on any non-2xx / network error. Parses via text()+serde_json so no
+/// reqwest "json" feature is required.
+async fn fetch_course_reads(cfg: &Config, course: &str, players: &[PlayerTrailCfg]) -> Result<String, String> {
     let base = cfg.server_url.trim_end_matches('/');
     let client = reqwest::Client::new();
     let q = [("course", course), ("cc", "150")];
@@ -426,17 +439,28 @@ async fn fetch_course_reads(cfg: &Config, course: &str) -> Result<String, String
         serde_json::from_str(&txt).map_err(|e| e.to_string())
     }
     let pb = get_json(client.get(format!("{base}/v1/me/pb-splits")).query(&q).bearer_auth(&cfg.token), "pb-splits").await?;
-    let tr = get_json(client.get(format!("{base}/v1/trails")).query(&q).bearer_auth(&cfg.token), "trails").await?;
     let fp = get_json(client.get(format!("{base}/v1/friends-pbs")).query(&q), "friends-pbs").await?;
-    Ok(serde_json::json!({ "pb_splits": pb, "trails": tr, "friends_pbs": fp }).to_string())
+    let mut trails: Vec<serde_json::Value> = Vec::new();
+    for p in players {
+        if p.mode == "none" { continue; }
+        let n = p.n.to_string();
+        let runs = get_json(
+            client.get(format!("{base}/v1/players/{}/trails", p.player_id))
+                .query(&[("course", course), ("cc", "150"), ("mode", p.mode.as_str()), ("n", n.as_str())]),
+            "player-trails",
+        ).await?;
+        trails.extend(tag_runs_with_player(p.player_id, &runs));
+    }
+    Ok(serde_json::json!({ "pb_splits": pb, "trails": trails, "friends_pbs": fp }).to_string())
 }
 
-/// Frontend reads for a course (PB splits + own/friends trails + friends PBs), via the
-/// server with the token, cached per course. Returns the last cache when offline /
-/// unconfigured (or an empty payload if never fetched). JSON string.
+/// Frontend reads for a course (PB splits + per-player trails + friends PBs), via the server
+/// with the token, cached per course. `config` is the per-player trail selection (players with
+/// mode != none). Returns the last cache when offline / unconfigured. JSON string.
 #[tauri::command]
-pub async fn sync_course_reads(course: String) -> String {
+pub async fn sync_course_reads(course: String, config: Option<Vec<PlayerTrailCfg>>) -> String {
     let slug = slugify(&course);
+    let players = config.unwrap_or_default();
     let cfg = { CONFIG.lock().unwrap().clone() };
     let cached = || -> String {
         OUTBOX.lock().ok()
@@ -446,7 +470,7 @@ pub async fn sync_course_reads(course: String) -> String {
     if cfg.server_url.trim().is_empty() || cfg.token.trim().is_empty() {
         return cached();
     }
-    match fetch_course_reads(&cfg, &course).await {
+    match fetch_course_reads(&cfg, &course, &players).await {
         Ok(payload) => {
             if let Ok(g) = OUTBOX.lock() {
                 if let Some(c) = g.as_ref() { course_cache_put(c, &slug, &payload); }
@@ -740,5 +764,16 @@ mod tests {
         assert_eq!(course_slug_of(r#"{"course":"Bowser's Castle"}"#).as_deref(), Some("bowsers_castle"));
         assert_eq!(course_slug_of(r#"{"status":"reset"}"#), None);   // no course field
         assert_eq!(course_slug_of("not json"), None);
+    }
+
+    #[test]
+    fn tag_runs_with_player_adds_id() {
+        let runs = serde_json::json!([{"run_id":10,"points":[]},{"run_id":20,"points":[]}]);
+        let out = tag_runs_with_player(7, &runs);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0]["player_id"], 7);
+        assert_eq!(out[0]["run_id"], 10);
+        assert_eq!(out[1]["player_id"], 7);
+        assert!(tag_runs_with_player(7, &serde_json::json!("not an array")).is_empty());
     }
 }
