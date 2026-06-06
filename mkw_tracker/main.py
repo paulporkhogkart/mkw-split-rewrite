@@ -1127,6 +1127,12 @@ def run(args):
         else:
             ts_state = ts.state
 
+        # ── Finished run: emit + upload the instant the final time locks ──────
+        # (the timer-freeze), rather than waiting for the POST_TIME_TRIAL results
+        # screen. Idempotent: the lifecycle's _finalized guard fires this once.
+        if ts.total_time is not None:
+            lifecycle.finalize_on_finish()
+
         # ── Emit any newly-recorded splits ───────────────────────────────────
         # ts.splits is populated incrementally as burst scans complete.
         # Emit each new entry as soon as it appears so the UI updates in real time.

@@ -61,6 +61,11 @@ class RaceLifecycle:
         # _start_race, consumed by _finalize_recording as the run's started_at).
         self._race_started_at: Optional[str] = None
 
+        # Guards a double finalize: the finished run is emitted the instant the final
+        # time locks (finalize_on_finish), so the later screen-change finalize must not
+        # re-emit. Reset on each new race / state clear.
+        self._finalized = False
+
         # The most recent full frame (set externally each loop iteration)
         self.current_frame = None
 
@@ -138,14 +143,26 @@ class RaceLifecycle:
         self._mush.reset()
         self._minimap.reset()
         self._race_started_at = None
+        self._finalized = False
         print("  [reset] Race stats cleared")
+
+    def finalize_on_finish(self):
+        """Emit + save the finished run the instant the final time locks (called from
+        the main loop when ts.total_time is set), so the server receives it at the
+        timer-freeze rather than when the results screen later appears. Idempotent."""
+        self._finalize_recording(completed=True)
 
     def _finalize_recording(self, completed: bool):
         """
         Save the current recording.
         completed=True  → race finished; calibrate and save threshold; PB eligible.
         completed=False → aborted; save history only, no calibration.
+
+        Idempotent within a race: a no-op if already finalized (the finished run is
+        emitted at the finish-lock, then the screen change would otherwise re-run this).
         """
+        if self._finalized:
+            return
         sel       = self._selection.state
         course    = sel.course
         character = sel.character
@@ -190,10 +207,12 @@ class RaceLifecycle:
         self._mm_rec.save(course, character=character, costume=costume,
                           kart=sel.kart, total_time=best_total_time,
                           lap_splits=dict(self._ts.splits))
+        self._finalized = True
 
     def _start_race(self, old: Screen):
         from datetime import datetime, timezone
         self._race_started_at = datetime.now(timezone.utc).isoformat()
+        self._finalized = False
 
         sel       = self._selection.state
         course    = sel.course

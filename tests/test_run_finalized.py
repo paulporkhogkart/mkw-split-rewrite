@@ -87,6 +87,23 @@ def test_run_finalized_includes_started_at_from_race_start():
     assert evt["started_at"] == "2026-06-05T12:00:00+00:00"
 
 
+def test_finish_lock_emits_once_and_screen_change_does_not_duplicate():
+    # Bug 1: the finished run must be emitted the instant the final time locks
+    # (finalize_on_finish, called from the main loop), and the later POST_TIME_TRIAL
+    # screen change must NOT emit a duplicate.
+    ipc = _FakeIpc()
+    lc = _lifecycle(ipc, total_time="1:23.456", splits={1: "0:41.000", 2: "1:23.456"})
+    lc._race_started_at = "2026-06-06T12:00:00+00:00"
+    lc.finalize_on_finish()
+    finalized = [l for l in ipc.lines if l["type"] == "run_finalized"]
+    assert len(finalized) == 1
+    assert finalized[0]["status"] == "finished"
+    assert finalized[0]["total_time"] == "1:23.456"
+    lc.on_screen_change(Screen.RACING, Screen.POST_TIME_TRIAL)
+    finalized = [l for l in ipc.lines if l["type"] == "run_finalized"]
+    assert len(finalized) == 1
+
+
 def test_reset_emits_run_finalized_with_null_total():
     ipc = _FakeIpc()
     lc = _lifecycle(ipc, total_time=None, splits={})
