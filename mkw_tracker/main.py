@@ -38,6 +38,7 @@ from .race.coins import CoinTracker
 from .race.timestamp import TimestampTracker
 from .race.finish import FinishDetector, FinishStillDetector, load_finish_templates
 from .race.mushrooms import MushroomTracker, load_mushroom_templates, MUSHROOM_ROI, MUSHROOM_TEMPLATES
+from .race.lapstats import LapStatsTracker
 from .minimap.tracker import MinimapTracker, MINIMAP_ROI as _MINIMAP_ROI
 from .minimap.recorder import MinimapRecorder
 from .minimap.player import MinimapPlayer
@@ -821,6 +822,7 @@ def run(args):
     minimap   = MinimapTracker()
     mm_rec    = MinimapRecorder()
     mm_player = MinimapPlayer()
+    lapstats  = LapStatsTracker()
 
     # ── IPC server ───────────────────────────────────────────────────────────
     from .ipc.broadcaster import EventBroadcaster
@@ -850,6 +852,7 @@ def run(args):
         ts=ts,
         finish=finish,
         mush=mush,
+        lapstats=lapstats,
         minimap=minimap,
         mm_rec=mm_rec,
         mm_player=mm_player,
@@ -1066,6 +1069,7 @@ def run(args):
             lap_state, lap_inc = laps.update(frame, screen)
             coin_state         = coins.update(frame, screen)
             mush_state         = mush.update(frame, screen)
+            lapstats.update(mush_state.count)
             mm_state           = minimap.update(frame, screen)
             mm_rec.update(mm_state)
         else:
@@ -1088,6 +1092,9 @@ def run(args):
         # = ts.total_time, which the finish burst populates.)
         if finish_just_detected:
             mm_player.stop()
+
+        if finish_just_detected and lap_state.current_lap is not None:
+            lapstats.record_lap(lap_state.current_lap, coin_state.coins)
 
         # ── Calibrate on finish detection ────────────────────────────────────
         if finish_just_detected and not minimap._calibrated:
@@ -1124,6 +1131,8 @@ def run(args):
                 lap_number=_ts_lap,
                 is_finish=finish_just_detected,
             )
+            if lap_inc and _ts_lap is not None:
+                lapstats.record_lap(_ts_lap, coin_state.coins)
         else:
             ts_state = ts.state
 
