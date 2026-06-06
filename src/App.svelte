@@ -19,6 +19,7 @@
   import DeviceSelectors from "./components/DeviceSelectors.svelte";
   import LanguageSelectors from "./components/LanguageSelectors.svelte";
   import SettingsModal from "./components/SettingsModal.svelte";
+  import RunReviewModal from "./components/RunReviewModal.svelte";
   import { screen as screenStore, liveScore as liveScoreStore,
            candidates as candidatesStore, selection as selectionStore,
            race as raceStore, logs as logsStore,
@@ -76,6 +77,14 @@
   let mushrooms = 0;
   let raceSplits = {};      // lap number → split time string
   let raceFinishTime = null; // total time string from finish event
+
+  // ── Run review queue ────────────────────────────────────────────────────────
+  // Each entry: { attemptId, run, isPb }. The modal renders the head; submit/discard
+  // dequeues. Fed live by run_needs_review and on launch by sync_list_pending.
+  let reviewQueue = [];
+  $: reviewHead = reviewQueue[0] ?? null;
+  // Canonical dropdown options from the engine option_lists event.
+  let optionLists = { courses: [], characters: [], karts: [], costumes: [] };
 
   // ── Device / updater ──────────────────────────────────────────────────────────
   let devices = [];
@@ -797,6 +806,22 @@
       case "pb_achieved":
         pushLog(`[pb] ${msg.course}  ${msg.time}`);
         break;
+      case "run_needs_review":
+        pushLog(`[review] ${msg.run?.course ?? "?"} ${msg.run?.status ?? ""} - missing: ${(msg.missing ?? []).join(", ") || "none"}`);
+        // Replace any existing entry for this attempt (idempotent), else append.
+        reviewQueue = [
+          ...reviewQueue.filter((e) => e.attemptId !== msg.attempt_id),
+          { attemptId: msg.attempt_id, run: msg.run, isPb: !!msg.is_pb },
+        ];
+        break;
+      case "option_lists":
+        optionLists = {
+          courses:    msg.courses    ?? [],
+          characters: msg.characters ?? [],
+          karts:      msg.karts      ?? [],
+          costumes:   msg.costumes   ?? [],
+        };
+        break;
       case "error":  pushLog(`[ERR] ${msg.message}`); break;
       case "minimap_update":
         minimapStore.set({ cx: msg.cx, cy: msg.cy, radius: msg.radius,
@@ -816,6 +841,23 @@
         break;
       }
     }
+  }
+
+  // ── Run review actions ──────────────────────────────────────────────────────
+  function _dequeue(attemptId) {
+    reviewQueue = reviewQueue.filter((e) => e.attemptId !== attemptId);
+  }
+  function onReviewSubmit(e) {
+    const { attempt_id, ...filled } = e.detail;   // attempt_id travels separately
+    invoke("sync_resolve_pending", { attemptId: attempt_id, filled }).catch(() => {});
+    pushLog(`[review] submitted ${attempt_id}`);
+    _dequeue(attempt_id);
+  }
+  function onReviewDiscard(e) {
+    const { attempt_id } = e.detail;
+    invoke("sync_discard_pending", { attemptId: attempt_id }).catch(() => {});
+    pushLog(`[review] discarded ${attempt_id}`);
+    _dequeue(attempt_id);
   }
 
   // ── Camera ────────────────────────────────────────────────────────────────────
@@ -1223,6 +1265,17 @@
     startFeedPoll();
     initDiscordPresence();
     initSync();
+    // Resurface any runs held for review from a previous session.
+    try {
+      const pending = JSON.parse(await invoke("sync_list_pending"));
+      if (Array.isArray(pending) && pending.length) {
+        reviewQueue = [
+          ...reviewQueue,
+          ...pending.map((p) => ({ attemptId: p.attempt_id, run: p.run, isPb: !!p.is_pb })),
+        ];
+        pushLog(`[review] ${pending.length} run(s) awaiting review from a previous session`);
+      }
+    } catch (_) { /* no outbox / not ready - ignore */ }
   });
 
   onDestroy(()=>{
@@ -1702,6 +1755,18 @@
   onAppLanguageChange={onAppLanguageChange}
   onSwitch2LanguageChange={onSwitch2LanguageChange}
 />
+
+{#if reviewHead}
+  <RunReviewModal
+    run={reviewHead.run}
+    isPb={reviewHead.isPb}
+    options={optionLists}
+    queueIndex={0}
+    queueCount={reviewQueue.length}
+    on:submit={onReviewSubmit}
+    on:discard={onReviewDiscard}
+  />
+{/if}
 
 <!-- ═══════════════════════════════════════════════════════════════════════════ -->
 <!--  STYLES                                                                    -->
