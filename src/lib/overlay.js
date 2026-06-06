@@ -176,7 +176,7 @@ export function roiToScreen(box, displayRect, srcW = 1920, srcH = 1080) {
  *   }>,
  *   minimap?:  { cx:number, cy:number, radius:number, trackState:string,
  *                roi?:[number,number,number,number] } | null,   // roi = [x,y,w,h] per-map
- *   trails?:   Array<{ points:[number,number,number][], color:string, opacity?:number }>,
+ *   trails?:   Array<{ points:[number,number,number][], color:string, opacity?:number, abandoned?:boolean }>,
  *   sampleImg?: HTMLImageElement | null,
  *   raceElapsedMs?:  number | null,  // race clock → interpolates the trail dots
  *   legend?:   Array<{ name:string, color:string }>,
@@ -213,12 +213,11 @@ export function drawOverlay(ctx, opts) {
     ctx.restore();
   }
 
-  // ── Replay dots (time-interpolated moving dots; mirrors MinimapPlayer) ───────
-  // Each replay shows a single dot at its recorded position for the current
-  // race-elapsed time - not a static path. PB dots are larger; an abandoned run
-  // (no total_time) becomes an X once its clock runs out.
+  // ── Ghost trail dots (time-interpolated; mirrors MinimapPlayer) ──────────────
   // Each render-ready run shows one moving dot at its interpolated position for the
-  // current race-elapsed time, in its player's colour at the run's fade opacity.
+  // current race-elapsed time, in its player's colour at the run's fade opacity. A
+  // retried/reset run (abandoned: no finish) becomes an X at its final point once its
+  // recorded clock runs out, marking where that attempt ended.
   if (trails && trails.length > 0 && raceElapsedMs != null) {
     const dotR = Math.max(3, 5 * scale);
     for (const trail of trails) {
@@ -226,13 +225,18 @@ export function drawOverlay(ctx, opts) {
       const pos = interpolateXY(trail.points, raceElapsedMs);
       if (!pos) continue;
       const p = pointToScreen(pos[0], pos[1], displayRect);
+      const lastT = trail.points[trail.points.length - 1][0];
       ctx.save();
       ctx.globalAlpha = trail.opacity ?? 1;
-      // Dark halo for legibility, then the colored dot.
-      ctx.beginPath(); ctx.arc(p.x, p.y, dotR + 1, 0, Math.PI * 2);
-      ctx.fillStyle = shade(trail.color, -55); ctx.fill();
-      ctx.beginPath(); ctx.arc(p.x, p.y, dotR, 0, Math.PI * 2);
-      ctx.fillStyle = trail.color; ctx.fill();
+      if (trail.abandoned && raceElapsedMs >= lastT) {
+        drawX(ctx, p.x, p.y, dotR, trail.color);   // retried/reset run ended here
+      } else {
+        // Dark halo for legibility, then the colored dot.
+        ctx.beginPath(); ctx.arc(p.x, p.y, dotR + 1, 0, Math.PI * 2);
+        ctx.fillStyle = shade(trail.color, -55); ctx.fill();
+        ctx.beginPath(); ctx.arc(p.x, p.y, dotR, 0, Math.PI * 2);
+        ctx.fillStyle = trail.color; ctx.fill();
+      }
       ctx.restore();
     }
   }

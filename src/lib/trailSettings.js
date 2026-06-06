@@ -64,7 +64,11 @@ export function buildTrailRuns(courseReads, settings, rosterList) {
   for (const [pid, runs] of byPlayer) {
     const { color } = playerCfg(settings, pid, idxById.get(pid) ?? 0);
     runs.forEach((run, i) => {
-      out.push({ points: run.points ?? [], color, opacity: rankOpacity(i, runs.length, settings.fadeByRank) });
+      out.push({
+        points: run.points ?? [], color,
+        opacity: rankOpacity(i, runs.length, settings.fadeByRank),
+        abandoned: run.status !== "finished",   // reset/dnf runs draw an X at their end
+      });
     });
   }
   return out;

@@ -30,12 +30,15 @@ describe("trailSettings helpers", () => {
     expect(rankOpacity(0, 1, true)).toBe(1);
   });
 
-  it("buildTrailRuns groups by player, applies colour + rank fade", () => {
+  it("buildTrailRuns groups by player, applies colour + rank fade + abandoned flag", () => {
     const s = { fadeByRank: true, players: { 1: { mode: "last", n: 3, color: "#blue" } } };
-    const reads = { trails: [{ player_id: 1, points: [[0, 1, 1, 1]] }, { player_id: 1, points: [[0, 2, 2, 1]] }] };
+    const reads = { trails: [
+      { player_id: 1, status: "finished", points: [[0, 1, 1, 1]] },
+      { player_id: 1, status: "reset", points: [[0, 2, 2, 1]] },
+    ] };
     expect(buildTrailRuns(reads, s, roster)).toEqual([
-      { points: [[0, 1, 1, 1]], color: "#blue", opacity: 1 },
-      { points: [[0, 2, 2, 1]], color: "#blue", opacity: 0.2 },
+      { points: [[0, 1, 1, 1]], color: "#blue", opacity: 1, abandoned: false },
+      { points: [[0, 2, 2, 1]], color: "#blue", opacity: 0.2, abandoned: true },
     ]);
   });
 
