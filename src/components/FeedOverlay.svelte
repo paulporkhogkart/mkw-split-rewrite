@@ -1,7 +1,7 @@
 <script>
   import { onMount, onDestroy } from "svelte";
   import { screen as screenStore, tells as tellsStore, rois as roisStore,
-           minimap as minimapStore, replays as replaysStore, sample as sampleStore,
+           minimap as minimapStore, trailRuns as trailRunsStore, trailLegend as trailLegendStore, sample as sampleStore,
            race as raceStore } from "../lib/stores.js";
   import { drawOverlay } from "../lib/overlay.js";
 
@@ -29,7 +29,8 @@
   let currentTells  = [];
   let currentRois   = {};
   let currentMinimap = null;
-  let currentReplays = [];
+  let currentTrails  = [];
+  let currentLegend  = [];
   let sampleImg      = null;   // decoded HTMLImageElement | null
   let raceFinishTime = null;   // non-null once the final time is detected
 
@@ -37,7 +38,8 @@
   const unsubTells   = tellsStore.subscribe(v   => { currentTells   = v ?? []; });
   const unsubRois    = roisStore.subscribe(v    => { currentRois    = v ?? {}; });
   const unsubMinimap = minimapStore.subscribe(v => { currentMinimap = v ?? null; });
-  const unsubReplays = replaysStore.subscribe(v => { currentReplays = v ?? []; });
+  const unsubTrails  = trailRunsStore.subscribe(v  => { currentTrails  = v ?? []; });
+  const unsubLegend  = trailLegendStore.subscribe(v => { currentLegend  = v ?? []; });
   const unsubRace    = raceStore.subscribe(v    => { raceFinishTime = v?.finishTime ?? null; });
   const unsubSample  = sampleStore.subscribe(b64 => {
     if (!b64) { sampleImg = null; return; }
@@ -105,7 +107,7 @@
   // ── Reactive: active ROI list for the current screen ──────────────────────────
   $: activeRois = buildActiveRois(currentScreen, currentTells, currentRois);
 
-  // The minimap reconstruction (ROI outline, tracking dot, replays, icon sample)
+  // The minimap reconstruction (ROI outline, tracking dot, trails, icon sample)
   // is only meaningful during a live race: RACING screen AND the final time not
   // yet detected. Outside that window none of it is drawn.
   $: mmActive = currentScreen === "RACING" && raceFinishTime == null;
@@ -163,7 +165,8 @@
       canvasW, canvasH,
       rois:          activeRois,
       minimap:       mmActive ? currentMinimap : null,
-      replays:       mmActive ? currentReplays : [],
+      trails:        mmActive ? currentTrails : [],
+      legend:        mmActive ? currentLegend : [],
       sampleImg:     mmActive ? sampleImg : null,
       raceElapsedMs: elapsed,
     });
@@ -171,7 +174,7 @@
 
   // Static redraws (ROI boxes, sample, canvas resize) happen on any input change.
   // While mmActive the rAF loop also redraws every frame so the dots move.
-  $: { void activeRois; void currentMinimap; void currentReplays; void sampleImg;
+  $: { void activeRois; void currentMinimap; void currentTrails; void currentLegend; void sampleImg;
        void mmActive; void canvasW; void canvasH; redraw(); }
 
   // ── ResizeObserver: keep canvas dimensions in sync with container ─────────────
@@ -194,7 +197,8 @@
     unsubTells();
     unsubRois();
     unsubMinimap();
-    unsubReplays();
+    unsubTrails();
+    unsubLegend();
     unsubRace();
     unsubSample();
     stopLoop();

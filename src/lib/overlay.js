@@ -1,4 +1,4 @@
-import { C, REPLAY_HUES } from "./palette.js";
+import { C } from "./palette.js";
 
 /** Map ROI kind to its stroke/label color. */
 const KIND_COLOR = {
@@ -176,15 +176,15 @@ export function roiToScreen(box, displayRect, srcW = 1920, srcH = 1080) {
  *   }>,
  *   minimap?:  { cx:number, cy:number, radius:number, trackState:string,
  *                roi?:[number,number,number,number] } | null,   // roi = [x,y,w,h] per-map
- *   replays?:  Array<{ id:string|number, points:[number,number,number][],
- *                      is_pb?:boolean, total_time?:string|null }>,
+ *   trails?:   Array<{ points:[number,number,number][], color:string, opacity?:number }>,
  *   sampleImg?: HTMLImageElement | null,
- *   raceElapsedMs?:  number | null,  // race clock → interpolates the replay dots
+ *   raceElapsedMs?:  number | null,  // race clock → interpolates the trail dots
+ *   legend?:   Array<{ name:string, color:string }>,
  * }} opts
  */
 export function drawOverlay(ctx, opts) {
-  const { canvasW, canvasH, rois, minimap = null, replays = [], sampleImg = null,
-          raceElapsedMs = null } = opts;
+  const { canvasW, canvasH, rois, minimap = null, trails = [], sampleImg = null,
+          raceElapsedMs = null, legend = [] } = opts;
 
   ctx.clearRect(0, 0, canvasW, canvasH);
 
@@ -217,28 +217,22 @@ export function drawOverlay(ctx, opts) {
   // Each replay shows a single dot at its recorded position for the current
   // race-elapsed time - not a static path. PB dots are larger; an abandoned run
   // (no total_time) becomes an X once its clock runs out.
-  if (replays && replays.length > 0 && raceElapsedMs != null) {
-    for (let i = 0; i < replays.length; i++) {
-      const trail = replays[i];
+  // Each render-ready run shows one moving dot at its interpolated position for the
+  // current race-elapsed time, in its player's colour at the run's fade opacity.
+  if (trails && trails.length > 0 && raceElapsedMs != null) {
+    const dotR = Math.max(3, 5 * scale);
+    for (const trail of trails) {
       if (!trail || !Array.isArray(trail.points) || trail.points.length === 0) continue;
       const pos = interpolateXY(trail.points, raceElapsedMs);
       if (!pos) continue;
-      const color = REPLAY_HUES[i % REPLAY_HUES.length];
-      const p     = pointToScreen(pos[0], pos[1], displayRect);
-      const dotR  = Math.max(3, 5 * scale) + (trail.is_pb ? 2 : 0);
-      const lastT = trail.points[trail.points.length - 1][0];
-      const abandoned = trail.total_time == null && !trail.is_pb;
-
+      const p = pointToScreen(pos[0], pos[1], displayRect);
       ctx.save();
-      if (raceElapsedMs >= lastT && abandoned) {
-        drawX(ctx, p.x, p.y, dotR, color);
-      } else {
-        // Dark halo for legibility, then the colored dot (mirrors cv2 shadow+fill).
-        ctx.beginPath(); ctx.arc(p.x, p.y, dotR + 1, 0, Math.PI * 2);
-        ctx.fillStyle = shade(color, -55); ctx.fill();
-        ctx.beginPath(); ctx.arc(p.x, p.y, dotR, 0, Math.PI * 2);
-        ctx.fillStyle = color; ctx.fill();
-      }
+      ctx.globalAlpha = trail.opacity ?? 1;
+      // Dark halo for legibility, then the colored dot.
+      ctx.beginPath(); ctx.arc(p.x, p.y, dotR + 1, 0, Math.PI * 2);
+      ctx.fillStyle = shade(trail.color, -55); ctx.fill();
+      ctx.beginPath(); ctx.arc(p.x, p.y, dotR, 0, Math.PI * 2);
+      ctx.fillStyle = trail.color; ctx.fill();
       ctx.restore();
     }
   }
@@ -344,5 +338,32 @@ export function drawOverlay(ctx, opts) {
     }
   }
 
+  if (legend && legend.length > 0) drawLegend(ctx, legend, canvasW, canvasH);
+
+  ctx.restore();
+}
+
+/** Bottom-left legend mapping each active player's name to its trail colour. */
+function drawLegend(ctx, legend, canvasW, canvasH) {
+  const PAD = 7, ROW = 15, DOT = 4, FONT = 10;
+  ctx.save();
+  ctx.font = `${FONT}px sans-serif`;
+  let maxW = 0;
+  for (const r of legend) maxW = Math.max(maxW, ctx.measureText(r.name).width);
+  const boxW = PAD * 2 + DOT * 2 + 6 + maxW;
+  const boxH = PAD * 2 + legend.length * ROW;
+  const x0 = PAD;
+  const y0 = canvasH - boxH - PAD;
+  ctx.fillStyle = "rgba(11,12,14,0.72)";
+  if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(x0, y0, boxW, boxH, 3); ctx.fill(); }
+  else ctx.fillRect(x0, y0, boxW, boxH);
+  ctx.textBaseline = "middle";
+  legend.forEach((r, i) => {
+    const cy = y0 + PAD + i * ROW + ROW / 2;
+    ctx.beginPath(); ctx.arc(x0 + PAD + DOT, cy, DOT, 0, Math.PI * 2);
+    ctx.fillStyle = r.color; ctx.fill();
+    ctx.fillStyle = "#d9dadd";
+    ctx.fillText(r.name, x0 + PAD + DOT * 2 + 6, cy);
+  });
   ctx.restore();
 }
