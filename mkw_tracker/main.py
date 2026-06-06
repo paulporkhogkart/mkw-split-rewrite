@@ -171,6 +171,17 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
         }
         ipc.emit(emit_state(state_dict))
 
+    elif t == "set_selection":
+        # Phase C: correct the engine's live selection from a just-finished review
+        # popup, so a retry inherits the user-confirmed values. Mutate state only -
+        # the main loop re-emits selection_update on the next frame (it does not
+        # overwrite this off the selection screens). conf=1.0 = manually confirmed.
+        if tracker is not None:
+            for field in ("course", "character", "kart", "costume"):
+                if msg.get(field) is not None:
+                    setattr(tracker.state, field, msg[field])
+                    setattr(tracker.state, f"{field}_conf", 1.0)
+
     elif t == "force_screen":
         screen_name = msg.get("screen", "")
         try:
