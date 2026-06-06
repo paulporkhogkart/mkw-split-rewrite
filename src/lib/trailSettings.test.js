@@ -8,10 +8,11 @@ const roster = [
 ];
 
 describe("trailSettings helpers", () => {
-  it("playerColor is deterministic by player_id (locked palette)", () => {
-    expect(playerColor(1)).toBe(TRAIL_PRESETS[1]);
-    expect(playerColor(8)).toBe(TRAIL_PRESETS[0]);
-    expect(playerColor(2)).toBe(playerColor(2));
+  it("playerColor: named assignment wins, stable per-id fallback otherwise", () => {
+    expect(playerColor({ display_name: "Paul", player_id: 1 })).toBe("#9b6bd0");   // purple
+    expect(playerColor({ display_name: "Luke", player_id: 2 })).toBe("#cf5b4e");   // red
+    expect(playerColor({ display_name: "Alex", player_id: 3 })).toBe("#3d7cc2");   // blue
+    expect(playerColor({ display_name: "Stranger", player_id: 8 })).toBe(TRAIL_PRESETS[0]);   // fallback
   });
 
   it("playerCfg defaults to last_pb (n=49 for me, 24 for others); stored overrides", () => {
@@ -42,8 +43,9 @@ describe("trailSettings helpers", () => {
       { player_id: 2, status: "finished", is_pb: true,  points: [[0, 2, 2, 1]] },
       { player_id: 2, status: "reset",    is_pb: false, points: [[0, 3, 3, 1]] },
     ] };
-    const out = buildTrailRuns(reads, s);
-    expect(out.map((r) => r.color)).toEqual([playerColor(2), playerColor(2), playerColor(2)]);
+    const out = buildTrailRuns(reads, s, roster);
+    const luke = playerColor(roster[1]);   // Luke = red
+    expect(out.map((r) => r.color)).toEqual([luke, luke, luke]);
     expect(out[0].opacity).toBe(1);                                       // rank 0
     expect(out[1]).toMatchObject({ is_pb: true, opacity: 1, abandoned: false });
     expect(out[2]).toMatchObject({ is_pb: false, abandoned: true, opacity: 0.2 });
@@ -52,8 +54,8 @@ describe("trailSettings helpers", () => {
   it("trailLegendRows lists active players with colour + mode", () => {
     const s = { players: { 2: { mode: "none" } } };
     expect(trailLegendRows(s, roster).map((r) => [r.name, r.mode, r.color])).toEqual([
-      ["Paul", "last_pb", playerColor(1)],
-      ["Alex", "last_pb", playerColor(3)],
+      ["Paul", "last_pb", playerColor(roster[0])],
+      ["Alex", "last_pb", playerColor(roster[2])],
     ]);
   });
 });

@@ -624,7 +624,7 @@
       const r = JSON.parse(await invoke("sync_course_reads", { course, config: activeConfig(settings, rosterList) }));
       pbSplitsStore.set(r.pb_splits?.splits ?? null);
       pbTotalStore.set(r.pb_splits?.total_ms ?? null);
-      trailRunsStore.set(buildTrailRuns(r, settings));
+      trailRunsStore.set(buildTrailRuns(r, settings, rosterList));
       trailLegendStore.set(trailLegendRows(settings, rosterList));
       friendsPbsStore.set(r.friends_pbs ?? []);
     } catch (_) { /* offline / unconfigured: leave stores as-is */ }

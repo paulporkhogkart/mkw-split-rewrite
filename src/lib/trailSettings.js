@@ -19,6 +19,11 @@ function loadSettings() {
 export const trailSettings = writable(loadSettings());
 trailSettings.subscribe((v) => { try { localStorage.setItem(SKEY, JSON.stringify(v)); } catch (_) { /* ignore */ } });
 
+/** Reset every player's mode/count + the fade toggle back to defaults (PB + Last N, fade off). */
+export function resetTrailSettings() {
+  trailSettings.set({ ...DEFAULTS, players: {} });
+}
+
 function loadRoster() { try { return JSON.parse(localStorage.getItem(RKEY) || "[]"); } catch { return []; } }
 export const roster = writable(loadRoster());
 /** Cache the roster (from the server) so the settings list survives offline. */
@@ -27,9 +32,23 @@ export function cacheRoster(list) {
   try { localStorage.setItem(RKEY, JSON.stringify(list)); } catch (_) { /* ignore */ }
 }
 
-/** A player's locked trail colour — deterministic by player_id, identical on every client. */
-export function playerColor(playerId) {
-  return TRAIL_PRESETS[((Number(playerId) % TRAIL_PRESETS.length) + TRAIL_PRESETS.length) % TRAIL_PRESETS.length];
+// Fixed colour assignments for the competition roster (keyed by display name, lowercased).
+// Locked + identical on every client; anyone not listed falls back to a stable per-id preset.
+const PLAYER_COLORS = {
+  paul:   "#9b6bd0",   // purple
+  alex:   "#3d7cc2",   // blue
+  luke:   "#cf5b4e",   // red
+  aliias: "#5aa86a",   // green
+  adymer: "#d98a3e",   // orange
+};
+
+/** A player's locked trail colour: their assigned colour if listed, else a stable per-id
+ *  preset. Identical on every client. Takes the roster player {player_id, display_name}. */
+export function playerColor(p) {
+  const named = PLAYER_COLORS[(p?.display_name ?? "").trim().toLowerCase()];
+  if (named) return named;
+  const L = TRAIL_PRESETS.length;
+  return TRAIL_PRESETS[(((Number(p?.player_id) || 0) % L) + L) % L];
 }
 
 /** A player's effective {mode, n}. Default "PB + Last N": you = last 49 + PB, others = last 24 + PB. */
@@ -59,7 +78,8 @@ export function rankOpacity(i, count, fade) {
  *  player) into render-ready runs with the player's locked colour + per-run opacity. PB runs
  *  stay full opacity (and carry is_pb so the overlay can mark them); reset runs carry abandoned.
  *  Returns [{points, color, opacity, abandoned, is_pb}]. */
-export function buildTrailRuns(courseReads, settings) {
+export function buildTrailRuns(courseReads, settings, rosterList) {
+  const byId = new Map((rosterList ?? []).map((p) => [p.player_id, p]));
   const byPlayer = new Map();
   for (const t of (courseReads?.trails ?? [])) {
     if (!byPlayer.has(t.player_id)) byPlayer.set(t.player_id, []);
@@ -67,7 +87,7 @@ export function buildTrailRuns(courseReads, settings) {
   }
   const out = [];
   for (const [pid, runs] of byPlayer) {
-    const color = playerColor(pid);
+    const color = playerColor(byId.get(pid) ?? { player_id: pid });
     runs.forEach((run, i) => {
       out.push({
         points: run.points ?? [],
@@ -84,6 +104,6 @@ export function buildTrailRuns(courseReads, settings) {
 /** Legend rows (active players) for the overlay: {name, color, mode, n}. */
 export function trailLegendRows(settings, rosterList) {
   return (rosterList ?? [])
-    .map((p) => ({ name: p.display_name, color: playerColor(p.player_id), ...playerCfg(settings, p) }))
+    .map((p) => ({ name: p.display_name, color: playerColor(p), ...playerCfg(settings, p) }))
     .filter((r) => r.mode !== "none");
 }

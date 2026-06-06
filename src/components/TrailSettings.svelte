@@ -4,7 +4,9 @@
   // Colours are locked + auto-assigned per player (same on every client), shown read-only.
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
-  import { trailSettings, roster, cacheRoster, playerCfg, playerColor } from "../lib/trailSettings.js";
+  import { trailSettings, roster, cacheRoster, playerCfg, playerColor, resetTrailSettings } from "../lib/trailSettings.js";
+
+  let confirmReset = false;
 
   const MODES = [
     ["none", "None"], ["pbs", "PBs only"], ["best", "Best N"],
@@ -53,13 +55,24 @@
             disabled={!usesN(cfg.mode)}
             on:change={(e) => setPlayer(p, { n: Math.max(1, parseInt(e.target.value, 10) || 1) })} />
           <span class="chip" class:off={cfg.mode === "none"}
-            style={cfg.mode === "none" ? "" : `background:${playerColor(p.player_id)}`} title="Locked colour"></span>
+            style={cfg.mode === "none" ? "" : `background:${playerColor(p)}`} title="Locked colour"></span>
         </div>
       {/each}
     </div>
   {/if}
 
-  <p class="note">Default is <b>PB + Last 49</b> for you and <b>PB + Last 24</b> for everyone else (the PB shows even when it's older than that). Large sets put many ghosts on the minimap at once.</p>
+  <div class="foot">
+    <p class="note">Default is <b>PB + Last 49</b> for you and <b>PB + Last 24</b> for everyone else (the PB shows even when it's older than that). Large sets put many ghosts on the minimap at once.</p>
+    <div class="reset">
+      {#if confirmReset}
+        <span class="reset-q">Reset everyone to defaults?</span>
+        <button class="rbtn" on:click={() => (confirmReset = false)}>Cancel</button>
+        <button class="rbtn rbtn-go" on:click={() => { resetTrailSettings(); confirmReset = false; }}>Reset</button>
+      {:else}
+        <button class="rbtn" on:click={() => (confirmReset = true)}>Reset to defaults</button>
+      {/if}
+    </div>
+  </div>
 </div>
 
 <style>
@@ -99,4 +112,15 @@
     border-radius: var(--r); padding: .6rem .7rem; margin: 0; }
   .note { font-size: .66rem; color: var(--tx-dim); line-height: 1.55; margin: 0; }
   .note b { color: var(--tx-mut); }
+
+  .foot { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+  .foot .note { flex: 1; min-width: 16rem; }
+  .reset { display: flex; align-items: center; gap: .45rem; flex-shrink: 0; }
+  .reset-q { font-size: .66rem; color: var(--tx-dim); }
+  .rbtn { background: var(--panel-2); color: var(--tx-mut); border: 1px solid var(--bd); border-radius: var(--r);
+    padding: .22rem .55rem; font-family: inherit; font-size: .68rem; cursor: pointer; white-space: nowrap;
+    transition: background .12s, color .12s, border-color .12s; }
+  .rbtn:hover { background: var(--raised); color: var(--tx); }
+  .rbtn-go { border-color: var(--warn); color: var(--warn); }
+  .rbtn-go:hover { background: var(--raised); }
 </style>
