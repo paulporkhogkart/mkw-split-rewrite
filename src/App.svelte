@@ -811,7 +811,7 @@
         // Replace any existing entry for this attempt (idempotent), else append.
         reviewQueue = [
           ...reviewQueue.filter((e) => e.attemptId !== msg.attempt_id),
-          { attemptId: msg.attempt_id, run: msg.run, isPb: !!msg.is_pb },
+          { attemptId: msg.attempt_id, run: msg.run, isPb: !!msg.is_pb, live: true },
         ];
         break;
       case "option_lists":
@@ -849,7 +849,14 @@
   }
   function onReviewSubmit(e) {
     const { attempt_id, ...filled } = e.detail;   // attempt_id travels separately
+    const entry = reviewQueue.find((x) => x.attemptId === attempt_id);
     invoke("sync_resolve_pending", { attemptId: attempt_id, filled }).catch(() => {});
+    // For a just-finished run (not a resurfaced one), correct the engine's live
+    // selection state so a retry inherits the values the user just confirmed.
+    if (entry?.live) {
+      send({ type: "set_selection", course: filled.course, character: filled.character,
+             kart: filled.kart, costume: filled.costume });
+    }
     pushLog(`[review] submitted ${attempt_id}`);
     _dequeue(attempt_id);
   }
@@ -1271,7 +1278,7 @@
       if (Array.isArray(pending) && pending.length) {
         reviewQueue = [
           ...reviewQueue,
-          ...pending.map((p) => ({ attemptId: p.attempt_id, run: p.run, isPb: !!p.is_pb })),
+          ...pending.map((p) => ({ attemptId: p.attempt_id, run: p.run, isPb: !!p.is_pb, live: false })),
         ];
         pushLog(`[review] ${pending.length} run(s) awaiting review from a previous session`);
       }
