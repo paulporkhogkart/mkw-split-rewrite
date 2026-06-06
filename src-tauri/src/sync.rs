@@ -176,6 +176,41 @@ fn is_new_pb(conn: &Connection, slug: &str, cc: i64, ms: i64) -> bool {
     }
 }
 
+/// The gating matrix. Returns the ids of missing required fields; empty = complete
+/// enough to upload. `0`/negative are valid; only null/empty counts as missing.
+fn missing_fields(v: &serde_json::Value, is_pb: bool) -> Vec<String> {
+    let mut missing = Vec::new();
+    let str_present = |key: &str| -> bool {
+        v.get(key).and_then(|x| x.as_str()).map(|s| !s.trim().is_empty()).unwrap_or(false)
+    };
+    for key in ["course", "character", "kart"] {
+        if !str_present(key) { missing.push(key.to_string()); }
+    }
+    let status = v.get("status").and_then(|x| x.as_str()).unwrap_or("");
+    if status == "finished" {
+        let total_ok = v.get("total_time").and_then(|x| x.as_str())
+            .and_then(parse_time_ms).is_some();
+        if !total_ok { missing.push("total_time".to_string()); }
+        if is_pb {
+            if let Some(n) = v.get("total_laps").and_then(|x| x.as_i64()) {
+                let laps = v.get("laps").and_then(|x| x.as_array());
+                for lap_no in 1..=n {
+                    let entry = laps.and_then(|arr| arr.iter().find(|e|
+                        e.get("lap").and_then(|x| x.as_i64()) == Some(lap_no)));
+                    let time_ok = entry.and_then(|e| e.get("time_str")).and_then(|x| x.as_str())
+                        .map(|s| !s.is_empty()).unwrap_or(false);
+                    let coins_ok = entry.and_then(|e| e.get("coins")).map(|x| !x.is_null()).unwrap_or(false);
+                    let shrooms_ok = entry.and_then(|e| e.get("shrooms")).map(|x| !x.is_null()).unwrap_or(false);
+                    if !time_ok { missing.push(format!("lap_{lap_no}_time")); }
+                    if !coins_ok { missing.push(format!("lap_{lap_no}_coins")); }
+                    if !shrooms_ok { missing.push(format!("lap_{lap_no}_shrooms")); }
+                }
+            }
+        }
+    }
+    missing
+}
+
 /// If `line` is a finished run that beats the cached best for its course, returns a
 /// `pb_achieved` JSON line (and optimistically lowers the cache). cc is 150 until the
 /// engine reports it (server default matches).
@@ -458,5 +493,30 @@ mod tests {
         assert_eq!(outbox_pending(&conn).len(), 1);
         assert_eq!(outbox_list_pending(&conn).len(), 0);
         assert_eq!(outbox_get_body(&conn, "a2").unwrap(), r#"{"type":"run_finalized","attempt_id":"a2","course":"X"}"#);
+    }
+
+    fn _v(s: &str) -> serde_json::Value { serde_json::from_str(s).unwrap() }
+
+    #[test]
+    fn missing_fields_matrix() {
+        let complete = _v(r#"{"course":"X","character":"Mario","kart":"K","status":"finished","total_time":"1:00.000"}"#);
+        assert!(missing_fields(&complete, false).is_empty());
+
+        let reset = _v(r#"{"course":"X","character":"","kart":"K","status":"reset"}"#);
+        assert_eq!(missing_fields(&reset, false), vec!["character"]);
+
+        let no_total = _v(r#"{"course":"X","character":"M","kart":"K","status":"finished"}"#);
+        assert_eq!(missing_fields(&no_total, false), vec!["total_time"]);
+
+        let pb_ok = _v(r#"{"course":"X","character":"M","kart":"K","status":"finished","total_time":"1:00.000","total_laps":2,
+            "laps":[{"lap":1,"time_str":"0:30.000","coins":5,"shrooms":2},{"lap":2,"time_str":"0:30.000","coins":-1,"shrooms":0}]}"#);
+        assert!(missing_fields(&pb_ok, true).is_empty());
+
+        let pb_gap = _v(r#"{"course":"X","character":"M","kart":"K","status":"finished","total_time":"1:00.000","total_laps":2,
+            "laps":[{"lap":1,"time_str":"0:30.000","coins":5,"shrooms":2},{"lap":2,"time_str":"0:30.000","coins":null,"shrooms":0}]}"#);
+        assert_eq!(missing_fields(&pb_gap, true), vec!["lap_2_coins"]);
+
+        let pb_no_n = _v(r#"{"course":"X","character":"M","kart":"K","status":"finished","total_time":"1:00.000"}"#);
+        assert!(missing_fields(&pb_no_n, true).is_empty());
     }
 }
