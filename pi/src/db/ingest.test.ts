@@ -22,6 +22,23 @@ const payload: AttemptPayload = {
 };
 
 describe('upsertRun', () => {
+  it('stores lap_time_str (and coins/shrooms) on run_laps', () => {
+    const db = openDb(':memory:'); applySchema(db);
+    db.exec("INSERT INTO seasons(id,name,is_active) VALUES (1,'Season 1',1)");
+    db.exec("INSERT INTO players(id,display_name) VALUES (1,'Paul')");
+    db.exec("INSERT INTO courses(id,slug,display_name) VALUES (1,'rainbow_road','Rainbow Road')");
+    const runId = upsertRun(db, {
+      attempt_id: 'a1', course: 'Rainbow Road', status: 'finished', total_time: '1:40.000',
+      laps: [{ lap: 1, time_ms: 40000, time_str: '0:40.000', coins: 5, shrooms: 2 }],
+    } as any, 1, 1);
+    const row = db.prepare(
+      'SELECT lap_time_str, coins, shrooms FROM run_laps WHERE run_id=? AND lap_index=1'
+    ).get(runId) as any;
+    expect(row.lap_time_str).toBe('0:40.000');
+    expect(row.coins).toBe(5);
+    expect(row.shrooms).toBe(2);
+  });
+
   it('inserts a live finished run with laps + points', () => {
     const db = base();
     const runId = upsertRun(db, payload, 1, 1);

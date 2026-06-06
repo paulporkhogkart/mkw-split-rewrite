@@ -1,4 +1,4 @@
-export type Lap = { lap: number; time_ms: number; coins?: number | null; shrooms?: number | null };
+export type Lap = { lap: number; time_ms: number; time_str?: string | null; coins?: number | null; shrooms?: number | null };
 export type Point = [number, number, number, number];
 export type AttemptPayload = {
   attempt_id: string; course: string; cc?: number;
