@@ -11,10 +11,10 @@ export function parseTimeMs(t) {
   return m ? Number(m[1]) * 60000 + Number(m[2]) * 1000 + Number(m[3]) : null;
 }
 
-// Coins are a signed delta — any integer (incl. negative, incl. 0) is valid.
+// Coins are a signed delta - any integer (incl. negative, incl. 0) is valid.
 export const isValidInt = (s) => /^-?\d+$/.test((s ?? "").toString().trim());
 
-// Mushrooms used per lap — a non-negative integer.
+// Mushrooms used per lap - a non-negative integer.
 export const isValidCount = (s) => /^\d+$/.test((s ?? "").toString().trim());
 
 // A lap row is complete when every field validates.
