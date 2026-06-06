@@ -49,7 +49,7 @@ export function readsRoutes(db: DatabaseSync): Hono<Env> {
   r.get('/v1/players/:id/trails', (c) => {
     const cid = course(c); if (cid === null) return c.json({ error: 'unknown course' }, 400);
     const q = c.req.query('mode') ?? 'pbs';
-    const mode = (['none', 'pbs', 'best', 'last', 'all'].includes(q) ? q : 'pbs') as TrailMode;
+    const mode = (['none', 'pbs', 'best', 'last', 'last_pb', 'all'].includes(q) ? q : 'pbs') as TrailMode;
     return c.json(playerTrails(db, season(c), Number(c.req.param('id')), cid, num(c.req.query('cc'), 150), mode, num(c.req.query('n'), 1)));
   });
   return r;

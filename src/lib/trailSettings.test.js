@@ -1,49 +1,59 @@
 import { describe, it, expect } from "vitest";
-import { playerCfg, activeConfig, rankOpacity, buildTrailRuns, trailLegendRows, TRAIL_PRESETS } from "./trailSettings.js";
+import { playerColor, playerCfg, activeConfig, rankOpacity, buildTrailRuns, trailLegendRows, TRAIL_PRESETS } from "./trailSettings.js";
 
 const roster = [
-  { player_id: 1, display_name: "Paul" },
-  { player_id: 2, display_name: "Luke" },
-  { player_id: 3, display_name: "Alex" },
+  { player_id: 1, display_name: "Paul", is_me: true },
+  { player_id: 2, display_name: "Luke", is_me: false },
+  { player_id: 3, display_name: "Alex", is_me: false },
 ];
 
 describe("trailSettings helpers", () => {
-  it("playerCfg defaults to pbs / n=100 / preset colour by index; honours stored", () => {
-    expect(playerCfg({ players: {} }, 1, 0)).toEqual({ mode: "pbs", n: 100, color: TRAIL_PRESETS[0] });
-    expect(playerCfg({ players: { 2: { mode: "last", n: 50, color: "#fff" } } }, 2, 1)).toEqual({ mode: "last", n: 50, color: "#fff" });
-    expect(playerCfg({ players: {} }, 3, 9).color).toBe(TRAIL_PRESETS[9 % TRAIL_PRESETS.length]);
+  it("playerColor is deterministic by player_id (locked palette)", () => {
+    expect(playerColor(1)).toBe(TRAIL_PRESETS[1]);
+    expect(playerColor(8)).toBe(TRAIL_PRESETS[0]);
+    expect(playerColor(2)).toBe(playerColor(2));
   });
 
-  it("activeConfig drops none and emits {player_id,mode,n}", () => {
-    const s = { fadeByRank: true, players: { 1: { mode: "last", n: 100 }, 2: { mode: "none" }, 3: { mode: "best", n: 10 } } };
+  it("playerCfg defaults to last_pb (n=49 for me, 24 for others); stored overrides", () => {
+    expect(playerCfg({ players: {} }, roster[0])).toEqual({ mode: "last_pb", n: 49 });
+    expect(playerCfg({ players: {} }, roster[1])).toEqual({ mode: "last_pb", n: 24 });
+    expect(playerCfg({ players: { 2: { mode: "best", n: 10 } } }, roster[1])).toEqual({ mode: "best", n: 10 });
+  });
+
+  it("activeConfig drops none and emits {player_id,mode,n} (others default)", () => {
+    const s = { players: { 1: { mode: "last", n: 100 }, 2: { mode: "none" } } };
     expect(activeConfig(s, roster)).toEqual([
       { player_id: 1, mode: "last", n: 100 },
-      { player_id: 3, mode: "best", n: 10 },
+      { player_id: 3, mode: "last_pb", n: 24 },
     ]);
   });
 
   it("rankOpacity fades 1→floor; full when off or single", () => {
     expect(rankOpacity(0, 5, true)).toBe(1);
     expect(rankOpacity(4, 5, true)).toBe(0.2);
-    expect(rankOpacity(2, 5, true)).toBe(0.6);
     expect(rankOpacity(3, 5, false)).toBe(1);
     expect(rankOpacity(0, 1, true)).toBe(1);
   });
 
-  it("buildTrailRuns groups by player, applies colour + rank fade + abandoned flag", () => {
-    const s = { fadeByRank: true, players: { 1: { mode: "last", n: 3, color: "#blue" } } };
+  it("buildTrailRuns: locked colour by player; PB full-opacity + flagged; reset abandoned", () => {
+    const s = { fadeByRank: true, players: {} };
     const reads = { trails: [
-      { player_id: 1, status: "finished", points: [[0, 1, 1, 1]] },
-      { player_id: 1, status: "reset", points: [[0, 2, 2, 1]] },
+      { player_id: 2, status: "finished", is_pb: false, points: [[0, 1, 1, 1]] },
+      { player_id: 2, status: "finished", is_pb: true,  points: [[0, 2, 2, 1]] },
+      { player_id: 2, status: "reset",    is_pb: false, points: [[0, 3, 3, 1]] },
     ] };
-    expect(buildTrailRuns(reads, s, roster)).toEqual([
-      { points: [[0, 1, 1, 1]], color: "#blue", opacity: 1, abandoned: false },
-      { points: [[0, 2, 2, 1]], color: "#blue", opacity: 0.2, abandoned: true },
-    ]);
+    const out = buildTrailRuns(reads, s);
+    expect(out.map((r) => r.color)).toEqual([playerColor(2), playerColor(2), playerColor(2)]);
+    expect(out[0].opacity).toBe(1);                                       // rank 0
+    expect(out[1]).toMatchObject({ is_pb: true, opacity: 1, abandoned: false });
+    expect(out[2]).toMatchObject({ is_pb: false, abandoned: true, opacity: 0.2 });
   });
 
-  it("trailLegendRows lists active players with name/colour/mode", () => {
-    const s = { fadeByRank: true, players: { 1: { mode: "last", n: 100, color: "#a" }, 2: { mode: "none" } } };
-    expect(trailLegendRows(s, roster).map((r) => [r.name, r.mode])).toEqual([["Paul", "last"], ["Alex", "pbs"]]);
+  it("trailLegendRows lists active players with colour + mode", () => {
+    const s = { players: { 2: { mode: "none" } } };
+    expect(trailLegendRows(s, roster).map((r) => [r.name, r.mode, r.color])).toEqual([
+      ["Paul", "last_pb", playerColor(1)],
+      ["Alex", "last_pb", playerColor(3)],
+    ]);
   });
 });

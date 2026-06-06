@@ -2,14 +2,15 @@
 // server reads into render-ready trails. Persisted in localStorage (like syncSettings).
 import { writable } from "svelte/store";
 
-// Preset palette — distinct + legible on the dark minimap.
+// Locked palette — a player's colour is fixed + the same on every client (deterministic
+// by player_id), so "your dots" look the same to everyone. Not client-configurable.
 export const TRAIL_PRESETS = ["#3d7cc2", "#d98a3e", "#5aa86a", "#cf5b4e", "#9b6bd0", "#46b0c8", "#d56aa8", "#c9b03e"];
-export const TRAIL_MODES = ["none", "pbs", "best", "last", "all"];
+export const TRAIL_MODES = ["none", "pbs", "best", "last", "last_pb", "all"];
 const FADE_FLOOR = 0.2;
 
 const SKEY = "mkw.trailSettings";
 const RKEY = "mkw.roster";
-const DEFAULTS = { fadeByRank: true, players: {} };   // players: { [playerId]: {mode, n, color} }
+const DEFAULTS = { fadeByRank: false, players: {} };   // players: { [playerId]: {mode, n} }
 
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(SKEY) || "{}") }; }
@@ -26,20 +27,24 @@ export function cacheRoster(list) {
   try { localStorage.setItem(RKEY, JSON.stringify(list)); } catch (_) { /* ignore */ }
 }
 
-/** A player's effective config, with defaults: PBs, n=100, a preset colour by roster index. */
-export function playerCfg(settings, playerId, idx) {
-  const p = settings.players?.[playerId];
+/** A player's locked trail colour — deterministic by player_id, identical on every client. */
+export function playerColor(playerId) {
+  return TRAIL_PRESETS[((Number(playerId) % TRAIL_PRESETS.length) + TRAIL_PRESETS.length) % TRAIL_PRESETS.length];
+}
+
+/** A player's effective {mode, n}. Default "PB + Last N": you = last 49 + PB, others = last 24 + PB. */
+export function playerCfg(settings, rosterPlayer) {
+  const p = settings.players?.[rosterPlayer.player_id];
   return {
-    mode:  p?.mode  ?? "pbs",
-    n:     p?.n     ?? 100,
-    color: p?.color ?? TRAIL_PRESETS[idx % TRAIL_PRESETS.length],
+    mode: p?.mode ?? "last_pb",
+    n:    p?.n    ?? (rosterPlayer.is_me ? 49 : 24),
   };
 }
 
 /** The trail config to send to sync_course_reads: players with mode != none. */
 export function activeConfig(settings, rosterList) {
   return (rosterList ?? [])
-    .map((p, idx) => ({ player_id: p.player_id, ...playerCfg(settings, p.player_id, idx) }))
+    .map((p) => ({ player_id: p.player_id, ...playerCfg(settings, p) }))
     .filter((c) => c.mode !== "none")
     .map((c) => ({ player_id: c.player_id, mode: c.mode, n: Math.max(1, Number(c.n) || 1) }));
 }
@@ -51,10 +56,10 @@ export function rankOpacity(i, count, fade) {
 }
 
 /** Group the combined course-reads `trails` (each tagged player_id, rank-ordered within a
- *  player) into render-ready runs with the player's colour + per-run fade opacity.
- *  Returns [{points, color, opacity}]. */
-export function buildTrailRuns(courseReads, settings, rosterList) {
-  const idxById = new Map((rosterList ?? []).map((p, idx) => [p.player_id, idx]));
+ *  player) into render-ready runs with the player's locked colour + per-run opacity. PB runs
+ *  stay full opacity (and carry is_pb so the overlay can mark them); reset runs carry abandoned.
+ *  Returns [{points, color, opacity, abandoned, is_pb}]. */
+export function buildTrailRuns(courseReads, settings) {
   const byPlayer = new Map();
   for (const t of (courseReads?.trails ?? [])) {
     if (!byPlayer.has(t.player_id)) byPlayer.set(t.player_id, []);
@@ -62,12 +67,14 @@ export function buildTrailRuns(courseReads, settings, rosterList) {
   }
   const out = [];
   for (const [pid, runs] of byPlayer) {
-    const { color } = playerCfg(settings, pid, idxById.get(pid) ?? 0);
+    const color = playerColor(pid);
     runs.forEach((run, i) => {
       out.push({
-        points: run.points ?? [], color,
-        opacity: rankOpacity(i, runs.length, settings.fadeByRank),
+        points: run.points ?? [],
+        color,
+        opacity: run.is_pb ? 1 : rankOpacity(i, runs.length, settings.fadeByRank),
         abandoned: run.status !== "finished",   // reset/dnf runs draw an X at their end
+        is_pb: !!run.is_pb,                      // PB runs get a slight visual accent
       });
     });
   }
@@ -77,6 +84,6 @@ export function buildTrailRuns(courseReads, settings, rosterList) {
 /** Legend rows (active players) for the overlay: {name, color, mode, n}. */
 export function trailLegendRows(settings, rosterList) {
   return (rosterList ?? [])
-    .map((p, idx) => ({ name: p.display_name, ...playerCfg(settings, p.player_id, idx) }))
+    .map((p) => ({ name: p.display_name, color: playerColor(p.player_id), ...playerCfg(settings, p) }))
     .filter((r) => r.mode !== "none");
 }

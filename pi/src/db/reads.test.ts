@@ -125,4 +125,14 @@ describe('playerTrails', () => {
   it('none returns nothing', () => {
     expect(playerTrails(db5(), 1, 1, 1, 150, 'none', 5)).toEqual([]);
   });
+  it('last_pb appends the PB when it is older than the last N; flags is_pb', () => {
+    const t = playerTrails(db5(), 1, 1, 1, 150, 'last_pb', 1);
+    expect(t.map((r) => r.run_id)).toEqual([30, 10]);          // newest + the PB
+    expect(t.map((r) => r.is_pb)).toEqual([false, true]);
+  });
+  it('last_pb does not duplicate the PB when it is within the last N', () => {
+    const t = playerTrails(db5(), 1, 1, 1, 150, 'last_pb', 3);
+    expect(t.map((r) => r.run_id)).toEqual([30, 20, 10]);
+    expect(t.filter((r) => r.is_pb).map((r) => r.run_id)).toEqual([10]);
+  });
 });

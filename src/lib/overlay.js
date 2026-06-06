@@ -231,11 +231,16 @@ export function drawOverlay(ctx, opts) {
       if (trail.abandoned && raceElapsedMs >= lastT) {
         drawX(ctx, p.x, p.y, dotR, trail.color);   // retried/reset run ended here
       } else {
-        // Dark halo for legibility, then the colored dot.
-        ctx.beginPath(); ctx.arc(p.x, p.y, dotR + 1, 0, Math.PI * 2);
+        // PB runs get a slight accent: a touch larger + a faint ring (subtle, not loud).
+        const r = trail.is_pb ? dotR + 1 : dotR;
+        ctx.beginPath(); ctx.arc(p.x, p.y, r + 1, 0, Math.PI * 2);   // dark halo for legibility
         ctx.fillStyle = shade(trail.color, -55); ctx.fill();
-        ctx.beginPath(); ctx.arc(p.x, p.y, dotR, 0, Math.PI * 2);
+        ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
         ctx.fillStyle = trail.color; ctx.fill();
+        if (trail.is_pb) {
+          ctx.beginPath(); ctx.arc(p.x, p.y, r + 1.5, 0, Math.PI * 2);
+          ctx.lineWidth = 1; ctx.strokeStyle = "rgba(255,255,255,0.55)"; ctx.stroke();
+        }
       }
       ctx.restore();
     }
