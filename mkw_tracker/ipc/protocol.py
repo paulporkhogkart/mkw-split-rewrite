@@ -136,12 +136,16 @@ def emit_pb_splits(course: str, splits, total_ms=None) -> str:
 
 
 def emit_option_lists(characters: List[str], karts: List[str],
-                      courses: List[str], costumes: List[str]) -> str:
+                      courses: List[str], costumes: List[str],
+                      costumes_by_character: Optional[Dict[str, List[str]]] = None) -> str:
     """Canonical selection names per category for the run-review popup dropdowns.
     These are the exact names the detector emits in ``selection_update`` (template
-    keys), so a detected value is always present as an option."""
+    keys), so a detected value is always present as an option.
+    ``costumes_by_character`` maps each character to its valid costumes so the popup
+    can restrict the costume dropdown to the chosen character."""
     return _emit("option_lists", characters=characters, karts=karts,
-                 courses=courses, costumes=costumes)
+                 courses=courses, costumes=costumes,
+                 costumes_by_character=costumes_by_character or {})
 
 
 def emit_state(state_dict: dict) -> str:

@@ -84,7 +84,7 @@
   let reviewQueue = [];
   $: reviewHead = reviewQueue[0] ?? null;
   // Canonical dropdown options from the engine option_lists event.
-  let optionLists = { courses: [], characters: [], karts: [], costumes: [] };
+  let optionLists = { courses: [], characters: [], karts: [], costumes: [], costumesByCharacter: {} };
 
   // ── Device / updater ──────────────────────────────────────────────────────────
   let devices = [];
@@ -820,6 +820,7 @@
           characters: msg.characters ?? [],
           karts:      msg.karts      ?? [],
           costumes:   msg.costumes   ?? [],
+          costumesByCharacter: msg.costumes_by_character ?? {},
         };
         break;
       case "error":  pushLog(`[ERR] ${msg.message}`); break;

@@ -20,7 +20,7 @@
 
   export let run;                       // { attempt_id, status, course, character, kart, costume, total_time, total_laps, laps[] }
   export let isPb = false;
-  export let options = { courses: [], characters: [], karts: [], costumes: [] };
+  export let options = { courses: [], characters: [], karts: [], costumes: [], costumesByCharacter: {} };
   export let queueIndex = 0;            // 0-based position in the review queue
   export let queueCount = 1;            // total runs awaiting review
   export let playSound = true;
@@ -67,8 +67,12 @@
   $: badLaps     = needSplits ? (laps ?? []).filter((l) => !lapComplete(l)).map((l) => l.lap) : [];
   $: canSubmit   = !missCourse && !missChar && !missKart && !missTotal && badLaps.length === 0;
 
-  // Costume is optional and "Base" (no costume) must always be selectable + first.
-  $: costumeOptions = ["Base", ...(options.costumes ?? []).filter((c) => c !== "Base")];
+  // Costume is optional; restricted to the selected character's valid costumes
+  // (engine KNOWN_COSTUMES). "Base" (no costume) is always first; an unknown or
+  // costume-less character yields just "Base".
+  $: costumeOptions = ["Base", ...((options.costumesByCharacter?.[character]) ?? []).filter((c) => c !== "Base")];
+  // If the current costume isn't valid for the selected character, fall back to Base.
+  $: if (costume && !costumeOptions.includes(costume)) costume = "Base";
 
   function submit() {
     if (!canSubmit) return;

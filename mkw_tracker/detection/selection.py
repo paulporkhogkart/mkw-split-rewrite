@@ -276,12 +276,17 @@ class SelectionTracker:
         Built from the loaded template-dict keys (costumes already canonicalized to
         KNOWN_COSTUMES names) so the run-review popup's dropdowns always contain the
         value the detector reported, in the active Switch language.
+
+        ``costumes_by_character`` is the full KNOWN_COSTUMES map (character -> the
+        costumes valid for it) so the popup can restrict the costume dropdown to the
+        selected character. Its names share the same canonical form as ``costumes``.
         """
         return {
             "characters": sorted(self._char_templates.keys()),
             "karts":      sorted(self._kart_templates.keys()),
             "courses":    sorted(self._course_templates.keys()),
             "costumes":   sorted(self._costume_templates.keys()),
+            "costumes_by_character": {c: list(v) for c, v in KNOWN_COSTUMES.items()},
         }
 
     # ------------------------------------------------------------------
