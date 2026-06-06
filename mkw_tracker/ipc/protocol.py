@@ -124,8 +124,9 @@ def emit_pb_export(course: str, mkwreplay: dict) -> str:
 def emit_run_finalized(run: dict) -> str:
     """Serialise the full finalized-attempt payload for the Tauri app to upload.
 
-    ``run`` carries: attempt_id, course, status, character, kart, costume,
-    started_at, ended_at, total_time, laps [{lap, time_ms}], points [[t_ms,cx,cy,score]].
+    ``run`` carries: attempt_id, course, status, character, kart, costume, total_laps,
+    started_at, ended_at, total_time, points [[t_ms,cx,cy,score]], and
+    laps [{lap, time_ms, time_str, coins, shrooms}].
     """
     return json.dumps({"type": "run_finalized", **run})
 

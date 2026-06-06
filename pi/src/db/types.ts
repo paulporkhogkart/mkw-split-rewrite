@@ -1,7 +1,7 @@
 export type Lap = { lap: number; time_ms: number; time_str?: string | null; coins?: number | null; shrooms?: number | null };
 export type Point = [number, number, number, number];
 export type AttemptPayload = {
-  attempt_id: string; course: string; cc?: number;
+  attempt_id: string; course: string; cc?: number; total_laps?: number | null;
   status: 'finished' | 'reset' | 'dnf';
   character?: string | null; kart?: string | null; costume?: string | null;
   started_at?: string | null; ended_at?: string | null; total_time?: string | null;
