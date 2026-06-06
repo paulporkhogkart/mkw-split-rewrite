@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { openDb, applySchema } from './connect';
-import { courseLeaderboard, friendsPbs, currentWr, myPbs, myPbSplits, courseTrails } from './reads';
+import { courseLeaderboard, friendsPbs, currentWr, myPbs, myPbSplits, courseTrails, roster, playerTrails } from './reads';
 
 function seeded() {
   const db = openDb(':memory:');
@@ -82,5 +82,47 @@ describe('courseTrails', () => {
     const t = courseTrails(seededTrails(), 1, 1, 150, 1);
     expect(t.find(x => x.player_id === 1)?.is_me).toBe(true);
     expect(t.find(x => x.player_id === 2)?.is_me).toBe(false);
+  });
+});
+
+describe('roster', () => {
+  it('returns the season roster players (alphabetical), excluding non-members', () => {
+    const db = openDb(':memory:'); applySchema(db);
+    db.exec("INSERT INTO seasons(id,name,is_active) VALUES (1,'S1',1)");
+    db.exec("INSERT INTO players(id,display_name) VALUES (1,'Paul'),(2,'Luke'),(3,'Zoe')");
+    db.exec("INSERT INTO season_rosters(season_id,player_id) VALUES (1,1),(1,2)");   // Zoe not in roster
+    expect(roster(db, 1)).toEqual([{ player_id: 2, display_name: 'Luke' }, { player_id: 1, display_name: 'Paul' }]);
+  });
+});
+
+describe('playerTrails', () => {
+  function db5() {
+    const db = openDb(':memory:'); applySchema(db);
+    db.exec("INSERT INTO seasons(id,name,is_active) VALUES (1,'S1',1)");
+    db.exec("INSERT INTO players(id,display_name) VALUES (1,'Paul')");
+    db.exec("INSERT INTO courses(id,slug,display_name) VALUES (1,'rr','RR')");
+    // 3 finished runs with points (one is_pb); run 40 is faster but has NO points (legacy).
+    db.exec("INSERT INTO runs(id,season_id,player_id,course_id,cc,status,provenance,total_time_ms,started_at,ended_at,is_pb) VALUES " +
+      "(10,1,1,1,150,'finished','live',108000,'2026-01-01T00:00','2026-01-01T00:02',1)," +
+      "(20,1,1,1,150,'finished','live',110000,'2026-01-02T00:00','2026-01-02T00:02',0)," +
+      "(30,1,1,1,150,'finished','live',109000,'2026-01-03T00:00','2026-01-03T00:02',0)," +
+      "(40,1,1,1,150,'finished','legacy_import',107000,NULL,NULL,0)");
+    db.exec("INSERT INTO run_points(run_id,t_ms,cx,cy,score) VALUES (10,0,1,1,0.9),(20,0,2,2,0.9),(30,0,3,3,0.9)");
+    return db;
+  }
+  it('pbs returns the PB run only', () => {
+    expect(playerTrails(db5(), 1, 1, 1, 150, 'pbs', 1).map(r => r.run_id)).toEqual([10]);
+  });
+  it('best returns fastest finished WITH points first (legacy point-less excluded from the limit)', () => {
+    expect(playerTrails(db5(), 1, 1, 1, 150, 'best', 2).map(r => r.run_id)).toEqual([10, 30]);
+  });
+  it('last returns newest first, limited', () => {
+    expect(playerTrails(db5(), 1, 1, 1, 150, 'last', 2).map(r => r.run_id)).toEqual([30, 20]);
+  });
+  it('all returns every run with points, newest first', () => {
+    expect(playerTrails(db5(), 1, 1, 1, 150, 'all', 1).map(r => r.run_id)).toEqual([30, 20, 10]);
+  });
+  it('none returns nothing', () => {
+    expect(playerTrails(db5(), 1, 1, 1, 150, 'none', 5)).toEqual([]);
   });
 });

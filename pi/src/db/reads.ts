@@ -92,3 +92,53 @@ export function courseTrails(db: DatabaseSync, seasonId: number, courseId: numbe
   }
   return out;
 }
+
+export type RosterRow = { player_id: number; display_name: string };
+
+/** The active season's roster (players), for the per-player trail settings list. */
+export function roster(db: DatabaseSync, seasonId: number): RosterRow[] {
+  return db.prepare(
+    `SELECT p.id AS player_id, p.display_name
+     FROM season_rosters sr JOIN players p ON p.id = sr.player_id
+     WHERE sr.season_id=?
+     ORDER BY p.display_name`
+  ).all(seasonId) as RosterRow[];
+}
+
+export type TrailMode = 'none' | 'pbs' | 'best' | 'last' | 'all';
+export type PlayerTrailRun = { run_id: number; total_ms: number | null; status: string; points: number[][] };
+
+/** One player's selected runs' trails for a course, ordered by rank (rank 0 first) so the
+ *  client can fade by index: pbs (the is_pb run), best (fastest N finished), last (newest N),
+ *  all (newest first). Runs with no points (legacy total-only) are omitted. */
+export function playerTrails(db: DatabaseSync, seasonId: number, playerId: number,
+                             courseId: number, cc: number, mode: TrailMode, n: number): PlayerTrailRun[] {
+  if (mode === 'none') return [];
+  // EXISTS(points) up front so LIMIT counts only runs that actually have a trail
+  // (legacy total-only runs have no points and must not consume a best/last slot).
+  let sql = `SELECT id, total_time_ms, status FROM runs
+             WHERE season_id=? AND player_id=? AND course_id=? AND cc=?
+               AND EXISTS (SELECT 1 FROM run_points rp WHERE rp.run_id = runs.id)`;
+  const params: (number)[] = [seasonId, playerId, courseId, cc];
+  if (mode === 'pbs') {
+    sql += ` AND is_pb=1`;
+  } else if (mode === 'best') {
+    sql += ` AND status='finished' AND total_time_ms IS NOT NULL ORDER BY total_time_ms ASC LIMIT ?`;
+    params.push(Math.max(1, n));
+  } else if (mode === 'last') {
+    sql += ` ORDER BY COALESCE(ended_at, started_at, '') DESC, id DESC LIMIT ?`;
+    params.push(Math.max(1, n));
+  } else { // all
+    sql += ` ORDER BY COALESCE(ended_at, started_at, '') DESC, id DESC`;
+  }
+  const runs = db.prepare(sql).all(...params) as { id: number; total_time_ms: number | null; status: string }[];
+  const ptStmt = db.prepare(`SELECT t_ms, cx, cy, score FROM run_points WHERE run_id=? ORDER BY t_ms`);
+  const out: PlayerTrailRun[] = [];
+  for (const r of runs) {
+    const pts = ptStmt.all(r.id) as { t_ms: number; cx: number; cy: number; score: number }[];
+    if (pts.length === 0) continue;   // legacy / point-less run: no trail
+    out.push({ run_id: r.id, total_ms: r.total_time_ms ?? null, status: r.status,
+               points: pts.map((p) => [p.t_ms, p.cx, p.cy, p.score]) });
+  }
+  return out;
+}

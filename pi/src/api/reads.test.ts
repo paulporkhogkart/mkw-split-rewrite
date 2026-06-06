@@ -86,3 +86,35 @@ describe('GET /v1/trails (optional token)', () => {
     expect((await app.request('/v1/trails?course=nope')).status).toBe(400);
   });
 });
+
+describe('GET /v1/roster', () => {
+  it('lists the season roster; is_me flags the token holder', async () => {
+    const db = openDb(':memory:'); applySchema(db);
+    db.exec("INSERT INTO seasons(id,name,is_active) VALUES (1,'Season 1',1)");
+    db.exec("INSERT INTO players(id,display_name) VALUES (1,'Paul'),(2,'Luke')");
+    db.exec("INSERT INTO season_rosters(season_id,player_id) VALUES (1,1),(1,2)");
+    const app = createApp(db, new EventHub());
+    const token = mintToken(db, 'Paul');
+    const anon = await (await app.request('/v1/roster')).json();
+    expect(anon.map((r: any) => [r.display_name, r.is_me])).toEqual([['Luke', false], ['Paul', false]]);
+    const mine = await (await app.request('/v1/roster', { headers: { authorization: `Bearer ${token}` } })).json();
+    expect(mine.find((r: any) => r.display_name === 'Paul').is_me).toBe(true);
+  });
+});
+
+describe('GET /v1/players/:id/trails', () => {
+  it('returns the player trails by mode; 400 on unknown course', async () => {
+    const db = openDb(':memory:'); applySchema(db);
+    db.exec("INSERT INTO seasons(id,name,is_active) VALUES (1,'Season 1',1)");
+    db.exec("INSERT INTO players(id,display_name) VALUES (1,'Paul')");
+    db.exec("INSERT INTO courses(id,slug,display_name) VALUES (1,'rainbow_road','Rainbow Road')");
+    db.exec("INSERT INTO runs(id,season_id,player_id,course_id,cc,status,provenance,total_time_ms,started_at,ended_at,is_pb) VALUES (10,1,1,1,150,'finished','live',108000,'a','a1',1),(20,1,1,1,150,'finished','live',110000,'b','b1',0)");
+    db.exec("INSERT INTO run_points(run_id,t_ms,cx,cy,score) VALUES (10,0,1,1,0.9),(20,0,2,2,0.9)");
+    const app = createApp(db, new EventHub());
+    const last = await (await app.request('/v1/players/1/trails?course=Rainbow%20Road&mode=last&n=5')).json();
+    expect(last.map((r: any) => r.run_id)).toEqual([20, 10]);
+    const pbs = await (await app.request('/v1/players/1/trails?course=Rainbow%20Road&mode=pbs')).json();
+    expect(pbs.map((r: any) => r.run_id)).toEqual([10]);
+    expect((await app.request('/v1/players/1/trails?course=nope&mode=pbs')).status).toBe(400);
+  });
+});

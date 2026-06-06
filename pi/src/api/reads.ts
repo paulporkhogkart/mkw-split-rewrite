@@ -3,7 +3,8 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { Env } from './app';
 import { activeSeasonId, listSeasons, courseIdBySlug } from '../db/seasons';
 import { slugify } from '../db/slug';
-import { courseLeaderboard, overallLeaderboard, friendsPbs, playerPbs, currentWr, myPbs, myPbSplits, courseTrails } from '../db/reads';
+import { courseLeaderboard, overallLeaderboard, friendsPbs, playerPbs, currentWr, myPbs, myPbSplits, courseTrails, roster, playerTrails } from '../db/reads';
+import type { TrailMode } from '../db/reads';
 import { requireToken } from './auth';
 import { playerByToken } from '../db/players';
 
@@ -39,6 +40,17 @@ export function readsRoutes(db: DatabaseSync): Hono<Env> {
     const m = /^Bearer (.+)$/.exec(c.req.header('authorization') ?? '');
     const me = m ? playerByToken(db, m[1]) : null;
     return c.json(courseTrails(db, season(c), cid, num(c.req.query('cc'), 150), me ? me.id : null));
+  });
+  r.get('/v1/roster', (c) => {
+    const m = /^Bearer (.+)$/.exec(c.req.header('authorization') ?? '');
+    const me = m ? playerByToken(db, m[1]) : null;
+    return c.json(roster(db, season(c)).map((p) => ({ ...p, is_me: me ? p.player_id === me.id : false })));
+  });
+  r.get('/v1/players/:id/trails', (c) => {
+    const cid = course(c); if (cid === null) return c.json({ error: 'unknown course' }, 400);
+    const q = c.req.query('mode') ?? 'pbs';
+    const mode = (['none', 'pbs', 'best', 'last', 'all'].includes(q) ? q : 'pbs') as TrailMode;
+    return c.json(playerTrails(db, season(c), Number(c.req.param('id')), cid, num(c.req.query('cc'), 150), mode, num(c.req.query('n'), 1)));
   });
   return r;
 }
