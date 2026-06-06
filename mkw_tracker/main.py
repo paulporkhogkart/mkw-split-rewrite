@@ -58,7 +58,8 @@ from .ipc.protocol import (parse_inbound, emit_ready, emit_screen_change, emit_s
                             emit_roi_preview, emit_asset_preview, emit_asset_saved,
                             emit_calibration_result, emit_calib_capture,
                             emit_minimap_update, minimap_update_payload,
-                            emit_replay_paths, emit_minimap_sample, emit_screen_thumbs)
+                            emit_replay_paths, emit_minimap_sample, emit_screen_thumbs,
+                            emit_option_lists)
 from .utils.camera import build_camera_source
 from .utils.normalize import Normalizer
 
@@ -133,6 +134,7 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
             detector.reload_language(_lang)
             if tracker is not None:
                 tracker.reload_language(_lang)
+                ipc.emit(emit_option_lists(**tracker.option_lists()))
             load_finish_templates(switch2_language=_lang)
             load_mushroom_templates(switch2_language=_lang)
         elif key.startswith("calib_") and _normalizer is not None:
@@ -902,6 +904,7 @@ def run(args):
         app_language=settings.get("app_language", "en_uk") or "en_uk",
         switch2_language=switch2_language,
     ))
+    ipc.emit(emit_option_lists(**tracker.option_lists()))
     print("Screen detector running. Press 'q' to quit.\n")
 
     # ── Per-loop state ───────────────────────────────────────────────────────

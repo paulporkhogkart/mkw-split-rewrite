@@ -135,6 +135,15 @@ def emit_pb_splits(course: str, splits, total_ms=None) -> str:
     return _emit("pb_splits", course=course, splits=splits, total_ms=total_ms)
 
 
+def emit_option_lists(characters: List[str], karts: List[str],
+                      courses: List[str], costumes: List[str]) -> str:
+    """Canonical selection names per category for the run-review popup dropdowns.
+    These are the exact names the detector emits in ``selection_update`` (template
+    keys), so a detected value is always present as an option."""
+    return _emit("option_lists", characters=characters, karts=karts,
+                 courses=courses, costumes=costumes)
+
+
 def emit_state(state_dict: dict) -> str:
     return _emit("state", **state_dict)
 

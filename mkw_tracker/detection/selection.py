@@ -270,6 +270,21 @@ class SelectionTracker:
         }
 
     # ------------------------------------------------------------------
+    def option_lists(self) -> dict:
+        """Sorted canonical names per category, as emitted in ``selection_update``.
+
+        Built from the loaded template-dict keys (costumes already canonicalized to
+        KNOWN_COSTUMES names) so the run-review popup's dropdowns always contain the
+        value the detector reported, in the active Switch language.
+        """
+        return {
+            "characters": sorted(self._char_templates.keys()),
+            "karts":      sorted(self._kart_templates.keys()),
+            "courses":    sorted(self._course_templates.keys()),
+            "costumes":   sorted(self._costume_templates.keys()),
+        }
+
+    # ------------------------------------------------------------------
     def _rebuild_costume_subset(self, character: str):
         valid = KNOWN_COSTUMES.get(character, [])
         self._relevant_costumes = {k: v for k, v in self._costume_templates.items()
