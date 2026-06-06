@@ -24,5 +24,6 @@ export const setup      = writable({ complete: null, open: false, step: "languag
 export const language   = writable({ app: "en_uk", switch2: "en_uk" });
 export const pbSplits     = writable(null);  // {lap: split_ms} for current course PB | null
 export const pbTotalMs    = writable(null);  // PB total time in ms | null
-export const friendsTrails = writable([]);   // [{player_id, player, total_ms, points:[[t,cx,cy,score]]}] (server; data-only, not drawn yet)
 export const friendsPbs    = writable([]);   // [{player_id, display_name, total_time_ms, total_time_str, rank}] (server; data-only)
+export const trailRuns     = writable([]);   // render-ready ghost trails: [{points:[[t,cx,cy,score]], color, opacity}]
+export const trailLegend   = writable([]);   // [{name, color, mode, n}] for the active players (overlay legend)

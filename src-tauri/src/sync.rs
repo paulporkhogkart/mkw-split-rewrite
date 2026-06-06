@@ -481,6 +481,24 @@ pub async fn sync_course_reads(course: String, config: Option<Vec<PlayerTrailCfg
     }
 }
 
+/// Fetch the season roster for the Trails settings list. Returns the server JSON array
+/// (each `{player_id, display_name, is_me}`; is_me set when a token is configured), or
+/// `"[]"` when unconfigured / unreachable (the frontend caches the last good roster).
+#[tauri::command]
+pub async fn sync_roster() -> String {
+    let cfg = { CONFIG.lock().unwrap().clone() };
+    if cfg.server_url.trim().is_empty() { return "[]".into(); }
+    let base = cfg.server_url.trim_end_matches('/');
+    let mut rb = reqwest::Client::new()
+        .get(format!("{base}/v1/roster"))
+        .timeout(std::time::Duration::from_secs(8));
+    if !cfg.token.trim().is_empty() { rb = rb.bearer_auth(&cfg.token); }
+    match rb.send().await {
+        Ok(r) if r.status().is_success() => r.text().await.unwrap_or_else(|_| "[]".into()),
+        _ => "[]".into(),
+    }
+}
+
 /// Open the outbox DB in the app data dir, then spawn the drain loop.
 pub fn init(app: tauri::AppHandle) {
     use tauri::Manager;

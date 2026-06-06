@@ -25,9 +25,12 @@
            race as raceStore, logs as logsStore,
            tells as tellsStore, rois as roisStore,
            view as viewStore,
-           minimap as minimapStore, replays as replaysStore, sample as sampleStore } from "./lib/stores.js";
-  import { pbSplits as pbSplitsStore, pbTotalMs as pbTotalStore,
-           friendsTrails as friendsTrailsStore, friendsPbs as friendsPbsStore } from "./lib/stores.js";
+           minimap as minimapStore, sample as sampleStore } from "./lib/stores.js";
+  import { pbSplits as pbSplitsStore, pbTotalMs as pbTotalStore, friendsPbs as friendsPbsStore,
+           trailRuns as trailRunsStore, trailLegend as trailLegendStore } from "./lib/stores.js";
+  import { get } from "svelte/store";
+  import { trailSettings, roster as rosterStore, cacheRoster,
+           activeConfig, buildTrailRuns, trailLegendRows } from "./lib/trailSettings.js";
   import { initDiscordPresence } from "./lib/discord.js";
   import { initSync } from "./lib/sync.js";
 
@@ -443,9 +446,9 @@
   const FIRST_TIME_STEPS = ["language", "camera"];
   // Post-setup, the ⚙ modal is a slim Settings panel: Language + Camera only.
   // Screen/tell/HUD/template editing now lives in the Edit Screens view.
-  const RERUN_STEPS      = ["language", "camera", "discord", "sync"];
+  const RERUN_STEPS      = ["language", "camera", "discord", "sync", "trails"];
   const STEP_LABELS = {
-    language: "Language", camera: "Video", discord: "Discord", sync: "Sync", screens: "Screens",
+    language: "Language", camera: "Video", discord: "Discord", sync: "Sync", trails: "Trails", screens: "Screens",
     selection: "Selection", hud: "HUD", templates: "Templates",
   };
   $: STEPS = setupComplete ? RERUN_STEPS : FIRST_TIME_STEPS;
@@ -611,17 +614,18 @@
   })();
 
   // Pull a course's reads (PB splits + own/friends trails + friends PBs) from the Rust
-  // read-back/cache and fan them into the stores. Own trail feeds the existing minimap
-  // overlay (mapped to its [x,y] shape); friends' data is made available but not drawn.
+  // read-back/cache and fan them into the stores. Trails are selected + coloured + faded
+  // per the user's Trails settings (per player); pb_splits feeds the Discord delta;
+  // friends_pbs is data-only.
   async function loadCourseReads(course) {
     try {
-      const r = JSON.parse(await invoke("sync_course_reads", { course }));
+      const settings = get(trailSettings);
+      const rosterList = get(rosterStore);
+      const r = JSON.parse(await invoke("sync_course_reads", { course, config: activeConfig(settings, rosterList) }));
       pbSplitsStore.set(r.pb_splits?.splits ?? null);
       pbTotalStore.set(r.pb_splits?.total_ms ?? null);
-      const trails = r.trails ?? [];
-      const own = trails.find((t) => t.is_me);
-      replaysStore.set(own ? [{ id: "me", points: own.points.map((p) => [p[1], p[2]]) }] : []);
-      friendsTrailsStore.set(trails.filter((t) => !t.is_me));
+      trailRunsStore.set(buildTrailRuns(r, settings, rosterList));
+      trailLegendStore.set(trailLegendRows(settings, rosterList));
       friendsPbsStore.set(r.friends_pbs ?? []);
     } catch (_) { /* offline / unconfigured: leave stores as-is */ }
   }
@@ -1284,6 +1288,11 @@
     startFeedPoll();
     initDiscordPresence();
     initSync();
+    // Load the roster so trail config can resolve player ids (cached for offline use).
+    try {
+      const list = JSON.parse(await invoke("sync_roster"));
+      if (Array.isArray(list) && list.length) cacheRoster(list);
+    } catch (_) { /* keep the cached roster */ }
     // Resurface any runs held for review from a previous session.
     try {
       const pending = JSON.parse(await invoke("sync_list_pending"));
