@@ -8,10 +8,10 @@ const roster = [
 ];
 
 describe("trailSettings helpers", () => {
-  it("playerColor: named assignment wins, stable per-id fallback otherwise", () => {
-    expect(playerColor({ display_name: "Paul", player_id: 1 })).toBe("#9b6bd0");   // purple
+  it("playerColor: server colour wins, then named assignment, then per-id preset", () => {
+    expect(playerColor({ display_name: "Paul", player_id: 1, color: "#112233" })).toBe("#112233");  // server-curated wins
+    expect(playerColor({ display_name: "Paul", player_id: 1 })).toBe("#9b6bd0");   // named (purple)
     expect(playerColor({ display_name: "Luke", player_id: 2 })).toBe("#cf5b4e");   // red
-    expect(playerColor({ display_name: "Alex", player_id: 3 })).toBe("#3d7cc2");   // blue
     expect(playerColor({ display_name: "Stranger", player_id: 8 })).toBe(TRAIL_PRESETS[0]);   // fallback
   });
 

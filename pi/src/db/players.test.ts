@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { openDb, applySchema } from './connect';
-import { mintToken, playerByToken, hashToken } from './players';
+import { mintToken, playerByToken, hashToken, setPlayerColor } from './players';
 
 function seeded() {
   const db = openDb(':memory:');
@@ -25,5 +25,14 @@ describe('token auth', () => {
   });
   it('mintToken throws for an unknown player', () => {
     expect(() => mintToken(seeded(), 'Nobody')).toThrow();
+  });
+});
+
+describe('player colour', () => {
+  it('setPlayerColor sets the colour (case-insensitive); throws for an unknown player', () => {
+    const db = seeded();
+    setPlayerColor(db, 'paul', '#9b6bd0');
+    expect((db.prepare('SELECT color FROM players WHERE display_name=?').get('Paul') as any).color).toBe('#9b6bd0');
+    expect(() => setPlayerColor(db, 'Nobody', '#ffffff')).toThrow();
   });
 });

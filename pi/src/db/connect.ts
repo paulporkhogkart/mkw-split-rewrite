@@ -14,4 +14,6 @@ const SCHEMA_PATH = fileURLToPath(new URL('../../../server/schema.sql', import.m
 
 export function applySchema(db: DatabaseSync): void {
   db.exec(readFileSync(SCHEMA_PATH, 'utf8'));
+  // Additive migrations for existing DBs (CREATE TABLE IF NOT EXISTS won't add columns).
+  try { db.exec('ALTER TABLE players ADD COLUMN color TEXT'); } catch { /* already present */ }
 }

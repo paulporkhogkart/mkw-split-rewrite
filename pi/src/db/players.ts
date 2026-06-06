@@ -18,3 +18,9 @@ export function playerByToken(db: DatabaseSync, token: string): { id: number; di
   const row = db.prepare('SELECT id, display_name FROM players WHERE auth_token_hash=?').get(hashToken(token)) as any;
   return row ?? null;
 }
+
+/** Set a player's curated trail colour (a CSS hex like "#9b6bd0"). Throws for unknown player. */
+export function setPlayerColor(db: DatabaseSync, displayName: string, color: string): void {
+  const info = db.prepare('UPDATE players SET color=? WHERE display_name=? COLLATE NOCASE').run(color, displayName);
+  if (info.changes === 0) throw new Error(`unknown player: ${displayName}`);
+}

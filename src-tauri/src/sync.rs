@@ -297,10 +297,52 @@ struct Config { server_url: String, token: String }
 
 static CONFIG: Mutex<Config> = Mutex::new(Config { server_url: String::new(), token: String::new() });
 static OUTBOX: Mutex<Option<Connection>> = Mutex::new(None);
+/// Latest detected course (from selection_update), used as the course for the run_started ping.
+static LAST_COURSE: Mutex<String> = Mutex::new(String::new());
 
-/// Called by lib.rs for every sidecar stdout line. Gates run_finalized events (see
-/// route_line) and returns the event to emit, if any.
+/// Course display-name from a selection_update line, or None (absent/blank/other type).
+fn course_from_selection(line: &str) -> Option<String> {
+    if !line.contains("selection_update") { return None; }
+    let v: serde_json::Value = serde_json::from_str(line).ok()?;
+    if v.get("type")?.as_str()? != "selection_update" { return None; }
+    let c = v.get("course")?.as_str()?;
+    if c.is_empty() { None } else { Some(c.to_string()) }
+}
+
+/// True when a screen_change line marks a FRESH entry into RACING (not a pause-resume).
+fn is_racing_entry(line: &str) -> bool {
+    if !line.contains("screen_change") { return false; }
+    let v: serde_json::Value = match serde_json::from_str(line) { Ok(v) => v, Err(_) => return false };
+    if v.get("type").and_then(|t| t.as_str()) != Some("screen_change") { return false; }
+    let to = v.get("to").and_then(|t| t.as_str()).unwrap_or("");
+    let from = v.get("from").and_then(|t| t.as_str()).unwrap_or("");
+    to == "RACING" && from != "RACING" && from != "RACE_MENU" && from != "HOME"
+}
+
+/// Fire-and-forget POST /v1/runs/start so the server emits a run_started event (ephemeral,
+/// no DB write). Runs on its own thread (blocking reqwest) so it never blocks the stdout loop.
+fn fire_run_started(course: String) {
+    std::thread::spawn(move || {
+        let cfg = CONFIG.lock().unwrap().clone();
+        if cfg.server_url.trim().is_empty() || cfg.token.trim().is_empty() { return; }
+        let url = format!("{}/v1/runs/start", cfg.server_url.trim_end_matches('/'));
+        let body = serde_json::json!({ "course": course, "cc": 150 }).to_string();
+        let _ = reqwest::blocking::Client::new()
+            .post(&url).bearer_auth(&cfg.token)
+            .header("content-type", "application/json").body(body)
+            .timeout(std::time::Duration::from_secs(8)).send();
+    });
+}
+
+/// Called by lib.rs for every sidecar stdout line. Tracks the latest course + pings run_started
+/// on a fresh RACING entry, then gates run_finalized events (route_line), returning any event.
 pub fn on_line(line: &str) -> Option<String> {
+    if let Some(c) = course_from_selection(line) {
+        if let Ok(mut lc) = LAST_COURSE.lock() { *lc = c; }
+    } else if is_racing_entry(line) {
+        let course = LAST_COURSE.lock().map(|c| c.clone()).unwrap_or_default();
+        if !course.is_empty() { fire_run_started(course); }
+    }
     if !is_run_finalized(line) { return None; }
     let guard = OUTBOX.lock().ok()?;
     let conn = guard.as_ref()?;
@@ -793,5 +835,36 @@ mod tests {
         assert_eq!(out[0]["run_id"], 10);
         assert_eq!(out[1]["player_id"], 7);
         assert!(tag_runs_with_player(7, &serde_json::json!("not an array")).is_empty());
+    }
+
+    #[test]
+    fn course_from_selection_extracts_only_nonblank_selection_courses() {
+        assert_eq!(
+            course_from_selection(r#"{"type": "selection_update", "course": "Rainbow Road"}"#).as_deref(),
+            Some("Rainbow Road"),
+        );
+        // Blank course → None (selection in progress, course not yet known).
+        assert_eq!(course_from_selection(r#"{"type": "selection_update", "course": ""}"#), None);
+        // No course key → None.
+        assert_eq!(course_from_selection(r#"{"type": "selection_update", "character": "Mario"}"#), None);
+        // Other event types / non-JSON → None.
+        assert_eq!(course_from_selection(r#"{"type": "screen_change", "to": "RACING"}"#), None);
+        assert_eq!(course_from_selection("heartbeat"), None);
+    }
+
+    #[test]
+    fn is_racing_entry_only_fires_on_fresh_entry() {
+        // Fresh entry from the pre-race flow → true.
+        assert!(is_racing_entry(r#"{"type": "screen_change", "from": "RACE_INTRO", "to": "RACING"}"#));
+        // Pause/resume re-entries → false (not a new run).
+        assert!(!is_racing_entry(r#"{"type": "screen_change", "from": "RACE_MENU", "to": "RACING"}"#));
+        assert!(!is_racing_entry(r#"{"type": "screen_change", "from": "HOME", "to": "RACING"}"#));
+        // Already racing (self-transition) → false.
+        assert!(!is_racing_entry(r#"{"type": "screen_change", "from": "RACING", "to": "RACING"}"#));
+        // Leaving RACING / other transitions → false.
+        assert!(!is_racing_entry(r#"{"type": "screen_change", "from": "RACING", "to": "POST_TIME_TRIAL"}"#));
+        // Wrong event type / non-JSON → false.
+        assert!(!is_racing_entry(r#"{"type": "selection_update", "course": "Rainbow Road"}"#));
+        assert!(!is_racing_entry("not json"));
     }
 }

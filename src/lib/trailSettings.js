@@ -45,6 +45,7 @@ const PLAYER_COLORS = {
 /** A player's locked trail colour: their assigned colour if listed, else a stable per-id
  *  preset. Identical on every client. Takes the roster player {player_id, display_name}. */
 export function playerColor(p) {
+  if (p?.color) return p.color;   // server-curated colour wins (set via the pi `set-color` script)
   const named = PLAYER_COLORS[(p?.display_name ?? "").trim().toLowerCase()];
   if (named) return named;
   const L = TRAIL_PRESETS.length;

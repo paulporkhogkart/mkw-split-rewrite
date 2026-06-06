@@ -86,12 +86,15 @@ describe('courseTrails', () => {
 });
 
 describe('roster', () => {
-  it('returns the season roster players (alphabetical), excluding non-members', () => {
+  it('returns the season roster (alphabetical) with curated colour, excluding non-members', () => {
     const db = openDb(':memory:'); applySchema(db);
     db.exec("INSERT INTO seasons(id,name,is_active) VALUES (1,'S1',1)");
-    db.exec("INSERT INTO players(id,display_name) VALUES (1,'Paul'),(2,'Luke'),(3,'Zoe')");
+    db.exec("INSERT INTO players(id,display_name,color) VALUES (1,'Paul','#9b6bd0'),(2,'Luke',NULL),(3,'Zoe',NULL)");
     db.exec("INSERT INTO season_rosters(season_id,player_id) VALUES (1,1),(1,2)");   // Zoe not in roster
-    expect(roster(db, 1)).toEqual([{ player_id: 2, display_name: 'Luke' }, { player_id: 1, display_name: 'Paul' }]);
+    expect(roster(db, 1)).toEqual([
+      { player_id: 2, display_name: 'Luke', color: null },
+      { player_id: 1, display_name: 'Paul', color: '#9b6bd0' },
+    ]);
   });
 });
 

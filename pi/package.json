@@ -5,7 +5,8 @@
   "scripts": {
     "test": "vitest run",
     "dev": "node --no-warnings --import tsx src/server.ts",
-    "mint-token": "node --no-warnings --import tsx src/scripts/mintToken.ts"
+    "mint-token": "node --no-warnings --import tsx src/scripts/mintToken.ts",
+    "set-color": "node --no-warnings --import tsx src/scripts/setColor.ts"
   },
   "dependencies": {
     "hono": "^4.6.0",

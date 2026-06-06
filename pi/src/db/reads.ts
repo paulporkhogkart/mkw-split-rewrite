@@ -93,12 +93,12 @@ export function courseTrails(db: DatabaseSync, seasonId: number, courseId: numbe
   return out;
 }
 
-export type RosterRow = { player_id: number; display_name: string };
+export type RosterRow = { player_id: number; display_name: string; color: string | null };
 
-/** The active season's roster (players), for the per-player trail settings list. */
+/** The active season's roster (players + their curated trail colour), for the settings list. */
 export function roster(db: DatabaseSync, seasonId: number): RosterRow[] {
   return db.prepare(
-    `SELECT p.id AS player_id, p.display_name
+    `SELECT p.id AS player_id, p.display_name, p.color
      FROM season_rosters sr JOIN players p ON p.id = sr.player_id
      WHERE sr.season_id=?
      ORDER BY p.display_name`

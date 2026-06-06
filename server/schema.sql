@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS players (
     id              INTEGER PRIMARY KEY,
     display_name    TEXT NOT NULL UNIQUE,
     auth_token_hash TEXT UNIQUE,
+    color           TEXT,
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -23,8 +24,7 @@ CREATE TABLE IF NOT EXISTS season_rosters (
 CREATE TABLE IF NOT EXISTS courses (
     id            INTEGER PRIMARY KEY,
     slug          TEXT NOT NULL UNIQUE,
-    display_name  TEXT NOT NULL,
-    default_laps  INTEGER
+    display_name  TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS runs (
