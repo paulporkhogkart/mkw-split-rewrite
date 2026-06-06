@@ -322,6 +322,50 @@ pub async fn sync_test_connection() -> Result<String, String> {
     }
 }
 
+/// Merge `filled` (a JSON object of corrected fields) into the stored body and flip the
+/// row to `ready`. Pure (takes the conn) so it's unit-testable.
+fn resolve_in_outbox(conn: &Connection, attempt_id: &str, filled: &serde_json::Value) {
+    let Some(body) = outbox_get_body(conn, attempt_id) else { return };
+    let Ok(mut v) = serde_json::from_str::<serde_json::Value>(&body) else { return };
+    if let (Some(obj), Some(f)) = (v.as_object_mut(), filled.as_object()) {
+        for (k, val) in f { obj.insert(k.clone(), val.clone()); }
+    }
+    if let Ok(merged) = serde_json::to_string(&v) {
+        outbox_update_ready(conn, attempt_id, &merged);
+    }
+}
+
+#[tauri::command]
+pub fn sync_resolve_pending(attempt_id: String, filled: serde_json::Value) {
+    if let Ok(guard) = OUTBOX.lock() {
+        if let Some(conn) = guard.as_ref() { resolve_in_outbox(conn, &attempt_id, &filled); }
+    }
+}
+
+#[tauri::command]
+pub fn sync_discard_pending(attempt_id: String) {
+    if let Ok(guard) = OUTBOX.lock() {
+        if let Some(conn) = guard.as_ref() { outbox_delete(conn, &attempt_id); }
+    }
+}
+
+/// JSON array of `{attempt_id, run}` for every held (pending_review) run, for the UI to
+/// resurface on launch. `type` is stripped from each run.
+#[tauri::command]
+pub fn sync_list_pending() -> String {
+    if let Ok(guard) = OUTBOX.lock() {
+        if let Some(conn) = guard.as_ref() {
+            let arr: Vec<serde_json::Value> = outbox_list_pending(conn).iter().filter_map(|(id, body)| {
+                let mut v: serde_json::Value = serde_json::from_str(body).ok()?;
+                if let Some(o) = v.as_object_mut() { o.remove("type"); }
+                Some(serde_json::json!({ "attempt_id": id, "run": v }))
+            }).collect();
+            return serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into());
+        }
+    }
+    "[]".into()
+}
+
 /// Open the outbox DB in the app data dir, then spawn the drain loop.
 pub fn init(app: tauri::AppHandle) {
     use tauri::Manager;
@@ -545,5 +589,21 @@ mod tests {
 
         let pb_no_n = _v(r#"{"course":"X","character":"M","kart":"K","status":"finished","total_time":"1:00.000"}"#);
         assert!(missing_fields(&pb_no_n, true).is_empty());
+    }
+
+    #[test]
+    fn resolve_merges_filled_fields_and_releases() {
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_outbox(&conn);
+        outbox_insert(&conn, "b1",
+            r#"{"type":"run_finalized","attempt_id":"b1","course":"Rainbow Road","character":"Mario","kart":null,"status":"finished"}"#,
+            "pending_review");
+        let filled: serde_json::Value = serde_json::from_str(r#"{"kart":"Standard Kart"}"#).unwrap();
+        resolve_in_outbox(&conn, "b1", &filled);
+        let body = outbox_get_body(&conn, "b1").unwrap();
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["kart"], "Standard Kart");
+        assert_eq!(outbox_pending(&conn).len(), 1);            // now ready
+        assert_eq!(outbox_list_pending(&conn).len(), 0);
     }
 }
