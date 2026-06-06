@@ -56,7 +56,7 @@ def _lifecycle(ipc, total_time, splits):
     return RaceLifecycle(
         selection=sel, laps=laps, coins=MagicMock(), ts=ts,
         finish=FinishStillDetector(), mush=MagicMock(), minimap=minimap,
-        mm_rec=mm_rec, mm_player=MagicMock(), lapstats=lapstats, ipc=ipc,
+        mm_rec=mm_rec, lapstats=lapstats, ipc=ipc,
     )
 
 

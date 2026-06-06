@@ -21,7 +21,7 @@ def _make_lifecycle(ts_total_time=None):
     return RaceLifecycle(
         selection=MagicMock(), laps=MagicMock(), coins=MagicMock(), ts=ts,
         finish=FinishStillDetector(), mush=MagicMock(), minimap=minimap,
-        mm_rec=MagicMock(), mm_player=MagicMock(),
+        mm_rec=MagicMock(),
     )
 
 
@@ -29,13 +29,11 @@ def test_leaving_racing_to_menu_finalizes_without_crash():
     # Previously raised on `self._finish.state.detected`.
     lc = _make_lifecycle()
     lc.on_screen_change(Screen.RACING, Screen.MAIN_MENU)
-    lc._mm_rec.save.assert_called_once()
-    lc._mm_player.stop.assert_called()
+    lc._laps.reset.assert_called()   # finalize + clear ran without crashing
 
 
 def test_finish_to_post_without_timestamp_does_not_crash():
     # Previously raised on `self._finish.state.total_time` when ts.total_time was None.
     lc = _make_lifecycle(ts_total_time=None)
     lc.on_screen_change(Screen.RACING, Screen.POST_TIME_TRIAL)
-    lc._mm_rec.save.assert_called_once()
-    lc._mm_player.stop.assert_called()
+    lc._laps.reset.assert_called()   # finalize + clear ran without crashing

@@ -11,7 +11,6 @@ import numpy as np
 from .database.connection import get_connection, close_connection
 from .database.config_repo import get_config as _get_config_direct, delete_configs_like
 from .database.migrations import apply_migrations
-from .database.replay_repo import export_mkwreplay
 from .config.settings import get_settings
 from .config.defaults import Defaults
 from .detection.screen import Screen, ScreenDetector
@@ -41,7 +40,6 @@ from .race.mushrooms import MushroomTracker, load_mushroom_templates, MUSHROOM_R
 from .race.lapstats import LapStatsTracker
 from .minimap.tracker import MinimapTracker, MINIMAP_ROI as _MINIMAP_ROI
 from .minimap.recorder import MinimapRecorder
-from .minimap.player import MinimapPlayer
 from .overlay.debug import draw_debug_rois, draw_selection_rois
 from .overlay.race_hud import (draw_lap_rois, draw_coin_rois, draw_timestamp_rois,
                                 draw_finish_roi, draw_mushroom_roi)
@@ -51,14 +49,14 @@ from .lifecycle.race import RaceLifecycle
 from .ipc.sidecar import IpcServer
 from .ipc.protocol import (parse_inbound, emit_ready, emit_screen_change, emit_selection_update,
                             emit_lap_update, emit_coin_update, emit_mush_update, emit_finish, emit_split_recorded,
-                            emit_pb_export, emit_state, emit_devices_list,
+                            emit_state, emit_devices_list,
                             emit_error, emit_heartbeat, emit_frame_data, emit_template_score,
                             emit_template_saved, emit_template_images, emit_tells_list, emit_rois_list,
                             emit_camera_paused, emit_camera_resumed, emit_camera_status,
                             emit_roi_preview, emit_asset_preview, emit_asset_saved,
                             emit_calibration_result, emit_calib_capture,
                             emit_minimap_update, minimap_update_payload,
-                            emit_replay_paths, emit_minimap_sample, emit_screen_thumbs,
+                            emit_minimap_sample, emit_screen_thumbs,
                             emit_option_lists)
 from .utils.camera import build_camera_source
 from .utils.normalize import Normalizer
@@ -192,14 +190,6 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
     elif t == "toggle_debug":
         show_debug[0] = bool(msg.get("enabled", not show_debug[0]))
 
-    elif t == "export_pb":
-        course = msg.get("course", "")
-        payload = export_mkwreplay(course)
-        if payload:
-            ipc.emit(emit_pb_export(course, payload))
-        else:
-            ipc.emit(emit_error(f"No PB found for course {course!r}"))
-
     elif t == "set_seed":
         from .database.replay_repo import set_minimap_seed
         set_minimap_seed(
@@ -218,26 +208,6 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
             msg.get("w", 0),
             msg.get("h", 0),
         )
-
-    elif t == "get_replay_paths":
-        from .database.replay_repo import replay_paths as _replay_paths
-        from .database.connection import get_connection as _get_conn
-        from .ipc.protocol import emit_replay_paths as _emit_rp
-        _course = msg.get("course", "")
-        _paths = _replay_paths(_get_conn(), _course)
-        ipc.emit(_emit_rp(_course, _paths))
-
-    elif t == "get_pb_splits":
-        from .database.replay_repo import get_pb_splits as _get_pb_splits
-        from .database.connection import get_connection as _get_conn
-        from .ipc.protocol import emit_pb_splits as _emit_pbs
-        _course = msg.get("course", "")
-        _row = _get_conn().execute(
-            "SELECT total_time_ms FROM replays WHERE player='me' AND course=? AND is_pb=1",
-            (_course,),
-        ).fetchone()
-        _total = _row["total_time_ms"] if _row else None
-        ipc.emit(_emit_pbs(_course, _get_pb_splits(_course), _total))
 
     elif t == "get_screen_thumbs":
         # Downscaled per-screen reference shots for the edit-mode graph nodes.
@@ -834,7 +804,6 @@ def run(args):
     mush      = MushroomTracker()
     minimap   = MinimapTracker()
     mm_rec    = MinimapRecorder()
-    mm_player = MinimapPlayer()
     lapstats  = LapStatsTracker()
 
     # ── IPC server ───────────────────────────────────────────────────────────
@@ -868,8 +837,6 @@ def run(args):
         lapstats=lapstats,
         minimap=minimap,
         mm_rec=mm_rec,
-        mm_player=mm_player,
-        history_mode=args.history,
         transition_count=transition_count,
         ipc=ipc,
     )
@@ -1100,13 +1067,6 @@ def run(args):
         finish_just_detected  = (finish.update(frame, screen, bool(_on_final_lap))
                                  and ts.total_time is None)
 
-        # Stop replay playback the instant the timer is detected as stopped (final
-        # time), not when the results graphic later appears / we leave RACING.
-        # (Recording already halts here too: mm_rec.update is gated on _race_complete
-        # = ts.total_time, which the finish burst populates.)
-        if finish_just_detected:
-            mm_player.stop()
-
         if finish_just_detected and lap_state.current_lap is not None:
             lapstats.record_lap(lap_state.current_lap, coin_state.coins)
 
@@ -1275,7 +1235,6 @@ def run(args):
         if display_enabled:
             if not show_debug[0]:
                 display = cv2.resize(frame, (1280, 720), interpolation=cv2.INTER_LINEAR)
-                mm_player.draw(None, display, screen)
                 cv2.imshow("MKW Tracker", display)
             else:
                 # Full-res ROI boxes
@@ -1313,7 +1272,6 @@ def run(args):
                 # draw_finish_roi(None, display, screen, finish_state)   # finish disabled
                 draw_mushroom_roi(None, display, screen, mush_state)
                 draw_minimap_crosshair(None, display, screen, mm_state, tracker=minimap)
-                mm_player.draw(None, display, screen)
 
                 draw_screen_badge(display, screen)
                 draw_legend(display)
@@ -1380,8 +1338,6 @@ def main():
     parser = argparse.ArgumentParser(description="MKW split tracker")
     parser.add_argument("--purge-tight", action="store_true",
                         help="Delete all _tight.png files on startup.")
-    parser.add_argument("--history", action="store_true",
-                        help="Load 'last 100 runs' replay mode.")
     parser.add_argument("--no-ipc", action="store_true",
                         help="Disable stdin/stdout IPC (run as standalone).")
     parser.add_argument("--ws-port", type=int, metavar="PORT", default=None,

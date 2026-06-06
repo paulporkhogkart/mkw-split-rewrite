@@ -817,10 +817,6 @@
         if (msg.splits) raceSplits = { ...raceSplits, ...msg.splits };
         pushLog(`[finish] ${msg.result}  ${msg.total_time ?? "-"}`);
         break;
-      case "pb_splits":
-        pbSplitsStore.set(msg.splits ?? null);
-        pbTotalStore.set(msg.total_ms ?? null);
-        break;
       case "pb_achieved":
         pushLog(`[pb] ${msg.course}  ${msg.time}`);
         break;
@@ -845,9 +841,6 @@
       case "minimap_update":
         minimapStore.set({ cx: msg.cx, cy: msg.cy, radius: msg.radius,
                            trackState: msg.track_state, roi: msg.roi ?? null });
-        break;
-      case "replay_paths":
-        replaysStore.set(msg.paths ?? []);
         break;
       case "minimap_sample":
         sampleStore.set(msg.png_b64 ?? null);

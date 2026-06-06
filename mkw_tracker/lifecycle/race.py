@@ -5,7 +5,6 @@ from ..detection.screen import Screen
 from ..detection.selection import SelectionTracker
 from ..minimap.tracker import MinimapTracker, MINIMAP_ROI
 from ..minimap.recorder import MinimapRecorder
-from ..minimap.player import MinimapPlayer
 from ..race.laps import LapTracker
 from ..race.coins import CoinTracker
 from ..race.timestamp import TimestampTracker
@@ -35,9 +34,7 @@ class RaceLifecycle:
         mush:       MushroomTracker,
         minimap:    MinimapTracker,
         mm_rec:     MinimapRecorder,
-        mm_player:  MinimapPlayer,
         lapstats=None,
-        history_mode: bool = False,
         transition_count: Optional[list] = None,
         ipc=None,
     ):
@@ -50,8 +47,6 @@ class RaceLifecycle:
         self._lapstats   = lapstats
         self._minimap    = minimap
         self._mm_rec     = mm_rec
-        self._mm_player  = mm_player
-        self._history_mode = history_mode
         self._transition_count = transition_count if transition_count is not None else [0]
 
         self._ipc = ipc
@@ -89,7 +84,6 @@ class RaceLifecycle:
                 self._resuming_race      = False
                 completed = (new == Screen.POST_TIME_TRIAL) or self._finish.detected
                 self._finalize_recording(completed)
-                self._mm_player.stop()
                 self._clear_race_state()
 
         # ── From a pause screen ──────────────────────────────────────────────
@@ -103,7 +97,6 @@ class RaceLifecycle:
                 self._paused_from_racing = False
                 self._resuming_race      = False
                 self._finalize_recording(completed=False)
-                self._mm_player.stop()
                 self._clear_race_state()
 
         # ── Entering RACING fresh (not a resume) ────────────────────────────
@@ -125,7 +118,6 @@ class RaceLifecycle:
 
     def _pause(self):
         self._mm_rec.pause()
-        self._mm_player.stop()
         self._paused_from_racing = True
         print("  [Race] Paused (entering pause screen)")
 
@@ -133,8 +125,6 @@ class RaceLifecycle:
         self._resuming_race      = True
         self._paused_from_racing = False
         self._mm_rec.resume()
-        if self._mm_player._replays:
-            self._mm_player.start(offset_ms=self._mm_rec._elapsed_ms())
         print("  [Race] Resumed")
 
     def _clear_race_state(self):
@@ -158,9 +148,9 @@ class RaceLifecycle:
 
     def _finalize_recording(self, completed: bool):
         """
-        Save the current recording.
-        completed=True  → race finished; calibrate and save threshold; PB eligible.
-        completed=False → aborted; save history only, no calibration.
+        Emit the finalized attempt for the app to hold/upload.
+        completed=True  → race finished; calibrate the minimap threshold.
+        completed=False → aborted/reset; emit only, no calibration.
 
         Idempotent within a race: a no-op if already finalized (the finished run is
         emitted at the finish-lock, then the screen change would otherwise re-run this).
@@ -222,9 +212,6 @@ class RaceLifecycle:
                 "points":     [[t, cx, cy, sc] for (t, cx, cy, sc) in self._mm_rec.points],
             }))
 
-        self._mm_rec.save(course, character=character, costume=costume,
-                          kart=sel.kart, total_time=best_total_time,
-                          lap_splits=dict(self._ts.splits))
         self._finalized = True
 
     def _start_race(self, old: Screen):
@@ -251,11 +238,6 @@ class RaceLifecycle:
 
         # Start recording
         self._mm_rec.start()
-
-        # Load and start replay
-        replay_mode = "history" if self._history_mode else "others"
-        if course and self._mm_player.load(course, mode=replay_mode):
-            self._mm_player.start()
 
         # Seed minimap position from DB
         if course:

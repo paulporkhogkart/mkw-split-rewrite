@@ -20,10 +20,6 @@ class ToggleDebugCmd:
     enabled: bool
 
 @dataclass
-class ExportPbCmd:
-    course: str
-
-@dataclass
 class SetSeedCmd:
     course: str
     cx:     int
@@ -117,10 +113,6 @@ def emit_pb_achieved(course: str, time: str) -> str:
     return _emit("pb_achieved", course=course, time=time)
 
 
-def emit_pb_export(course: str, mkwreplay: dict) -> str:
-    return _emit("pb_export", course=course, mkwreplay=mkwreplay)
-
-
 def emit_run_finalized(run: dict) -> str:
     """Serialise the full finalized-attempt payload for the Tauri app to upload.
 
@@ -129,10 +121,6 @@ def emit_run_finalized(run: dict) -> str:
     laps [{lap, time_ms, time_str, coins, shrooms}].
     """
     return json.dumps({"type": "run_finalized", **run})
-
-
-def emit_pb_splits(course: str, splits, total_ms=None) -> str:
-    return _emit("pb_splits", course=course, splits=splits, total_ms=total_ms)
 
 
 def emit_option_lists(characters: List[str], karts: List[str],
@@ -288,15 +276,6 @@ def emit_screen_thumbs(thumbs: dict) -> str:
     ``thumbs`` is ``{SCREEN_NAME: base64_png}`` (small downscaled reference shots).
     """
     return _emit("screen_thumbs", thumbs=thumbs)
-
-
-def emit_replay_paths(course: str, paths: list) -> str:
-    """Outbound. Emits trail paths for every stored run on a course.
-
-    ``paths`` is a list of ``{"id": str, "points": [[cx, cy], ...]}`` dicts
-    where coordinates are full-frame 1080p pixels.
-    """
-    return _emit("replay_paths", course=course, paths=paths)
 
 
 def emit_minimap_sample(course: str, png_b64) -> str:

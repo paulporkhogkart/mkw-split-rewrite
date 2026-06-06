@@ -39,33 +39,10 @@ CREATE TABLE IF NOT EXISTS minimap_thresholds (
     updated_at TEXT DEFAULT (datetime('now')),
     PRIMARY KEY (course, character, costume)
 );
-
-CREATE TABLE IF NOT EXISTS replays (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    player         TEXT    NOT NULL DEFAULT 'me',
-    source         TEXT    NOT NULL DEFAULT 'local',
-    course         TEXT    NOT NULL,
-    character      TEXT,
-    costume        TEXT,
-    kart           TEXT,
-    total_time     TEXT,
-    total_time_ms  INTEGER,
-    is_pb          INTEGER NOT NULL DEFAULT 0,
-    recorded_at    TEXT    DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_replays_course_player ON replays(course, player);
-
-CREATE TABLE IF NOT EXISTS replay_points (
-    replay_id INTEGER NOT NULL REFERENCES replays(id) ON DELETE CASCADE,
-    t_ms      INTEGER NOT NULL,
-    cx        REAL    NOT NULL,
-    cy        REAL    NOT NULL,
-    score     REAL    NOT NULL DEFAULT 1.0
-);
-
-CREATE INDEX IF NOT EXISTS idx_replay_points_id ON replay_points(replay_id);
 """
+# Note: the replays / replay_points / replay_splits race-data tables were removed in
+# Phase 2 (race data now lives on the server). Fresh DBs no longer create them;
+# existing DBs keep the now-unused tables (no destructive DROP migration).
 
 
 _SEED_V2 = """
@@ -135,15 +112,9 @@ INSERT OR IGNORE INTO minimap_rois (course, x, y, w, h) VALUES
 """
 
 
-_SCHEMA_V4 = """
-CREATE TABLE IF NOT EXISTS replay_splits (
-    replay_id  INTEGER NOT NULL REFERENCES replays(id) ON DELETE CASCADE,
-    lap        INTEGER NOT NULL,
-    split_ms   INTEGER,
-    split_text TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_replay_splits_id ON replay_splits(replay_id);
-"""
+# v4 originally created replay_splits; removed in Phase 2. Kept as a no-op so the
+# schema_version chain still advances to 4 on older DBs.
+_SCHEMA_V4 = "-- replay_splits removed in Phase 2 (race data moved to server)"
 
 
 def apply_migrations(db_path: str | None = None):
@@ -198,4 +169,4 @@ def apply_migrations(db_path: str | None = None):
         conn.executescript(_SCHEMA_V4)
         conn.execute("UPDATE schema_version SET version=4")
         conn.commit()
-        print("[DB] Schema migrated to v4 (replay_splits)")
+        print("[DB] Schema version bumped to v4")

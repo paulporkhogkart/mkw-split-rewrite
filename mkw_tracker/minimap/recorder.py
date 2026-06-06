@@ -3,7 +3,6 @@ import time
 from typing import Optional
 
 from .tracker import MinimapState
-from ..database.replay_repo import save_run
 
 
 class MinimapRecorder:
@@ -77,44 +76,6 @@ class MinimapRecorder:
             return
         t_ms = self._elapsed_ms()
         self._points.append((t_ms, mm.cx_smooth, mm.cy_smooth, mm.last_score))
-
-    def save(
-        self,
-        course: str,
-        total_time: Optional[str] = None,
-        character: Optional[str] = None,
-        costume:   Optional[str] = None,
-        kart:      Optional[str] = None,
-        lap_splits: Optional[dict] = None,
-    ) -> Optional[int]:
-        """
-        Persist the recorded run to the DB.  Returns the replay_id, or None.
-        total_time=None means an aborted/reset run.
-        """
-        self._recording   = False
-        self._pause_start = None
-
-        if not self._points or not course:
-            self._points = []
-            return None
-
-        points_out = list(self._points)
-        self._points = []
-
-        replay_id = save_run(
-            course=course,
-            points=points_out,
-            total_time=total_time,
-            character=character,
-            costume=costume,
-            kart=kart,
-            player="me",
-            source="local",
-            lap_splits=lap_splits,
-        )
-        status = f"time={total_time}" if total_time else "aborted"
-        print(f"  [Replay] Saved to DB ({status}, {len(points_out)} pts) id={replay_id}")
-        return replay_id
 
     def retroactive_filter(self, threshold: float):
         """
