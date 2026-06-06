@@ -94,6 +94,12 @@ pub fn discord_set_presence(payload: Presence) {
     let burl = payload.button_url.clone().unwrap_or_default();
 
     let mut act = activity::Activity::new();
+    // Report as "Competing in ..." rather than "Playing". Discord only offers the
+    // voice-channel "Ask to Stream" request for game (Playing) activities, and that
+    // button can't be repurposed to stream the capture card - so a non-game type
+    // removes it. ("Competing" also reads right for a time-trial competition; viewers
+    // use our custom Twitch button to watch.)
+    act = act.activity_type(activity::ActivityType::Competing);
     if !details.is_empty() {
         act = act.details(&details);
     }
