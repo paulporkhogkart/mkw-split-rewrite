@@ -49,3 +49,46 @@ export function myPbs(db: DatabaseSync, seasonId: number, playerId: number) {
      ORDER BY c.slug`
   ).all(seasonId, playerId);
 }
+
+/** The caller's PB on a course: total + per-lap cumulative splits {lap_index: lap_time_ms}.
+ *  Empty splits (and possibly null total) when there is no live PB, or the PB is a
+ *  legacy total-time-only run with no stored laps. Mirrors the engine's old emit_pb_splits. */
+export function myPbSplits(db: DatabaseSync, seasonId: number, playerId: number, courseId: number, cc: number):
+    { total_ms: number | null; splits: Record<number, number> } {
+  const run = db.prepare(
+    `SELECT id, total_time_ms FROM runs
+     WHERE season_id=? AND player_id=? AND course_id=? AND cc=? AND is_pb=1`
+  ).get(seasonId, playerId, courseId, cc) as { id: number; total_time_ms: number | null } | undefined;
+  if (!run) return { total_ms: null, splits: {} };
+  const laps = db.prepare(
+    `SELECT lap_index, lap_time_ms FROM run_laps WHERE run_id=? ORDER BY lap_index`
+  ).all(run.id) as { lap_index: number; lap_time_ms: number | null }[];
+  const splits: Record<number, number> = {};
+  for (const l of laps) if (l.lap_time_ms != null) splits[l.lap_index] = l.lap_time_ms;
+  return { total_ms: run.total_time_ms ?? null, splits };
+}
+
+export type Trail = { player_id: number; player: string; total_ms: number | null; is_me: boolean; points: number[][] };
+
+/** Every roster player's PB trail for a course (fastest first), each tagged is_me when
+ *  it matches meId. Point-less PBs (legacy total-time-only) are omitted - no trail. */
+export function courseTrails(db: DatabaseSync, seasonId: number, courseId: number, cc: number, meId: number | null): Trail[] {
+  const runs = db.prepare(
+    `SELECT r.id, r.player_id, p.display_name, r.total_time_ms
+     FROM runs r JOIN players p ON p.id = r.player_id
+     WHERE r.season_id=? AND r.course_id=? AND r.cc=? AND r.is_pb=1
+     ORDER BY r.total_time_ms ASC`
+  ).all(seasonId, courseId, cc) as { id: number; player_id: number; display_name: string; total_time_ms: number | null }[];
+  const out: Trail[] = [];
+  const ptStmt = db.prepare(`SELECT t_ms, cx, cy, score FROM run_points WHERE run_id=? ORDER BY t_ms`);
+  for (const r of runs) {
+    const pts = ptStmt.all(r.id) as { t_ms: number; cx: number; cy: number; score: number }[];
+    if (pts.length === 0) continue;   // legacy / point-less PB: no trail
+    out.push({
+      player_id: r.player_id, player: r.display_name, total_ms: r.total_time_ms ?? null,
+      is_me: meId != null && r.player_id === meId,
+      points: pts.map((p) => [p.t_ms, p.cx, p.cy, p.score]),
+    });
+  }
+  return out;
+}
