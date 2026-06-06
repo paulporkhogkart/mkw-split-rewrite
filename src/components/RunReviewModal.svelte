@@ -16,6 +16,7 @@
   import { fade, scale } from "svelte/transition";
   import { quintOut } from "svelte/easing";
   import snd from "../assets/run-review.wav";
+  import { isValidTime, isValidInt, isValidCount, lapComplete, buildLaps } from "../lib/runReview.js";
 
   export let run;                       // { attempt_id, status, course, character, kart, costume, total_time, total_laps, laps[] }
   export let isPb = false;
@@ -25,8 +26,6 @@
   export let playSound = true;
 
   const dispatch = createEventDispatcher();
-  const TIME_RE = /^\d+:\d{2}\.\d{3}$/;
-  const validTime = (t) => TIME_RE.test((t ?? "").trim());
 
   // ── Working copy, (re)loaded only when the run identity changes ────────────────
   let course, character, kart, costume, totalTime, laps;
@@ -43,8 +42,17 @@
     costume   = run.costume   ?? "Base";
     totalTime = run.total_time ?? "";
     const n = run.total_laps ?? (run.laps?.length ?? 0);
-    const seen = new Map((run.laps ?? []).map((l) => [l.lap, l.time_str ?? ""]));
-    laps = Array.from({ length: n }, (_, i) => ({ lap: i + 1, time: seen.get(i + 1) ?? "" }));
+    const seenT = new Map((run.laps ?? []).map((l) => [l.lap, l.time_str ?? ""]));
+    const seenC = new Map((run.laps ?? []).map((l) => [l.lap, l.coins]));
+    const seenS = new Map((run.laps ?? []).map((l) => [l.lap, l.shrooms]));
+    // coins/shrooms stay strings for the inputs; 0 must render as "0", null as "".
+    const numStr = (x) => (x == null ? "" : String(x));
+    laps = Array.from({ length: n }, (_, i) => ({
+      lap: i + 1,
+      time:    seenT.get(i + 1) ?? "",
+      coins:   numStr(seenC.get(i + 1)),
+      shrooms: numStr(seenS.get(i + 1)),
+    }));
   }
 
   // ── What this run needs, and what's still missing ─────────────────────────────
@@ -55,10 +63,12 @@
   $: missCourse  = !course;
   $: missChar    = !character;
   $: missKart    = !kart;
-  $: missTotal   = needTotal && !validTime(totalTime);
-  $: badLaps     = needSplits ? (laps ?? []).filter((l) => !validTime(l.time)).map((l) => l.lap) : [];
+  $: missTotal   = needTotal && !isValidTime(totalTime);
+  $: badLaps     = needSplits ? (laps ?? []).filter((l) => !lapComplete(l)).map((l) => l.lap) : [];
+  $: canSubmit   = !missCourse && !missChar && !missKart && !missTotal && badLaps.length === 0;
 
-  $: canSubmit = !missCourse && !missChar && !missKart && !missTotal && badLaps.length === 0;
+  // Costume is optional and "Base" (no costume) must always be selectable + first.
+  $: costumeOptions = ["Base", ...(options.costumes ?? []).filter((c) => c !== "Base")];
 
   function submit() {
     if (!canSubmit) return;
@@ -66,8 +76,7 @@
       attempt_id: run.attempt_id,
       course, character, kart, costume,
       total_time: needTotal ? totalTime.trim() : (run.total_time ?? null),
-      laps: needSplits ? laps.map((l) => ({ lap: l.lap, time_str: l.time.trim() }))
-                       : (run.laps ?? []),
+      laps: needSplits ? buildLaps(laps) : (run.laps ?? []),
     });
   }
   const discard = () => dispatch("discard", { attempt_id: run.attempt_id });
@@ -125,7 +134,7 @@
       <label class="rv-row">
         <span class="rv-label rv-label-opt">Costume</span>
         <select class="rv-ctrl" bind:value={costume}>
-          {#each (options.costumes.length ? options.costumes : ["Base"]) as c}<option value={c}>{c}</option>{/each}
+          {#each costumeOptions as c}<option value={c}>{c}</option>{/each}
         </select>
       </label>
 
@@ -139,12 +148,23 @@
       {/if}
 
       {#if needSplits}
+        <div class="rv-divider"></div>
+        <div class="rv-laphead">
+          <span class="rv-lh rv-lh-lap">Lap</span>
+          <span class="rv-lh">Time</span>
+          <span class="rv-lh rv-lh-num">Coins</span>
+          <span class="rv-lh rv-lh-num">Mush</span>
+        </div>
         {#each laps as lap (lap.lap)}
-          <label class="rv-row" class:rv-miss={!validTime(lap.time)}>
-            <span class="rv-label rv-label-lap">Lap {lap.lap}{#if !validTime(lap.time)}<i class="rv-flag" aria-label="missing">!</i>{/if}</span>
-            <input class="rv-ctrl rv-time" class:rv-ctrl-miss={!validTime(lap.time)}
+          <div class="rv-laprow">
+            <span class="rv-lap-no">{lap.lap}</span>
+            <input class="rv-ctrl rv-time" class:rv-ctrl-miss={!isValidTime(lap.time)}
                    bind:value={lap.time} placeholder="0:00.000" spellcheck="false" autocomplete="off" />
-          </label>
+            <input class="rv-ctrl rv-time rv-num" class:rv-ctrl-miss={!isValidInt(lap.coins)}
+                   bind:value={lap.coins} placeholder="0" inputmode="numeric" spellcheck="false" autocomplete="off" />
+            <input class="rv-ctrl rv-time rv-num" class:rv-ctrl-miss={!isValidCount(lap.shrooms)}
+                   bind:value={lap.shrooms} placeholder="0" inputmode="numeric" spellcheck="false" autocomplete="off" />
+          </div>
         {/each}
       {/if}
     </div>
@@ -211,7 +231,6 @@
     display: inline-flex; align-items: center; gap: .3rem;
   }
   .rv-label-opt { color: var(--tx-dim); }
-  .rv-label-lap { color: var(--tx-dim); font-variant-numeric: tabular-nums; }
 
   /* The "missing required" affordance: a small amber marker + amber field border.
      Functional color only — no decorative tints (matches the app's restraint). */
@@ -241,6 +260,22 @@
     font-family: var(--mono); letter-spacing: .01em; font-variant-numeric: tabular-nums;
   }
   .rv-time::placeholder { color: var(--tx-dim); }
+
+  /* Per-lap PB grid: lap no. | time | coins | mush. Columns line up with the header. */
+  .rv-laphead, .rv-laprow {
+    display: grid;
+    grid-template-columns: 30px 1fr 52px 52px;
+    align-items: center; gap: .4rem;
+  }
+  .rv-laphead { margin-top: .05rem; }
+  .rv-lh { font-size: .6rem; color: var(--tx-dim); text-transform: uppercase; letter-spacing: .04em; }
+  .rv-lh-lap { text-align: left; }
+  .rv-lh-num { text-align: right; }
+  .rv-lap-no {
+    font-size: .7rem; color: var(--tx-dim);
+    font-variant-numeric: tabular-nums; text-align: center;
+  }
+  .rv-num { text-align: right; padding-right: .45rem; }
 
   .rv-divider { height: 1px; background: var(--bd-soft); margin: .25rem 0 .1rem; }
 
