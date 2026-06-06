@@ -249,6 +249,47 @@ fn route_line(conn: &Connection, line: &str) -> Option<String> {
     }
 }
 
+// ── Per-course read cache (Phase 2b) ─────────────────────────────────────────
+// Caches the combined {pb_splits, trails, friends_pbs} payload per course slug so
+// the monitor's reads survive a flaky network (last-good served offline).
+fn ensure_course_cache(conn: &Connection) {
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS course_cache (
+            course_slug TEXT PRIMARY KEY,
+            payload     TEXT NOT NULL,
+            fetched_at  INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+        )",
+        [],
+    ).expect("create course_cache");
+}
+
+fn course_cache_put(conn: &Connection, slug: &str, payload: &str) {
+    conn.execute(
+        "INSERT INTO course_cache(course_slug, payload) VALUES (?1, ?2)
+         ON CONFLICT(course_slug) DO UPDATE SET payload=excluded.payload, fetched_at=strftime('%s','now')",
+        rusqlite::params![slug, payload],
+    ).ok();
+}
+
+fn course_cache_get(conn: &Connection, slug: &str) -> Option<String> {
+    conn.query_row(
+        "SELECT payload FROM course_cache WHERE course_slug=?1",
+        rusqlite::params![slug],
+        |r| r.get::<_, String>(0),
+    ).ok()
+}
+
+fn course_cache_clear(conn: &Connection, slug: &str) {
+    conn.execute("DELETE FROM course_cache WHERE course_slug=?1", rusqlite::params![slug]).ok();
+}
+
+/// Slugified `course` of a stored run body, for invalidating its cache after upload.
+fn course_slug_of(line: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(line).ok()?;
+    let s = slugify(v.get("course")?.as_str()?);
+    if s.is_empty() { None } else { Some(s) }
+}
+
 use std::sync::Mutex;
 
 #[derive(Default, Clone)]
@@ -369,6 +410,53 @@ pub fn sync_list_pending() -> String {
     "[]".into()
 }
 
+const EMPTY_COURSE_READS: &str = r#"{"pb_splits":{"total_ms":null,"splits":{}},"trails":[],"friends_pbs":[]}"#;
+
+/// Fetch the course's PB splits + trails + friends-PBs and combine into one payload.
+/// Err on empty config / any non-2xx / network error. Parses via text()+serde_json so
+/// no reqwest "json" feature is required.
+async fn fetch_course_reads(cfg: &Config, course: &str) -> Result<String, String> {
+    let base = cfg.server_url.trim_end_matches('/');
+    let client = reqwest::Client::new();
+    let q = [("course", course), ("cc", "150")];
+    async fn get_json(rb: reqwest::RequestBuilder, what: &str) -> Result<serde_json::Value, String> {
+        let resp = rb.timeout(std::time::Duration::from_secs(8)).send().await.map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(format!("{what} {}", resp.status())); }
+        let txt = resp.text().await.map_err(|e| e.to_string())?;
+        serde_json::from_str(&txt).map_err(|e| e.to_string())
+    }
+    let pb = get_json(client.get(format!("{base}/v1/me/pb-splits")).query(&q).bearer_auth(&cfg.token), "pb-splits").await?;
+    let tr = get_json(client.get(format!("{base}/v1/trails")).query(&q).bearer_auth(&cfg.token), "trails").await?;
+    let fp = get_json(client.get(format!("{base}/v1/friends-pbs")).query(&q), "friends-pbs").await?;
+    Ok(serde_json::json!({ "pb_splits": pb, "trails": tr, "friends_pbs": fp }).to_string())
+}
+
+/// Frontend reads for a course (PB splits + own/friends trails + friends PBs), via the
+/// server with the token, cached per course. Returns the last cache when offline /
+/// unconfigured (or an empty payload if never fetched). JSON string.
+#[tauri::command]
+pub async fn sync_course_reads(course: String) -> String {
+    let slug = slugify(&course);
+    let cfg = { CONFIG.lock().unwrap().clone() };
+    let cached = || -> String {
+        OUTBOX.lock().ok()
+            .and_then(|g| g.as_ref().and_then(|c| course_cache_get(c, &slug)))
+            .unwrap_or_else(|| EMPTY_COURSE_READS.to_string())
+    };
+    if cfg.server_url.trim().is_empty() || cfg.token.trim().is_empty() {
+        return cached();
+    }
+    match fetch_course_reads(&cfg, &course).await {
+        Ok(payload) => {
+            if let Ok(g) = OUTBOX.lock() {
+                if let Some(c) = g.as_ref() { course_cache_put(c, &slug, &payload); }
+            }
+            payload
+        }
+        Err(e) => { log::debug!("[sync] course_reads {slug}: {e}"); cached() }
+    }
+}
+
 /// Open the outbox DB in the app data dir, then spawn the drain loop.
 pub fn init(app: tauri::AppHandle) {
     use tauri::Manager;
@@ -383,6 +471,7 @@ pub fn init(app: tauri::AppHandle) {
     };
     ensure_outbox(&conn);
     ensure_pb_cache(&conn);
+    ensure_course_cache(&conn);
     *OUTBOX.lock().unwrap() = Some(conn);
 
     // A dedicated OS thread (not the tokio runtime) running a blocking loop:
@@ -428,7 +517,11 @@ pub fn init(app: tauri::AppHandle) {
                     .send()
                 {
                     Ok(resp) if resp.status().is_success() => {
-                        if let Some(c) = OUTBOX.lock().unwrap().as_ref() { outbox_delete(c, &id); }
+                        if let Some(c) = OUTBOX.lock().unwrap().as_ref() {
+                            outbox_delete(c, &id);
+                            // Invalidate the course's read cache so the new PB/trail is re-fetched.
+                            if let Some(slug) = course_slug_of(&line) { course_cache_clear(c, &slug); }
+                        }
                         seeded = false;
                     }
                     Ok(resp) => log::debug!("[sync] {id}: server {}", resp.status()),
@@ -626,5 +719,26 @@ mod tests {
         let np = rows.iter().find(|(id, _, _)| id == "np1").unwrap();
         assert_eq!(pb.2, true);
         assert_eq!(np.2, false);
+    }
+
+    #[test]
+    fn course_cache_roundtrip_and_clear() {
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_course_cache(&conn);
+        assert_eq!(course_cache_get(&conn, "rainbow_road"), None);
+        course_cache_put(&conn, "rainbow_road", r#"{"pb_splits":{}}"#);
+        assert_eq!(course_cache_get(&conn, "rainbow_road").as_deref(), Some(r#"{"pb_splits":{}}"#));
+        course_cache_put(&conn, "rainbow_road", r#"{"x":1}"#);   // upsert overwrites
+        assert_eq!(course_cache_get(&conn, "rainbow_road").as_deref(), Some(r#"{"x":1}"#));
+        course_cache_clear(&conn, "rainbow_road");
+        assert_eq!(course_cache_get(&conn, "rainbow_road"), None);
+    }
+
+    #[test]
+    fn course_slug_of_extracts_and_slugifies() {
+        assert_eq!(course_slug_of(r#"{"course":"Rainbow Road"}"#).as_deref(), Some("rainbow_road"));
+        assert_eq!(course_slug_of(r#"{"course":"Bowser's Castle"}"#).as_deref(), Some("bowsers_castle"));
+        assert_eq!(course_slug_of(r#"{"status":"reset"}"#), None);   // no course field
+        assert_eq!(course_slug_of("not json"), None);
     }
 }
