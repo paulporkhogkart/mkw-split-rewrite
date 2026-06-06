@@ -33,6 +33,7 @@ from unittest.mock import MagicMock
 from mkw_tracker.detection.screen import Screen
 from mkw_tracker.race.finish import FinishStillDetector
 from mkw_tracker.lifecycle.race import RaceLifecycle
+from mkw_tracker.race.lapstats import LapStatsTracker
 
 
 class _FakeIpc:
@@ -49,10 +50,13 @@ def _lifecycle(ipc, total_time, splits):
     ts = MagicMock(); ts.total_time = total_time; ts.splits = splits
     minimap = MagicMock(); minimap._calibrated = True   # skip calibrate branch
     mm_rec = MagicMock(); mm_rec.points = [(0, 1.0, 2.0, 0.9)]; mm_rec.save.return_value = None
+    laps = MagicMock(); laps.state.total_laps = 3
+    lapstats = LapStatsTracker()
+    lapstats.per_lap = {1: {"coins": 5, "shrooms": 2}, 2: {"coins": -1, "shrooms": 0}}
     return RaceLifecycle(
-        selection=sel, laps=MagicMock(), coins=MagicMock(), ts=ts,
+        selection=sel, laps=laps, coins=MagicMock(), ts=ts,
         finish=FinishStillDetector(), mush=MagicMock(), minimap=minimap,
-        mm_rec=mm_rec, mm_player=MagicMock(), ipc=ipc,
+        mm_rec=mm_rec, mm_player=MagicMock(), lapstats=lapstats, ipc=ipc,
     )
 
 
@@ -69,7 +73,10 @@ def test_finish_emits_run_finalized():
     assert evt["course"] == "Rainbow Road"
     assert evt["total_time"] == "1:23.456"
     assert evt["character"] == "Mario" and evt["kart"] == "Standard Kart" and evt["costume"] == "Base"
-    assert evt["laps"] == [{"lap": 1, "time_ms": 41000}, {"lap": 2, "time_ms": 83456}]
+    assert evt["laps"] == [
+        {"lap": 1, "time_ms": 41000, "time_str": "0:41.000", "coins": 5, "shrooms": 2},
+        {"lap": 2, "time_ms": 83456, "time_str": "1:23.456", "coins": -1, "shrooms": 0},
+    ]
     assert evt["points"] == [[0, 1.0, 2.0, 0.9]]
     assert isinstance(evt["attempt_id"], str) and len(evt["attempt_id"]) >= 8
     assert evt["ended_at"] is not None
@@ -112,3 +119,15 @@ def test_reset_emits_run_finalized_with_null_total():
     assert evt["status"] == "reset"
     assert evt["total_time"] is None
     assert evt["laps"] == []
+
+
+def test_run_finalized_includes_total_laps_and_per_lap_stats():
+    ipc = _FakeIpc()
+    lc = _lifecycle(ipc, total_time="1:23.456", splits={1: "0:41.000", 2: "1:23.456"})
+    lc.on_screen_change(Screen.RACING, Screen.POST_TIME_TRIAL)
+    evt = _run_finalized(ipc)
+    assert evt["total_laps"] == 3
+    assert evt["laps"] == [
+        {"lap": 1, "time_ms": 41000, "time_str": "0:41.000", "coins": 5, "shrooms": 2},
+        {"lap": 2, "time_ms": 83456, "time_str": "1:23.456", "coins": -1, "shrooms": 0},
+    ]

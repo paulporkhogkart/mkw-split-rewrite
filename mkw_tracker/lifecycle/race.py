@@ -36,6 +36,7 @@ class RaceLifecycle:
         minimap:    MinimapTracker,
         mm_rec:     MinimapRecorder,
         mm_player:  MinimapPlayer,
+        lapstats=None,
         history_mode: bool = False,
         transition_count: Optional[list] = None,
         ipc=None,
@@ -46,6 +47,7 @@ class RaceLifecycle:
         self._ts         = ts
         self._finish     = finish
         self._mush       = mush
+        self._lapstats   = lapstats
         self._minimap    = minimap
         self._mm_rec     = mm_rec
         self._mm_player  = mm_player
@@ -141,6 +143,8 @@ class RaceLifecycle:
         self._ts.reset()
         self._finish.reset()
         self._mush.reset()
+        if self._lapstats is not None:
+            self._lapstats.reset()
         self._minimap.reset()
         self._race_started_at = None
         self._finalized = False
@@ -188,8 +192,17 @@ class RaceLifecycle:
             from datetime import datetime, timezone
             from ..ipc.protocol import emit_run_finalized
             from ..database.replay_repo import _to_ms
-            laps = [{"lap": int(lap), "time_ms": _to_ms(txt)}
-                    for lap, txt in sorted(self._ts.splits.items())]
+            per_lap = self._lapstats.per_lap if self._lapstats is not None else {}
+            laps = []
+            for lap, txt in sorted(self._ts.splits.items()):
+                stats = per_lap.get(int(lap), {})
+                laps.append({
+                    "lap":     int(lap),
+                    "time_ms": _to_ms(txt),
+                    "time_str": txt,
+                    "coins":   stats.get("coins"),
+                    "shrooms": stats.get("shrooms"),
+                })
             self._ipc.emit(emit_run_finalized({
                 "attempt_id": uuid.uuid4().hex,
                 "course":     course,
@@ -197,6 +210,7 @@ class RaceLifecycle:
                 "character":  character,
                 "kart":       sel.kart,
                 "costume":    costume,
+                "total_laps": self._laps.state.total_laps,
                 "started_at": self._race_started_at,
                 "ended_at":   datetime.now(timezone.utc).isoformat(),
                 "total_time": best_total_time,
