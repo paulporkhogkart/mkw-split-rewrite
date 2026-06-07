@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS world_records (
     video_url    TEXT,
     character    TEXT,
     vehicle      TEXT,
+    is_current   INTEGER NOT NULL DEFAULT 0,
     provenance   TEXT NOT NULL DEFAULT 'legacy_import',
     created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
