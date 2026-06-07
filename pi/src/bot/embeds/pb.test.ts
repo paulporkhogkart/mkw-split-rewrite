@@ -33,7 +33,7 @@ describe('buildPbEmbed', () => {
       { name: 'TRACK', value: '`Rainbow Road`' },
       { name: 'TIME', value: '`1:46.000`' },
       { name: 'DELTA', value: '`-4.000s`' },
-      { name: 'OVERTOOK', value: '`Luke (+2.000s)`', inline: true },
+      { name: 'OVERTOOK', value: '`Luke  (+2.000s)`', inline: true },
       { name: 'POSITION', value: '`Track: 2 → 1`\n`Total: 3 → 2`', inline: true },
     ]);
     expect(e.footer).toEqual({ text: 'The WR is still ahead! (-6.000s)', icon_url: 'http://icon' });
