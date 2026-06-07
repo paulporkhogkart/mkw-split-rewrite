@@ -35,7 +35,10 @@ export function startEventStream(
       setTimeout(connect, backoff);
       backoff = Math.min(backoff * 2, 30000);
     });
-    ws.addEventListener('error', () => { try { ws?.close(); } catch { /* ignore */ } });
+    ws.addEventListener('error', (ev: Event) => {
+      log(`[bot] ws error: ${(ev as { message?: string }).message ?? 'unknown'}`);
+      try { ws?.close(); } catch { /* ignore */ }
+    });
   };
 
   connect();
