@@ -29,3 +29,42 @@ export function wrReign(
   const ms = Date.now() - Date.parse(reignStart);
   return { previous_holder: prevHolder, reign_ms: Number.isFinite(ms) && ms >= 0 ? ms : null, is_same_person };
 }
+
+/** Reign of the course's current champion (excluding `excludeRunId`, the just-inserted PB).
+ *  Best-times only improve, so the leaderboard is monotonic and a player's reign = the time
+ *  since the lead last changed TO them. Single forward pass over finished runs: track each
+ *  player's running best, and whenever the overall leader changes, reset the reign start to
+ *  that run's timestamp. The leader at the end of the pass is the pre-new-PB champion. */
+export function trackReign(
+  db: DatabaseSync, seasonId: number, courseId: number, cc: number,
+  newPlayer: string, excludeRunId: number,
+): ReignInfo {
+  const runs = db.prepare(
+    `SELECT p.display_name AS name, r.total_time_ms AS ms, r.ended_at AS ended_at
+     FROM runs r JOIN players p ON p.id = r.player_id
+     WHERE r.season_id=? AND r.course_id=? AND r.cc=? AND r.status='finished'
+       AND r.total_time_ms IS NOT NULL AND r.ended_at IS NOT NULL AND r.id != ?
+     ORDER BY r.ended_at ASC, r.id ASC`
+  ).all(seasonId, courseId, cc, excludeRunId) as { name: string; ms: number; ended_at: string }[];
+  if (runs.length === 0) return { previous_holder: null, reign_ms: null, is_same_person: false };
+
+  const best = new Map<string, number>();
+  let leader: string | null = null;
+  let reignStart: string | null = null;
+  for (const r of runs) {
+    const cur = best.get(r.name);
+    if (cur === undefined || r.ms < cur) best.set(r.name, r.ms);
+    let lname: string | null = null;
+    let lmin = Infinity;
+    for (const [n, m] of best) if (m < lmin) { lmin = m; lname = n; }
+    if (lname !== leader) { leader = lname; reignStart = r.ended_at; }   // the lead changed here
+  }
+
+  const is_same_person = leader === newPlayer;
+  const reign_ms = reignStart ? Date.now() - Date.parse(reignStart) : null;
+  return {
+    previous_holder: leader,
+    reign_ms: reign_ms != null && reign_ms >= 0 ? reign_ms : null,
+    is_same_person,
+  };
+}
