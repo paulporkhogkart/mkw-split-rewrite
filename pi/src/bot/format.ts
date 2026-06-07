@@ -32,16 +32,43 @@ export function formatOvertaken(list: OvertakenEntry[]): string {
   if (list.length === 0) return '`No-one`';
   const names = list.map((p) => p.name);
   const maxName = Math.max(...names.map((n) => n.length));
-  const parts = list.map((p) => parseDiff(p.diff_str));
-  const maxBefore = Math.max(...parts.map((pt) => pt.sign_and_whole.length));
+  const aligned = alignDiffColumn(list.map((p) => p.diff_str));
   return list.map((p, i) => {
-    const name = names[i];
-    const pt = parts[i];
-    const padded = name + ' '.repeat(Math.max(2, maxName - name.length + 2));
-    const before = pt.sign_and_whole.padStart(maxBefore);
-    const aligned = pt.decimal ? `${before}.${pt.decimal}s` : `${before}s`;
-    return `\`${padded}(${aligned})\``;
+    const padded = names[i] + ' '.repeat(Math.max(2, maxName - names[i].length + 2));
+    return `\`${padded}(${aligned[i]})\``;
   }).join('\n');
+}
+
+/** "1:23.456" / "23.456" — ports legacy TimeUtils.milliseconds_to_display. */
+export function msToDisplay(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const msPart = ms % 1000;
+  if (totalSeconds >= 60) {
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}:${String(seconds).padStart(2, '0')}.${String(msPart).padStart(3, '0')}`;
+  }
+  return `${totalSeconds}.${String(msPart).padStart(3, '0')}`;
+}
+
+/** Decimal-align a column of "+1.234s" diff strings: the sign+whole part is right-justified to
+ *  the column's max width, with the sign fixed at the left (space inserted between sign and digits).
+ *  '' / null entries stay ''. Shared by the leaderboard + nemesis + overtaken formatters (factors
+ *  the legacy duplicated alignment). Returns the inner string (no parens). */
+export function alignDiffColumn(diffs: (string | null | undefined)[]): string[] {
+  const parts = diffs.map((d) => (d ? parseDiff(d) : null));
+  const widths = parts.filter((p): p is { sign_and_whole: string; decimal: string } => p !== null)
+                      .map((p) => p.sign_and_whole.length);
+  const maxBefore = widths.length ? Math.max(...widths) : 0;
+  return parts.map((p) => {
+    if (!p) return '';
+    // Keep the sign (first char) fixed; right-pad only the digits so the decimal point aligns.
+    const sign = p.sign_and_whole[0] ?? '';
+    const digits = p.sign_and_whole.slice(1);
+    const paddedDigits = digits.padStart(maxBefore - 1);
+    const before = `${sign}${paddedDigits}`;
+    return p.decimal ? `${before}.${p.decimal}s` : `${before}s`;
+  });
 }
 
 /** Track/total position transitions — ports legacy _format_positions. */

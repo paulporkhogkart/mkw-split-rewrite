@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatTimeDifference, formatDuration, formatOvertaken, formatPositions } from './format';
+import { formatTimeDifference, formatDuration, formatOvertaken, formatPositions, msToDisplay, alignDiffColumn } from './format';
 
 describe('formatTimeDifference', () => {
   it('formats zero, positive, negative (ms)', () => {
@@ -46,5 +46,20 @@ describe('formatPositions', () => {
   it('omits an unchanged total and falls back to New record', () => {
     expect(formatPositions({ track: { old: null, new: null }, total: { old: 2, new: 2 } }))
       .toBe('`New record`');
+  });
+});
+
+describe('msToDisplay', () => {
+  it('formats sub-minute and minute+ times (ports TimeUtils.milliseconds_to_display)', () => {
+    expect(msToDisplay(23456)).toBe('23.456');
+    expect(msToDisplay(83456)).toBe('1:23.456');
+    expect(msToDisplay(120000)).toBe('2:00.000');
+    expect(msToDisplay(59999)).toBe('59.999');
+  });
+});
+
+describe('alignDiffColumn', () => {
+  it('right-justifies the integer part to a common width; empty stays empty', () => {
+    expect(alignDiffColumn(['+1.200s', '+12.030s', '', null])).toEqual(['+ 1.200s', '+12.030s', '', '']);
   });
 });
