@@ -235,7 +235,8 @@ its WR insert (otherwise the new `WHERE is_current=1` read returns nothing); the
 | Env var | Default | Meaning |
 |---------|---------|---------|
 | `MKWRS_URL` | `https://mkwrs.com/mkworld/` | Page to scrape. |
-| `MKWRS_INTERVAL_SEC` | `300` | In-process scrape interval; `0` disables the in-process scheduler. |
+| `MKWRS_MIN_INTERVAL_SEC` | `900` | Lower bound of the random in-process scrape interval. |
+| `MKWRS_MAX_INTERVAL_SEC` | `1800` | Upper bound; each cycle waits a fresh uniform-random delay in [min,max] (jitter to avoid a fixed cadence). `0` disables the scheduler. |
 | `MKW_DB` | `mkw.db` | (existing) DB path, used by the CLI and server alike. |
 
 cc is fixed at 150 (MKW is 150-only); a `--cc` CLI flag may default it but is not

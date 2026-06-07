@@ -18,5 +18,6 @@ const server = serve({ fetch: app.fetch, port: PORT }, (info) => {
 injectWebSocket(server);
 startWrScraper(db, hub, {
   url: process.env.MKWRS_URL,
-  intervalSec: Number(process.env.MKWRS_INTERVAL_SEC ?? 300),
+  minIntervalSec: Number(process.env.MKWRS_MIN_INTERVAL_SEC ?? 900),   // 15 min
+  maxIntervalSec: Number(process.env.MKWRS_MAX_INTERVAL_SEC ?? 1800),  // 30 min
 });
