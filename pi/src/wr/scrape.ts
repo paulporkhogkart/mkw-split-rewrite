@@ -20,10 +20,20 @@ export async function scrapeOnce(db: DatabaseSync, hub: EventHub, opts: ScrapeOp
 }
 
 async function defaultFetchHtml(url: string): Promise<string> {
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'mkw-pi-wr-scraper/1.0' },
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!res.ok) throw new Error(`mkwrs fetch failed: HTTP ${res.status}`);
-  return res.text();
+  // Manual AbortController + clearTimeout rather than AbortSignal.timeout: the latter
+  // leaves a 30s timer pending after the fetch resolves, keeping the event loop alive
+  // (and, when force-exited, racing libuv teardown on Windows). Clearing it lets the
+  // CLI exit cleanly on its own.
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 30_000);
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'mkw-pi-wr-scraper/1.0' },
+      signal: ac.signal,
+    });
+    if (!res.ok) throw new Error(`mkwrs fetch failed: HTTP ${res.status}`);
+    return await res.text();
+  } finally {
+    clearTimeout(timer);
+  }
 }
