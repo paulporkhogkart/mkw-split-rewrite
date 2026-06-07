@@ -115,6 +115,47 @@ export function formatTrackLeaderboard(rows: BoardRow[], wr: { record: string; r
   return lines.join('\n');
 }
 
+/** Row shape for formatTotalLeaderboard. */
+export type TotalRow = { position: number; name: string; total_display: string; total_ms: number; points: number };
+
+/**
+ * Overall (total) leaderboard with WR aggregate at top, decimal-aligned chained gaps, and golf points.
+ * Ports legacy _format_total_leaderboard (discord_bot.py:744-833).
+ *
+ * Gap is chained from the previous entry's total (or wrTotalMs for the first row).
+ * Gap only emitted when last_total_ms > 0 && total_ms > last_total_ms (legacy guard).
+ * Each line ends with ` [points]` after the diff.
+ */
+export function formatTotalLeaderboard(rows: TotalRow[], wrTotalDisplay: string, wrTotalMs: number): string {
+  if (rows.length === 0) return '`No times recorded`';
+
+  const lines: string[] = [];
+  lines.push(`\`   WR      ${wrTotalDisplay}\``);
+
+  const maxName = Math.max(...rows.map((r) => r.name.length));
+  const maxTime = Math.max(...rows.map((r) => r.total_display.length));
+
+  // Build chained diffs: gap to the previous entry's total_ms (wrTotalMs for the first row).
+  let last_total_ms = wrTotalMs;
+  const timeDiffs: string[] = rows.map((r) => {
+    const diff = (last_total_ms > 0 && r.total_ms > last_total_ms) ? formatTimeDifference(r.total_ms - last_total_ms) : '';
+    last_total_ms = r.total_ms;
+    return diff;
+  });
+
+  const aligned = alignDiffColumn(timeDiffs);
+
+  for (let i = 0; i < rows.length; i++) {
+    const { position, name, total_display, points } = rows[i];
+    const paddedName = name + ' '.repeat(maxName - name.length + 2);
+    const paddedTotal = total_display + ' '.repeat(maxTime - total_display.length + 1);
+    const diff = aligned[i] ? ` (${aligned[i]})` : '';
+    lines.push(`\`${position}. ${paddedName}${paddedTotal}${diff} [${points}]\``);
+  }
+
+  return lines.join('\n');
+}
+
 /** Track/total position transitions — ports legacy _format_positions. */
 export function formatPositions(pos: Positions): string {
   const t = pos.track;

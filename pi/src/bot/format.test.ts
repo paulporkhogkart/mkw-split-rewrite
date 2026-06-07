@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatTimeDifference, formatDuration, formatOvertaken, formatPositions, msToDisplay, alignDiffColumn, formatTrackLeaderboard } from './format';
+import { formatTimeDifference, formatDuration, formatOvertaken, formatPositions, msToDisplay, alignDiffColumn, formatTrackLeaderboard, formatTotalLeaderboard } from './format';
 
 describe('formatTimeDifference', () => {
   it('formats zero, positive, negative (ms)', () => {
@@ -79,5 +79,23 @@ describe('formatTrackLeaderboard', () => {
   });
   it('handles empty', () => {
     expect(formatTrackLeaderboard([], null)).toBe('`No times recorded`');
+  });
+});
+
+describe('formatTotalLeaderboard', () => {
+  it('renders WR aggregate + gaps + golf points', () => {
+    const out = formatTotalLeaderboard(
+      [ { position: 1, name: 'Paul', total_display: '3:30.000', total_ms: 210000, points: 2 },
+        { position: 2, name: 'Luke', total_display: '3:36.000', total_ms: 216000, points: 4 } ],
+      '3:20.000', 200000,
+    );
+    expect(out).toBe(
+      '`   WR      3:20.000`\n' +
+      '`1. Paul  3:30.000  (+10.000s) [2]`\n' +   // TWO spaces before '(' (padded_time trailing space + diff leading space)
+      '`2. Luke  3:36.000  ( +6.000s) [4]`'       // +6 rjust to width 3 (+10 is the widest sign_and_whole)
+    );
+  });
+  it('handles empty rows', () => {
+    expect(formatTotalLeaderboard([], '3:20.000', 200000)).toBe('`No times recorded`');
   });
 });
