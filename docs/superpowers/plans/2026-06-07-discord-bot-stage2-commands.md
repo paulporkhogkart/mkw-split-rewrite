@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-06-07-discord-bot-server-driven-design.md` (Stage 2 in Phasing).
 
-**Porting note:** Several formatters are verbatim ports of `legacy/mkwpb2/kart-off/services/discord_bot.py`. Each port task cites the exact legacy method + lines and locks the output with **exact-string tests** — the tests are the behavioral spec; match them byte-for-byte (including spaces and the `→` arrow). Do not "improve" the legacy alignment.
+**Porting note:** Several formatters are verbatim ports of `legacy/mkwpb2/kart-off/services/discord_bot.py`. Each port task cites the exact legacy method + lines and locks the output with **exact-string tests**. **The legacy source is the ultimate authority on spacing** — if a dictated expected-string below disagrees with what the faithful port produces, the *port* (matched against the legacy padding math) wins: correct the test expectation to the port's output and note it. (The legacy pads `padded_time = time + (maxTime-len+1)` spaces and the leaderboard diff has its own leading space → **two** spaces before `(`; nemesis has no leading space on its `(...)`. Don't "improve" the legacy alignment.)
 
 ---
 
@@ -131,8 +131,8 @@ describe('formatTrackLeaderboard', () => {
     );
     expect(out).toBe(
       '`   WR      1:40.000`\n' +
-      '`1. Paul  1:46.000 (+6.000s)`\n' +
-      '`2. Luke  1:48.000 (+2.000s)`'
+      '`1. Paul  1:46.000  (+6.000s)`\n' +   // TWO spaces before '(': padded_time trailing space + diff leading space
+      '`2. Luke  1:48.000  (+2.000s)`'
     );
   });
   it('handles empty', () => {
@@ -168,8 +168,8 @@ describe('formatTotalLeaderboard', () => {
     );
     expect(out).toBe(
       '`   WR      3:20.000`\n' +
-      '`1. Paul  3:30.000 (+10.000s) [2]`\n' +
-      '`2. Luke  3:36.000 ( +6.000s) [4]`'
+      '`1. Paul  3:30.000  (+10.000s) [2]`\n' +   // TWO spaces before '(' (padded_time + diff leading space)
+      '`2. Luke  3:36.000  ( +6.000s) [4]`'
     );
   });
 });
