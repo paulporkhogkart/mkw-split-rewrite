@@ -19,7 +19,7 @@
   import { fade, scale } from "svelte/transition";
   import { quintOut } from "svelte/easing";
   import snd from "../assets/run-review.wav";
-  import { isValidTime, parseTimeMs, isPbTime, isValidInt, isValidCount, lapComplete, buildLaps } from "../lib/runReview.js";
+  import { isValidTime, parseTimeMs, isPbTime, isValidInt, isValidCount, buildLaps, lapsComplete } from "../lib/runReview.js";
 
   export let run;                       // { attempt_id, status, course, character, kart, costume, total_time, total_laps, laps[] }
   export let isPb = false;
@@ -86,10 +86,12 @@
        ? (liveBest === undefined ? !!isPb : isPbTime(totalMs, liveBest))
        : false;
 
-  // The per-lap grid shows only for a PB whose laps the engine actually captured;
-  // splits/coins/mushrooms are best-effort - never hand-entered, never required.
-  $: hasCapturedLaps = (run?.laps?.length ?? 0) > 0;
-  $: needSplits  = isFinished && isPbLive && hasCapturedLaps;
+  // The per-lap grid shows only for a PB whose laps were FULLY captured (all
+  // total_laps). Splits are all-or-nothing - one untracked lap drops the whole set
+  // (the coin deltas / mushroom counts for the rest would be meaningless), so a
+  // partial capture shows no grid and uploads no per-lap data.
+  $: totalLaps   = run?.total_laps ?? (run?.laps?.length ?? 0);
+  $: needSplits  = isFinished && isPbLive && lapsComplete(run?.laps, totalLaps);
 
   $: missCourse  = !course;
   $: missChar    = !character;
@@ -111,9 +113,10 @@
       attempt_id: run.attempt_id,
       course, character, kart, costume,
       total_time: needTotal ? totalTime.trim() : (run.total_time ?? null),
-      // Submit only complete lap rows when the grid is shown; otherwise forward
-      // whatever the engine captured (possibly nothing). Splits are never required.
-      laps: needSplits ? buildLaps((laps ?? []).filter(lapComplete)) : (run.laps ?? []),
+      // The grid (when shown) holds a full captured set; forward it, else forward
+      // whatever the engine captured. A partial/edited-incomplete set is dropped
+      // wholesale at the upload boundary (Rust laps_complete), never partially kept.
+      laps: needSplits ? buildLaps(laps) : (run.laps ?? []),
     });
   }
   const discard = () => dispatch("discard", { attempt_id: run.attempt_id });

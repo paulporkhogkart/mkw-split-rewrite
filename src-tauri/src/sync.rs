@@ -43,14 +43,40 @@ fn attempt_id_of(line: &str) -> Option<String> {
     v.get("attempt_id")?.as_str().map(|s| s.to_string())
 }
 
+/// True only when every lap 1..=total_laps was captured with all fields present
+/// (non-empty time_str + non-null coins + non-null shrooms). Per-lap data is
+/// all-or-nothing: one untracked lap makes the coin deltas / mushroom counts for the
+/// rest meaningless (coins are deltas off the previous lap), so a partial set is
+/// worse than none.
+fn laps_complete(v: &serde_json::Value) -> bool {
+    let Some(n) = v.get("total_laps").and_then(|x| x.as_i64()) else { return false; };
+    if n < 1 { return false; }
+    let Some(laps) = v.get("laps").and_then(|x| x.as_array()) else { return false; };
+    (1..=n).all(|lap_no| {
+        laps.iter()
+            .find(|e| e.get("lap").and_then(|x| x.as_i64()) == Some(lap_no))
+            .map(|e| {
+                let time_ok = e.get("time_str").and_then(|x| x.as_str())
+                    .map(|s| !s.is_empty()).unwrap_or(false);
+                let coins_ok = e.get("coins").map(|x| !x.is_null()).unwrap_or(false);
+                let shrooms_ok = e.get("shrooms").map(|x| !x.is_null()).unwrap_or(false);
+                time_ok && coins_ok && shrooms_ok
+            })
+            .unwrap_or(false)
+    })
+}
+
 /// Turn a stored run_finalized line into the POST body: drop the IPC `type` tag and
-/// forward everything else as-is. `cc` is NOT injected — it isn't a client setting;
-/// the engine will include it per run if MKW ever ships more than 150cc, and the
-/// server defaults to 150 when it's absent.
+/// forward everything else as-is, except a partial per-lap set is dropped entirely
+/// (`laps: []`) — see `laps_complete`. `cc` is NOT injected — it isn't a client
+/// setting; the engine will include it per run if MKW ever ships more than 150cc, and
+/// the server defaults to 150 when it's absent.
 fn build_upload_body(line: &str) -> Option<String> {
     let mut v: serde_json::Value = serde_json::from_str(line).ok()?;
+    let complete = laps_complete(&v);
     let obj = v.as_object_mut()?;
     obj.remove("type");
+    if !complete { obj.insert("laps".into(), serde_json::json!([])); }
     serde_json::to_string(&v).ok()
 }
 
@@ -669,6 +695,35 @@ mod tests {
         assert_eq!(v["attempt_id"], "a1");
         assert_eq!(v["course"], "Rainbow Road");
         assert_eq!(v["status"], "finished");
+    }
+
+    #[test]
+    fn laps_complete_requires_every_lap_fully_tracked() {
+        let full = _v(r#"{"total_laps":2,"laps":[{"lap":1,"time_str":"0:30.000","coins":5,"shrooms":2},{"lap":2,"time_str":"0:30.000","coins":-1,"shrooms":0}]}"#);
+        assert!(laps_complete(&full));
+        // A whole lap missing.
+        let short = _v(r#"{"total_laps":3,"laps":[{"lap":1,"time_str":"0:30.000","coins":5,"shrooms":2},{"lap":2,"time_str":"0:30.000","coins":1,"shrooms":0}]}"#);
+        assert!(!laps_complete(&short));
+        // One null field in one lap.
+        let gap = _v(r#"{"total_laps":2,"laps":[{"lap":1,"time_str":"0:30.000","coins":5,"shrooms":2},{"lap":2,"time_str":"0:30.000","coins":null,"shrooms":0}]}"#);
+        assert!(!laps_complete(&gap));
+        // No laps / no total_laps.
+        assert!(!laps_complete(&_v(r#"{"total_laps":3}"#)));
+        assert!(!laps_complete(&_v(r#"{"status":"finished"}"#)));
+    }
+
+    #[test]
+    fn upload_body_drops_a_partial_lap_set_keeps_a_full_one() {
+        // 1 of 3 laps tracked → all per-lap data dropped (laps: []), rest preserved.
+        let partial = r#"{"type":"run_finalized","attempt_id":"a1","course":"RR","status":"finished","total_time":"1:50.000","total_laps":3,"laps":[{"lap":1,"time_str":"0:36.000","coins":5,"shrooms":2}]}"#;
+        let v: serde_json::Value = serde_json::from_str(&build_upload_body(partial).unwrap()).unwrap();
+        assert_eq!(v["laps"].as_array().unwrap().len(), 0);
+        assert_eq!(v["total_time"], "1:50.000");      // everything else intact
+        assert_eq!(v["total_laps"], 3);
+        // A complete set survives untouched.
+        let full = r#"{"type":"run_finalized","attempt_id":"a2","course":"RR","status":"finished","total_time":"1:50.000","total_laps":2,"laps":[{"lap":1,"time_str":"0:55.000","coins":5,"shrooms":2},{"lap":2,"time_str":"0:55.000","coins":1,"shrooms":1}]}"#;
+        let bv: serde_json::Value = serde_json::from_str(&build_upload_body(full).unwrap()).unwrap();
+        assert_eq!(bv["laps"].as_array().unwrap().len(), 2);
     }
 
     #[test]

@@ -29,6 +29,19 @@ export const isValidCount = (s) => /^\d+$/.test((s ?? "").toString().trim());
 export const lapComplete = (l) =>
   isValidTime(l.time) && isValidInt(l.coins) && isValidCount(l.shrooms);
 
+// True only when the engine captured a FULL per-lap set: every lap 1..totalLaps with
+// a time + non-null coins + non-null shrooms. Per-lap data is all-or-nothing - one
+// untracked lap makes the coin deltas / mushroom counts for the rest meaningless, so
+// a partial capture is treated as no per-lap data at all. Mirrors Rust laps_complete.
+export function lapsComplete(runLaps, totalLaps) {
+  if (!Array.isArray(runLaps) || !Number.isInteger(totalLaps) || totalLaps < 1) return false;
+  for (let n = 1; n <= totalLaps; n++) {
+    const l = runLaps.find((x) => x?.lap === n);
+    if (!l || !l.time_str || l.coins == null || l.shrooms == null) return false;
+  }
+  return true;
+}
+
 // Turn the popup's working lap rows ({lap, time, coins, shrooms} as strings) into
 // the upload shape. time_ms is derived from the edited string so the server (which
 // stores lap.time_ms directly) always gets it.
