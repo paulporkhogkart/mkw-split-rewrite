@@ -65,7 +65,13 @@ export function buildPbData(db: DatabaseSync, ev: PbEvent): PbEmbedData {
     oldTotalPos = overall.filter((o) => o.display_name !== ev.player && o.total_time_ms < myOld).length + 1;
   }
 
-  const is_new_track_record = newTrackPos === 1 && (oldTrackPos == null || oldTrackPos > 1 || others.length === 0);
+  // New track record = no prior time on the course, or this PB beats the track's prior best
+  // time (this player's previous time and every other player's current time). Mirrors the
+  // legacy `is_new_track_record = not old_leaderboard or new_time_ms < old_leaderboard[0].time_ms`.
+  const priorTimes = others.map((r) => r.total_time_ms);
+  if (prevMs != null) priorTimes.push(prevMs);
+  const oldBest = priorTimes.length ? Math.min(...priorTimes) : null;
+  const is_new_track_record = oldBest == null || newMs < oldBest;
   let reign = null;
   if (is_new_track_record && courseId) {
     const pbRun = db.prepare(

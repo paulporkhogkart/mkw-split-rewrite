@@ -64,4 +64,20 @@ describe('buildPbData', () => {
     expect(d.is_new_track_record).toBe(true);
     expect(d.reign?.previous_holder).toBe('Luke');
   });
+
+  it('flags a track record when a player improves their own leading time (slower rival present)', () => {
+    const db = openDb(':memory:'); applySchema(db);
+    db.exec("INSERT INTO seasons(id,name,is_active) VALUES (1,'S1',1)");
+    db.exec("INSERT INTO players(id,display_name) VALUES (1,'Paul'),(2,'Luke')");
+    db.exec("INSERT INTO courses(id,slug,display_name) VALUES (1,'rr','Rainbow Road')");
+    // Paul already led at 1:47 ahead of Luke 1:48, then improves to 1:46 (run 99).
+    db.exec("INSERT INTO runs(id,season_id,player_id,course_id,cc,status,provenance,total_time_ms,total_time_str,ended_at,is_pb) VALUES " +
+      "(50,1,1,1,150,'finished','live',107000,'1:47.000','2026-01-01T00:00:00.000Z',0)," +
+      "(60,1,2,1,150,'finished','live',108000,'1:48.000','2026-01-02T00:00:00.000Z',1)," +
+      "(99,1,1,1,150,'finished','live',106000,'1:46.000','2026-03-01T00:00:00.000Z',1)");
+    const d = buildPbData(db, { type: 'pb_achieved', player: 'Paul', course: 'rr', cc: 150, total_time: '1:46.000', delta_vs_prev_ms: -1000, rank: 1 });
+    expect(d.is_new_track_record).toBe(true);                 // beat the prior best (own 1:47), not just rank 1
+    expect(d.reign?.previous_holder).toBe('Paul');
+    expect(d.reign?.is_same_person).toBe(true);
+  });
 });
