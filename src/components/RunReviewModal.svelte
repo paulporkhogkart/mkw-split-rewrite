@@ -1,22 +1,25 @@
 <script>
   // RunReviewModal.svelte — review-and-complete a detected run before it uploads.
   //
-  // A finished/reset run reaches the outbox only once it's "complete enough":
+  // A run is "complete enough" to upload once it has its identity + total:
   //   • every run  → course, character, kart
   //   • finished   → + total time
-  //   • finished PB → + every lap split (count == total_laps)
+  // Per-lap splits/coins/mushrooms are best-effort: never required, never hand-entered.
+  // PB-ness is re-checked live against the picked course (pbBest), so a PB whose course
+  // wasn't auto-detected is still recognised; when its laps WERE captured the grid is
+  // shown for an optional once-over (non-blocking).
   // Anything missing holds the run here for the user to fill (or Discard) — nothing
   // uploads until they act. The popup is deliberately part of the app's existing
   // OBS-style system (same tokens / modal idiom), not a separate look.
   //
   // Stateless wrt the queue: shows ONE run; the parent advances on submit/discard.
-  //   props : run, isPb, options{courses,characters,karts,costumes}, queueIndex, queueCount
+  //   props : run, isPb, pbBest, options{courses,characters,karts,costumes}, queueIndex, queueCount
   //   events: submit(filledRun) · discard({attempt_id})
   import { createEventDispatcher, onMount, tick } from "svelte";
   import { fade, scale } from "svelte/transition";
   import { quintOut } from "svelte/easing";
   import snd from "../assets/run-review.wav";
-  import { isValidTime, isValidInt, isValidCount, lapComplete, buildLaps } from "../lib/runReview.js";
+  import { isValidTime, parseTimeMs, isPbTime, isValidInt, isValidCount, lapComplete, buildLaps } from "../lib/runReview.js";
 
   export let run;                       // { attempt_id, status, course, character, kart, costume, total_time, total_laps, laps[] }
   export let isPb = false;
@@ -24,6 +27,10 @@
   export let queueIndex = 0;            // 0-based position in the review queue
   export let queueCount = 1;            // total runs awaiting review
   export let playSound = true;
+  // Live PB lookup: (course) => Promise<bestMs|null>. Asked whenever the chosen course
+  // changes, so a run whose course wasn't auto-detected can still be recognised as a
+  // PB once you pick it. Defaults to "no record on file" when not supplied.
+  export let pbBest = async () => null;
 
   const dispatch = createEventDispatcher();
 
@@ -36,6 +43,7 @@
   $: if (run && run.attempt_id !== loadedId) {
     loadedId  = run.attempt_id;
     confirmingDiscard = false;       // reset the prompt when the queue advances
+    liveBest = undefined; pbQueryKey = null;   // re-evaluate PB for the new run
     course    = run.course    ?? "";
     character = run.character ?? "";
     kart      = run.kart      ?? "";
@@ -55,17 +63,40 @@
     }));
   }
 
+  // ── Live PB detection ─────────────────────────────────────────────────────────
+  // A run whose course wasn't auto-detected reaches here flagged as a non-PB (the
+  // engine couldn't look it up). Re-evaluate against the cached best for whatever
+  // course the user picks, so the popup recognises and collects a real PB.
+  let liveBest;            // undefined = not looked up; null = no record; number = best ms
+  let pbQueryKey = null;   // course we last queried (don't re-query on every keystroke)
+  async function lookupPb(c) {
+    pbQueryKey = c;
+    if (!c) { liveBest = undefined; return; }
+    try { liveBest = await pbBest(c); } catch { liveBest = undefined; }
+  }
+
   // ── What this run needs, and what's still missing ─────────────────────────────
   $: isFinished  = run?.status === "finished";
   $: needTotal   = isFinished;
-  $: needSplits  = isFinished && isPb;
+
+  $: totalMs     = isValidTime(totalTime) ? parseTimeMs(totalTime) : null;
+  $: pbCourse    = isFinished && course && totalMs != null ? course : null;
+  $: if (pbCourse !== pbQueryKey) lookupPb(pbCourse);
+  $: isPbLive    = isFinished
+       ? (liveBest === undefined ? !!isPb : isPbTime(totalMs, liveBest))
+       : false;
+
+  // The per-lap grid shows only for a PB whose laps the engine actually captured;
+  // splits/coins/mushrooms are best-effort - never hand-entered, never required.
+  $: hasCapturedLaps = (run?.laps?.length ?? 0) > 0;
+  $: needSplits  = isFinished && isPbLive && hasCapturedLaps;
 
   $: missCourse  = !course;
   $: missChar    = !character;
   $: missKart    = !kart;
   $: missTotal   = needTotal && !isValidTime(totalTime);
-  $: badLaps     = needSplits ? (laps ?? []).filter((l) => !lapComplete(l)).map((l) => l.lap) : [];
-  $: canSubmit   = !missCourse && !missChar && !missKart && !missTotal && badLaps.length === 0;
+  // Only identity + total gate submit; per-lap data never blocks.
+  $: canSubmit   = !missCourse && !missChar && !missKart && !missTotal;
 
   // Costume is optional; restricted to the selected character's valid costumes
   // (engine KNOWN_COSTUMES). "Base" (no costume) is always first; an unknown or
@@ -80,7 +111,9 @@
       attempt_id: run.attempt_id,
       course, character, kart, costume,
       total_time: needTotal ? totalTime.trim() : (run.total_time ?? null),
-      laps: needSplits ? buildLaps(laps) : (run.laps ?? []),
+      // Submit only complete lap rows when the grid is shown; otherwise forward
+      // whatever the engine captured (possibly nothing). Splits are never required.
+      laps: needSplits ? buildLaps((laps ?? []).filter(lapComplete)) : (run.laps ?? []),
     });
   }
   const discard = () => dispatch("discard", { attempt_id: run.attempt_id });
@@ -103,7 +136,10 @@
     in:scale={{ duration: 170, start: 0.97, opacity: 0, easing: quintOut }}
   >
     <header class="rv-head">
-      <h2 id="rv-title" class="rv-head-title">Run needs review</h2>
+      <div class="rv-head-l">
+        <h2 id="rv-title" class="rv-head-title">Run needs review</h2>
+        {#if isPbLive}<span class="rv-pb" title="This run is a new personal best">PB</span>{/if}
+      </div>
       {#if queueCount > 1}
         <span class="rv-queue" title="Runs awaiting review">{queueIndex + 1}<span class="rv-queue-sep">/</span>{queueCount}</span>
       {/if}
@@ -214,7 +250,14 @@
     padding: .6rem .85rem;
     border-bottom: 1px solid var(--bd-soft);
   }
+  .rv-head-l { display: flex; align-items: center; gap: .45rem; min-width: 0; }
   .rv-head-title { font-size: .82rem; font-weight: 600; color: var(--tx); letter-spacing: .01em; }
+  /* New-PB chip: subtle outlined accent (functional highlight, not a fill). */
+  .rv-pb {
+    flex-shrink: 0; font-size: .6rem; font-weight: 700; letter-spacing: .04em;
+    color: var(--accent); border: 1px solid var(--accent);
+    border-radius: var(--r-sm); padding: .06rem .32rem; line-height: 1.3;
+  }
   .rv-queue {
     flex-shrink: 0; font-size: .66rem; color: var(--tx-mut);
     background: var(--panel-2); border: 1px solid var(--bd);

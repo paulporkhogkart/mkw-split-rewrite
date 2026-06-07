@@ -863,10 +863,22 @@
   function _dequeue(attemptId) {
     reviewQueue = reviewQueue.filter((e) => e.attemptId !== attemptId);
   }
+  // Live PB lookup for the review popup: the cached best ms for a course (or null),
+  // from the Rust pb_cache. Lets the popup recognise a PB once the course is picked.
+  async function pbBestLookup(course) {
+    if (!course) return null;
+    try { return await invoke("sync_pb_best", { course }); }
+    catch { return null; }
+  }
   function onReviewSubmit(e) {
     const { attempt_id, ...filled } = e.detail;   // attempt_id travels separately
     const entry = reviewQueue.find((x) => x.attemptId === attempt_id);
-    invoke("sync_resolve_pending", { attemptId: attempt_id, filled }).catch(() => {});
+    // The resolve returns a pb_achieved event when the now-complete run is a PB (e.g.
+    // the course was only entered here); route it like any tracker event so a reviewed
+    // PB notifies just like an auto-detected one.
+    invoke("sync_resolve_pending", { attemptId: attempt_id, filled })
+      .then((ev) => { if (ev) handleMsg(JSON.parse(ev)); })
+      .catch(() => {});
     // For a just-finished run (not a resurfaced one), correct the engine's live
     // selection state so a retry inherits the values the user just confirmed.
     if (entry?.live) {
@@ -1788,6 +1800,7 @@
   <RunReviewModal
     run={reviewHead.run}
     isPb={reviewHead.isPb}
+    pbBest={pbBestLookup}
     options={optionLists}
     queueIndex={0}
     queueCount={reviewQueue.length}

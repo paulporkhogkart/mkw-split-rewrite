@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isValidTime, parseTimeMs, isValidInt, isValidCount, buildLaps } from "./runReview.js";
+import { isValidTime, parseTimeMs, isValidInt, isValidCount, buildLaps, isPbTime } from "./runReview.js";
 
 describe("runReview validators", () => {
   it("validates M:SS.mmm time strings", () => {
@@ -31,6 +31,15 @@ describe("runReview validators", () => {
     expect(isValidCount("3")).toBe(true);
     expect(isValidCount("-1")).toBe(false);
     expect(isValidCount("")).toBe(false);
+  });
+
+  it("isPbTime: any time beats no record; otherwise must be strictly faster", () => {
+    expect(isPbTime(110000, null)).toBe(true);       // no prior PB on record
+    expect(isPbTime(110000, undefined)).toBe(true);
+    expect(isPbTime(109000, 110000)).toBe(true);     // faster
+    expect(isPbTime(110000, 110000)).toBe(false);    // tie is not a PB
+    expect(isPbTime(111000, 110000)).toBe(false);    // slower
+    expect(isPbTime(null, 110000)).toBe(false);      // no time entered yet
   });
 
   it("buildLaps derives time_ms and parses coins/shrooms", () => {

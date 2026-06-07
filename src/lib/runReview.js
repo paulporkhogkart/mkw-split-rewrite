@@ -11,6 +11,14 @@ export function parseTimeMs(t) {
   return m ? Number(m[1]) * 60000 + Number(m[2]) * 1000 + Number(m[3]) : null;
 }
 
+// True when totalMs would be a new PB versus the cached best. A null/undefined best
+// means no PB is on record yet, so any finished time counts. Mirrors the Rust
+// pb_cache check (sync.rs:is_new_pb): a tie is NOT a PB.
+export function isPbTime(totalMs, best) {
+  if (totalMs == null) return false;
+  return best == null || totalMs < best;
+}
+
 // Coins are a signed delta - any integer (incl. negative, incl. 0) is valid.
 export const isValidInt = (s) => /^-?\d+$/.test((s ?? "").toString().trim());
 

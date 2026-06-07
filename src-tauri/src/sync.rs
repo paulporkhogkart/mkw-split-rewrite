@@ -32,6 +32,11 @@ fn parse_time_ms(t: &str) -> Option<i64> {
     Some(m * 60_000 + s * 1_000 + ms)
 }
 
+/// A trimmed, non-empty string field — treats null, absent, and "" alike as None.
+fn nonempty_str<'a>(v: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    v.get(key).and_then(|x| x.as_str()).map(str::trim).filter(|s| !s.is_empty())
+}
+
 /// Extract the `attempt_id` from a run_finalized JSON line.
 fn attempt_id_of(line: &str) -> Option<String> {
     let v: serde_json::Value = serde_json::from_str(line).ok()?;
@@ -180,8 +185,11 @@ fn is_new_pb(conn: &Connection, slug: &str, cc: i64, ms: i64) -> bool {
 }
 
 /// The gating matrix. Returns the ids of missing required fields; empty = complete
-/// enough to upload. `0`/negative are valid; only null/empty counts as missing.
-fn missing_fields(v: &serde_json::Value, is_pb: bool) -> Vec<String> {
+/// enough to upload. Only the run's identity (course/character/kart) and — on a
+/// finished run — the total time are required. Per-lap splits/coins/mushrooms are
+/// best-effort: the engine ships them when it tracked them, but they NEVER gate a
+/// run, so the user is never asked to hand-enter lap data they don't have.
+fn missing_fields(v: &serde_json::Value) -> Vec<String> {
     let mut missing = Vec::new();
     let str_present = |key: &str| -> bool {
         v.get(key).and_then(|x| x.as_str()).map(|s| !s.trim().is_empty()).unwrap_or(false)
@@ -189,37 +197,37 @@ fn missing_fields(v: &serde_json::Value, is_pb: bool) -> Vec<String> {
     for key in ["course", "character", "kart"] {
         if !str_present(key) { missing.push(key.to_string()); }
     }
-    let status = v.get("status").and_then(|x| x.as_str()).unwrap_or("");
-    if status == "finished" {
+    if v.get("status").and_then(|x| x.as_str()) == Some("finished") {
         let total_ok = v.get("total_time").and_then(|x| x.as_str())
             .and_then(parse_time_ms).is_some();
         if !total_ok { missing.push("total_time".to_string()); }
-        if is_pb {
-            if let Some(n) = v.get("total_laps").and_then(|x| x.as_i64()) {
-                let laps = v.get("laps").and_then(|x| x.as_array());
-                for lap_no in 1..=n {
-                    let entry = laps.and_then(|arr| arr.iter().find(|e|
-                        e.get("lap").and_then(|x| x.as_i64()) == Some(lap_no)));
-                    let time_ok = entry.and_then(|e| e.get("time_str")).and_then(|x| x.as_str())
-                        .map(|s| !s.is_empty()).unwrap_or(false);
-                    let coins_ok = entry.and_then(|e| e.get("coins")).map(|x| !x.is_null()).unwrap_or(false);
-                    let shrooms_ok = entry.and_then(|e| e.get("shrooms")).map(|x| !x.is_null()).unwrap_or(false);
-                    if !time_ok { missing.push(format!("lap_{lap_no}_time")); }
-                    if !coins_ok { missing.push(format!("lap_{lap_no}_coins")); }
-                    if !shrooms_ok { missing.push(format!("lap_{lap_no}_shrooms")); }
-                }
-            }
-        }
     }
     missing
 }
 
-/// True if this is a finished run whose time beats the cached best (lowers the cache).
+/// (course_slug, ms) for a finished run with a non-empty course and a parseable total
+/// time; None for anything that can't be a PB (reset, or missing course / total).
+fn finished_pb_key(v: &serde_json::Value) -> Option<(String, i64)> {
+    if v.get("status").and_then(|x| x.as_str()) != Some("finished") { return None; }
+    let course = nonempty_str(v, "course")?;
+    let ms = nonempty_str(v, "total_time").and_then(parse_time_ms)?;
+    Some((slugify(course), ms))
+}
+
+/// True if this finished run beats the cached best, lowering the cache so back-to-back
+/// offline PBs each register. Use on the upload/commit path only.
 fn is_finished_new_pb(conn: &Connection, v: &serde_json::Value) -> bool {
-    if v.get("status").and_then(|x| x.as_str()) != Some("finished") { return false; }
-    let Some(course) = v.get("course").and_then(|x| x.as_str()) else { return false; };
-    let Some(ms) = v.get("total_time").and_then(|x| x.as_str()).and_then(parse_time_ms) else { return false; };
-    is_new_pb(conn, &slugify(course), 150, ms)
+    match finished_pb_key(v) { Some((slug, ms)) => is_new_pb(conn, &slug, 150, ms), None => false }
+}
+
+/// Read-only PB check that does NOT touch the cache — for framing a HELD run whose
+/// outcome isn't committed yet (it may be discarded, or resolved later, at which point
+/// the cache is lowered exactly once).
+fn is_finished_pb_peek(conn: &Connection, v: &serde_json::Value) -> bool {
+    match finished_pb_key(v) {
+        Some((slug, ms)) => match pb_cache_best(conn, &slug, 150) { Some(best) => ms < best, None => true },
+        None => false,
+    }
 }
 
 /// Route one run_finalized line: store it with the right status and return the event to
@@ -228,9 +236,10 @@ fn is_finished_new_pb(conn: &Connection, v: &serde_json::Value) -> bool {
 fn route_line(conn: &Connection, line: &str) -> Option<String> {
     let id = attempt_id_of(line)?;
     let v: serde_json::Value = serde_json::from_str(line).ok()?;
-    let is_pb = is_finished_new_pb(conn, &v);
-    let missing = missing_fields(&v, is_pb);
+    let missing = missing_fields(&v);
     if missing.is_empty() {
+        // Complete → uploads now, so commit the PB check (lowers the cache).
+        let is_pb = is_finished_new_pb(conn, &v);
         outbox_insert(conn, &id, line, "ready", is_pb);
         if is_pb {
             let course = v.get("course").and_then(|x| x.as_str()).unwrap_or("");
@@ -239,6 +248,9 @@ fn route_line(conn: &Connection, line: &str) -> Option<String> {
         }
         None
     } else {
+        // Held for review → PB-ness is only a framing hint; DON'T lower the cache (the
+        // run may be discarded, and resolve re-checks + lowers on release).
+        let is_pb = is_finished_pb_peek(conn, &v);
         outbox_insert(conn, &id, line, "pending_review", is_pb);
         let mut run = v.clone();
         if let Some(o) = run.as_object_mut() { o.remove("type"); }
@@ -408,24 +420,44 @@ pub async fn sync_test_connection() -> Result<String, String> {
     }
 }
 
-/// Merge `filled` (a JSON object of corrected fields) into the stored body and flip the
-/// row to `ready`. Pure (takes the conn) so it's unit-testable.
-fn resolve_in_outbox(conn: &Connection, attempt_id: &str, filled: &serde_json::Value) {
-    let Some(body) = outbox_get_body(conn, attempt_id) else { return };
-    let Ok(mut v) = serde_json::from_str::<serde_json::Value>(&body) else { return };
+/// Merge `filled` (a JSON object of corrected fields) into the stored body, flip the
+/// row to `ready`, and return the merged value. Pure (takes the conn) so it's
+/// unit-testable. None if the row is gone / unparseable.
+fn resolve_in_outbox(conn: &Connection, attempt_id: &str, filled: &serde_json::Value) -> Option<serde_json::Value> {
+    let body = outbox_get_body(conn, attempt_id)?;
+    let mut v = serde_json::from_str::<serde_json::Value>(&body).ok()?;
     if let (Some(obj), Some(f)) = (v.as_object_mut(), filled.as_object()) {
         for (k, val) in f { obj.insert(k.clone(), val.clone()); }
     }
-    if let Ok(merged) = serde_json::to_string(&v) {
-        outbox_update_ready(conn, attempt_id, &merged);
-    }
+    let merged = serde_json::to_string(&v).ok()?;
+    outbox_update_ready(conn, attempt_id, &merged);
+    Some(v)
 }
 
+/// Merge the user's fixes into a held run and release it. If the now-complete run is a
+/// PB (the course may only now be known), lower the cache and return a `pb_achieved`
+/// event so reviewed PBs notify just like auto-detected ones. Returns None otherwise.
 #[tauri::command]
-pub fn sync_resolve_pending(attempt_id: String, filled: serde_json::Value) {
-    if let Ok(guard) = OUTBOX.lock() {
-        if let Some(conn) = guard.as_ref() { resolve_in_outbox(conn, &attempt_id, &filled); }
+pub fn sync_resolve_pending(attempt_id: String, filled: serde_json::Value) -> Option<String> {
+    let guard = OUTBOX.lock().ok()?;
+    let conn = guard.as_ref()?;
+    let merged = resolve_in_outbox(conn, &attempt_id, &filled)?;
+    if is_finished_new_pb(conn, &merged) {
+        let course = merged.get("course").and_then(|x| x.as_str()).unwrap_or("");
+        let time = merged.get("total_time").and_then(|x| x.as_str()).unwrap_or("");
+        return Some(serde_json::json!({"type":"pb_achieved","course":course,"time":time}).to_string());
     }
+    None
+}
+
+/// The cached PB (ms) for a course at 150cc, or null if none / unconfigured. Read-only
+/// — does NOT lower the cache — so the review popup can ask, live, whether the course
+/// the user just picked makes this run a PB (driving the "PB" badge + split prompt).
+#[tauri::command]
+pub fn sync_pb_best(course: String) -> Option<i64> {
+    let guard = OUTBOX.lock().ok()?;
+    let conn = guard.as_ref()?;
+    pb_cache_best(conn, &slugify(&course), 150)
 }
 
 #[tauri::command]
@@ -724,6 +756,19 @@ mod tests {
     }
 
     #[test]
+    fn held_run_peeks_pb_without_lowering_the_cache() {
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_outbox(&conn); ensure_pb_cache(&conn);
+        // PB-worthy time but missing kart → held. is_pb is flagged (peek), but the
+        // cache must stay untouched so the popup + resolve still see it as a PB.
+        let line = r#"{"type":"run_finalized","attempt_id":"h1","course":"Rainbow Road","character":"M","kart":"","status":"finished","total_time":"1:50.000"}"#;
+        let ev: serde_json::Value = serde_json::from_str(&route_line(&conn, line).unwrap()).unwrap();
+        assert_eq!(ev["type"], "run_needs_review");
+        assert_eq!(ev["is_pb"], true);
+        assert_eq!(pb_cache_best(&conn, "rainbow_road", 150), None);   // NOT lowered
+    }
+
+    #[test]
     fn outbox_status_routes_ready_vs_pending() {
         let conn = Connection::open_in_memory().unwrap();
         ensure_outbox(&conn);
@@ -751,24 +796,28 @@ mod tests {
     #[test]
     fn missing_fields_matrix() {
         let complete = _v(r#"{"course":"X","character":"Mario","kart":"K","status":"finished","total_time":"1:00.000"}"#);
-        assert!(missing_fields(&complete, false).is_empty());
+        assert!(missing_fields(&complete).is_empty());
 
         let reset = _v(r#"{"course":"X","character":"","kart":"K","status":"reset"}"#);
-        assert_eq!(missing_fields(&reset, false), vec!["character"]);
+        assert_eq!(missing_fields(&reset), vec!["character"]);
 
         let no_total = _v(r#"{"course":"X","character":"M","kart":"K","status":"finished"}"#);
-        assert_eq!(missing_fields(&no_total, false), vec!["total_time"]);
+        assert_eq!(missing_fields(&no_total), vec!["total_time"]);
 
-        let pb_ok = _v(r#"{"course":"X","character":"M","kart":"K","status":"finished","total_time":"1:00.000","total_laps":2,
-            "laps":[{"lap":1,"time_str":"0:30.000","coins":5,"shrooms":2},{"lap":2,"time_str":"0:30.000","coins":-1,"shrooms":0}]}"#);
-        assert!(missing_fields(&pb_ok, true).is_empty());
+        // Identity is always required, on any status.
+        let bare = _v(r#"{"course":"","character":"","kart":"","status":"reset"}"#);
+        assert_eq!(missing_fields(&bare), vec!["course", "character", "kart"]);
+    }
 
-        let pb_gap = _v(r#"{"course":"X","character":"M","kart":"K","status":"finished","total_time":"1:00.000","total_laps":2,
-            "laps":[{"lap":1,"time_str":"0:30.000","coins":5,"shrooms":2},{"lap":2,"time_str":"0:30.000","coins":null,"shrooms":0}]}"#);
-        assert_eq!(missing_fields(&pb_gap, true), vec!["lap_2_coins"]);
-
-        let pb_no_n = _v(r#"{"course":"X","character":"M","kart":"K","status":"finished","total_time":"1:00.000"}"#);
-        assert!(missing_fields(&pb_no_n, true).is_empty());
+    #[test]
+    fn missing_fields_never_gates_laps() {
+        // A finished run with identity + total but NO per-lap data is complete:
+        // splits are best-effort and must never hold a run for review.
+        let no_laps = _v(r#"{"course":"X","character":"M","kart":"K","status":"finished","total_time":"1:00.000"}"#);
+        assert!(missing_fields(&no_laps).is_empty());
+        // Partial/empty laps don't gate it either (even though it'd be a PB).
+        let partial = _v(r#"{"course":"X","character":"M","kart":"K","status":"finished","total_time":"1:00.000","total_laps":3,"laps":[{"lap":1,"time_str":"0:20.000"}]}"#);
+        assert!(missing_fields(&partial).is_empty());
     }
 
     #[test]
@@ -785,6 +834,27 @@ mod tests {
         assert_eq!(v["kart"], "Standard Kart");
         assert_eq!(outbox_pending(&conn).len(), 1);            // now ready
         assert_eq!(outbox_list_pending(&conn).len(), 0);
+    }
+
+    #[test]
+    fn resolve_releases_and_flags_a_reviewed_pb() {
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_outbox(&conn); ensure_pb_cache(&conn);
+        // Held because the course wasn't detected — only the final time was captured.
+        outbox_insert(&conn, "r1",
+            r#"{"type":"run_finalized","attempt_id":"r1","course":"","character":"Mario","kart":"K","status":"finished","total_time":"1:50.000"}"#,
+            "pending_review", false);
+        // The user picks the course in the popup; the run releases to ready.
+        let filled: serde_json::Value = serde_json::from_str(r#"{"course":"Rainbow Road"}"#).unwrap();
+        let merged = resolve_in_outbox(&conn, "r1", &filled).unwrap();
+        assert_eq!(merged["course"], "Rainbow Road");
+        assert_eq!(outbox_pending(&conn).len(), 1);
+        assert_eq!(outbox_list_pending(&conn).len(), 0);
+        // With the course now known it's a PB (empty cache); the check lowers the
+        // cache so the same time won't re-fire (mirrors sync_resolve_pending).
+        assert!(is_finished_new_pb(&conn, &merged));
+        assert_eq!(pb_cache_best(&conn, "rainbow_road", 150), Some(110000));
+        assert!(!is_finished_new_pb(&conn, &merged));
     }
 
     #[test]
