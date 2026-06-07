@@ -69,6 +69,52 @@ export function alignDiffColumn(diffs: (string | null | undefined)[]): string[] 
   });
 }
 
+/** Row shape for formatTrackLeaderboard. */
+export type BoardRow = { position: number; name: string; time: string; time_ms: number };
+
+/**
+ * Track leaderboard with WR at top and decimal-aligned chained gaps.
+ * Ports legacy _format_track_leaderboard (discord_bot.py:650-742).
+ *
+ * Gap is chained: each row's diff is against the PREVIOUS row's time_ms (or wr.record_ms for the
+ * first row). last_ms starts at wr.record_ms (or null) and updates to each row's time_ms after
+ * computing the diff.
+ */
+export function formatTrackLeaderboard(rows: BoardRow[], wr: { record: string; record_ms: number } | null): string {
+  if (rows.length === 0 && !wr) return '`No times recorded`';
+
+  const lines: string[] = [];
+
+  if (wr) {
+    lines.push(`\`   WR      ${wr.record}\``);
+  }
+
+  if (rows.length === 0) return lines.join('\n');
+
+  const maxName = Math.max(...rows.map((r) => r.name.length));
+  const maxTime = Math.max(...rows.map((r) => r.time.length));
+
+  // Build chained diffs: each row's gap is to the previous row's time (or WR if first).
+  let last_ms: number | null = wr ? wr.record_ms : null;
+  const timeDiffs: string[] = rows.map((r) => {
+    const diff = (last_ms !== null && r.time_ms > last_ms) ? formatTimeDifference(r.time_ms - last_ms) : '';
+    last_ms = r.time_ms;
+    return diff;
+  });
+
+  const aligned = alignDiffColumn(timeDiffs);
+
+  for (let i = 0; i < rows.length; i++) {
+    const { position, name, time } = rows[i];
+    const paddedName = name + ' '.repeat(maxName - name.length + 2);
+    const paddedTime = time + ' '.repeat(maxTime - time.length + 1);
+    const diff = aligned[i] ? ` (${aligned[i]})` : '';
+    lines.push(`\`${position}. ${paddedName}${paddedTime}${diff}\``);
+  }
+
+  return lines.join('\n');
+}
+
 /** Track/total position transitions — ports legacy _format_positions. */
 export function formatPositions(pos: Positions): string {
   const t = pos.track;

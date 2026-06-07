@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatTimeDifference, formatDuration, formatOvertaken, formatPositions, msToDisplay, alignDiffColumn } from './format';
+import { formatTimeDifference, formatDuration, formatOvertaken, formatPositions, msToDisplay, alignDiffColumn, formatTrackLeaderboard } from './format';
 
 describe('formatTimeDifference', () => {
   it('formats zero, positive, negative (ms)', () => {
@@ -61,5 +61,23 @@ describe('msToDisplay', () => {
 describe('alignDiffColumn', () => {
   it('right-justifies the integer part to a common width; empty stays empty', () => {
     expect(alignDiffColumn(['+1.200s', '+12.030s', '', null])).toEqual([' +1.200s', '+12.030s', '', '']);
+  });
+});
+
+describe('formatTrackLeaderboard', () => {
+  it('renders WR line + chained gaps, decimal-aligned (legacy format)', () => {
+    const out = formatTrackLeaderboard(
+      [ { position: 1, name: 'Paul', time: '1:46.000', time_ms: 106000 },
+        { position: 2, name: 'Luke', time: '1:48.000', time_ms: 108000 } ],
+      { record: '1:40.000', record_ms: 100000 },
+    );
+    expect(out).toBe(
+      '`   WR      1:40.000`\n' +
+      '`1. Paul  1:46.000  (+6.000s)`\n' +   // two spaces: padded_time trailing space + diff leading space (legacy)
+      '`2. Luke  1:48.000  (+2.000s)`'
+    );
+  });
+  it('handles empty', () => {
+    expect(formatTrackLeaderboard([], null)).toBe('`No times recorded`');
   });
 });
