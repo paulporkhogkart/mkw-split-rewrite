@@ -21,6 +21,9 @@ const MARKER_LABEL = {
   reacquire: "reacq",
 };
 
+/** PB ghost-dot "breathe": angular speed of the size/brightness pulse (rad/s ≈ 0.8 Hz). */
+const PB_PULSE_OMEGA = 5.0;
+
 /**
  * Map a single 1080p point to canvas pixel coords using the display rectangle.
  *
@@ -176,7 +179,7 @@ export function roiToScreen(box, displayRect, srcW = 1920, srcH = 1080) {
  *   }>,
  *   minimap?:  { cx:number, cy:number, radius:number, trackState:string,
  *                roi?:[number,number,number,number] } | null,   // roi = [x,y,w,h] per-map
- *   trails?:   Array<{ points:[number,number,number][], color:string, opacity?:number, abandoned?:boolean }>,
+ *   trails?:   Array<{ points:[number,number,number][], color:string, opacity?:number, abandoned?:boolean, is_pb?:boolean }>,
  *   sampleImg?: HTMLImageElement | null,
  *   raceElapsedMs?:  number | null,  // race clock → interpolates the trail dots
  *   legend?:   Array<{ name:string, color:string }>,
@@ -218,6 +221,9 @@ export function drawOverlay(ctx, opts) {
   // current race-elapsed time, in its player's colour at the run's fade opacity. A
   // retried/reset run (abandoned: no finish) becomes an X at its final point once its
   // recorded clock runs out, marking where that attempt ended.
+  //
+  // `trails` arrives in global paint order (buildTrailRuns): intermingled across players by
+  // importance - every PB above every non-PB, fainter ghosts lower, the fastest PB on top.
   if (trails && trails.length > 0 && raceElapsedMs != null) {
     const dotR = Math.max(3, 5 * scale);
     for (const trail of trails) {
@@ -230,17 +236,20 @@ export function drawOverlay(ctx, opts) {
       ctx.globalAlpha = trail.opacity ?? 1;
       if (trail.abandoned && raceElapsedMs >= lastT) {
         drawX(ctx, p.x, p.y, dotR, trail.color);   // retried/reset run ended here
-      } else {
-        // PB runs get a slight accent: a touch larger + a faint ring (subtle, not loud).
-        const r = trail.is_pb ? dotR + 1 : dotR;
+      } else if (trail.is_pb) {
+        // PB: a soft "breathe" - radius + brightness rise and fall together (no
+        // outline). raceElapsedMs is the always-advancing pulse clock here.
+        const k = 0.5 + 0.5 * Math.sin((raceElapsedMs / 1000) * PB_PULSE_OMEGA);
+        const r = dotR + Math.max(1.2, dotR * 0.4) * k;
         ctx.beginPath(); ctx.arc(p.x, p.y, r + 1, 0, Math.PI * 2);   // dark halo for legibility
         ctx.fillStyle = shade(trail.color, -55); ctx.fill();
         ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = shade(trail.color, Math.round(28 * k)); ctx.fill();
+      } else {
+        ctx.beginPath(); ctx.arc(p.x, p.y, dotR + 1, 0, Math.PI * 2);   // dark halo for legibility
+        ctx.fillStyle = shade(trail.color, -55); ctx.fill();
+        ctx.beginPath(); ctx.arc(p.x, p.y, dotR, 0, Math.PI * 2);
         ctx.fillStyle = trail.color; ctx.fill();
-        if (trail.is_pb) {
-          ctx.beginPath(); ctx.arc(p.x, p.y, r + 1.5, 0, Math.PI * 2);
-          ctx.lineWidth = 1; ctx.strokeStyle = "rgba(255,255,255,0.55)"; ctx.stroke();
-        }
       }
       ctx.restore();
     }

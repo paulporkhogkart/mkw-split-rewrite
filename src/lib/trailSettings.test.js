@@ -39,16 +39,35 @@ describe("trailSettings helpers", () => {
   it("buildTrailRuns: locked colour by player; PB full-opacity + flagged; reset abandoned", () => {
     const s = { fadeByRank: true, players: {} };
     const reads = { trails: [
-      { player_id: 2, status: "finished", is_pb: false, points: [[0, 1, 1, 1]] },
-      { player_id: 2, status: "finished", is_pb: true,  points: [[0, 2, 2, 1]] },
-      { player_id: 2, status: "reset",    is_pb: false, points: [[0, 3, 3, 1]] },
+      { player_id: 2, status: "finished", is_pb: false, points: [[0, 1, 1, 1]] },   // rank 0
+      { player_id: 2, status: "finished", is_pb: true,  points: [[0, 2, 2, 1]] },   // rank 1 (PB)
+      { player_id: 2, status: "reset",    is_pb: false, points: [[0, 3, 3, 1]] },   // rank 2 (reset)
     ] };
     const out = buildTrailRuns(reads, s, roster);
     const luke = playerColor(roster[1]);   // Luke = red
     expect(out.map((r) => r.color)).toEqual([luke, luke, luke]);
-    expect(out[0].opacity).toBe(1);                                       // rank 0
-    expect(out[1]).toMatchObject({ is_pb: true, opacity: 1, abandoned: false });
-    expect(out[2]).toMatchObject({ is_pb: false, abandoned: true, opacity: 0.2 });
+    // Paint order (last = on top): faded rank-2 reset at the bottom, rank-0 above it, PB on top
+    // - PBs always sit above non-PB dots, and fainter runs sit lower.
+    expect(out[0]).toMatchObject({ is_pb: false, abandoned: true, opacity: 0.2 });   // rank 2 (reset)
+    expect(out[1]).toMatchObject({ is_pb: false, abandoned: false, opacity: 1 });    // rank 0
+    expect(out[2]).toMatchObject({ is_pb: true, abandoned: false, opacity: 1 });     // PB on top
+  });
+
+  it("buildTrailRuns z-order: global intermingle - PBs on top (fastest highest), fainter lower", () => {
+    const s = { fadeByRank: true, players: {} };
+    // points[0][1] tags each run so we can read the output (paint) order back.
+    const reads = { trails: [
+      { player_id: 2, status: "finished", is_pb: true,  total_ms: 100000, points: [[0, 1, 0, 1]] }, // p2 PB (fastest overall)
+      { player_id: 2, status: "finished", is_pb: false, total_ms: 105000, points: [[0, 2, 0, 1]] }, // p2 rank 1 (op 0.6)
+      { player_id: 2, status: "finished", is_pb: false, total_ms: 110000, points: [[0, 3, 0, 1]] }, // p2 rank 2 (op 0.2)
+      { player_id: 3, status: "finished", is_pb: true,  total_ms: 102000, points: [[0, 4, 0, 1]] }, // p3 PB
+      { player_id: 3, status: "finished", is_pb: false, total_ms: 108000, points: [[0, 5, 0, 1]] }, // p3 rank 1 (op 0.2)
+    ] };
+    const out = buildTrailRuns(reads, s, roster);
+    // Bottom -> top: faint non-PBs first (3, then 5, then 2 - by opacity, ties broken faster-higher),
+    // then both PBs above all non-PBs, sorted by time (4 below, fastest 1 on top). PBs intermingle
+    // above every non-PB regardless of player; player colour never forms a layer.
+    expect(out.map((r) => r.points[0][1])).toEqual([3, 5, 2, 4, 1]);
   });
 
   it("trailLegendRows lists active players with colour + mode", () => {

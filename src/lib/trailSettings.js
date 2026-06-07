@@ -77,8 +77,11 @@ export function rankOpacity(i, count, fade) {
 
 /** Group the combined course-reads `trails` (each tagged player_id, rank-ordered within a
  *  player) into render-ready runs with the player's locked colour + per-run opacity. PB runs
- *  stay full opacity (and carry is_pb so the overlay can mark them); reset runs carry abandoned.
- *  Returns [{points, color, opacity, abandoned, is_pb}]. */
+ *  stay full opacity (and carry is_pb so the overlay can pulse them); reset runs carry abandoned.
+ *  Output is in global paint order (z-order, last = on top), intermingled across players by
+ *  importance: every PB sits above every non-PB dot, fainter (more faded) runs sit lower, and
+ *  faster runs sit higher - so the fastest PB tops the whole stack and no colour forms a layer.
+ *  Returns [{points, color, opacity, abandoned, is_pb, total_ms}]. */
 export function buildTrailRuns(courseReads, settings, rosterList) {
   const byId = new Map((rosterList ?? []).map((p) => [p.player_id, p]));
   const byPlayer = new Map();
@@ -95,10 +98,21 @@ export function buildTrailRuns(courseReads, settings, rosterList) {
         color,
         opacity: run.is_pb ? 1 : rankOpacity(i, runs.length, settings.fadeByRank),
         abandoned: run.status !== "finished",   // reset/dnf runs draw an X at their end
-        is_pb: !!run.is_pb,                      // PB runs get a slight visual accent
+        is_pb: !!run.is_pb,                      // PB run: pulsing accent + top of the z-stack
+        total_ms: run.total_ms ?? null,          // for the importance sort below
       });
     });
   }
+  // Global paint order = z-order (last = on top), intermingled across players by importance:
+  //   1. every PB sits above every non-PB dot (no faded ghost ever covers a PB);
+  //   2. within a band, fainter runs sit lower (the fade level is the priority);
+  //   3. faster runs sit higher - so the fastest PB tops the whole stack.
+  out.sort((a, b) => {
+    if (a.is_pb !== b.is_pb) return a.is_pb ? 1 : -1;
+    if (a.opacity !== b.opacity) return a.opacity - b.opacity;
+    const at = a.total_ms ?? Infinity, bt = b.total_ms ?? Infinity;
+    return at === bt ? 0 : bt - at;
+  });
   return out;
 }
 
