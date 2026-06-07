@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatTimeDifference, formatDuration, formatOvertaken, formatPositions, msToDisplay, alignDiffColumn, formatTrackLeaderboard, formatTotalLeaderboard } from './format';
+import { formatTimeDifference, formatDuration, formatOvertaken, formatPositions, msToDisplay, alignDiffColumn, formatTrackLeaderboard, formatTotalLeaderboard, formatNemesisTracks } from './format';
 
 describe('formatTimeDifference', () => {
   it('formats zero, positive, negative (ms)', () => {
@@ -97,5 +97,38 @@ describe('formatTotalLeaderboard', () => {
   });
   it('handles empty rows', () => {
     expect(formatTotalLeaderboard([], '3:20.000', 200000)).toBe('`No times recorded`');
+  });
+});
+
+describe('formatNemesisTracks', () => {
+  it('renders positions, padded tracks, aligned gaps, and [ahead] when untargeted', () => {
+    const out = formatNemesisTracks(
+      [ { track_name: 'Rainbow Road', time_difference_str: '+2.500s', ahead_player: 'Luke' },
+        { track_name: 'DK Pass', time_difference_str: '+0.300s', ahead_player: 'Paul' } ],
+      false, 1,
+    );
+    expect(out).toBe(
+      '`1. Rainbow Road  (+2.500s) [Luke]`\n' +
+      '`2. DK Pass       (+0.300s) [Paul]`'
+    );
+  });
+  it('empty', () => { expect(formatNemesisTracks([], false, 1)).toBe("`No tracks where you're behind`"); });
+  it('omits [ahead] when targeted', () => {
+    const out = formatNemesisTracks(
+      [ { track_name: 'DK Pass', time_difference_str: '+1.000s', ahead_player: 'Luke' } ],
+      true, 1,
+    );
+    expect(out).toBe('`1. DK Pass  (+1.000s)`');
+  });
+  it('right-justifies position numbers when startPosition + length - 1 >= 10', () => {
+    const rows = Array.from({ length: 5 }, (_, i) => ({
+      track_name: 'AB',
+      time_difference_str: '+1.000s',
+      ahead_player: 'X',
+    }));
+    const out = formatNemesisTracks(rows, true, 8); // positions 8..12, width 2
+    const lines = out.split('\n');
+    expect(lines[0]).toBe('` 8. AB  (+1.000s)`');
+    expect(lines[4]).toBe('`12. AB  (+1.000s)`');
   });
 });

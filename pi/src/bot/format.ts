@@ -156,6 +156,42 @@ export function formatTotalLeaderboard(rows: TotalRow[], wrTotalDisplay: string,
   return lines.join('\n');
 }
 
+/** Row shape for formatNemesisTracks. */
+export type NemesisRow = { track_name: string; time_difference_str: string; ahead_player: string };
+
+/**
+ * Nemesis track list: positions right-justified, track names padded, diffs decimal-aligned, optional [player] suffix.
+ * Ports legacy _format_nemesis_tracks (discord_bot.py:455-520).
+ *
+ * Key differences from the leaderboard formatters:
+ *   - NO leading space before '(' — the track padding provides the separation.
+ *   - Position width = digits of (startPosition + rows.length - 1).
+ *   - Track padding = maxTrack - len + 2 trailing spaces.
+ *   - player_info = ' [ahead_player]' when !isTargeted, else ''.
+ */
+export function formatNemesisTracks(rows: NemesisRow[], isTargeted: boolean, startPosition: number): string {
+  if (rows.length === 0) return "`No tracks where you're behind`";
+
+  // Position width: enough digits for the last position.
+  const maxPosition = startPosition + rows.length - 1;
+  const positionWidth = String(maxPosition).length;
+
+  // Longest track name for alignment.
+  const maxTrack = Math.max(...rows.map((r) => r.track_name.length));
+
+  // Decimal-align the diff column via the shared helper.
+  const aligned = alignDiffColumn(rows.map((r) => r.time_difference_str));
+
+  return rows.map((r, i) => {
+    const position = startPosition + i;
+    const posRjust = String(position).padStart(positionWidth);
+    const trackPadding = maxTrack - r.track_name.length + 2;
+    const paddedTrack = r.track_name + ' '.repeat(trackPadding);
+    const playerInfo = isTargeted ? '' : ` [${r.ahead_player}]`;
+    return `\`${posRjust}. ${paddedTrack}(${aligned[i]})${playerInfo}\``;
+  }).join('\n');
+}
+
 /** Track/total position transitions — ports legacy _format_positions. */
 export function formatPositions(pos: Positions): string {
   const t = pos.track;
