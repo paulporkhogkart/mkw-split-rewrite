@@ -28,7 +28,7 @@ export function playerPbs(db: DatabaseSync, seasonId: number, playerId: number, 
 export function currentWr(db: DatabaseSync, courseId: number, cc: number) {
   return (db.prepare(
     `SELECT holder_name, record_ms, record_str, achieved_at, video_url, character, vehicle
-     FROM world_records WHERE course_id=? AND cc=? ORDER BY achieved_at DESC, id DESC LIMIT 1`
+     FROM world_records WHERE course_id=? AND cc=? AND is_current=1 LIMIT 1`
   ).get(courseId, cc) as any) ?? null;
 }
 

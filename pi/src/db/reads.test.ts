@@ -10,7 +10,7 @@ function seeded() {
   db.exec("INSERT INTO season_rosters(season_id,player_id) VALUES (1,1),(1,2)");
   db.exec("INSERT INTO courses(id,slug,display_name) VALUES (1,'rr','RR')");
   db.exec("INSERT INTO runs(season_id,player_id,course_id,cc,status,provenance,total_time_ms,total_time_str,is_pb) VALUES (1,1,1,150,'finished','live',108000,'1:48.000',1),(1,2,1,150,'finished','live',112000,'1:52.000',1)");
-  db.exec("INSERT INTO world_records(course_id,cc,holder_name,record_ms,record_str) VALUES (1,150,'SuperFX',100000,'1:40.000')");
+  db.exec("INSERT INTO world_records(course_id,cc,holder_name,record_ms,record_str,is_current) VALUES (1,150,'SuperFX',100000,'1:40.000',1)");
   return db;
 }
 
@@ -25,6 +25,14 @@ describe('reads', () => {
   });
   it('currentWr returns the latest WR', () => {
     expect(currentWr(seeded(), 1, 150)?.record_ms).toBe(100000);
+  });
+  it('currentWr returns the is_current row even when a faster row exists', () => {
+    const db = seeded();
+    // A faster, non-current row (a removed/DQ'd record) plus moving current to a slower one.
+    db.exec("UPDATE world_records SET is_current=0 WHERE record_ms=100000");
+    db.exec("INSERT INTO world_records(course_id,cc,holder_name,record_ms,record_str,is_current) VALUES (1,150,'Reverted',101000,'1:41.000',1)");
+    db.exec("INSERT INTO world_records(course_id,cc,holder_name,record_ms,record_str,is_current) VALUES (1,150,'Ghost',95000,'1:35.000',0)");
+    expect(currentWr(db, 1, 150)?.record_ms).toBe(101000);
   });
 });
 
