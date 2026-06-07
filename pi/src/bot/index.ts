@@ -3,11 +3,13 @@ import { loadConfig } from './config';
 import { Announcer } from './client';
 import { startEventStream } from './ws';
 import { dispatch } from './dispatch';
+import { installCommands } from './commands/install';
 
 const cfg = loadConfig();
 const db = openDb(cfg.dbPath);                 // shared with the server (WAL); reads only
 const announcer = new Announcer(cfg.token, cfg.channelId);
 
+installCommands(announcer.client, db, { guildId: cfg.guildId });
 announcer.start().catch((err) => { console.error('[bot] login failed', err); process.exit(1); });
 const stream = startEventStream(cfg.wsUrl, (ev) => dispatch(db, ev, (embed) => { void announcer.send(embed); }));
 
