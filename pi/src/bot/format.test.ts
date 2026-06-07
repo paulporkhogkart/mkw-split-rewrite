@@ -60,6 +60,6 @@ describe('msToDisplay', () => {
 
 describe('alignDiffColumn', () => {
   it('right-justifies the integer part to a common width; empty stays empty', () => {
-    expect(alignDiffColumn(['+1.200s', '+12.030s', '', null])).toEqual(['+ 1.200s', '+12.030s', '', '']);
+    expect(alignDiffColumn(['+1.200s', '+12.030s', '', null])).toEqual([' +1.200s', '+12.030s', '', '']);
   });
 });

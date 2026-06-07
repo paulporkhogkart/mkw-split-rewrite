@@ -62,11 +62,9 @@ export function alignDiffColumn(diffs: (string | null | undefined)[]): string[] 
   const maxBefore = widths.length ? Math.max(...widths) : 0;
   return parts.map((p) => {
     if (!p) return '';
-    // Keep the sign (first char) fixed; right-pad only the digits so the decimal point aligns.
-    const sign = p.sign_and_whole[0] ?? '';
-    const digits = p.sign_and_whole.slice(1);
-    const paddedDigits = digits.padStart(maxBefore - 1);
-    const before = `${sign}${paddedDigits}`;
+    // Legacy alignment (rjust on the whole sign+whole part): the sign moves with the number,
+    // so decimals align but signs may not - matches _format_overtaken / leaderboard formatters.
+    const before = p.sign_and_whole.padStart(maxBefore);
     return p.decimal ? `${before}.${p.decimal}s` : `${before}s`;
   });
 }
