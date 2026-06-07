@@ -80,4 +80,17 @@ describe('buildPbData', () => {
     expect(d.reign?.previous_holder).toBe('Paul');
     expect(d.reign?.is_same_person).toBe(true);
   });
+
+  it('labels DELTA "First PB" when there is no previous PB (null delta)', () => {
+    const db = openDb(':memory:'); applySchema(db);
+    db.exec("INSERT INTO seasons(id,name,is_active) VALUES (1,'S1',1)");
+    db.exec("INSERT INTO players(id,display_name) VALUES (1,'Paul'),(2,'Luke')");
+    db.exec("INSERT INTO courses(id,slug,display_name) VALUES (1,'rr','Rainbow Road')");
+    db.exec("INSERT INTO runs(id,season_id,player_id,course_id,cc,status,provenance,total_time_ms,total_time_str,ended_at,is_pb) VALUES " +
+      "(60,1,2,1,150,'finished','live',108000,'1:48.000','2026-01-02T00:00:00.000Z',1)," +
+      "(99,1,1,1,150,'finished','live',106000,'1:46.000','2026-03-01T00:00:00.000Z',1)");
+    const d = buildPbData(db, { type: 'pb_achieved', player: 'Paul', course: 'rr', cc: 150, total_time: '1:46.000', delta_vs_prev_ms: null, rank: 1 });
+    expect(d.improvement_str).toBe('First PB');
+    expect(d.positions.track.old).toBeNull();   // no previous time on the course
+  });
 });

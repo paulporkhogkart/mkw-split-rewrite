@@ -32,7 +32,9 @@ export function buildPbData(db: DatabaseSync, ev: PbEvent): PbEmbedData {
   const track = courseId ? courseDisplayName(db, courseId) : ev.course;
   const newMs = timeToMs(ev.total_time) ?? 0;
   const prevMs = ev.delta_vs_prev_ms != null ? newMs - ev.delta_vs_prev_ms : null;
-  const improvement_str = ev.delta_vs_prev_ms != null ? formatTimeDifference(ev.delta_vs_prev_ms) : '';
+  // First PB on the course (server sends null delta): label it rather than render an empty
+  // DELTA box. Parallels the WR embed's "First WR".
+  const improvement_str = ev.delta_vs_prev_ms != null ? formatTimeDifference(ev.delta_vs_prev_ms) : 'First PB';
 
   const lb = courseId ? courseLeaderboard(db, seasonId, courseId, ev.cc) : [];
   const wr = courseId ? currentWr(db, courseId, ev.cc) : null;
