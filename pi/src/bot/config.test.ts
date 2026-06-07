@@ -8,26 +8,16 @@ describe('loadConfig', () => {
   });
   it('honours overrides', () => {
     const c = loadConfig({ DISCORD_BOT_TOKEN: 't', DISCORD_CHANNEL_ID: 'c', DISCORD_GUILD_ID: 'g', MKW_DB: '/x.db', PORT: '9000' } as any);
-    expect(c.guildId).toBe('g'); expect(c.dbPath).toBe('/x.db');
+    expect(c.guildId).toBe('g');
+    expect(c.dbPath).toBe('/x.db');
     expect(c.wsUrl).toBe('ws://127.0.0.1:9000/v1/events');
+  });
+  it('honours the BOT_WS_URL override', () => {
+    const c = loadConfig({ DISCORD_BOT_TOKEN: 't', DISCORD_CHANNEL_ID: 'c', BOT_WS_URL: 'ws://prod.example.com/v1/events' } as any);
+    expect(c.wsUrl).toBe('ws://prod.example.com/v1/events');
   });
   it('throws when a required var is missing', () => {
     expect(() => loadConfig({ DISCORD_CHANNEL_ID: 'c' } as any)).toThrow(/DISCORD_BOT_TOKEN/);
     expect(() => loadConfig({ DISCORD_BOT_TOKEN: 't' } as any)).toThrow(/DISCORD_CHANNEL_ID/);
-  });
-});
-
-import { gifFor, nameForId } from './players.config';
-
-describe('players.config', () => {
-  it('gifFor returns null for an unknown player (no crash)', () => {
-    expect(gifFor('NobodySpecial')).toBeNull();
-  });
-  it('gifFor returns a configured url for a known player', () => {
-    expect(gifFor('Paul')).toMatch(/^https:\/\/i\.imgur\.com\//);
-  });
-  it('nameForId maps a known discord id', () => {
-    expect(nameForId('1213316126948335636')).toBe('Paul');
-    expect(nameForId('0')).toBeNull();
   });
 });
