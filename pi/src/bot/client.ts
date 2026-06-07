@@ -1,7 +1,7 @@
 import { Client, GatewayIntentBits, type EmbedBuilder, type SendableChannels } from 'discord.js';
 
 /** Owns the discord.js client. Buffers embeds that arrive before the gateway is ready and
- *  flushes them on 'ready' (ports the legacy message_queue behaviour). */
+ *  flushes them on clientReady (ports the legacy message_queue behaviour). */
 export class Announcer {
   private client: Client;
   private channel: SendableChannels | null = null;
@@ -10,7 +10,7 @@ export class Announcer {
 
   constructor(private token: string, private channelId: string) {
     this.client = new Client({ intents: [GatewayIntentBits.Guilds] });
-    this.client.once('ready', async () => {
+    this.client.once('clientReady', async () => {
       const ch = await this.client.channels.fetch(this.channelId).catch(() => null);
       this.channel = ch && ch.isSendable() ? ch : null;
       if (!this.channel) console.error(`[bot] channel ${this.channelId} not found or not sendable`);
