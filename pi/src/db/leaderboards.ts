@@ -33,3 +33,37 @@ export function wrAggregate(db: DatabaseSync, cc: number): { total_ms: number; c
     .get(cc) as { total: number; n: number };
   return { total_ms: row.total, count: row.n };
 }
+
+export type NemesisDatum = { track_name: string; diff_ms: number; ahead_player: string };
+
+/** Courses where `playerId` is behind, vs a specific `targetId` or (when null) the course leader.
+ *  diff_ms = player's PB - the comparison PB (positive = player is behind). Sorted largest gap first.
+ *  Only courses where the player has a PB (and, for targeted, the target also has one) are included.
+ *  Ports legacy _calculate_nemesis_data (discord_bot.py:380-452). */
+export function nemesisRows(db: DatabaseSync, seasonId: number, cc: number,
+                            playerId: number, targetId: number | null): NemesisDatum[] {
+  const courses = db.prepare(
+    `SELECT c.id, c.display_name FROM courses c
+     WHERE EXISTS (SELECT 1 FROM runs r WHERE r.season_id=? AND r.cc=? AND r.course_id=c.id AND r.player_id=? AND r.is_pb=1)`
+  ).all(seasonId, cc, playerId) as { id: number; display_name: string }[];
+  const out: NemesisDatum[] = [];
+  for (const c of courses) {
+    const lb = courseLeaderboard(db, seasonId, c.id, cc);
+    const mine = lb.find((r) => r.player_id === playerId);
+    if (!mine) continue;
+    let ahead: { name: string; ms: number } | null = null;
+    if (targetId != null) {
+      const t = lb.find((r) => r.player_id === targetId);
+      if (!t) continue;                       // target has no time here -> skip
+      ahead = { name: t.display_name, ms: t.total_time_ms };
+    } else {
+      let leader = lb[0];
+      if (leader.player_id === playerId) leader = lb[1];   // compare to 2nd when player leads
+      if (!leader) continue;
+      ahead = { name: leader.display_name, ms: leader.total_time_ms };
+    }
+    out.push({ track_name: c.display_name, diff_ms: mine.total_time_ms - ahead.ms, ahead_player: ahead.name });
+  }
+  out.sort((a, b) => b.diff_ms - a.diff_ms);
+  return out;
+}
