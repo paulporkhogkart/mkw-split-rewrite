@@ -2,6 +2,7 @@ import { serve } from '@hono/node-server';
 import { openDb, applySchema } from './db/connect';
 import { EventHub } from './api/events';
 import { createApp, makeWs } from './api/app';
+import { startWrScraper } from './wr/scheduler';
 
 const DB_PATH = process.env.MKW_DB ?? 'mkw.db';
 const PORT = Number(process.env.PORT ?? 8787);
@@ -15,3 +16,7 @@ const server = serve({ fetch: app.fetch, port: PORT }, (info) => {
   console.log(`[pi] listening on http://127.0.0.1:${info.port}`);
 });
 injectWebSocket(server);
+startWrScraper(db, hub, {
+  url: process.env.MKWRS_URL,
+  intervalSec: Number(process.env.MKWRS_INTERVAL_SEC ?? 300),
+});

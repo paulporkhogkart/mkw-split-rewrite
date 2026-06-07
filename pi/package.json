@@ -6,7 +6,8 @@
     "test": "vitest run",
     "dev": "node --no-warnings --import tsx src/server.ts",
     "mint-token": "node --no-warnings --import tsx src/scripts/mintToken.ts",
-    "set-color": "node --no-warnings --import tsx src/scripts/setColor.ts"
+    "set-color": "node --no-warnings --import tsx src/scripts/setColor.ts",
+    "scrape-wr": "node --no-warnings --import tsx src/scripts/scrapeWr.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.0",
