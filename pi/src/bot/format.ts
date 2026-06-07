@@ -51,10 +51,10 @@ export function msToDisplay(ms: number): string {
   return `${totalSeconds}.${String(msPart).padStart(3, '0')}`;
 }
 
-/** Decimal-align a column of "+1.234s" diff strings: the sign+whole part is right-justified to
- *  the column's max width, with the sign fixed at the left (space inserted between sign and digits).
- *  '' / null entries stay ''. Shared by the leaderboard + nemesis + overtaken formatters (factors
- *  the legacy duplicated alignment). Returns the inner string (no parens). */
+/** Decimal-align a column of "+1.234s" diff strings: the whole sign+number part is right-justified
+ *  to the column's max width (legacy rjust - padding lands left of the sign, so "+1" vs "+12" gives
+ *  " +1" / "+12"). '' / null entries stay ''. Shared by the leaderboard + nemesis + overtaken
+ *  formatters (factors the legacy duplicated alignment). Returns the inner string (no parens). */
 export function alignDiffColumn(diffs: (string | null | undefined)[]): string[] {
   const parts = diffs.map((d) => (d ? parseDiff(d) : null));
   const widths = parts.filter((p): p is { sign_and_whole: string; decimal: string } => p !== null)
