@@ -1,3 +1,5 @@
+import type { OvertakenEntry, Positions } from './types';
+
 /** "+1.234s" / "-0.842s" / "±0.000s" — ports legacy TimeUtils.format_time_difference. */
 export function formatTimeDifference(ms: number): string {
   if (ms === 0) return '±0.000s';
@@ -15,8 +17,6 @@ export function formatDuration(ms: number): string {
   if (s < 31536000) return `${Math.floor(s / 2592000)} MONTH`;
   return `${Math.floor(s / 31536000)} YEAR`;
 }
-
-import type { OvertakenEntry, Positions } from './types';
 
 function parseDiff(diff: string): { sign_and_whole: string; decimal: string } {
   if (diff.endsWith('s')) {
