@@ -65,7 +65,7 @@ export function buildPbData(db: DatabaseSync, ev: PbEvent): PbEmbedData {
     oldTotalPos = overall.filter((o) => o.display_name !== ev.player && o.total_time_ms < myOld).length + 1;
   }
 
-  const is_new_track_record = newTrackPos === 1 && (oldTrackPos == null || oldTrackPos > 1);
+  const is_new_track_record = newTrackPos === 1 && (oldTrackPos == null || oldTrackPos > 1 || others.length === 0);
   let reign = null;
   if (is_new_track_record && courseId) {
     const pbRun = db.prepare(

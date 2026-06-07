@@ -1,0 +1,35 @@
+import { describe, it, expect } from 'vitest';
+import type { EmbedBuilder } from 'discord.js';
+import { openDb, applySchema } from '../db/connect';
+import { dispatch } from './dispatch';
+import type { ServerEvent } from '../db/types';
+
+function db1() {
+  const db = openDb(':memory:'); applySchema(db);
+  db.exec("INSERT INTO seasons(id,name,is_active) VALUES (1,'S1',1)");
+  db.exec("INSERT INTO players(id,display_name) VALUES (1,'Paul')");
+  db.exec("INSERT INTO courses(id,slug,display_name) VALUES (1,'rr','Rainbow Road')");
+  db.exec("INSERT INTO runs(id,season_id,player_id,course_id,cc,status,provenance,total_time_ms,total_time_str,ended_at,is_pb) VALUES (99,1,1,1,150,'finished','live',106000,'1:46.000','2026-03-01T00:00:00.000Z',1)");
+  return db;
+}
+
+describe('dispatch', () => {
+  it('emits a PB embed for pb_achieved', () => {
+    const sent: EmbedBuilder[] = [];
+    const ev: ServerEvent = { type: 'pb_achieved', player: 'Paul', course: 'rr', cc: 150, total_time: '1:46.000', delta_vs_prev_ms: -4000, rank: 1 };
+    dispatch(db1(), ev, (e) => sent.push(e));
+    expect(sent).toHaveLength(1);
+    expect(sent[0].toJSON().title).toBe('NEW TRACK RECORD');   // rank 1, no prior runs => track record
+  });
+  it('emits a WR embed for wr_update', () => {
+    const sent: EmbedBuilder[] = [];
+    const ev: ServerEvent = { type: 'wr_update', course: 'Rainbow Road', cc: 150, holder: 'Paul', total_time: '1:39.000', prev_holder: 'Luke', prev_time: '1:40.000', improvement_ms: 1000, character: null, vehicle: null, video_url: null };
+    dispatch(db1(), ev, (e) => sent.push(e));
+    expect(sent[0].toJSON().title).toBe('WORLD RECORD BY PAUL');
+  });
+  it('ignores unrelated events', () => {
+    const sent: EmbedBuilder[] = [];
+    dispatch(db1(), { type: 'run_started', player: 'Paul', course: 'rr', cc: 150 }, (e) => sent.push(e));
+    expect(sent).toHaveLength(0);
+  });
+});
