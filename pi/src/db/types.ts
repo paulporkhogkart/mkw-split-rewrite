@@ -13,4 +13,8 @@ export type ServerEvent =
   | { type: 'run_finished'; player: string; course: string; cc: number; total_time: string | null; is_pb: boolean; rank: number | null }
   | { type: 'pb_achieved'; player: string; course: string; cc: number; total_time: string; delta_vs_prev_ms: number | null; rank: number | null }
   | { type: 'lead_change'; course: string; cc: number; new_leader: string; prev_leader: string | null; total_time: string }
-  | { type: 'wr_beaten'; player: string; course: string; cc: number; total_time: string; wr_time: string };
+  | { type: 'wr_beaten'; player: string; course: string; cc: number; total_time: string; wr_time: string }
+  | { type: 'wr_update'; course: string; cc: number; holder: string | null;
+      total_time: string; prev_holder: string | null; prev_time: string | null;
+      improvement_ms: number | null; character: string | null;
+      vehicle: string | null; video_url: string | null };
