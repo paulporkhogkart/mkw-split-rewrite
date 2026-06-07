@@ -9,14 +9,15 @@
     "set-color": "node --no-warnings --import tsx src/scripts/setColor.ts"
   },
   "dependencies": {
-    "hono": "^4.6.0",
     "@hono/node-server": "^1.13.0",
-    "@hono/node-ws": "^1.0.4"
+    "@hono/node-ws": "^1.0.4",
+    "hono": "^4.6.0",
+    "node-html-parser": "^7.1.0"
   },
   "devDependencies": {
-    "typescript": "^5.7.0",
+    "@types/node": "^22.10.0",
     "tsx": "^4.19.0",
-    "vitest": "^4.1.8",
-    "@types/node": "^22.10.0"
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.8"
   }
 }
