@@ -24,6 +24,19 @@ The legacy embeds are fed by peewee models (`PersonalBest.update_pb` / `WorldRec
 3. **Events via WebSocket; reads via the shared DB.** See below.
 4. **PB title:** `"<NAME> PERSONAL BEST"`, name uppercased to match the sibling titles (e.g. `PAUL PERSONAL BEST`).
 
+## Improvements over the legacy bot (design review)
+
+This is a deliberate redesign, not a transcription. The **embed output is held identical** to the legacy bot (locked by snapshot tests — see Testing); everything behind the embeds is improved:
+
+- **No N+1 leaderboard queries.** Legacy `get_track_leaderboard` ran one query per player and `get_total_leaderboard` called it per track (O(tracks×players) queries). Replaced by single-SQL `courseLeaderboard` / `overallLeaderboard`.
+- **Reign in one pass** instead of rebuilding a historical leaderboard per PB (see Reign above).
+- **Separation of concerns.** The legacy ~1050-line `DiscordBot` god-object (gateway + events + rendering + formatting + commands + reign + video lookup) is split into focused, individually-testable modules; rendering (`embeds/`) is pure and decoupled from fetching (`enrich.ts`).
+- **No magic numbers / no crashes.** Drops the `previous_ms = 5459999` "no previous PB" hack (null-handled) and the `THUMBNAIL_GIFS[name]` KeyError (defensive `gifFor`).
+- **Resilience.** Adds backoff WS reconnect + pre-ready buffering.
+- **Deferred to Stage 2:** factor the duplicated decimal-column alignment shared by the four leaderboard/overtaken/nemesis formatters into one helper.
+
+The one intentional *content* change in an embed: the WR embed's **DELTA** field shows the real improvement (the `wr_update` event carries `improvement_ms`, which the legacy sheet-driven path lacked, so it usually printed "First WR"). Same field, same formatting — better data. Flagged for the user; easy to revert to always-"First WR" if undesired.
+
 ## Architecture
 
 ```
@@ -84,9 +97,9 @@ The WR embed has **no thumbnail** in the legacy bot, so non-friend mkwrs holders
 
 ### Reign (PB and WR)
 
-Ports the legacy reign logic to SQL/TS, with the legacy's **graceful degradation** (no duration when timestamps are missing, never an error):
+Reign is recomputed with **graceful degradation** (no duration when timestamps are missing, never an error):
 - **WR reign:** walk `world_records` for `(course_id, cc)` ordered by `achieved_at` desc from the current row; reign start = earliest contiguous row with the same `holder_name`; duration = `now − reign_start`.
-- **PB / track-record reign:** reconstruct historical course leadership from `runs` (`ended_at`, finished runs); reign start = when the current leader took the lead. Mirrors `calculate_reign_info` / `_get_leaderboard_at_time`.
+- **PB / track-record reign:** a best-times leaderboard is **monotonic** (PBs only improve), so a player's reign = *the time since the lead last changed to them*. One forward pass over the course's finished runs (ordered by `ended_at`), tracking each player's running best and resetting the reign start whenever the overall leader changes. This replaces the legacy `_get_leaderboard_at_time` approach (which rebuilt the whole leaderboard per PB, O(PBs×players) queries) with a single query + single pass.
 - Duration formatting reuses the legacy `_format_duration` buckets (SECOND/MINUTE/HOUR/DAY/MONTH/YEAR).
 
 ## Slash commands (full parity)
@@ -144,7 +157,7 @@ Shared DB query primitives (reign, historical leaderboard, overtaken/old-positio
 Shipped in two stages (separate implementation plans / review checkpoints):
 
 - **Stage 1 — announcements:** scaffolding (`bot/` dir, `discord.js` dep, `npm run bot`, config/env), discord.js client + ready-buffer, WS client + reconnect, the shared-DB read primitives (course/overall leaderboards already exist; add reign + overtaken/old-position), `enrich.ts`, both embed builders, `format.ts`, and the snapshot/format/reign tests. This is the core of the request — PB + WR embeds driven by the server.
-- **Stage 2 — slash commands:** `/leaderboard`, `/wr`, `/nemesis` (+ autocomplete) on top of Stage 1's reads and formatters.
+- **Stage 2 — slash commands:** `/leaderboard`, `/wr`, `/nemesis` (+ autocomplete) on top of Stage 1's reads and formatters, factoring the shared decimal-column alignment into one helper (the legacy duplicated it across four formatters).
 
 ## Operational note
 
