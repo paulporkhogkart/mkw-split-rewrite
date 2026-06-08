@@ -56,6 +56,8 @@ const RACE: RaceMetric[] = [
   { id: 'best_time',       kind: 'race', value: 'MIN(r.total_time_ms)',                                    statuses: ['finished'], joins: [] },
   { id: 'avg_finish_time', kind: 'race', value: 'AVG(r.total_time_ms)',                                    statuses: ['finished'], joins: [] },
   { id: 'pb_count',        kind: 'race', value: 'COUNT(*)',                                                statuses: ['finished'], joins: [], pbOnly: true },
+  // was_pb runs only get faster over time, so within a window MAX=first PB, MIN=last PB.
+  { id: 'time_improvement', kind: 'race', value: 'MAX(r.total_time_ms) - MIN(r.total_time_ms)',            statuses: ['finished'], joins: [], pbOnly: true },
 ];
 
 const BODY_COLUMNS: Record<string, string> = {

@@ -49,3 +49,12 @@ describe('screen-intervals ingest + screen_time', () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe('explorer', () => {
+  it('serves the stat-explorer page at /explorer', async () => {
+    const app = createApp(db(), new EventHub());
+    const res = await app.request('/explorer');
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('MKW Broadcast Stats');
+  });
+});

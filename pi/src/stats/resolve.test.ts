@@ -48,4 +48,16 @@ describe('resolveRace', () => {
     const r = resolveRace(d, { metric: 'pb_count', period: week(), filters: {}, seasonId: 1 });
     expect(r.total).toBe(2);
   });
+
+  it('time_improvement = slowest minus fastest PB in the window (ms shaved)', () => {
+    const d = db();
+    const add = (id: number, ms: number, when: string) => d.prepare(
+      `INSERT INTO runs(id,season_id,player_id,course_id,cc,status,provenance,ended_at,total_time_ms,was_pb,character)
+       VALUES(?,1,2,1,150,'finished','live',?,?,1,'Mario')`).run(id, when, ms);
+    d.prepare('UPDATE runs SET was_pb=1 WHERE id=1').run();        // Luke/bc 160000
+    add(10, 155000, '2026-06-10T07:00:00+00:00');
+    add(11, 150000, '2026-06-10T08:00:00+00:00');
+    const r = resolveRace(d, { metric: 'time_improvement', period: week(), filters: { player: 'Luke', course: 'bc' }, seasonId: 1 });
+    expect(r.total).toBe(10000);                                   // 160000 - 150000
+  });
 });

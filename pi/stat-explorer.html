@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MKW Stats Explorer</title>
+<style>
+  :root { --line:#d0d0d0; --muted:#666; --bg:#fafafa; --accent:#2b6cb0; }
+  * { box-sizing: border-box; }
+  body { font: 14px/1.5 system-ui, sans-serif; max-width: 980px; margin: 0 auto; padding: 24px; color:#1a1a1a; }
+  h1 { font-size: 20px; margin: 0 0 2px; }
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 24px 0 8px; }
+  .sub { color: var(--muted); margin: 0 0 16px; }
+  section { border: 1px solid var(--line); border-radius: 6px; padding: 16px; margin-bottom: 16px; background: #fff; }
+  label { display: inline-block; min-width: 92px; color: var(--muted); }
+  .row { margin: 6px 0; }
+  select, input { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; min-width: 200px; }
+  input.short { min-width: 110px; }
+  button { font: inherit; padding: 6px 14px; border: 1px solid var(--accent); background: var(--accent); color: #fff; border-radius: 4px; cursor: pointer; }
+  button.ghost { background:#fff; color: var(--accent); }
+  code, pre, .mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; }
+  pre { background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 12px; overflow:auto; max-height: 360px; margin: 8px 0 0; }
+  .url { background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 8px; word-break: break-all; margin: 10px 0; }
+  .cat { columns: 2; column-gap: 24px; }
+  .cat .group { break-inside: avoid; margin-bottom: 12px; }
+  .cat .group b { display:block; color: var(--muted); font-weight:600; }
+  .cat a { color: var(--accent); cursor: pointer; text-decoration: none; }
+  .cat a:hover { text-decoration: underline; }
+  .hide { display: none; }
+  .pill { display:inline-block; font-size:12px; color:var(--muted); border:1px solid var(--line); border-radius:10px; padding:0 7px; margin-left:6px; }
+  .err { color: #b00; }
+</style>
+</head>
+<body>
+<h1>MKW Broadcast Stats — Explorer</h1>
+<p class="sub" id="status">Loading the metric catalogue…</p>
+
+<section>
+  <div class="row"><label>Shape</label>
+    <select id="shape">
+      <option value="value">value — one number</option>
+      <option value="breakdown">breakdown — grouped rows</option>
+      <option value="series">series — time buckets</option>
+      <option value="correlation">correlation — race × body (r, slope)</option>
+    </select>
+  </div>
+
+  <div class="row" id="metricRow"><label>Metric</label><select id="metric"></select><span class="pill" id="kindPill"></span></div>
+  <div class="row hide" id="bodyRow"><label>Body metric</label><select id="bodyMetric"></select></div>
+  <div class="row hide" id="aggRow"><label>Aggregation</label><select id="agg"></select></div>
+  <div class="row hide" id="groupRow"><label>Group by</label><select id="groupBy"></select></div>
+  <div class="row hide" id="bucketRow"><label>Bucket</label><select id="bucket"><option>day</option><option>week</option><option>month</option></select></div>
+
+  <div id="filters"></div>
+  <div class="row hide" id="bcRow"><label>body_condition</label><input id="bodyCondition" class="mono" placeholder="e.g. bmi&lt;22 or body_fat&gt;20"></div>
+
+  <div class="row"><label>Period</label>
+    <select id="period"><option>this_week</option><option>this_month</option><option>today</option><option value="all_time">all_time</option><option>range</option></select>
+    <input id="tz" class="short" value="Australia/Melbourne" title="IANA timezone">
+  </div>
+  <div class="row hide" id="rangeRow"><label>Range</label>
+    <input id="from" class="short" placeholder="from e.g. 2026-06-01"> &nbsp;
+    <input id="to" class="short" placeholder="to e.g. 2026-07-01">
+  </div>
+
+  <div class="url mono" id="url"></div>
+  <div class="row"><button id="run">Run</button> <button class="ghost" id="copy">Copy URL</button></div>
+  <pre id="result">—</pre>
+</section>
+
+<h2>Everything available <span class="pill" id="count"></span></h2>
+<section><div class="cat" id="catalogue"></div></section>
+
+<h2>Reference</h2>
+<section class="mono" style="color:#333">
+  <p><b>Shapes</b> — <code>/v1/stats/value</code> (single number), <code>/v1/stats/breakdown</code> (rows, needs group_by),
+     <code>/v1/stats/series</code> (per-bucket, needs a bounded period), <code>/v1/stats/correlation</code> (n, r, slope, intercept).</p>
+  <p><b>Periods</b> — today · this_week (Mon start) · this_month · all_time · range(from,to). Resolved in <code>tz</code> (default Australia/Melbourne).</p>
+  <p><b>Dimensions</b> — filter or group_by, per metric: race = player·course·character·kart·costume·cc; sequential/completion = player·course·cc; body = player; screen = player·screen.</p>
+  <p><b>Notes</b> — reads are unauthenticated. Body metrics &amp; correlation need <code>porker.db</code> (503 otherwise). <code>screen_time</code> reads 0 until the desktop app is forwarding intervals. Most stats are forward-looking (live runs only). Discover the live list any time at <code>/v1/stats/metrics</code>.</p>
+</section>
+
+<script>
+let META = [];
+const $ = (id) => document.getElementById(id);
+const RACE_DIMS = ['player','course','character','kart','costume','cc'];
+const ALL_DIMS = [...RACE_DIMS, 'screen'];
+
+async function load() {
+  try {
+    const [health, metrics] = await Promise.all([
+      fetch('/health').then(r => r.ok ? r.json() : Promise.reject()),
+      fetch('/v1/stats/metrics').then(r => r.json()),
+    ]);
+    META = metrics;
+    $('status').textContent = `Server OK · ${META.length} metrics in the registry (+ correlation).`;
+    $('count').textContent = `${META.length} metrics`;
+    buildMetricSelect();
+    buildBodySelect();
+    buildCatalogue();
+    render();
+  } catch (e) {
+    $('status').innerHTML = '<span class="err">Could not reach the server. Run <code>npm run dev</code> in <code>pi/</code> and open this page at <code>/explorer</code>.</span>';
+  }
+}
+
+function buildMetricSelect() {
+  $('metric').innerHTML = META.map(m => `<option value="${m.id}">${m.id} · ${m.kind}</option>`).join('');
+}
+function buildBodySelect() {
+  const body = META.filter(m => m.kind === 'body');
+  $('bodyMetric').innerHTML = body.map(m => `<option value="${m.id}">${m.id}</option>`).join('');
+}
+function buildCatalogue() {
+  const kinds = {};
+  for (const m of META) (kinds[m.kind] ||= []).push(m);
+  let html = '';
+  for (const [kind, list] of Object.entries(kinds)) {
+    html += `<div class="group"><b>${kind}</b>` +
+      list.map(m => `<div><a data-id="${m.id}">${m.id}</a> <span class="pill">${(m.dimensions||[]).join(' · ')||'—'}</span></div>`).join('') +
+      `</div>`;
+  }
+  html += `<div class="group"><b>special</b><div><a data-shape="correlation">correlation</a> <span class="pill">body · player · course</span></div></div>`;
+  $('catalogue').innerHTML = html;
+  $('catalogue').querySelectorAll('a').forEach(a => a.onclick = () => {
+    if (a.dataset.shape) { $('shape').value = 'correlation'; }
+    else { $('shape').value = 'value'; $('metric').value = a.dataset.id; }
+    render();
+  });
+}
+
+function currentMetric() { return META.find(m => m.id === $('metric').value); }
+
+function render() {
+  const shape = $('shape').value;
+  const corr = shape === 'correlation';
+  $('metricRow').classList.toggle('hide', corr);
+  $('bodyRow').classList.toggle('hide', !corr);
+  $('groupRow').classList.toggle('hide', shape !== 'breakdown' || corr);
+  $('bucketRow').classList.toggle('hide', shape !== 'series' || corr);
+
+  const m = currentMetric();
+  $('kindPill').textContent = corr ? '' : (m ? m.kind : '');
+  const dims = corr ? ['player','course'] : (m ? (m.dimensions || []) : []);
+
+  // Aggregation (body metrics only)
+  const isBody = !corr && m && m.kind === 'body';
+  $('aggRow').classList.toggle('hide', !isBody);
+  if (isBody) $('agg').innerHTML = (m.aggs || []).map(a => `<option>${a}</option>`).join('');
+
+  // body_condition (race metrics only)
+  $('bcRow').classList.toggle('hide', !(!corr && m && m.kind === 'race'));
+
+  // group_by options = the metric's dimensions
+  if (shape === 'breakdown' && !corr) $('groupBy').innerHTML = dims.map(d => `<option>${d}</option>`).join('');
+
+  // Filter inputs: one per allowed dimension
+  $('filters').innerHTML = dims.map(d =>
+    `<div class="row"><label>${d}</label><input class="short flt" data-dim="${d}" placeholder="${corr && d!=='player'&&d!=='course' ? '' : 'filter ' + d}"></div>`
+  ).join('');
+
+  $('rangeRow').classList.toggle('hide', $('period').value !== 'range');
+  updateUrl();
+  $('filters').querySelectorAll('input').forEach(i => i.oninput = updateUrl);
+}
+
+function buildUrl() {
+  const shape = $('shape').value;
+  const tz = $('tz').value.trim();
+  const period = $('period').value;
+  const qs = new URLSearchParams();
+  const add = (k, v) => { if (v != null && String(v).trim() !== '') qs.set(k, String(v).trim()); };
+
+  if (shape === 'correlation') {
+    add('body', $('bodyMetric').value);
+    $('filters').querySelectorAll('.flt').forEach(i => add(i.dataset.dim, i.value));
+    add('period', period); add('tz', tz);
+    if (period === 'range') { add('from', $('from').value); add('to', $('to').value); }
+    return '/v1/stats/correlation?' + qs.toString();
+  }
+
+  const m = currentMetric();
+  add('metric', m && m.id);
+  if (shape === 'breakdown') add('group_by', $('groupBy').value);
+  if (shape === 'series') add('bucket', $('bucket').value);
+  if (m && m.kind === 'body') add('agg', $('agg').value);
+  if (m && m.kind === 'race') add('body_condition', $('bodyCondition').value);
+  $('filters').querySelectorAll('.flt').forEach(i => add(i.dataset.dim, i.value));
+  add('period', period); add('tz', tz);
+  if (period === 'range') { add('from', $('from').value); add('to', $('to').value); }
+  return `/v1/stats/${shape}?` + qs.toString();
+}
+
+function updateUrl() { $('url').textContent = buildUrl(); }
+
+async function run() {
+  const url = buildUrl();
+  $('result').textContent = 'Fetching…';
+  try {
+    const r = await fetch(url);
+    const txt = await r.text();
+    let body; try { body = JSON.stringify(JSON.parse(txt), null, 2); } catch { body = txt; }
+    $('result').textContent = `HTTP ${r.status}\n\n${body}`;
+  } catch (e) { $('result').textContent = 'Fetch failed: ' + e; }
+}
+
+['shape','metric','period'].forEach(id => $(id).addEventListener('change', render));
+['tz','from','to','groupBy','bucket','agg','bodyMetric','bodyCondition'].forEach(id => $(id).addEventListener('input', updateUrl));
+$('run').onclick = run;
+$('copy').onclick = () => navigator.clipboard?.writeText($('url').textContent);
+load();
+</script>
+</body>
+</html>

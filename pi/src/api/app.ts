@@ -1,5 +1,7 @@
 import { Hono } from 'hono';
 import type { DatabaseSync } from 'node:sqlite';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { EventHub } from './events';
 import { runsRoutes } from './runs';
 import { readsRoutes } from './reads';
@@ -8,6 +10,9 @@ import { screenRoutes } from './screen';
 
 export type Env = { Variables: { playerId: number; playerName: string } };
 
+/** The self-contained stat-explorer page (pi/stat-explorer.html), served same-origin. */
+const EXPLORER_HTML = fileURLToPath(new URL('../../stat-explorer.html', import.meta.url));
+
 export function createApp(db: DatabaseSync, hub: EventHub): Hono<Env> {
   const app = new Hono<Env>();
   app.get('/health', (c) => c.json({ status: 'ok' }));
@@ -15,6 +20,10 @@ export function createApp(db: DatabaseSync, hub: EventHub): Hono<Env> {
   app.route('/', readsRoutes(db));
   app.route('/', createStatsApp(db, { porkerPath: process.env.STATS_PORKER_DB ?? 'porker.db' }));
   app.route('/', screenRoutes(db));
+  app.get('/explorer', (c) => {
+    try { return c.html(readFileSync(EXPLORER_HTML, 'utf8')); }
+    catch { return c.text('stat-explorer.html not found', 404); }
+  });
   return app;
 }
 
