@@ -48,7 +48,7 @@
         "label": "main",
         "title": "pbenguin",
         "width": 1200,
-        "height": 800,
+        "height": 760,
         "center": true,
         "resizable": true,
         "minWidth": 600,

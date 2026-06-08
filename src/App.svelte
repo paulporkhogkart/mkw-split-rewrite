@@ -1882,7 +1882,7 @@
   .player-band {
     /* Reserved for the live player panel (sub-project #3). Grows to fill the space below the
        feed + controls; never shrinks below room for the cards. */
-    flex: 1 0 0; min-height: 200px; overflow: hidden;
+    flex: 1 0 0; min-height: 130px; overflow: hidden;
     border-top: 1px solid var(--bd); background: var(--bg);
     display: flex; align-items: center; justify-content: center;
   }
