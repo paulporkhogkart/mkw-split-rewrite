@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { loadConfig } from './config';
 
 describe('loadConfig', () => {
@@ -19,5 +20,15 @@ describe('loadConfig', () => {
   it('throws when a required var is missing', () => {
     expect(() => loadConfig({ DISCORD_CHANNEL_ID: 'c' } as any)).toThrow(/DISCORD_BOT_TOKEN/);
     expect(() => loadConfig({ DISCORD_BOT_TOKEN: 't' } as any)).toThrow(/DISCORD_CHANNEL_ID/);
+  });
+});
+
+describe('npm run bot', () => {
+  // The bot reads DISCORD_BOT_TOKEN from process.env, but Node doesn't auto-load .env -
+  // the script must pass --env-file (as src/bot/README.md documents). Guards regressing
+  // back to a token-less launch.
+  it('loads .env via --env-file so the token reaches process.env', () => {
+    const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+    expect(pkg.scripts.bot).toMatch(/--env-file/);
   });
 });
