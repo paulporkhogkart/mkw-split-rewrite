@@ -337,6 +337,8 @@ static CONFIG: Mutex<Config> = Mutex::new(Config { server_url: String::new(), to
 static OUTBOX: Mutex<Option<Connection>> = Mutex::new(None);
 /// Latest detected course (from selection_update), used as the course for the run_started ping.
 static LAST_COURSE: Mutex<String> = Mutex::new(String::new());
+/// Current screen + the epoch-ms we entered it, for screen-time intervals.
+static SCREEN: Mutex<Option<(String, i64)>> = Mutex::new(None);
 
 /// Course display-name from a selection_update line, or None (absent/blank/other type).
 fn course_from_selection(line: &str) -> Option<String> {
@@ -357,6 +359,61 @@ fn is_racing_entry(line: &str) -> bool {
     to == "RACING" && from != "RACING" && from != "RACE_MENU" && from != "HOME"
 }
 
+/// Epoch milliseconds now.
+fn now_ms() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64).unwrap_or(0)
+}
+
+/// (from, to) of a screen_change line, or None (other type / blank `to` / non-JSON).
+fn parse_screen_change(line: &str) -> Option<(String, String)> {
+    if !line.contains("screen_change") { return None; }
+    let v: serde_json::Value = serde_json::from_str(line).ok()?;
+    if v.get("type")?.as_str()? != "screen_change" { return None; }
+    let from = v.get("from").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let to = v.get("to")?.as_str()?.to_string();
+    if to.is_empty() { return None; }
+    Some((from, to))
+}
+
+/// Pure screen-interval stepper: given the previously-open (screen, entered_ms) and a
+/// transition to `to` at `now`, return the interval to record (if any) + the new open
+/// state. No interval for the first screen, a self-transition, or zero/negative length.
+fn screen_step(prev: Option<(String, i64)>, to: &str, now: i64)
+    -> (Option<(String, i64, i64)>, Option<(String, i64)>) {
+    let interval = match &prev {
+        Some((screen, entered)) if now > *entered && !screen.is_empty() && screen.as_str() != to =>
+            Some((screen.clone(), *entered, now)),
+        _ => None,
+    };
+    (interval, Some((to.to_string(), now)))
+}
+
+fn ensure_screen_outbox(conn: &Connection) {
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS screen_outbox (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            screen     TEXT NOT NULL,
+            started_ms INTEGER NOT NULL,
+            ended_ms   INTEGER NOT NULL
+        )",
+        [],
+    ).expect("create screen_outbox");
+}
+
+/// Close the open screen interval (if any) into the outbox and open a new one at `to`.
+fn record_screen_transition(conn: &Connection, to: &str, now: i64) {
+    let mut cur = SCREEN.lock().unwrap();
+    let (interval, next) = screen_step(cur.take(), to, now);
+    if let Some((screen, a, b)) = interval {
+        conn.execute(
+            "INSERT INTO screen_outbox(screen, started_ms, ended_ms) VALUES (?1,?2,?3)",
+            rusqlite::params![screen, a, b],
+        ).ok();
+    }
+    *cur = next;
+}
+
 /// Fire-and-forget POST /v1/runs/start so the server emits a run_started event (ephemeral,
 /// no DB write). Runs on its own thread (blocking reqwest) so it never blocks the stdout loop.
 fn fire_run_started(course: String) {
@@ -375,6 +432,11 @@ fn fire_run_started(course: String) {
 /// Called by lib.rs for every sidecar stdout line. Tracks the latest course + pings run_started
 /// on a fresh RACING entry, then gates run_finalized events (route_line), returning any event.
 pub fn on_line(line: &str) -> Option<String> {
+    if let Some((_from, to)) = parse_screen_change(line) {
+        if let Ok(guard) = OUTBOX.lock() {
+            if let Some(conn) = guard.as_ref() { record_screen_transition(conn, &to, now_ms()); }
+        }
+    }
     if let Some(c) = course_from_selection(line) {
         if let Ok(mut lc) = LAST_COURSE.lock() { *lc = c; }
     } else if is_racing_entry(line) {
@@ -614,6 +676,7 @@ pub fn init(app: tauri::AppHandle) {
     ensure_outbox(&conn);
     ensure_pb_cache(&conn);
     ensure_course_cache(&conn);
+    ensure_screen_outbox(&conn);
     *OUTBOX.lock().unwrap() = Some(conn);
 
     // A dedicated OS thread (not the tokio runtime) running a blocking loop:
@@ -668,6 +731,43 @@ pub fn init(app: tauri::AppHandle) {
                     }
                     Ok(resp) => log::debug!("[sync] {id}: server {}", resp.status()),
                     Err(e) => log::debug!("[sync] {id}: {e}"),
+                }
+            }
+
+            // Drain screen-time intervals in one batch.
+            let screen_rows: Vec<(i64, String, i64, i64)> = {
+                let guard = OUTBOX.lock().unwrap();
+                match guard.as_ref() {
+                    Some(c) => {
+                        let mut stmt = c.prepare(
+                            "SELECT id, screen, started_ms, ended_ms FROM screen_outbox ORDER BY id LIMIT 200"
+                        ).unwrap();
+                        let rows = stmt.query_map([], |r| Ok((
+                            r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?,
+                        ))).unwrap();
+                        rows.filter_map(|r| r.ok()).collect()
+                    }
+                    None => Vec::new(),
+                }
+            };
+            if !screen_rows.is_empty() {
+                let intervals: Vec<serde_json::Value> = screen_rows.iter()
+                    .map(|(_, s, a, b)| serde_json::json!({ "screen": s, "started_ms": a, "ended_ms": b }))
+                    .collect();
+                let body = serde_json::json!({ "intervals": intervals }).to_string();
+                let url = format!("{}/v1/screen-intervals", cfg.server_url.trim_end_matches('/'));
+                match client.post(&url).bearer_auth(&cfg.token)
+                    .header("content-type", "application/json").body(body).send()
+                {
+                    Ok(resp) if resp.status().is_success() => {
+                        if let Some(c) = OUTBOX.lock().unwrap().as_ref() {
+                            for (id, _, _, _) in &screen_rows {
+                                c.execute("DELETE FROM screen_outbox WHERE id=?1", rusqlite::params![id]).ok();
+                            }
+                        }
+                    }
+                    Ok(resp) => log::debug!("[sync] screen: server {}", resp.status()),
+                    Err(e) => log::debug!("[sync] screen: {e}"),
                 }
             }
         }
@@ -991,5 +1091,31 @@ mod tests {
         // Wrong event type / non-JSON → false.
         assert!(!is_racing_entry(r#"{"type": "selection_update", "course": "Rainbow Road"}"#));
         assert!(!is_racing_entry("not json"));
+    }
+
+    #[test]
+    fn parse_screen_change_extracts_from_to() {
+        assert_eq!(
+            parse_screen_change(r#"{"type":"screen_change","from":"MAIN_MENU","to":"RACING"}"#),
+            Some(("MAIN_MENU".to_string(), "RACING".to_string())),
+        );
+        assert_eq!(parse_screen_change(r#"{"type":"selection_update","course":"X"}"#), None);
+        assert_eq!(parse_screen_change(r#"{"type":"screen_change","to":""}"#), None);
+        assert_eq!(parse_screen_change("not json"), None);
+    }
+
+    #[test]
+    fn screen_step_emits_previous_interval_only() {
+        // First screen: nothing recorded, opens MAIN_MENU.
+        let (iv, next) = screen_step(None, "MAIN_MENU", 1000);
+        assert_eq!(iv, None);
+        assert_eq!(next, Some(("MAIN_MENU".to_string(), 1000)));
+        // Transition closes the previous interval and opens the next.
+        let (iv2, next2) = screen_step(Some(("MAIN_MENU".to_string(), 1000)), "RACING", 5000);
+        assert_eq!(iv2, Some(("MAIN_MENU".to_string(), 1000, 5000)));
+        assert_eq!(next2, Some(("RACING".to_string(), 5000)));
+        // Self-transition and zero-length produce no interval.
+        assert_eq!(screen_step(Some(("RACING".to_string(), 5000)), "RACING", 6000).0, None);
+        assert_eq!(screen_step(Some(("X".to_string(), 5000)), "Y", 5000).0, None);
     }
 }
