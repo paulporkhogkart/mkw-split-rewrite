@@ -3,6 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { EventHub } from './events';
 import { runsRoutes } from './runs';
 import { readsRoutes } from './reads';
+import { createStatsApp } from './stats';
 
 export type Env = { Variables: { playerId: number; playerName: string } };
 
@@ -11,6 +12,7 @@ export function createApp(db: DatabaseSync, hub: EventHub): Hono<Env> {
   app.get('/health', (c) => c.json({ status: 'ok' }));
   app.route('/', runsRoutes(db, hub));
   app.route('/', readsRoutes(db));
+  app.route('/', createStatsApp(db, { porkerPath: process.env.STATS_PORKER_DB ?? 'porker.db' }));
   return app;
 }
 
