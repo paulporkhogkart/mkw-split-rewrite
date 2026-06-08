@@ -21,9 +21,9 @@ describe('pbTitle', () => {
     expect(pbTitle({ ...base, is_new_track_record: true, reign: { previous_holder: 'Luke', reign_ms: 2 * 86400_000, is_same_person: false } }))
       .toBe('PAUL HAS ENDED THE 2 DAY REIGN OF LUKE');
   });
-  it('leads with the new name when extending his own reign', () => {
+  it('uses "THE <dur> REIGN OF <NAME> CONTINUES" when extending his own reign', () => {
     expect(pbTitle({ ...base, is_new_track_record: true, reign: { previous_holder: 'Paul', reign_ms: 2 * 86400_000, is_same_person: true } }))
-      .toBe('PAUL HAS EXTENDED HIS 2 DAY REIGN');
+      .toBe('THE 2 DAY REIGN OF PAUL CONTINUES');
   });
 });
 

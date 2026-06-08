@@ -2,16 +2,17 @@ import { EmbedBuilder } from 'discord.js';
 import type { PbEmbedData } from '../types';
 import { formatDuration, formatOvertaken, formatPositions } from '../format';
 
-/** PB title — every variant starts with the achiever's name for consistency. Only a track record
- *  that dethrones/extends a measurable reign gets a reign title; everything else (incl. a
- *  first-ever time on a track) is just "<NAME> PERSONAL BEST". */
+/** PB title. Ending someone else's reign leads with the new name ("<NAME> HAS ENDED THE
+ *  <dur> REIGN OF <PREV>"); extending your own reign uses the classic "THE <dur> REIGN OF
+ *  <NAME> CONTINUES"; everything else (incl. a first-ever time on a track) is just
+ *  "<NAME> PERSONAL BEST". */
 export function pbTitle(d: PbEmbedData): string {
   const name = d.player.toUpperCase();
   if (!d.is_new_track_record || !d.reign || d.reign.reign_ms == null) return `${name} PERSONAL BEST`;
   const dur = formatDuration(d.reign.reign_ms);
   const prev = (d.reign.previous_holder ?? '').toUpperCase();
   return d.reign.is_same_person
-    ? `${name} HAS EXTENDED HIS ${dur} REIGN`
+    ? `THE ${dur} REIGN OF ${name} CONTINUES`
     : `${name} HAS ENDED THE ${dur} REIGN OF ${prev}`;
 }
 
