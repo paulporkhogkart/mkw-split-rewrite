@@ -1,6 +1,6 @@
-// Turn a player's stored "#rrggbb" colour into a Discord embed edge colour that reads well on
-// Discord's dark (~#313338) background: clamp it away from near-black and washed-out, and keep
-// coloured hues vivid. True greys are left alone (only brightness is clamped).
+// Turn a player's stored "#rrggbb" colour into a soft pastel Discord embed edge colour that reads
+// well on Discord's dark (~#313338) background: lift it into a light band and ease the saturation
+// off (a tint, not the vivid trail colour). True greys are left neutral (brightness only).
 
 function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
   r /= 255; g /= 255; b /= 255;
@@ -35,15 +35,15 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
   ];
 }
 
-/** "#rrggbb" -> a dark-mode-legible 0xRRGGBB Discord colour, or null for missing/invalid input. */
+/** "#rrggbb" -> a soft pastel, dark-mode-legible 0xRRGGBB Discord colour, or null for invalid input. */
 export function discordColor(hex: string | null | undefined): number | null {
   if (!hex) return null;
   const m = /^#?([0-9a-fA-F]{6})$/.exec(hex.trim());
   if (!m) return null;
   const n = parseInt(m[1], 16);
   const [h, s0, l0] = rgbToHsl((n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff);
-  const l = Math.min(0.70, Math.max(0.48, l0));       // not near-black, not washed out
-  const s = s0 > 0.08 ? Math.max(s0, 0.5) : s0;        // keep coloured hues vivid; leave greys
+  const l = Math.min(0.86, Math.max(0.78, l0));        // light pastel band
+  const s = s0 > 0.08 ? Math.min(0.58, Math.max(0.38, s0)) : s0;   // soft saturation; leave greys
   const [r, g, b] = hslToRgb(h, s, l);
   return (r << 16) | (g << 8) | b;
 }
