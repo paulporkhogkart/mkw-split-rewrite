@@ -1,0 +1,51 @@
+import { describe, it, expect } from 'vitest';
+import { DatabaseSync } from 'node:sqlite';
+import { applySchema } from '../db/connect';
+import { resolveRace } from './resolve';
+import { resolvePeriod } from './period';
+import { DateTime } from 'luxon';
+
+function db(): DatabaseSync {
+  const d = new DatabaseSync(':memory:');
+  applySchema(d);
+  d.exec(`INSERT INTO seasons(id,name,is_active) VALUES (1,'S1',1);
+          INSERT INTO players(id,display_name) VALUES (1,'Paul'),(2,'Luke');
+          INSERT INTO courses(id,slug,display_name) VALUES (1,'bc','Bowsers Castle'),(2,'mbc','Mario Bros Circuit');`);
+  const run = (id:number,p:number,c:number,st:string,ms:number|null,when:string,ch:string) =>
+    d.prepare(`INSERT INTO runs(id,season_id,player_id,course_id,cc,status,provenance,ended_at,total_time_ms,character)
+               VALUES (?,1,?,?,150,?,'live',?,?,?)`).run(id,p,c,st,when,ms,ch);
+  run(1,2,1,'finished',160000,'2026-06-10T03:00:00+00:00','Mario');
+  run(2,2,1,'reset',    null,  '2026-06-10T04:00:00+00:00','Mario');
+  run(3,2,2,'finished',120000,'2026-06-10T05:00:00+00:00','Peach');
+  run(4,1,1,'finished',158000,'2026-06-10T06:00:00+00:00','Mario');
+  const lap = (rid:number,idx:number,coins:number)=>d.prepare(
+    'INSERT INTO run_laps(run_id,lap_index,lap_time_ms,coins,shrooms) VALUES (?,?,1000,?,1)').run(rid,idx,coins);
+  lap(1,0,5); lap(1,1,4); lap(2,0,3); // reset still collected 3
+  return d;
+}
+const week = () => resolvePeriod('this_week','Australia/Melbourne',
+  { now: DateTime.fromISO('2026-06-10T20:00:00',{zone:'Australia/Melbourne'}) });
+
+describe('resolveRace', () => {
+  it('counts resets (status-filtered)', () => {
+    const r = resolveRace(db(), { metric: 'resets', period: week(), filters: {}, seasonId: 1 });
+    expect(r.total).toBe(1);
+  });
+
+  it('sums coins across all statuses incl. the reset', () => {
+    const r = resolveRace(db(), { metric: 'coins', period: week(), filters: { player: 'Luke' }, seasonId: 1 });
+    expect(r.total).toBe(12); // 5+4 (finished) + 3 (reset)
+  });
+
+  it('breaks coins down by course', () => {
+    const r = resolveRace(db(), { metric: 'coins', period: week(), filters: {}, groupBy: 'course', seasonId: 1 });
+    expect(r.rows).toEqual([{ key: 'Bowsers Castle', value: 12 }]); // only bc has laps
+  });
+
+  it('pb_count uses the stored flag', () => {
+    const d = db();
+    d.prepare('UPDATE runs SET was_pb=1 WHERE id IN (1,4)').run();
+    const r = resolveRace(d, { metric: 'pb_count', period: week(), filters: {}, seasonId: 1 });
+    expect(r.total).toBe(2);
+  });
+});
