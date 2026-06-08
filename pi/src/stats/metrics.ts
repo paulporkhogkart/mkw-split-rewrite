@@ -33,7 +33,12 @@ export interface SequentialMetric {
   kind: 'sequential';
 }
 
-export type MetricDef = RaceMetric | BodyMetric | SequentialMetric;
+export interface CompletionMetric {
+  id: string;
+  kind: 'completion';
+}
+
+export type MetricDef = RaceMetric | BodyMetric | SequentialMetric | CompletionMetric;
 
 const RACE: RaceMetric[] = [
   { id: 'attempts',        kind: 'race', value: 'COUNT(*)',                                                statuses: 'all',        joins: [] },
@@ -65,7 +70,11 @@ const SEQUENTIAL: SequentialMetric[] = [
   { id: 'current_reset_streak', kind: 'sequential' },
 ];
 
-const REGISTRY = new Map<string, MetricDef>([...RACE, ...BODY, ...SEQUENTIAL].map((m) => [m.id, m]));
+const COMPLETION: CompletionMetric[] = [
+  { id: 'avg_completion_before_reset', kind: 'completion' },
+];
+
+const REGISTRY = new Map<string, MetricDef>([...RACE, ...BODY, ...SEQUENTIAL, ...COMPLETION].map((m) => [m.id, m]));
 
 export function getMetric(id: string): MetricDef | undefined { return REGISTRY.get(id); }
 export function listMetrics(): MetricDef[] { return [...REGISTRY.values()]; }
@@ -75,6 +84,6 @@ export function allowsDimension(metricId: string, dim: Dimension): boolean {
   const m = REGISTRY.get(metricId);
   if (!m) return false;
   if (m.kind === 'race') return RACE_DIMENSIONS.includes(dim);
-  if (m.kind === 'sequential') return dim === 'player' || dim === 'course' || dim === 'cc';
+  if (m.kind === 'sequential' || m.kind === 'completion') return dim === 'player' || dim === 'course' || dim === 'cc';
   return dim === 'player'; // body
 }

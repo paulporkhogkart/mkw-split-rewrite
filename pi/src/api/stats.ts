@@ -7,6 +7,7 @@ import type { PeriodKey, Dimension, StatResult } from '../stats/types';
 import { getMetric, listMetrics, allowsDimension, type BodyAgg } from '../stats/metrics';
 import { resolveRace } from '../stats/resolve';
 import { resolveSequential } from '../stats/sequential';
+import { resolveCompletion } from '../stats/completion';
 import { resolveBody, openPorker, presentPorkerTables } from '../stats/body';
 import { parseBodyCondition, bodyConditionSql } from '../stats/align';
 import { activeSeasonId } from '../db/seasons';
@@ -86,10 +87,18 @@ export function createStatsApp(db: DatabaseSync, deps: StatsDeps): Hono {
     return resolveSequential(db, { metric, period: period(c), filters, groupBy, seasonId });
   };
 
+  const handleCompletion = (c: Ctx, groupBy?: Dimension): StatResult => {
+    const metric = c.req.query('metric')!;
+    const filters = collectFilters(c);
+    const seasonId = c.req.query('season') ? Number(c.req.query('season')) : activeSeasonId(db);
+    return resolveCompletion(db, { metric, period: period(c), filters, groupBy, seasonId });
+  };
+
   const dispatch = (c: Ctx, groupBy?: Dimension): StatResult => {
     const m = guard(c, groupBy);
     if (m.kind === 'body') return handleBody(c);
     if (m.kind === 'sequential') return handleSequential(c, groupBy);
+    if (m.kind === 'completion') return handleCompletion(c, groupBy);
     return handleRace(c, groupBy);
   };
 
@@ -129,7 +138,7 @@ export function createStatsApp(db: DatabaseSync, deps: StatsDeps): Hono {
   app.get('/v1/stats/series', (c) => wrap(c, () => seriesResult(c)));
   app.get('/v1/stats/metrics', (c) => c.json(listMetrics().map((m) => ({
     id: m.id, kind: m.kind,
-    dimensions: m.kind === 'race' ? DIMS : m.kind === 'sequential' ? (['player', 'course', 'cc'] as Dimension[]) : ['player'],
+    dimensions: m.kind === 'race' ? DIMS : (m.kind === 'sequential' || m.kind === 'completion') ? (['player', 'course', 'cc'] as Dimension[]) : ['player'],
     aggs: m.kind === 'body' ? m.aggs : undefined,
   }))));
 

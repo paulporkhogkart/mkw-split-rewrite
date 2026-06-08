@@ -103,4 +103,15 @@ describe('stats routes', () => {
     const seq = body.find((m: { id: string }) => m.id === 'resets_since_pb');
     expect(seq.dimensions).toEqual(['player', 'course', 'cc']);
   });
+
+  it('avg_completion_before_reset dispatches (null without trails) and is catalogued', async () => {
+    const app = createStatsApp(db(), { porkerPath: null });
+    const res = await app.request('/v1/stats/value?metric=avg_completion_before_reset&course=bc');
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.value).toBeNull();      // the reset has no trail -> unevaluable
+    expect(body.unevaluable).toBe(1);
+    const cat = await (await app.request('/v1/stats/metrics')).json();
+    expect(cat.find((x: { id: string }) => x.id === 'avg_completion_before_reset').dimensions).toEqual(['player', 'course', 'cc']);
+  });
 });
