@@ -83,4 +83,24 @@ describe('stats routes', () => {
     expect((await res2.json()).value).toBe(0);
     rmSync(dir, { recursive: true, force: true });
   });
+
+  it('sequential resets_since_pb via /value (no PB -> all resets)', async () => {
+    const app = createStatsApp(db(), { porkerPath: null });
+    const res = await app.request('/v1/stats/value?metric=resets_since_pb&player=Luke&course=bc');
+    expect(res.status).toBe(200);
+    expect((await res.json()).value).toBe(1); // one reset, no PB yet
+  });
+
+  it('sequential /value without player+course -> 400', async () => {
+    const app = createStatsApp(db(), { porkerPath: null });
+    const res = await app.request('/v1/stats/value?metric=resets_since_pb');
+    expect(res.status).toBe(400);
+  });
+
+  it('/v1/stats/metrics tags sequential dimensions', async () => {
+    const app = createStatsApp(db(), { porkerPath: null });
+    const body = await (await app.request('/v1/stats/metrics')).json();
+    const seq = body.find((m: { id: string }) => m.id === 'resets_since_pb');
+    expect(seq.dimensions).toEqual(['player', 'course', 'cc']);
+  });
 });

@@ -30,4 +30,9 @@ describe('metric registry', () => {
     expect(ids).toContain('resets');
     expect(ids).toContain('muscle_mass');
   });
+
+  it('sequential metrics allow player/course/cc only', () => {
+    expect(allowsDimension('resets_since_pb', 'course')).toBe(true);
+    expect(allowsDimension('resets_since_pb', 'character')).toBe(false);
+  });
 });

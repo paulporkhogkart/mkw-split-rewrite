@@ -28,7 +28,12 @@ export interface BodyMetric {
   defaultAgg: BodyAgg;
 }
 
-export type MetricDef = RaceMetric | BodyMetric;
+export interface SequentialMetric {
+  id: string;
+  kind: 'sequential';
+}
+
+export type MetricDef = RaceMetric | BodyMetric | SequentialMetric;
 
 const RACE: RaceMetric[] = [
   { id: 'attempts',        kind: 'race', value: 'COUNT(*)',                                                statuses: 'all',        joins: [] },
@@ -54,7 +59,13 @@ const BODY: BodyMetric[] = Object.entries(BODY_COLUMNS).map(([id, column]) => ({
   id, kind: 'body', column, aggs: ['current', 'change', 'min', 'max'], defaultAgg: 'current',
 }));
 
-const REGISTRY = new Map<string, MetricDef>([...RACE, ...BODY].map((m) => [m.id, m]));
+const SEQUENTIAL: SequentialMetric[] = [
+  { id: 'resets_since_pb', kind: 'sequential' },
+  { id: 'avg_resets_until_pb', kind: 'sequential' },
+  { id: 'current_reset_streak', kind: 'sequential' },
+];
+
+const REGISTRY = new Map<string, MetricDef>([...RACE, ...BODY, ...SEQUENTIAL].map((m) => [m.id, m]));
 
 export function getMetric(id: string): MetricDef | undefined { return REGISTRY.get(id); }
 export function listMetrics(): MetricDef[] { return [...REGISTRY.values()]; }
@@ -63,5 +74,7 @@ export function listMetrics(): MetricDef[] { return [...REGISTRY.values()]; }
 export function allowsDimension(metricId: string, dim: Dimension): boolean {
   const m = REGISTRY.get(metricId);
   if (!m) return false;
-  return m.kind === 'race' ? RACE_DIMENSIONS.includes(dim) : dim === 'player';
+  if (m.kind === 'race') return RACE_DIMENSIONS.includes(dim);
+  if (m.kind === 'sequential') return dim === 'player' || dim === 'course' || dim === 'cc';
+  return dim === 'player'; // body
 }
