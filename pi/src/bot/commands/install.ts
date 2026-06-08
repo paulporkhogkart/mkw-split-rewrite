@@ -106,7 +106,7 @@ async function handleNemesis(db: DatabaseSync, interaction: ChatInputCommandInte
       pageCount > 1
         ? `Page ${p + 1} of ${pageCount} • ${total} total tracks`
         : `${total} tracks`;
-    return nemesisPageEmbed(v.title, slice, v.targeted, p * PAGE + 1, footer);
+    return nemesisPageEmbed(v.title, slice, v.targeted, p * PAGE + 1, footer, v.color);
   };
 
   if (pageCount === 1) {

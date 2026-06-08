@@ -12,14 +12,16 @@ function reignFooter(e: EmbedBuilder, leader: string | null, reignMs: number | n
   }
 }
 
-export function trackLeaderboardEmbed(v: { title: string; body: string; leader: string | null; reign_ms: number | null }, thumb: string | null): EmbedBuilder {
-  const e = new EmbedBuilder().setTitle(v.title).setColor(BLUE).setDescription(v.body);
+type BoardView = { title: string; body: string; leader: string | null; reign_ms: number | null; color?: number | null };
+
+export function trackLeaderboardEmbed(v: BoardView, thumb: string | null): EmbedBuilder {
+  const e = new EmbedBuilder().setTitle(v.title).setColor(v.color ?? BLUE).setDescription(v.body);
   reignFooter(e, v.leader, v.reign_ms, thumb);
   return e;
 }
 
-export function totalLeaderboardEmbed(v: { title: string; body: string; leader: string | null; reign_ms: number | null }, thumb: string | null): EmbedBuilder {
-  const e = new EmbedBuilder().setTitle(v.title).setColor(BLUE).setDescription(v.body);
+export function totalLeaderboardEmbed(v: BoardView, thumb: string | null): EmbedBuilder {
+  const e = new EmbedBuilder().setTitle(v.title).setColor(v.color ?? BLUE).setDescription(v.body);
   reignFooter(e, v.leader, v.reign_ms, thumb);
   return e;
 }
@@ -35,7 +37,7 @@ export function wrInfoEmbed(v: { title: string; time: string; char: string; kart
   return e;
 }
 
-export function nemesisPageEmbed(title: string, rows: NemesisRow[], targeted: boolean, startPosition: number, footer: string): EmbedBuilder {
-  return new EmbedBuilder().setTitle(title).setColor(BLUE)
+export function nemesisPageEmbed(title: string, rows: NemesisRow[], targeted: boolean, startPosition: number, footer: string, color: number | null = null): EmbedBuilder {
+  return new EmbedBuilder().setTitle(title).setColor(color ?? BLUE)
     .setDescription(formatNemesisTracks(rows, targeted, startPosition)).setFooter({ text: footer });
 }

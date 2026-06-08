@@ -208,3 +208,22 @@ describe('buildNemesis', () => {
     }
   });
 });
+
+describe('player colours on command views', () => {
+  it('buildTrackBoard color is null when #1 has none, a number when set', () => {
+    expect((buildTrackBoard(seeded(), 'Rainbow Road', 150) as { color: number | null }).color).toBeNull();
+    const db = seeded();
+    db.exec("UPDATE players SET color='#a78bfa' WHERE display_name='Paul'");   // Paul leads RR
+    const r = buildTrackBoard(db, 'Rainbow Road', 150);
+    if ('error' in r) throw new Error(r.error);
+    expect(typeof r.color).toBe('number');
+  });
+
+  it('buildNemesis returns the requester colour', () => {
+    const db = seeded();
+    db.exec("UPDATE players SET color='#4ade80' WHERE display_name='Luke'");
+    const v = buildNemesis(db, '867421622347890719', null, 150);   // Luke's discord id
+    if ('error' in v) throw new Error(v.error);
+    expect(typeof v.color).toBe('number');
+  });
+});

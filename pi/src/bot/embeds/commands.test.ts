@@ -106,3 +106,16 @@ describe('nemesisPageEmbed', () => {
     expect(e.footer?.text).toBe('6 tracks');
   });
 });
+
+describe('player colours', () => {
+  it('leaderboard embeds use the view colour, else default blue', () => {
+    const v = { title: 'X', body: '`x`', leader: null, reign_ms: null, color: 0x123456 };
+    expect(trackLeaderboardEmbed(v, null).toJSON().color).toBe(0x123456);
+    expect(totalLeaderboardEmbed(v, null).toJSON().color).toBe(0x123456);
+    expect(trackLeaderboardEmbed({ ...v, color: null }, null).toJSON().color).toBe(0xc2ddfd);
+  });
+  it('nemesisPageEmbed uses the colour arg, else default blue', () => {
+    expect(nemesisPageEmbed('T', [], false, 1, 'f', 0x123456).toJSON().color).toBe(0x123456);
+    expect(nemesisPageEmbed('T', [], false, 1, 'f').toJSON().color).toBe(0xc2ddfd);
+  });
+});

@@ -10,6 +10,7 @@ import {
 } from '../format';
 import type { BoardRow, TotalRow, NemesisRow } from '../format';
 import { nameForId } from '../players.config';
+import { discordColor } from '../color';
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -23,12 +24,20 @@ const playerId = (db: DatabaseSync, name: string): number | null =>
   (db.prepare('SELECT id FROM players WHERE display_name=? COLLATE NOCASE').get(name) as { id: number } | undefined)
     ?.id ?? null;
 
+/** A player's stored colour as a dark-mode-legible Discord embed colour, or null. */
+const playerColor = (db: DatabaseSync, name: string | null): number | null => {
+  if (!name) return null;
+  const row = db.prepare('SELECT color FROM players WHERE display_name=? COLLATE NOCASE').get(name) as
+    | { color: string | null } | undefined;
+  return discordColor(row?.color ?? null);
+};
+
 // ---------------------------------------------------------------------------
 // buildTrackBoard
 // ---------------------------------------------------------------------------
 
 export type TrackBoard =
-  | { title: string; body: string; leader: string | null; reign_ms: number | null }
+  | { title: string; body: string; leader: string | null; reign_ms: number | null; color: number | null }
   | { error: string };
 
 /**
@@ -64,6 +73,7 @@ export function buildTrackBoard(db: DatabaseSync, courseInput: string, cc = 150)
     body,
     leader: reign?.previous_holder ?? null,
     reign_ms: reign?.reign_ms ?? null,
+    color: playerColor(db, lb[0]?.display_name ?? null),   // the #1 player's colour
   };
 }
 
@@ -71,7 +81,7 @@ export function buildTrackBoard(db: DatabaseSync, courseInput: string, cc = 150)
 // buildOverallBoard
 // ---------------------------------------------------------------------------
 
-export type OverallBoard = { title: string; body: string; leader: string | null; reign_ms: number | null };
+export type OverallBoard = { title: string; body: string; leader: string | null; reign_ms: number | null; color: number | null };
 
 /**
  * Pure data assembly for `/leaderboard` (overall, no track argument).
@@ -98,7 +108,10 @@ export function buildOverallBoard(db: DatabaseSync, cc = 150): OverallBoard {
   );
 
   const reign = overallReign(db, season, cc);
-  return { title: 'Overall Leaderboard', body, leader: reign.leader, reign_ms: reign.reign_ms };
+  return {
+    title: 'Overall Leaderboard', body, leader: reign.leader, reign_ms: reign.reign_ms,
+    color: playerColor(db, standings[0]?.display_name ?? null),   // the overall #1 player's colour
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -193,7 +206,7 @@ function wrVideo(
 // ---------------------------------------------------------------------------
 
 export type NemesisView =
-  | { title: string; rows: NemesisRow[]; targeted: boolean }
+  | { title: string; rows: NemesisRow[]; targeted: boolean; color: number | null }
   | { error: string };
 
 /**
@@ -229,5 +242,5 @@ export function buildNemesis(
     ahead_player: d.ahead_player,
   }));
 
-  return { title, rows, targeted: targetName != null };
+  return { title, rows, targeted: targetName != null, color: playerColor(db, requester) };   // requester's colour
 }
