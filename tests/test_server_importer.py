@@ -101,6 +101,10 @@ def test_map_players_creates_and_rosters(legacy_db, server_db):
     names = {r["display_name"] for r in server_db.execute("SELECT display_name FROM players")}
     assert names == {"Paul", "Luke"}
     assert server_db.execute("SELECT COUNT(*) FROM season_rosters").fetchone()[0] == 4
+    # Colours are seeded alongside the players (from importer.PLAYER_COLORS).
+    colors = {r["display_name"]: r["color"] for r in server_db.execute("SELECT display_name, color FROM players")}
+    assert colors["Paul"] == "#a78bfa"
+    assert colors["Luke"] == "#f87171"
 
 
 def test_map_courses_resolves_apostrophe_and_alias(legacy_db, server_db):

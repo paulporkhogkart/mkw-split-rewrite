@@ -45,15 +45,33 @@ def ensure_seasons(conn, legacy, cutover_iso) -> tuple[int, int]:
     return s0_id, s1_id
 
 
+# Per-player edge colours (lower-cased name -> hex), seeded with the players. Used by the
+# Discord bot for /leaderboard and /nemesis embed edges; tuned for Discord dark mode.
+PLAYER_COLORS = {
+    "paul": "#a78bfa",     # violet
+    "adymer": "#fbbf24",   # amber-gold
+    "alex": "#38bdf8",     # sky
+    "aliias": "#4ade80",   # green
+    "luke": "#f87171",     # red
+}
+
+
 def map_players(conn, legacy, s0_id, s1_id) -> dict[int, int]:
-    """Map legacy player ids -> server player ids (case-insensitive), seeding rosters."""
+    """Map legacy player ids -> server player ids (case-insensitive), seeding rosters + colours."""
     mapping: dict[int, int] = {}
     for row in legacy.execute("SELECT id, name FROM players"):
+        color = PLAYER_COLORS.get(row["name"].lower())
         existing = conn.execute(
             "SELECT id FROM players WHERE display_name = ? COLLATE NOCASE",
             (row["name"],)).fetchone()
-        pid = existing["id"] if existing else conn.execute(
-            "INSERT INTO players(display_name) VALUES (?)", (row["name"],)).lastrowid
+        if existing:
+            pid = existing["id"]
+            if color is not None:
+                conn.execute("UPDATE players SET color=? WHERE id=?", (color, pid))
+        else:
+            pid = conn.execute(
+                "INSERT INTO players(display_name, color) VALUES (?, ?)",
+                (row["name"], color)).lastrowid
         for sid in (s0_id, s1_id):
             conn.execute(
                 "INSERT OR IGNORE INTO season_rosters(season_id, player_id) VALUES (?,?)",
