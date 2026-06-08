@@ -2,9 +2,9 @@ import { EmbedBuilder } from 'discord.js';
 import type { PbEmbedData } from '../types';
 import { formatDuration, formatOvertaken, formatPositions } from '../format';
 
-/** PB title. Ending someone else's reign leads with the new name ("<NAME> HAS ENDED THE
- *  <dur> REIGN OF <PREV>"); extending your own reign uses the classic "THE <dur> REIGN OF
- *  <NAME> CONTINUES"; everything else (incl. a first-ever time on a track) is just
+/** PB title. Ending someone else's reign leads with the new name ("<NAME> ENDED THE <dur>
+ *  REIGN OF <PREV>"); extending your own reign uses the classic "THE <dur> REIGN OF <NAME>
+ *  CONTINUES"; everything else (incl. a first-ever time on a track) is just
  *  "<NAME> PERSONAL BEST". */
 export function pbTitle(d: PbEmbedData): string {
   const name = d.player.toUpperCase();
@@ -13,7 +13,7 @@ export function pbTitle(d: PbEmbedData): string {
   const prev = (d.reign.previous_holder ?? '').toUpperCase();
   return d.reign.is_same_person
     ? `THE ${dur} REIGN OF ${name} CONTINUES`
-    : `${name} HAS ENDED THE ${dur} REIGN OF ${prev}`;
+    : `${name} ENDED THE ${dur} REIGN OF ${prev}`;
 }
 
 /** Green PB embed — ports legacy DiscordBot._send_pb_message. GIF urls are injected so the
