@@ -7,7 +7,7 @@ import { requireToken } from './auth';
 import { activeSeasonId, courseIdBySlug } from '../db/seasons';
 import { slugify } from '../db/slug';
 import { upsertRun } from '../db/ingest';
-import { recomputeIsPb } from '../db/pb';
+import { recomputeIsPb, recomputeWasPb } from '../db/pb';
 import { courseLeaderboard, currentWr } from '../db/reads';
 
 export function runsRoutes(db: DatabaseSync, hub: EventHub): Hono<Env> {
@@ -33,6 +33,7 @@ export function runsRoutes(db: DatabaseSync, hub: EventHub): Hono<Env> {
     if (p.status !== 'finished') return c.json({ is_pb: false, rank: null, gap_to_leader_ms: null, gap_to_wr_ms: null });
 
     recomputeIsPb(db, seasonId, playerId, courseId, cc);
+    recomputeWasPb(db, seasonId, playerId, courseId, cc);
     const lb = courseLeaderboard(db, seasonId, courseId, cc);
     const mine = lb.find(x => x.player_id === playerId) ?? null;
     const newMineMs = mine ? mine.total_time_ms : null;

@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { backfillWasPb } from './pb';
 
 export function openDb(path: string): DatabaseSync {
   const db = new DatabaseSync(path);
@@ -25,6 +26,11 @@ export function applySchema(db: DatabaseSync): void {
       WHERE w2.course_id = world_records.course_id AND w2.cc = world_records.cc
       ORDER BY w2.achieved_at DESC, w2.id DESC LIMIT 1)`);
   } catch { /* already present + seeded */ }
+  // Additive: per-run "was a PB when set" flag. Backfilled once, on first add.
+  try {
+    db.exec('ALTER TABLE runs ADD COLUMN was_pb INTEGER NOT NULL DEFAULT 0');
+    backfillWasPb(db);
+  } catch { /* already present + backfilled */ }
   // Idempotent: at most one current WR per (course,cc). Created here (not in schema.sql)
   // so the column is guaranteed present for both fresh and migrated DBs.
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_wr_current ON world_records(course_id, cc) WHERE is_current=1');
