@@ -7,7 +7,7 @@
 <style>
   :root { --line:#d0d0d0; --muted:#666; --bg:#fafafa; --accent:#2b6cb0; }
   * { box-sizing: border-box; }
-  body { font: 14px/1.5 system-ui, sans-serif; max-width: 980px; margin: 0 auto; padding: 24px; color:#1a1a1a; }
+  body { font: 14px/1.5 system-ui, sans-serif; max-width: 1000px; margin: 0 auto; padding: 24px; color:#1a1a1a; }
   h1 { font-size: 20px; margin: 0 0 2px; }
   h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 24px 0 8px; }
   .sub { color: var(--muted); margin: 0 0 16px; }
@@ -15,17 +15,17 @@
   label { display: inline-block; min-width: 92px; color: var(--muted); }
   .row { margin: 6px 0; }
   select, input { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; min-width: 200px; }
-  input.short { min-width: 110px; }
+  input.short { min-width: 120px; }
   button { font: inherit; padding: 6px 14px; border: 1px solid var(--accent); background: var(--accent); color: #fff; border-radius: 4px; cursor: pointer; }
   button.ghost { background:#fff; color: var(--accent); }
   code, pre, .mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; }
-  pre { background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 12px; overflow:auto; max-height: 360px; margin: 8px 0 0; }
-  .url { background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 8px; word-break: break-all; margin: 10px 0; }
-  .cat { columns: 2; column-gap: 24px; }
-  .cat .group { break-inside: avoid; margin-bottom: 12px; }
-  .cat .group b { display:block; color: var(--muted); font-weight:600; }
-  .cat a { color: var(--accent); cursor: pointer; text-decoration: none; }
-  .cat a:hover { text-decoration: underline; }
+  pre { background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 12px; overflow:auto; max-height: 320px; margin: 8px 0 0; }
+  .title { font-size: 17px; font-weight: 600; margin: 4px 0 12px; padding: 10px 12px; background:#f0f5fb; border:1px solid #cfe0f0; border-radius: 6px; }
+  .url { color: var(--muted); font-size: 12px; word-break: break-all; margin: 10px 0; }
+  .gallery .group { margin-bottom: 14px; }
+  .gallery .group > b { display:block; color: var(--muted); text-transform:uppercase; font-size:12px; letter-spacing:.04em; margin-bottom:4px; }
+  .gallery a { display:inline-block; color: var(--accent); cursor: pointer; text-decoration: none; border:1px solid var(--line); border-radius: 14px; padding: 3px 10px; margin: 3px 4px 3px 0; }
+  .gallery a:hover { background:#f0f5fb; }
   .hide { display: none; }
   .pill { display:inline-block; font-size:12px; color:var(--muted); border:1px solid var(--line); border-radius:10px; padding:0 7px; margin-left:6px; }
   .err { color: #b00; }
@@ -33,34 +33,39 @@
 </head>
 <body>
 <h1>MKW Broadcast Stats — Explorer</h1>
-<p class="sub" id="status">Loading the metric catalogue…</p>
+<p class="sub" id="status">Loading…</p>
 
+<h2>Pick a ready-made stat</h2>
+<section><div class="gallery" id="gallery">…</div></section>
+
+<h2>…or build your own</h2>
 <section>
+  <div class="title" id="title">—</div>
+
   <div class="row"><label>Shape</label>
     <select id="shape">
-      <option value="value">value — one number</option>
-      <option value="breakdown">breakdown — grouped rows</option>
-      <option value="series">series — time buckets</option>
-      <option value="correlation">correlation — race × body (r, slope)</option>
+      <option value="value">total / single number</option>
+      <option value="breakdown">ranked breakdown</option>
+      <option value="series">over time</option>
+      <option value="correlation">correlation (race × body)</option>
     </select>
   </div>
-
-  <div class="row" id="metricRow"><label>Metric</label><select id="metric"></select><span class="pill" id="kindPill"></span></div>
-  <div class="row hide" id="bodyRow"><label>Body metric</label><select id="bodyMetric"></select></div>
-  <div class="row hide" id="aggRow"><label>Aggregation</label><select id="agg"></select></div>
-  <div class="row hide" id="groupRow"><label>Group by</label><select id="groupBy"></select></div>
+  <div class="row" id="metricRow"><label>Stat</label><select id="metric"></select><span class="pill" id="kindPill"></span></div>
+  <div class="row hide" id="bodyRow"><label>Body stat</label><select id="bodyMetric"></select></div>
+  <div class="row hide" id="aggRow"><label>Of the</label><select id="agg"></select></div>
+  <div class="row hide" id="groupRow"><label>Per</label><select id="groupBy"></select></div>
   <div class="row hide" id="bucketRow"><label>Bucket</label><select id="bucket"><option>day</option><option>week</option><option>month</option></select></div>
 
   <div id="filters"></div>
-  <div class="row hide" id="bcRow"><label>body_condition</label><input id="bodyCondition" class="mono" placeholder="e.g. bmi&lt;22 or body_fat&gt;20"></div>
+  <div class="row hide" id="bcRow"><label>Only when</label><input id="bodyCondition" class="mono" placeholder="e.g. bmi&lt;22 or body_fat&gt;20"></div>
 
-  <div class="row"><label>Period</label>
+  <div class="row"><label>When</label>
     <select id="period"><option>this_week</option><option>this_month</option><option>today</option><option value="all_time">all_time</option><option>range</option></select>
     <input id="tz" class="short" value="Australia/Melbourne" title="IANA timezone">
   </div>
   <div class="row hide" id="rangeRow"><label>Range</label>
-    <input id="from" class="short" placeholder="from e.g. 2026-06-01"> &nbsp;
-    <input id="to" class="short" placeholder="to e.g. 2026-07-01">
+    <input id="from" class="short" placeholder="from 2026-06-01"> &nbsp;
+    <input id="to" class="short" placeholder="to 2026-07-01">
   </div>
 
   <div class="url mono" id="url"></div>
@@ -68,136 +73,212 @@
   <pre id="result">—</pre>
 </section>
 
-<h2>Everything available <span class="pill" id="count"></span></h2>
-<section><div class="cat" id="catalogue"></div></section>
-
 <h2>Reference</h2>
-<section class="mono" style="color:#333">
-  <p><b>Shapes</b> — <code>/v1/stats/value</code> (single number), <code>/v1/stats/breakdown</code> (rows, needs group_by),
-     <code>/v1/stats/series</code> (per-bucket, needs a bounded period), <code>/v1/stats/correlation</code> (n, r, slope, intercept).</p>
-  <p><b>Periods</b> — today · this_week (Mon start) · this_month · all_time · range(from,to). Resolved in <code>tz</code> (default Australia/Melbourne).</p>
-  <p><b>Dimensions</b> — filter or group_by, per metric: race = player·course·character·kart·costume·cc; sequential/completion = player·course·cc; body = player; screen = player·screen.</p>
-  <p><b>Notes</b> — reads are unauthenticated. Body metrics &amp; correlation need <code>porker.db</code> (503 otherwise). <code>screen_time</code> reads 0 until the desktop app is forwarding intervals. Most stats are forward-looking (live runs only). Discover the live list any time at <code>/v1/stats/metrics</code>.</p>
+<section class="mono" style="color:#333;font-size:13px">
+  <p><b>Shapes</b> — total · breakdown (ranked rows) · over-time (buckets) · correlation (n, r, slope).</p>
+  <p><b>When</b> — today · this week (Mon start) · this month · all-time · range — in any timezone (default Melbourne).</p>
+  <p><b>Per / filter by</b> — race: player·course·character·kart·costume·cc · sequential/completion: player·course·cc · body: player · screen: player·screen.</p>
+  <p><b>Notes</b> — reads need no login. Body &amp; correlation need <code>porker.db</code>. Time-per-screen reads 0 until the desktop app forwards intervals. Live registry: <code>/v1/stats/metrics</code>.</p>
 </section>
 
 <script>
 let META = [];
 const $ = (id) => document.getElementById(id);
-const RACE_DIMS = ['player','course','character','kart','costume','cc'];
-const ALL_DIMS = [...RACE_DIMS, 'screen'];
+const ALL_DIMS = ['player','course','character','kart','costume','cc','screen'];
 
+// ── human labels ──────────────────────────────────────────────
+const METRIC_LABEL = {
+  attempts:'Attempts', resets:'Resets', finishes:'Finishes', reset_rate:'Reset rate',
+  coins:'Coins collected', mushrooms:'Mushrooms used', driving_time:'Driving time',
+  best_time:'Best time', avg_finish_time:'Average finish time', pb_count:'PBs set',
+  time_improvement:'PB improvement', resets_since_pb:'Resets since last PB',
+  avg_resets_until_pb:'Average resets per PB', current_reset_streak:'Current reset streak',
+  avg_completion_before_reset:'Average completion before reset', screen_time:'Time spent',
+};
+const SUMMABLE = ['coins','mushrooms','driving_time','resets','attempts','finishes','pb_count','time_improvement'];
+const bodyLabel = (id) => id.replace(/_/g,' ').replace(/\bbmi\b/,'BMI').replace(/\bbmr\b/,'BMR').replace(/^\w/, c => c.toUpperCase());
+const metricLabel = (m) => METRIC_LABEL[m.id] || (m.kind === 'body' ? bodyLabel(m.id) : m.id);
+const PER_LABEL = { player:'player', course:'course', character:'character', kart:'kart', costume:'costume', cc:'cc', screen:'screen' };
+function filterPhrase(dim, v) {
+  return { course:` on ${v}`, character:` as ${v}`, kart:` in the ${v}`, costume:` (${v})`, cc:` (${v}cc)`, screen:` in ${v}` }[dim] || '';
+}
+const WHEN = () => ({ today:'today', this_week:'this week', this_month:'this month', all_time:'all-time',
+  range:`${$('from').value || '?'}–${$('to').value || '?'}` }[$('period').value]);
+function condPhrase(c) {
+  const x = /^([a-z_]+)\s*(<=|>=|<|>|=)\s*(-?\d+(\.\d+)?)$/.exec(c.trim()); if (!x) return c;
+  const op = { '<':'under', '<=':'at most', '>':'over', '>=':'at least', '=':'at' }[x[2]];
+  if (x[1] === 'body_fat') return `${op} ${x[3]}% body fat`;
+  if (x[1] === 'bmi') return `${op} ${x[3]} BMI`;
+  return `${op} ${x[3]} ${bodyLabel(x[1]).toLowerCase()}`;
+}
+function filters() {
+  const f = {}; document.querySelectorAll('.flt').forEach(i => { if (i.value.trim()) f[i.dataset.dim] = i.value.trim(); }); return f;
+}
+
+function titleFor() {
+  const shape = $('shape').value, f = filters();
+  if (shape === 'correlation') {
+    return `Does ${bodyLabel($('bodyMetric').value).toLowerCase()} track finish time? · ${WHEN()}` +
+      (f.course ? ` on ${f.course}` : '') + (f.player ? ` — ${f.player}` : '');
+  }
+  const m = currentMetric(); if (!m) return '';
+  let head = metricLabel(m);
+  if (m.kind === 'body') {
+    head = { current:`Current ${head.toLowerCase()}`, change:`${head} change`,
+             min:`Lowest ${head.toLowerCase()}`, max:`Highest ${head.toLowerCase()}` }[$('agg').value] || head;
+  } else if (SUMMABLE.includes(m.id) && shape === 'value') {
+    head = `Total ${head.toLowerCase()}`;
+  }
+  let s = head;
+  if (shape === 'breakdown') s += ` per ${PER_LABEL[$('groupBy').value] || $('groupBy').value}`;
+  if (shape === 'series') s += ` over time`;
+  const gb = shape === 'breakdown' ? $('groupBy').value : null;
+  for (const [dim, v] of Object.entries(f)) if (dim !== 'player' && dim !== gb) s += filterPhrase(dim, v);
+  if (m.kind === 'race' && $('bodyCondition').value.trim()) s += ` while ${condPhrase($('bodyCondition').value)}`;
+  if (m.kind === 'body' && $('shape').value === 'value' && !f.player) s += ' (all players)';
+  s += ` · ${WHEN()}`;
+  if (f.player) s += ` — ${f.player}`;
+  return s;
+}
+
+// ── ready-made gallery ────────────────────────────────────────
+const PRESETS = [
+  ['Racing & PBs', [
+    ['PBs set this week', { shape:'value', metric:'pb_count', period:'this_week' }],
+    ['PBs set per course (this month)', { shape:'breakdown', metric:'pb_count', period:'this_month', group_by:'course' }],
+    ['PB improvement per course (this month)', { shape:'breakdown', metric:'time_improvement', period:'this_month', group_by:'course' }],
+    ['Best time per course', { shape:'breakdown', metric:'best_time', period:'all_time', group_by:'course' }],
+    ['Average finish time per course', { shape:'breakdown', metric:'avg_finish_time', period:'all_time', group_by:'course' }],
+    ['Finishes this week', { shape:'value', metric:'finishes', period:'this_week' }],
+  ]],
+  ['Resets', [
+    ['Total resets today', { shape:'value', metric:'resets', period:'today' }],
+    ['Resets per course (this week)', { shape:'breakdown', metric:'resets', period:'this_week', group_by:'course' }],
+    ['Reset rate per player', { shape:'breakdown', metric:'reset_rate', period:'all_time', group_by:'player' }],
+    ['Resets since last PB, per course (Luke)', { shape:'breakdown', metric:'resets_since_pb', group_by:'course', player:'Luke' }],
+    ['Average resets per PB, per course (Luke)', { shape:'breakdown', metric:'avg_resets_until_pb', group_by:'course', player:'Luke' }],
+    ['Current reset streak per course (Luke)', { shape:'breakdown', metric:'current_reset_streak', group_by:'course', player:'Luke' }],
+    ['Average completion before reset, per course', { shape:'breakdown', metric:'avg_completion_before_reset', group_by:'course' }],
+  ]],
+  ['Coins & items', [
+    ['Total coins this week', { shape:'value', metric:'coins', period:'this_week' }],
+    ['Coins per course (this month)', { shape:'breakdown', metric:'coins', period:'this_month', group_by:'course' }],
+    ['Coins per player (this week)', { shape:'breakdown', metric:'coins', period:'this_week', group_by:'player' }],
+    ['Mushrooms per course (this week)', { shape:'breakdown', metric:'mushrooms', period:'this_week', group_by:'course' }],
+  ]],
+  ['Driving & loadout', [
+    ['Total driving time this week', { shape:'value', metric:'driving_time', period:'this_week' }],
+    ['Driving time per character', { shape:'breakdown', metric:'driving_time', period:'all_time', group_by:'character' }],
+    ['Driving time per kart', { shape:'breakdown', metric:'driving_time', period:'all_time', group_by:'kart' }],
+  ]],
+  ['Body (pork-off)', [
+    ['Total body fat across players (now)', { shape:'value', metric:'body_fat', agg:'current', period:'all_time' }],
+    ['Body-fat change this month, per player', { shape:'breakdown', metric:'body_fat', agg:'change', period:'this_month', group_by:'player' }],
+    ['Total muscle mass across players (now)', { shape:'value', metric:'muscle_mass', agg:'current', period:'all_time' }],
+    ['Weight change this month (Paul)', { shape:'value', metric:'weight', agg:'change', period:'this_month', player:'Paul' }],
+    ['Lowest body fat this month, per player', { shape:'breakdown', metric:'body_fat', agg:'min', period:'this_month', group_by:'player' }],
+  ]],
+  ['Cross-domain', [
+    ['PBs set while under 22 BMI (this month)', { shape:'value', metric:'pb_count', period:'this_month', body_condition:'bmi<22' }],
+    ['Coins collected while over 20% body fat', { shape:'value', metric:'coins', period:'all_time', body_condition:'body_fat>20' }],
+    ['Body fat vs finish time (Luke — add a course)', { shape:'correlation', body:'body_fat', player:'Luke' }],
+  ]],
+  ['Screen-time', [
+    ['Time per screen today', { shape:'breakdown', metric:'screen_time', period:'today', group_by:'screen' }],
+    ['Time per screen, per player (this week)', { shape:'breakdown', metric:'screen_time', period:'this_week', group_by:'player' }],
+  ]],
+];
+
+function renderGallery() {
+  $('gallery').innerHTML = PRESETS.map(([group, items], gi) =>
+    `<div class="group"><b>${group}</b>` +
+    items.map((it, i) => `<a data-g="${gi}" data-i="${i}">${it[0]}</a>`).join('') + `</div>`
+  ).join('');
+  $('gallery').querySelectorAll('a').forEach(a => a.onclick = () => applyPreset(PRESETS[+a.dataset.g][1][+a.dataset.i][1]));
+}
+
+function applyPreset(q) {
+  $('shape').value = q.shape || 'value';
+  if (q.shape === 'correlation') $('bodyMetric').value = q.body; else $('metric').value = q.metric;
+  $('period').value = q.period || 'all_time';
+  render();                                  // builds the filter inputs for this metric
+  if (q.group_by) $('groupBy').value = q.group_by;
+  if (q.agg) $('agg').value = q.agg;
+  if (q.bucket) $('bucket').value = q.bucket;
+  $('bodyCondition').value = q.body_condition || '';
+  for (const dim of ALL_DIMS) {
+    const el = document.querySelector(`.flt[data-dim="${dim}"]`);
+    if (el) el.value = q[dim] || '';
+  }
+  updateUrl(); run();
+}
+
+// ── catalogue load + builder ──────────────────────────────────
 async function load() {
   try {
-    const [health, metrics] = await Promise.all([
+    const [, metrics] = await Promise.all([
       fetch('/health').then(r => r.ok ? r.json() : Promise.reject()),
       fetch('/v1/stats/metrics').then(r => r.json()),
     ]);
     META = metrics;
-    $('status').textContent = `Server OK · ${META.length} metrics in the registry (+ correlation).`;
-    $('count').textContent = `${META.length} metrics`;
-    buildMetricSelect();
-    buildBodySelect();
-    buildCatalogue();
+    $('status').textContent = `Server OK · ${META.length} stats available. Click a ready-made one, or build your own.`;
+    $('metric').innerHTML = META.map(m => `<option value="${m.id}">${metricLabel(m)} (${m.id})</option>`).join('');
+    $('bodyMetric').innerHTML = META.filter(m => m.kind === 'body').map(m => `<option value="${m.id}">${bodyLabel(m.id)}</option>`).join('');
+    renderGallery();
     render();
-  } catch (e) {
-    $('status').innerHTML = '<span class="err">Could not reach the server. Run <code>npm run dev</code> in <code>pi/</code> and open this page at <code>/explorer</code>.</span>';
+  } catch {
+    $('status').innerHTML = '<span class="err">Could not reach the server. Run <code>npm run dev</code> in <code>pi/</code> and open <code>/explorer</code> on it.</span>';
+    renderGallery();
   }
 }
 
-function buildMetricSelect() {
-  $('metric').innerHTML = META.map(m => `<option value="${m.id}">${m.id} · ${m.kind}</option>`).join('');
-}
-function buildBodySelect() {
-  const body = META.filter(m => m.kind === 'body');
-  $('bodyMetric').innerHTML = body.map(m => `<option value="${m.id}">${m.id}</option>`).join('');
-}
-function buildCatalogue() {
-  const kinds = {};
-  for (const m of META) (kinds[m.kind] ||= []).push(m);
-  let html = '';
-  for (const [kind, list] of Object.entries(kinds)) {
-    html += `<div class="group"><b>${kind}</b>` +
-      list.map(m => `<div><a data-id="${m.id}">${m.id}</a> <span class="pill">${(m.dimensions||[]).join(' · ')||'—'}</span></div>`).join('') +
-      `</div>`;
-  }
-  html += `<div class="group"><b>special</b><div><a data-shape="correlation">correlation</a> <span class="pill">body · player · course</span></div></div>`;
-  $('catalogue').innerHTML = html;
-  $('catalogue').querySelectorAll('a').forEach(a => a.onclick = () => {
-    if (a.dataset.shape) { $('shape').value = 'correlation'; }
-    else { $('shape').value = 'value'; $('metric').value = a.dataset.id; }
-    render();
-  });
-}
-
-function currentMetric() { return META.find(m => m.id === $('metric').value); }
+const currentMetric = () => META.find(m => m.id === $('metric').value);
 
 function render() {
-  const shape = $('shape').value;
-  const corr = shape === 'correlation';
+  const shape = $('shape').value, corr = shape === 'correlation';
   $('metricRow').classList.toggle('hide', corr);
   $('bodyRow').classList.toggle('hide', !corr);
   $('groupRow').classList.toggle('hide', shape !== 'breakdown' || corr);
   $('bucketRow').classList.toggle('hide', shape !== 'series' || corr);
-
   const m = currentMetric();
   $('kindPill').textContent = corr ? '' : (m ? m.kind : '');
   const dims = corr ? ['player','course'] : (m ? (m.dimensions || []) : []);
-
-  // Aggregation (body metrics only)
   const isBody = !corr && m && m.kind === 'body';
   $('aggRow').classList.toggle('hide', !isBody);
   if (isBody) $('agg').innerHTML = (m.aggs || []).map(a => `<option>${a}</option>`).join('');
-
-  // body_condition (race metrics only)
   $('bcRow').classList.toggle('hide', !(!corr && m && m.kind === 'race'));
-
-  // group_by options = the metric's dimensions
-  if (shape === 'breakdown' && !corr) $('groupBy').innerHTML = dims.map(d => `<option>${d}</option>`).join('');
-
-  // Filter inputs: one per allowed dimension
-  $('filters').innerHTML = dims.map(d =>
-    `<div class="row"><label>${d}</label><input class="short flt" data-dim="${d}" placeholder="${corr && d!=='player'&&d!=='course' ? '' : 'filter ' + d}"></div>`
-  ).join('');
-
+  if (shape === 'breakdown' && !corr) $('groupBy').innerHTML = dims.map(d => `<option value="${d}">${PER_LABEL[d] || d}</option>`).join('');
+  $('filters').innerHTML = dims.map(d => `<div class="row"><label>${PER_LABEL[d] || d}</label><input class="short flt" data-dim="${d}" placeholder="any ${d}"></div>`).join('');
   $('rangeRow').classList.toggle('hide', $('period').value !== 'range');
-  updateUrl();
   $('filters').querySelectorAll('input').forEach(i => i.oninput = updateUrl);
+  updateUrl();
 }
 
 function buildUrl() {
-  const shape = $('shape').value;
-  const tz = $('tz').value.trim();
-  const period = $('period').value;
-  const qs = new URLSearchParams();
+  const shape = $('shape').value, qs = new URLSearchParams();
   const add = (k, v) => { if (v != null && String(v).trim() !== '') qs.set(k, String(v).trim()); };
-
+  const f = filters();
   if (shape === 'correlation') {
-    add('body', $('bodyMetric').value);
-    $('filters').querySelectorAll('.flt').forEach(i => add(i.dataset.dim, i.value));
-    add('period', period); add('tz', tz);
-    if (period === 'range') { add('from', $('from').value); add('to', $('to').value); }
-    return '/v1/stats/correlation?' + qs.toString();
+    add('body', $('bodyMetric').value); add('player', f.player); add('course', f.course);
+  } else {
+    const m = currentMetric(); add('metric', m && m.id);
+    if (shape === 'breakdown') add('group_by', $('groupBy').value);
+    if (shape === 'series') add('bucket', $('bucket').value);
+    if (m && m.kind === 'body') add('agg', $('agg').value);
+    if (m && m.kind === 'race') add('body_condition', $('bodyCondition').value);
+    for (const [d, v] of Object.entries(f)) add(d, v);
   }
-
-  const m = currentMetric();
-  add('metric', m && m.id);
-  if (shape === 'breakdown') add('group_by', $('groupBy').value);
-  if (shape === 'series') add('bucket', $('bucket').value);
-  if (m && m.kind === 'body') add('agg', $('agg').value);
-  if (m && m.kind === 'race') add('body_condition', $('bodyCondition').value);
-  $('filters').querySelectorAll('.flt').forEach(i => add(i.dataset.dim, i.value));
-  add('period', period); add('tz', tz);
-  if (period === 'range') { add('from', $('from').value); add('to', $('to').value); }
-  return `/v1/stats/${shape}?` + qs.toString();
+  add('period', $('period').value); add('tz', $('tz').value);
+  if ($('period').value === 'range') { add('from', $('from').value); add('to', $('to').value); }
+  return `/v1/stats/${shape === 'correlation' ? 'correlation' : shape}?` + qs.toString();
 }
 
-function updateUrl() { $('url').textContent = buildUrl(); }
+function updateUrl() { $('title').textContent = titleFor() || '—'; $('url').textContent = buildUrl(); }
 
 async function run() {
-  const url = buildUrl();
   $('result').textContent = 'Fetching…';
   try {
-    const r = await fetch(url);
+    const r = await fetch(buildUrl());
     const txt = await r.text();
     let body; try { body = JSON.stringify(JSON.parse(txt), null, 2); } catch { body = txt; }
     $('result').textContent = `HTTP ${r.status}\n\n${body}`;
