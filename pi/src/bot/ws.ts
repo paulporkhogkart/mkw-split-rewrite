@@ -15,6 +15,7 @@ export function parseEvent(data: string): ServerEvent | null {
 export function startEventStream(
   url: string,
   onEvent: (e: ServerEvent) => void,
+  onConnect: () => void = () => {},
   log: (m: string) => void = console.log,
 ): { close(): void } {
   let ws: WebSocket | null = null;
@@ -24,7 +25,9 @@ export function startEventStream(
   const connect = () => {
     if (closed) return;
     ws = new WebSocket(url);
-    ws.addEventListener('open', () => { log(`[bot] ws connected ${url}`); backoff = 1000; });
+    // 'open' fires on the initial connect AND every reconnect - the moment to catch up on
+    // anything missed while we were down / disconnected.
+    ws.addEventListener('open', () => { log(`[bot] ws connected ${url}`); backoff = 1000; onConnect(); });
     ws.addEventListener('message', (ev: MessageEvent) => {
       const e = parseEvent(typeof ev.data === 'string' ? ev.data : String(ev.data));
       if (e) onEvent(e);

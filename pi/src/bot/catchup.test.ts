@@ -1,0 +1,46 @@
+import { describe, it, expect } from 'vitest';
+import type { EmbedBuilder } from 'discord.js';
+import { openDb, applySchema } from '../db/connect';
+import { announceMissedPbs } from './catchup';
+
+function db1() {
+  const db = openDb(':memory:'); applySchema(db);
+  db.exec("INSERT INTO seasons(id,name,is_active) VALUES (1,'S1',1)");
+  db.exec("INSERT INTO players(id,display_name) VALUES (1,'Paul')");
+  db.exec("INSERT INTO courses(id,slug,display_name) VALUES (1,'bc','Bowsers Castle')");
+  const ins = (id: number, ms: number, str: string) => db.prepare(
+    "INSERT INTO runs(id,season_id,player_id,course_id,cc,status,provenance,total_time_ms,total_time_str,ended_at,was_pb,is_pb) VALUES (?,1,1,1,150,'finished','live',?,?,?,1,0)"
+  ).run(id, ms, str, `2026-06-1${id}T00:00:00.000Z`);
+  ins(10, 153101, '2:33.101');     // PB-setting run
+  ins(11, 152837, '2:32.837');     // a faster PB
+  db.prepare('UPDATE runs SET is_pb=1 WHERE id=11').run();
+  return db;
+}
+
+describe('announceMissedPbs', () => {
+  it('announces was_pb runs newer than the watermark and advances/persists it', () => {
+    const db = db1();
+    const sent: EmbedBuilder[] = [];
+    const saved: number[] = [];
+    const state = { lastPbRunId: 9 };
+    const n = announceMissedPbs(db, { send: (e) => sent.push(e), state, persist: (s) => saved.push(s.lastPbRunId) });
+    expect(n).toBe(2);
+    expect(sent).toHaveLength(2);
+    expect(state.lastPbRunId).toBe(11);
+    expect(saved).toEqual([10, 11]);             // persisted after each, monotonic
+
+    // A second pass (e.g. a redundant live nudge / reconnect) announces nothing.
+    const again: EmbedBuilder[] = [];
+    expect(announceMissedPbs(db, { send: (e) => again.push(e), state, persist: () => {} })).toBe(0);
+    expect(again).toHaveLength(0);
+  });
+
+  it('only announces strictly past the watermark', () => {
+    const db = db1();
+    const sent: EmbedBuilder[] = [];
+    const state = { lastPbRunId: 10 };           // run 10 already announced
+    announceMissedPbs(db, { send: (e) => sent.push(e), state, persist: () => {} });
+    expect(sent).toHaveLength(1);                // only run 11
+    expect(state.lastPbRunId).toBe(11);
+  });
+});

@@ -19,6 +19,10 @@ src-tauri/gen/
 mkw_tracker.db
 *.db-shm
 *.db-wal
+bot-state.json
+
+# Secrets (the .example templates are committed; the real .env is not)
+.env
 
 # Debug outputs
 debug_laps/
