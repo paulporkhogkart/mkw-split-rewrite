@@ -2,13 +2,15 @@ import { describe, it, expect } from 'vitest';
 import { getMetric, listMetrics, allowsDimension } from './metrics';
 
 describe('metric registry', () => {
-  it('exposes coins as an all-status lap-grain metric', () => {
+  it('exposes coins as an all-status run-level metric (incl. resets, no lap join)', () => {
     const m = getMetric('coins');
     expect(m?.kind).toBe('race');
     if (m?.kind === 'race') {
       expect(m.statuses).toBe('all');
-      expect(m.joins).toContain('laps');
+      expect(m.joins).toEqual([]);
+      expect(m.value).toContain('coins_gained');
     }
+    expect(getMetric('coins_lost')?.kind).toBe('race');
   });
 
   it('pb_count is finished-only and pb-restricted', () => {

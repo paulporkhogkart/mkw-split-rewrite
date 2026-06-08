@@ -133,6 +133,20 @@ def test_run_finalized_includes_total_laps_and_per_lap_stats():
     ]
 
 
+def test_run_finalized_includes_run_level_coin_mushroom_totals_even_on_reset():
+    ipc = _FakeIpc()
+    lc = _lifecycle(ipc, total_time=None, splits={})   # a RESET
+    lc._lapstats.coins_gained = 14
+    lc._lapstats.coins_lost = 6
+    lc._lapstats.mushrooms_used = 3
+    lc.on_screen_change(Screen.RACING, Screen.RESET)
+    evt = _run_finalized(ipc)
+    assert evt["status"] == "reset"
+    assert evt["coins_gained"] == 14      # the reset's coins are no longer lost
+    assert evt["coins_lost"] == 6
+    assert evt["mushrooms_used"] == 3
+
+
 def test_reset_with_unknown_identity_still_emits_for_review():
     # The whole point of run-review is to CATCH incomplete runs - including a reset
     # where the engine detected nothing (no course/character/kart). The emit must NOT

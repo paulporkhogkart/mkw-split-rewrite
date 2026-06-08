@@ -50,8 +50,10 @@ const RACE: RaceMetric[] = [
   { id: 'resets',          kind: 'race', value: 'COUNT(*)',                                                statuses: ['reset'],    joins: [] },
   { id: 'finishes',        kind: 'race', value: 'COUNT(*)',                                                statuses: ['finished'], joins: [] },
   { id: 'reset_rate',      kind: 'race', value: "AVG(CASE WHEN r.status='reset' THEN 1.0 ELSE 0.0 END)",   statuses: 'all',        joins: [] },
-  { id: 'coins',           kind: 'race', value: 'SUM(rl.coins)',                                           statuses: 'all',        joins: ['laps'] },
-  { id: 'mushrooms',       kind: 'race', value: 'SUM(rl.shrooms)',                                         statuses: 'all',        joins: ['laps'] },
+  // Run-level totals (include resets + the partial final lap); per-lap rows stay for splits.
+  { id: 'coins',           kind: 'race', value: 'SUM(r.coins_gained)',                                     statuses: 'all',        joins: [] },
+  { id: 'coins_lost',      kind: 'race', value: 'SUM(r.coins_lost)',                                       statuses: 'all',        joins: [] },
+  { id: 'mushrooms',       kind: 'race', value: 'SUM(r.mushrooms_used)',                                   statuses: 'all',        joins: [] },
   { id: 'driving_time',    kind: 'race', value: 'SUM(pt.maxt)',                                            statuses: 'all',        joins: ['points'] },
   { id: 'best_time',       kind: 'race', value: 'MIN(r.total_time_ms)',                                    statuses: ['finished'], joins: [] },
   { id: 'avg_finish_time', kind: 'race', value: 'AVG(r.total_time_ms)',                                    statuses: ['finished'], joins: [] },

@@ -89,13 +89,13 @@ const ALL_DIMS = ['player','course','character','kart','costume','cc','screen'];
 // ── human labels ──────────────────────────────────────────────
 const METRIC_LABEL = {
   attempts:'Attempts', resets:'Resets', finishes:'Finishes', reset_rate:'Reset rate',
-  coins:'Coins collected', mushrooms:'Mushrooms used', driving_time:'Driving time',
+  coins:'Coins collected', coins_lost:'Coins lost', mushrooms:'Mushrooms used', driving_time:'Driving time',
   best_time:'Best time', avg_finish_time:'Average finish time', pb_count:'PBs set',
   time_improvement:'PB improvement', resets_since_pb:'Resets since last PB',
   avg_resets_until_pb:'Average resets per PB', current_reset_streak:'Current reset streak',
   avg_completion_before_reset:'Average completion before reset', screen_time:'Time spent',
 };
-const SUMMABLE = ['coins','mushrooms','driving_time','resets','attempts','finishes','pb_count','time_improvement'];
+const SUMMABLE = ['coins','coins_lost','mushrooms','driving_time','resets','attempts','finishes','pb_count','time_improvement'];
 const bodyLabel = (id) => id.replace(/_/g,' ').replace(/\bbmi\b/,'BMI').replace(/\bbmr\b/,'BMR').replace(/^\w/, c => c.toUpperCase());
 const metricLabel = (m) => METRIC_LABEL[m.id] || (m.kind === 'body' ? bodyLabel(m.id) : m.id);
 const PER_LABEL = { player:'player', course:'course', character:'character', kart:'kart', costume:'costume', cc:'cc', screen:'screen' };
@@ -164,6 +164,8 @@ const PRESETS = [
     ['Total coins this week', { shape:'value', metric:'coins', period:'this_week' }],
     ['Coins per course (this month)', { shape:'breakdown', metric:'coins', period:'this_month', group_by:'course' }],
     ['Coins per player (this week)', { shape:'breakdown', metric:'coins', period:'this_week', group_by:'player' }],
+    ['Coins lost per course (this week)', { shape:'breakdown', metric:'coins_lost', period:'this_week', group_by:'course' }],
+    ['Most coins lost, per player', { shape:'breakdown', metric:'coins_lost', period:'all_time', group_by:'player' }],
     ['Mushrooms per course (this week)', { shape:'breakdown', metric:'mushrooms', period:'this_week', group_by:'course' }],
   ]],
   ['Driving & loadout', [

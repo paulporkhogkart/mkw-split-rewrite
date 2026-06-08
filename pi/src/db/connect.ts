@@ -31,6 +31,10 @@ export function applySchema(db: DatabaseSync): void {
     db.exec('ALTER TABLE runs ADD COLUMN was_pb INTEGER NOT NULL DEFAULT 0');
     backfillWasPb(db);
   } catch { /* already present + backfilled */ }
+  // Additive: run-level coin/mushroom totals (capture resets; per-lap rows stay for splits).
+  try { db.exec('ALTER TABLE runs ADD COLUMN coins_gained INTEGER'); } catch { /* present */ }
+  try { db.exec('ALTER TABLE runs ADD COLUMN coins_lost INTEGER'); } catch { /* present */ }
+  try { db.exec('ALTER TABLE runs ADD COLUMN mushrooms_used INTEGER'); } catch { /* present */ }
   // Idempotent: at most one current WR per (course,cc). Created here (not in schema.sql)
   // so the column is guaranteed present for both fresh and migrated DBs.
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_wr_current ON world_records(course_id, cc) WHERE is_current=1');

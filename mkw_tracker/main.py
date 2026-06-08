@@ -1058,6 +1058,7 @@ def run(args):
             coin_state         = coins.update(frame, screen)
             mush_state         = mush.update(frame, screen)
             lapstats.update(mush_state.count)
+            lapstats.update_coins(coin_state.coins)
             mm_state           = minimap.update(frame, screen)
             mm_rec.update(mm_state)
         else:

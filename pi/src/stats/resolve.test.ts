@@ -32,14 +32,28 @@ describe('resolveRace', () => {
     expect(r.total).toBe(1);
   });
 
-  it('sums coins across all statuses incl. the reset', () => {
-    const r = resolveRace(db(), { metric: 'coins', period: week(), filters: { player: 'Luke' }, seasonId: 1 });
-    expect(r.total).toBe(12); // 5+4 (finished) + 3 (reset)
+  it('sums coins (gained, run-level) across all statuses incl. the reset', () => {
+    const d = db();
+    d.prepare('UPDATE runs SET coins_gained=? WHERE id=?').run(9, 1);  // Luke/bc finished
+    d.prepare('UPDATE runs SET coins_gained=? WHERE id=?').run(3, 2);  // Luke/bc reset still gained 3
+    const r = resolveRace(d, { metric: 'coins', period: week(), filters: { player: 'Luke' }, seasonId: 1 });
+    expect(r.total).toBe(12);
   });
 
   it('breaks coins down by course', () => {
-    const r = resolveRace(db(), { metric: 'coins', period: week(), filters: {}, groupBy: 'course', seasonId: 1 });
-    expect(r.rows).toEqual([{ key: 'Bowsers Castle', value: 12 }]); // only bc has laps
+    const d = db();
+    d.prepare('UPDATE runs SET coins_gained=? WHERE id=?').run(9, 1);
+    d.prepare('UPDATE runs SET coins_gained=? WHERE id=?').run(3, 2);
+    const r = resolveRace(d, { metric: 'coins', period: week(), filters: {}, groupBy: 'course', seasonId: 1 });
+    expect(Object.fromEntries(r.rows.map((x) => [x.key, x.value]))['Bowsers Castle']).toBe(12);
+  });
+
+  it('sums coins_lost across all statuses', () => {
+    const d = db();
+    d.prepare('UPDATE runs SET coins_lost=? WHERE id=?').run(6, 1);
+    d.prepare('UPDATE runs SET coins_lost=? WHERE id=?').run(2, 2);  // reset's lost coins count too
+    const r = resolveRace(d, { metric: 'coins_lost', period: week(), filters: { player: 'Luke' }, seasonId: 1 });
+    expect(r.total).toBe(8);
   });
 
   it('pb_count uses the stored flag', () => {

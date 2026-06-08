@@ -27,11 +27,13 @@ export function upsertRun(db: DatabaseSync, p: AttemptPayload, playerId: number,
 
     const info = db.prepare(
       `INSERT INTO runs(attempt_id, season_id, player_id, course_id, cc, status, provenance,
-                        started_at, ended_at, total_time_ms, total_time_str, character, kart, costume, is_pb)
-       VALUES (?,?,?,?,?,?, 'live', ?,?,?,?,?,?,?, 0)`
+                        started_at, ended_at, total_time_ms, total_time_str, character, kart, costume,
+                        coins_gained, coins_lost, mushrooms_used, is_pb)
+       VALUES (?,?,?,?,?,?, 'live', ?,?,?,?,?,?,?, ?,?,?, 0)`
     ).run(p.attempt_id, seasonId, playerId, course.id, cc, p.status,
           p.started_at ?? null, p.ended_at ?? null, totalMs, p.total_time ?? null,
-          p.character ?? null, p.kart ?? null, p.costume ?? null);
+          p.character ?? null, p.kart ?? null, p.costume ?? null,
+          p.coins_gained ?? null, p.coins_lost ?? null, p.mushrooms_used ?? null);
     const runId = Number(info.lastInsertRowid);
 
     const lapStmt = db.prepare(

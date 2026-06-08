@@ -67,4 +67,16 @@ describe('upsertRun', () => {
     expect(run.status).toBe('reset');
     expect(run.total_time_ms).toBeNull();
   });
+
+  it('persists run-level coin/mushroom totals, incl. on a reset', () => {
+    const db = base();
+    const id = upsertRun(db, {
+      attempt_id: 'c1', course: 'Rainbow Road', status: 'reset',
+      coins_gained: 14, coins_lost: 6, mushrooms_used: 3,
+    } as any, 1, 1);
+    const run = db.prepare('SELECT coins_gained, coins_lost, mushrooms_used FROM runs WHERE id=?').get(id) as any;
+    expect(run.coins_gained).toBe(14);   // a reset's coins are no longer lost
+    expect(run.coins_lost).toBe(6);
+    expect(run.mushrooms_used).toBe(3);
+  });
 });

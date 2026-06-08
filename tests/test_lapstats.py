@@ -42,3 +42,40 @@ def test_reset_clears_everything():
     assert ls.per_lap == {}
     ls.record_lap(1, coin_count=3)
     assert ls.per_lap[1]["coins"] == 3       # baseline reset to 0
+
+
+def test_update_coins_accumulates_gained_and_lost():
+    ls = LapStatsTracker()
+    ls.update_coins(0)      # first reading: baseline only (race-start 0 isn't a gain)
+    ls.update_coins(3)      # +3 gained
+    ls.update_coins(6)      # +3 gained
+    ls.update_coins(4)      # -2 lost (a hit)
+    assert ls.coins_gained == 6
+    assert ls.coins_lost == 2
+
+
+def test_update_coins_ignores_misread_jumps_beyond_the_caps():
+    ls = LapStatsTracker()
+    ls.update_coins(18)     # baseline
+    ls.update_coins(5)      # drop of 13 > 3 -> OCR glitch, ignored, baseline stays 18
+    ls.update_coins(18)     # back to 18 -> no change
+    assert ls.coins_lost == 0 and ls.coins_gained == 0
+    ls.update_coins(16)     # a real hit (-2) right after is still caught
+    assert ls.coins_lost == 2
+
+
+def test_mushrooms_used_total_survives_laps_and_counts_a_full_burst():
+    ls = LapStatsTracker()
+    ls.update(3); ls.update(0)   # a 3->0 triple-burst = 3 uses
+    ls.record_lap(1, coin_count=0)
+    ls.update(2); ls.update(1)   # one more use in the next lap
+    assert ls.mushrooms_used == 4   # run-level total persists across the lap line
+
+
+def test_reset_clears_run_level_totals():
+    ls = LapStatsTracker()
+    ls.update_coins(0); ls.update_coins(5); ls.update_coins(2)
+    ls.update(3); ls.update(0)
+    ls.reset()
+    assert ls.coins_gained == 0 and ls.coins_lost == 0 and ls.mushrooms_used == 0
+    assert ls._prev_coin is None

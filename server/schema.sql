@@ -43,6 +43,9 @@ CREATE TABLE IF NOT EXISTS runs (
     character      TEXT,
     kart           TEXT,
     costume        TEXT,
+    coins_gained   INTEGER,
+    coins_lost     INTEGER,
+    mushrooms_used INTEGER,
     is_pb          INTEGER NOT NULL DEFAULT 0,
     created_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );
