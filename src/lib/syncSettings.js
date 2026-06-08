@@ -7,8 +7,19 @@ import { writable } from "svelte/store";
 const URL_KEY = "sync_server_url";
 const TOKEN_KEY = "sync_auth_token";
 
-export const serverUrl = writable(localStorage.getItem(URL_KEY) || "");
-export const authToken = writable(localStorage.getItem(TOKEN_KEY) || "");
+// localStorage is absent under Node (tests) - and under Node's experimental Web Storage it can
+// be present-but-broken (the global exists yet getItem isn't callable). Probe it; fall back to a
+// no-op so the module imports cleanly either way.
+function safeStorage() {
+  try {
+    if (typeof localStorage !== "undefined" && typeof localStorage.getItem === "function") return localStorage;
+  } catch { /* accessing the experimental global can throw */ }
+  return { getItem: () => null, setItem: () => {} };
+}
+const ls = safeStorage();
 
-serverUrl.subscribe((v) => localStorage.setItem(URL_KEY, v || ""));
-authToken.subscribe((v) => localStorage.setItem(TOKEN_KEY, v || ""));
+export const serverUrl = writable(ls.getItem(URL_KEY) || "");
+export const authToken = writable(ls.getItem(TOKEN_KEY) || "");
+
+serverUrl.subscribe((v) => ls.setItem(URL_KEY, v || ""));
+authToken.subscribe((v) => ls.setItem(TOKEN_KEY, v || ""));

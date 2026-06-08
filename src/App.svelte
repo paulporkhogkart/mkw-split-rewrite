@@ -32,6 +32,7 @@
   import { trailSettings, roster as rosterStore, cacheRoster,
            activeConfig, buildTrailRuns, trailLegendRows } from "./lib/trailSettings.js";
   import { initDiscordPresence } from "./lib/discord.js";
+  import { initPresence } from "./lib/presence.js";
   import { initSync } from "./lib/sync.js";
 
   let appWindow = null;
@@ -1300,6 +1301,7 @@
     startFeedPoll();
     initDiscordPresence();
     initSync();
+    initPresence();   // stream this player's live status to the server, mirror the roster's into the `presence` store
     // Load the roster so trail config can resolve player ids (cached for offline use).
     try {
       const list = JSON.parse(await invoke("sync_roster"));

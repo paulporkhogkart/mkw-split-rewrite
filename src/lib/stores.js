@@ -26,3 +26,4 @@ export const pbTotalMs    = writable(null);  // PB total time in ms | null
 export const friendsPbs    = writable([]);   // [{player_id, display_name, total_time_ms, total_time_str, rank}] (server; data-only)
 export const trailRuns     = writable([]);   // render-ready ghost trails: [{points:[[t,cx,cy,score]], color, opacity}]
 export const trailLegend   = writable([]);   // [{name, color, mode, n}] for the active players (overlay legend)
+export const presence      = writable({});   // {player_id: PresenceEntry} live status of roster players (server /v1/presence)
