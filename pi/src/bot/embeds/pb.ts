@@ -2,13 +2,17 @@ import { EmbedBuilder } from 'discord.js';
 import type { PbEmbedData } from '../types';
 import { formatDuration, formatOvertaken, formatPositions } from '../format';
 
-/** PB title — ports legacy DiscordBot._generate_title with the "<NAME> PERSONAL BEST" change. */
+/** PB title — every variant starts with the achiever's name for consistency. Only a track record
+ *  that dethrones/extends a measurable reign gets a reign title; everything else (incl. a
+ *  first-ever time on a track) is just "<NAME> PERSONAL BEST". */
 export function pbTitle(d: PbEmbedData): string {
-  if (!d.is_new_track_record) return `${d.player.toUpperCase()} PERSONAL BEST`;
-  if (!d.reign || d.reign.reign_ms == null) return 'NEW TRACK RECORD';
+  const name = d.player.toUpperCase();
+  if (!d.is_new_track_record || !d.reign || d.reign.reign_ms == null) return `${name} PERSONAL BEST`;
   const dur = formatDuration(d.reign.reign_ms);
   const prev = (d.reign.previous_holder ?? '').toUpperCase();
-  return d.reign.is_same_person ? `THE ${dur} REIGN OF ${prev} CONTINUES` : `THE ${dur} REIGN OF ${prev} IS OVER`;
+  return d.reign.is_same_person
+    ? `${name} HAS EXTENDED HIS ${dur} REIGN`
+    : `${name} HAS ENDED THE ${dur} REIGN OF ${prev}`;
 }
 
 /** Green PB embed — ports legacy DiscordBot._send_pb_message. GIF urls are injected so the
@@ -17,9 +21,11 @@ export function buildPbEmbed(d: PbEmbedData, gifs: { thumbnail?: string | null; 
   const e = new EmbedBuilder().setTitle(pbTitle(d)).setColor(0x6cca5f);
   if (gifs.thumbnail) e.setThumbnail(gifs.thumbnail);
   e.addFields(
-    { name: 'TRACK', value: `\`${d.track}\`` },
-    { name: 'TIME', value: `\`${d.time}\`` },
-    { name: 'DELTA', value: `\`${d.improvement_str}\`` },
+    // inline so TRACK/TIME/DELTA share one compact row (discord.py add_field defaults to
+    // inline=True, which the legacy bot relied on; discord.js defaults to false).
+    { name: 'TRACK', value: `\`${d.track}\``, inline: true },
+    { name: 'TIME', value: `\`${d.time}\``, inline: true },
+    { name: 'DELTA', value: `\`${d.improvement_str}\``, inline: true },
     { name: 'OVERTOOK', value: formatOvertaken(d.overtaken), inline: true },
     { name: 'POSITION', value: formatPositions(d.positions), inline: true },
   );

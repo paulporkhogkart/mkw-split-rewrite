@@ -19,7 +19,7 @@ describe('dispatch', () => {
     const ev: ServerEvent = { type: 'pb_achieved', player: 'Paul', course: 'rr', cc: 150, total_time: '1:46.000', delta_vs_prev_ms: -4000, rank: 1 };
     dispatch(db1(), ev, (e) => sent.push(e));
     expect(sent).toHaveLength(1);
-    expect(sent[0].toJSON().title).toBe('NEW TRACK RECORD');   // rank 1, no prior runs => track record
+    expect(sent[0].toJSON().title).toBe('PAUL PERSONAL BEST');   // rank 1 but no prior runs => no measurable reign
   });
   it('emits a WR embed for wr_update', () => {
     const sent: EmbedBuilder[] = [];
