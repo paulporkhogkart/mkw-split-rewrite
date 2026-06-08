@@ -1,4 +1,4 @@
-export type Dimension = 'player' | 'course' | 'character' | 'kart' | 'costume' | 'cc';
+export type Dimension = 'player' | 'course' | 'character' | 'kart' | 'costume' | 'cc' | 'screen';
 export type PeriodKey = 'today' | 'this_week' | 'this_month' | 'all_time' | 'range';
 
 export interface Period {

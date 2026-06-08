@@ -4,15 +4,16 @@ import { existsSync } from 'node:fs';
 import { DateTime } from 'luxon';
 import { resolvePeriod } from '../stats/period';
 import type { PeriodKey, Dimension, StatResult } from '../stats/types';
-import { getMetric, listMetrics, allowsDimension, type BodyAgg } from '../stats/metrics';
+import { getMetric, listMetrics, allowsDimension, RACE_DIMENSIONS, type BodyAgg } from '../stats/metrics';
 import { resolveRace } from '../stats/resolve';
 import { resolveSequential } from '../stats/sequential';
 import { resolveCompletion } from '../stats/completion';
+import { resolveScreen } from '../stats/screen';
 import { resolveBody, openPorker, presentPorkerTables } from '../stats/body';
 import { parseBodyCondition, bodyConditionSql } from '../stats/align';
 import { activeSeasonId } from '../db/seasons';
 
-const DIMS: Dimension[] = ['player', 'course', 'character', 'kart', 'costume', 'cc'];
+const DIMS: Dimension[] = ['player', 'course', 'character', 'kart', 'costume', 'cc', 'screen'];
 const PERIODS: PeriodKey[] = ['today', 'this_week', 'this_month', 'all_time', 'range'];
 
 export interface StatsDeps { porkerPath: string | null; }
@@ -94,11 +95,19 @@ export function createStatsApp(db: DatabaseSync, deps: StatsDeps): Hono {
     return resolveCompletion(db, { metric, period: period(c), filters, groupBy, seasonId });
   };
 
+  const handleScreen = (c: Ctx, groupBy?: Dimension): StatResult => {
+    const metric = c.req.query('metric')!;
+    const filters = collectFilters(c);
+    const seasonId = c.req.query('season') ? Number(c.req.query('season')) : activeSeasonId(db);
+    return resolveScreen(db, { metric, period: period(c), filters, groupBy, seasonId });
+  };
+
   const dispatch = (c: Ctx, groupBy?: Dimension): StatResult => {
     const m = guard(c, groupBy);
     if (m.kind === 'body') return handleBody(c);
     if (m.kind === 'sequential') return handleSequential(c, groupBy);
     if (m.kind === 'completion') return handleCompletion(c, groupBy);
+    if (m.kind === 'screen') return handleScreen(c, groupBy);
     return handleRace(c, groupBy);
   };
 
@@ -138,7 +147,10 @@ export function createStatsApp(db: DatabaseSync, deps: StatsDeps): Hono {
   app.get('/v1/stats/series', (c) => wrap(c, () => seriesResult(c)));
   app.get('/v1/stats/metrics', (c) => c.json(listMetrics().map((m) => ({
     id: m.id, kind: m.kind,
-    dimensions: m.kind === 'race' ? DIMS : (m.kind === 'sequential' || m.kind === 'completion') ? (['player', 'course', 'cc'] as Dimension[]) : ['player'],
+    dimensions: m.kind === 'race' ? RACE_DIMENSIONS
+      : (m.kind === 'sequential' || m.kind === 'completion') ? (['player', 'course', 'cc'] as Dimension[])
+      : m.kind === 'screen' ? (['player', 'screen'] as Dimension[])
+      : ['player'],
     aggs: m.kind === 'body' ? m.aggs : undefined,
   }))));
 

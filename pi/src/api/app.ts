@@ -4,6 +4,7 @@ import { EventHub } from './events';
 import { runsRoutes } from './runs';
 import { readsRoutes } from './reads';
 import { createStatsApp } from './stats';
+import { screenRoutes } from './screen';
 
 export type Env = { Variables: { playerId: number; playerName: string } };
 
@@ -13,6 +14,7 @@ export function createApp(db: DatabaseSync, hub: EventHub): Hono<Env> {
   app.route('/', runsRoutes(db, hub));
   app.route('/', readsRoutes(db));
   app.route('/', createStatsApp(db, { porkerPath: process.env.STATS_PORKER_DB ?? 'porker.db' }));
+  app.route('/', screenRoutes(db));
   return app;
 }
 

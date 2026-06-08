@@ -86,3 +86,15 @@ CREATE INDEX IF NOT EXISTS idx_runs_player      ON runs(season_id, player_id, co
 CREATE INDEX IF NOT EXISTS idx_run_laps_run     ON run_laps(run_id);
 CREATE INDEX IF NOT EXISTS idx_run_points_run   ON run_points(run_id);
 CREATE INDEX IF NOT EXISTS idx_wr_course        ON world_records(course_id, cc, achieved_at);
+
+CREATE TABLE IF NOT EXISTS screen_intervals (
+    id          INTEGER PRIMARY KEY,
+    season_id   INTEGER NOT NULL REFERENCES seasons(id),
+    player_id   INTEGER NOT NULL REFERENCES players(id),
+    screen      TEXT NOT NULL,
+    started_ms  INTEGER NOT NULL,
+    ended_ms    INTEGER NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(player_id, started_ms)
+);
+CREATE INDEX IF NOT EXISTS idx_screen_intervals ON screen_intervals(season_id, player_id, screen, started_ms);

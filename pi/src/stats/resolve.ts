@@ -25,6 +25,7 @@ function groupExpr(dim: Dimension): { select: string; join: string } {
     case 'kart': return { select: 'r.kart', join: '' };
     case 'costume': return { select: 'r.costume', join: '' };
     case 'cc': return { select: 'CAST(r.cc AS TEXT)', join: '' };
+    default: throw new Error(`race metrics cannot group by ${dim}`);
   }
 }
 
@@ -43,6 +44,7 @@ function filterClause(db: DatabaseSync, dim: Dimension, value: string): { sql: s
     case 'kart': return { sql: 'r.kart=?', param: value };
     case 'costume': return { sql: 'r.costume=?', param: value };
     case 'cc': return { sql: 'r.cc=?', param: Number(value) };
+    default: throw new Error(`race metrics cannot filter by ${dim}`);
   }
 }
 

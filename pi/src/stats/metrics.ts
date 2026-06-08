@@ -38,7 +38,12 @@ export interface CompletionMetric {
   kind: 'completion';
 }
 
-export type MetricDef = RaceMetric | BodyMetric | SequentialMetric | CompletionMetric;
+export interface ScreenMetric {
+  id: string;
+  kind: 'screen';
+}
+
+export type MetricDef = RaceMetric | BodyMetric | SequentialMetric | CompletionMetric | ScreenMetric;
 
 const RACE: RaceMetric[] = [
   { id: 'attempts',        kind: 'race', value: 'COUNT(*)',                                                statuses: 'all',        joins: [] },
@@ -74,7 +79,11 @@ const COMPLETION: CompletionMetric[] = [
   { id: 'avg_completion_before_reset', kind: 'completion' },
 ];
 
-const REGISTRY = new Map<string, MetricDef>([...RACE, ...BODY, ...SEQUENTIAL, ...COMPLETION].map((m) => [m.id, m]));
+const SCREEN: ScreenMetric[] = [
+  { id: 'screen_time', kind: 'screen' },
+];
+
+const REGISTRY = new Map<string, MetricDef>([...RACE, ...BODY, ...SEQUENTIAL, ...COMPLETION, ...SCREEN].map((m) => [m.id, m]));
 
 export function getMetric(id: string): MetricDef | undefined { return REGISTRY.get(id); }
 export function listMetrics(): MetricDef[] { return [...REGISTRY.values()]; }
@@ -85,5 +94,6 @@ export function allowsDimension(metricId: string, dim: Dimension): boolean {
   if (!m) return false;
   if (m.kind === 'race') return RACE_DIMENSIONS.includes(dim);
   if (m.kind === 'sequential' || m.kind === 'completion') return dim === 'player' || dim === 'course' || dim === 'cc';
+  if (m.kind === 'screen') return dim === 'player' || dim === 'screen';
   return dim === 'player'; // body
 }
