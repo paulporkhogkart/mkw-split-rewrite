@@ -60,7 +60,22 @@ function nameOf(db: DatabaseSync, table: 'players' | 'courses', id: number): str
   return (db.prepare(`SELECT display_name FROM ${table} WHERE id=?`).get(id) as { display_name: string }).display_name;
 }
 
-type RefEntry = { ref: RefPt[]; bounds: number[] };
+export interface RefEntry { ref: RefPt[]; bounds: number[]; }
+
+/** The per-course completion reference: the densest finished run's trail (arc-length
+ *  normalised) + its per-lap boundary fractions. null if no finished run with a trail. */
+export function courseReference(db: DatabaseSync, seasonId: number, courseId: number, cc: number): RefEntry | null {
+  const refRun = db.prepare(
+    `SELECT r.id, COUNT(p.run_id) AS n FROM runs r JOIN run_points p ON p.run_id=r.id
+     WHERE r.season_id=? AND r.course_id=? AND r.cc=? AND r.status='finished'
+     GROUP BY r.id ORDER BY n DESC LIMIT 1`).get(seasonId, courseId, cc) as { id: number; n: number } | undefined;
+  if (!refRun) return null;
+  const pts = db.prepare('SELECT cx, cy, t_ms FROM run_points WHERE run_id=? ORDER BY t_ms').all(refRun.id) as { cx: number; cy: number; t_ms: number }[];
+  const ref = buildReference(pts);
+  const laps = db.prepare('SELECT lap_time_ms FROM run_laps WHERE run_id=? ORDER BY lap_index').all(refRun.id) as { lap_time_ms: number }[];
+  let cum = 0; const cumMs = laps.map((l) => (cum += l.lap_time_ms));
+  return { ref, bounds: lapBoundaries(ref, cumMs) };
+}
 
 export function resolveCompletion(db: DatabaseSync, q: CompletionQuery): StatResult {
   const m = getMetric(q.metric);
@@ -81,16 +96,7 @@ export function resolveCompletion(db: DatabaseSync, q: CompletionQuery): StatRes
   const refCache = new Map<number, RefEntry | null>();
   const getRef = (courseIdv: number): RefEntry | null => {
     if (refCache.has(courseIdv)) return refCache.get(courseIdv)!;
-    const refRun = db.prepare(
-      `SELECT r.id, COUNT(p.run_id) AS n FROM runs r JOIN run_points p ON p.run_id=r.id
-       WHERE r.season_id=? AND r.course_id=? AND r.cc=? AND r.status='finished'
-       GROUP BY r.id ORDER BY n DESC LIMIT 1`).get(q.seasonId, courseIdv, cc) as { id: number; n: number } | undefined;
-    if (!refRun) { refCache.set(courseIdv, null); return null; }
-    const pts = db.prepare('SELECT cx, cy, t_ms FROM run_points WHERE run_id=? ORDER BY t_ms').all(refRun.id) as { cx: number; cy: number; t_ms: number }[];
-    const ref = buildReference(pts);
-    const laps = db.prepare('SELECT lap_time_ms FROM run_laps WHERE run_id=? ORDER BY lap_index').all(refRun.id) as { lap_time_ms: number }[];
-    let cum = 0; const cumMs = laps.map((l) => (cum += l.lap_time_ms));
-    const entry: RefEntry = { ref, bounds: lapBoundaries(ref, cumMs) };
+    const entry = courseReference(db, q.seasonId, courseIdv, cc);
     refCache.set(courseIdv, entry);
     return entry;
   };
