@@ -1546,6 +1546,11 @@
             {/if}
           </button>
         </div>
+
+        <!-- Reserved band for the live player panel (sub-project #3) -->
+        <div class="player-band">
+          <span class="player-band-ph">player status panel</span>
+        </div>
       </div>
 
       <!-- Right: sidebar panels (collapsible) -->
@@ -1869,9 +1874,19 @@
     background: var(--feed-bg); overflow: hidden; min-height: 0;
   }
   .feed-area {
-    flex: 1; min-height: 0; position: relative; overflow: hidden;
-    background: var(--feed-bg);
+    /* Video anchored to the top at its native 16:9 - no top/bottom letterbox bars. Shrinks
+       (flex) only when the window is too short, so the player band keeps its minimum. */
+    flex: 0 1 auto; width: 100%; aspect-ratio: 16 / 9; min-height: 0;
+    position: relative; overflow: hidden; background: var(--feed-bg);
   }
+  .player-band {
+    /* Reserved for the live player panel (sub-project #3). Grows to fill the space below the
+       feed + controls; never shrinks below room for the cards. */
+    flex: 1 0 0; min-height: 200px; overflow: hidden;
+    border-top: 1px solid var(--bd); background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .player-band-ph { font-size: .66rem; color: var(--tx-dim); letter-spacing: .05em; text-transform: uppercase; }
   .feed-placeholder {
     position: absolute; inset: 0;
     display: flex; flex-direction: column; align-items: center;

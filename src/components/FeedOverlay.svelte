@@ -166,7 +166,7 @@
       rois:          activeRois,
       minimap:       mmActive ? currentMinimap : null,
       trails:        mmActive ? currentTrails : [],
-      legend:        mmActive ? currentLegend : [],
+      legend:        [],   // minimap legend dropped - the player panel identifies players
       sampleImg:     mmActive ? sampleImg : null,
       raceElapsedMs: elapsed,
     });
