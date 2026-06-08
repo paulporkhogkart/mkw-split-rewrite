@@ -9,6 +9,7 @@ import { resolveRace } from '../stats/resolve';
 import { resolveSequential } from '../stats/sequential';
 import { resolveCompletion } from '../stats/completion';
 import { resolveScreen } from '../stats/screen';
+import { resolveCorrelation } from '../stats/correlation';
 import { resolveBody, openPorker, presentPorkerTables } from '../stats/body';
 import { parseBodyCondition, bodyConditionSql } from '../stats/align';
 import { activeSeasonId } from '../db/seasons';
@@ -153,6 +154,17 @@ export function createStatsApp(db: DatabaseSync, deps: StatsDeps): Hono {
       : ['player'],
     aggs: m.kind === 'body' ? m.aggs : undefined,
   }))));
+
+  // Race x body correlation (distinct shape: n/r/slope/intercept), per player+course.
+  app.get('/v1/stats/correlation', (c) => wrap(c, () => {
+    const body = c.req.query('body'); const player = c.req.query('player'); const course = c.req.query('course');
+    if (!body || !player || !course) throw { code: 400, msg: 'correlation needs body, player, course' };
+    const seasonId = c.req.query('season') ? Number(c.req.query('season')) : activeSeasonId(db);
+    const cc = c.req.query('cc') ? Number(c.req.query('cc')) : undefined;
+    const pk = openPorker(requirePorker());
+    try { return resolveCorrelation(db, pk, { body, player, course, period: period(c), seasonId, cc }); }
+    finally { pk.close(); }
+  }));
 
   return app;
 }

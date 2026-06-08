@@ -114,4 +114,27 @@ describe('stats routes', () => {
     const cat = await (await app.request('/v1/stats/metrics')).json();
     expect(cat.find((x: { id: string }) => x.id === 'avg_completion_before_reset').dimensions).toEqual(['player', 'course', 'cc']);
   });
+
+  it('correlation endpoint pairs finish time with as-of body fat', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'corr-'));
+    const pkPath = join(dir, 'porker.db');
+    const pk = new DatabaseSync(pkPath);
+    pk.exec(`CREATE TABLE "EunoraMeasurements" ("Timestamp" INTEGER,"Weight" REAL,"BodyMassIndex" REAL,"BodyFat" REAL,
+      "FatFreeBodyWeight" REAL,"SubcutaneousFat" REAL,"VisceralFat" REAL,"BodyWater" REAL,"SkeletalMuscle" REAL,
+      "MuscleMass" REAL,"BoneMass" REAL,"Protein" REAL,"BasalMetabolicRate" REAL,"MetabolicAge" REAL)`);
+    const ep = (iso: string) => Math.floor(DateTime.fromISO(iso, { zone: 'utc' }).toSeconds());
+    pk.prepare(`INSERT INTO "EunoraMeasurements" VALUES (?,80,22,?,60,15,5,55,50,50,3,18,1700,25)`).run(ep('2026-06-09T00:00:00'), 18);
+    pk.close();
+
+    const app = createStatsApp(db(), { porkerPath: pkPath }); // db(): Luke + bc + a finished run on 2026-06-10
+    const res = await app.request('/v1/stats/correlation?body=body_fat&player=Luke&course=bc&period=all_time');
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.n).toBe(1);       // one finished run, with an as-of weigh-in
+    expect(body.r).toBeNull();    // n < 2 -> null
+    rmSync(dir, { recursive: true, force: true });
+
+    const bad = await app.request('/v1/stats/correlation?body=body_fat&player=Luke');
+    expect(bad.status).toBe(400); // missing course
+  });
 });
