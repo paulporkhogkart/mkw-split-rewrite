@@ -11,4 +11,10 @@ describe('slugify', () => {
     expect(slugify('Sky-High Sundae')).toBe('sky_high_sundae');
     expect(slugify('DK Pass')).toBe('dk_pass');
   });
+
+  it('also strips the curly apostrophe (U+2019) used in the real course display names', () => {
+    const apos = String.fromCharCode(0x2019);   // ’ — what the DB display_names actually use
+    expect(slugify(`Wario${apos}s Galleon`)).toBe('warios_galleon');
+    expect(slugify(`Bowser${apos}s Castle`)).toBe('bowsers_castle');
+  });
 });
