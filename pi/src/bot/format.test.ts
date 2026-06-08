@@ -65,16 +65,16 @@ describe('alignDiffColumn', () => {
 });
 
 describe('formatTrackLeaderboard', () => {
-  it('renders WR line + chained gaps, decimal-aligned (legacy format)', () => {
+  it('anchors on the rank-1 PB: WR shows its gap to #1, #1 has no delta, others show total gap to #1', () => {
     const out = formatTrackLeaderboard(
       [ { position: 1, name: 'Paul', time: '1:46.000', time_ms: 106000 },
         { position: 2, name: 'Luke', time: '1:48.000', time_ms: 108000 } ],
       { record: '1:40.000', record_ms: 100000 },
     );
     expect(out).toBe(
-      '`   WR      1:40.000`\n' +
-      '`1. Paul  1:46.000  (+6.000s)`\n' +   // two spaces: padded_time trailing space + diff leading space (legacy)
-      '`2. Luke  1:48.000  (+2.000s)`'
+      '`   WR      1:40.000  (-6.000s)`\n' +   // WR is 6s faster than the #1 PB
+      '`1. Paul  1:46.000`\n' +               // rank-1 PB: zero anchor, no delta
+      '`2. Luke  1:48.000  (+2.000s)`'        // total gap to #1
     );
   });
   it('handles empty', () => {
@@ -83,16 +83,16 @@ describe('formatTrackLeaderboard', () => {
 });
 
 describe('formatTotalLeaderboard', () => {
-  it('renders WR aggregate + gaps + golf points', () => {
+  it('anchors on the rank-1 total; no golf points', () => {
     const out = formatTotalLeaderboard(
       [ { position: 1, name: 'Paul', total_display: '3:30.000', total_ms: 210000, points: 2 },
         { position: 2, name: 'Luke', total_display: '3:36.000', total_ms: 216000, points: 4 } ],
       '3:20.000', 200000,
     );
     expect(out).toBe(
-      '`   WR      3:20.000`\n' +
-      '`1. Paul  3:30.000  (+10.000s) [2]`\n' +   // TWO spaces before '(' (padded_time trailing space + diff leading space)
-      '`2. Luke  3:36.000  ( +6.000s) [4]`'       // +6 rjust to width 3 (+10 is the widest sign_and_whole)
+      '`   WR      3:20.000  (-10.000s)`\n' +
+      '`1. Paul  3:30.000`\n' +
+      '`2. Luke  3:36.000  (+6.000s)`'
     );
   });
   it('handles empty rows', () => {

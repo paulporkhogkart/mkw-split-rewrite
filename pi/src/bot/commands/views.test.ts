@@ -60,12 +60,11 @@ describe('buildTrackBoard', () => {
     if ('error' in result) expect(result.error).toContain('not found');
   });
 
-  it('formats the body with the exact Task 2 formatter shape (WR + chained gaps)', () => {
+  it('anchors the body on the rank-1 PB (WR shows its gap to #1)', () => {
     const result = buildTrackBoard(seeded(), 'Rainbow Road', 150);
     if ('error' in result) throw new Error('unexpected error: ' + result.error);
-    // WR line format: `   WR      1:40.000`
-    expect(result.body).toMatch(/`\s+WR\s+1:40\.000`/);
-    // First player row: backtick + position
+    // WR line now carries its gap to the #1 PB: `   WR      1:40.000  (-6.000s)`
+    expect(result.body).toMatch(/WR\s+1:40\.000\s+\(-6\.000s\)/);
     expect(result.body).toMatch(/`1\. Paul/);
     expect(result.body).toMatch(/`2\. Luke/);
   });
@@ -76,23 +75,20 @@ describe('buildTrackBoard', () => {
 // ---------------------------------------------------------------------------
 
 describe('buildOverallBoard', () => {
-  it('returns title, body (with aggregate WR + standings + points), leader, reign_ms', () => {
+  it('returns title, body (aggregate WR + standings, no golf points), leader, reign_ms', () => {
     const result = buildOverallBoard(seeded(), 150);
     expect(result.title).toBe('Overall Leaderboard');
-    // Body: aggregate WR line + 2 player rows
     expect(result.body).toContain('Paul');
     expect(result.body).toContain('Luke');
-    // Golf points in brackets
-    expect(result.body).toMatch(/\[\d+\]/);
-    // Leader and reign are present (Paul leads overall)
+    expect(result.body).not.toMatch(/\[\d+\]/);   // golf points removed
     expect(result.leader).toBe('Paul');
     expect(result.reign_ms).toBeGreaterThanOrEqual(0);
   });
 
-  it('body starts with WR aggregate line', () => {
+  it('body starts with the WR aggregate line (with its gap to #1)', () => {
     const result = buildOverallBoard(seeded(), 150);
-    // Total WR = 100000 + 90000 = 190000ms = 3:10.000
-    expect(result.body).toMatch(/`\s+WR\s+3:10\.000`/);
+    // Total WR = 100000 + 90000 = 190000ms = 3:10.000; Paul total 201000 -> WR gap -11.000s
+    expect(result.body).toMatch(/WR\s+3:10\.000\s+\(-11\.000s\)/);
   });
 });
 

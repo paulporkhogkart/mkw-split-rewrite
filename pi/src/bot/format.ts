@@ -73,45 +73,28 @@ export function alignDiffColumn(diffs: (string | null | undefined)[]): string[] 
 export type BoardRow = { position: number; name: string; time: string; time_ms: number };
 
 /**
- * Track leaderboard with WR at top and decimal-aligned chained gaps.
- * Ports legacy _format_track_leaderboard (discord_bot.py:650-742).
- *
- * Gap is chained: each row's diff is against the PREVIOUS row's time_ms (or wr.record_ms for the
- * first row). last_ms starts at wr.record_ms (or null) and updates to each row's time_ms after
- * computing the diff.
+ * Track leaderboard. The rank-1 PB is the zero-anchor: it shows no delta, the WR row shows its
+ * (negative) gap to the rank-1 PB, and every lower PB shows its TOTAL gap to rank 1 (not chained).
  */
 export function formatTrackLeaderboard(rows: BoardRow[], wr: { record: string; record_ms: number } | null): string {
   if (rows.length === 0 && !wr) return '`No times recorded`';
+  if (rows.length === 0) return `\`   WR      ${wr!.record}\``;   // WR only: nothing to compare against
+
+  const anchorMs = rows[0].time_ms;                                // rank-1 PB is the reference
+  const wrDiff = wr ? formatTimeDifference(wr.record_ms - anchorMs) : '';                 // faster -> negative
+  const rowDiffs = alignDiffColumn(rows.map((r, i) => (i === 0 ? '' : formatTimeDifference(r.time_ms - anchorMs))));
 
   const lines: string[] = [];
-
-  if (wr) {
-    lines.push(`\`   WR      ${wr.record}\``);
-  }
-
-  if (rows.length === 0) return lines.join('\n');
+  if (wr) lines.push(`\`   WR      ${wr.record}${wrDiff ? `  (${wrDiff})` : ''}\``);
 
   const maxName = Math.max(...rows.map((r) => r.name.length));
   const maxTime = Math.max(...rows.map((r) => r.time.length));
-
-  // Build chained diffs: each row's gap is to the previous row's time (or WR if first).
-  let last_ms: number | null = wr ? wr.record_ms : null;
-  const timeDiffs: string[] = rows.map((r) => {
-    const diff = (last_ms !== null && r.time_ms > last_ms) ? formatTimeDifference(r.time_ms - last_ms) : '';
-    last_ms = r.time_ms;
-    return diff;
-  });
-
-  const aligned = alignDiffColumn(timeDiffs);
-
   for (let i = 0; i < rows.length; i++) {
     const { position, name, time } = rows[i];
     const paddedName = name + ' '.repeat(maxName - name.length + 2);
-    const paddedTime = time + ' '.repeat(maxTime - time.length + 1);
-    const diff = aligned[i] ? ` (${aligned[i]})` : '';
-    lines.push(`\`${position}. ${paddedName}${paddedTime}${diff}\``);
+    const cell = rowDiffs[i] ? `${time}${' '.repeat(maxTime - time.length + 1)} (${rowDiffs[i]})` : time;
+    lines.push(`\`${position}. ${paddedName}${cell}\``);
   }
-
   return lines.join('\n');
 }
 
@@ -119,40 +102,26 @@ export function formatTrackLeaderboard(rows: BoardRow[], wr: { record: string; r
 export type TotalRow = { position: number; name: string; total_display: string; total_ms: number; points: number };
 
 /**
- * Overall (total) leaderboard with WR aggregate at top, decimal-aligned chained gaps, and golf points.
- * Ports legacy _format_total_leaderboard (discord_bot.py:744-833).
- *
- * Gap is chained from the previous entry's total (or wrTotalMs for the first row).
- * Gap only emitted when last_total_ms > 0 && total_ms > last_total_ms (legacy guard).
- * Each line ends with ` [points]` after the diff.
+ * Overall (total) leaderboard. Same zero-anchor scheme as the track board: the rank-1 total shows
+ * no delta, the WR aggregate row shows its (negative) gap to rank 1, and every lower total shows
+ * its TOTAL gap to rank 1. No golf points.
  */
 export function formatTotalLeaderboard(rows: TotalRow[], wrTotalDisplay: string, wrTotalMs: number): string {
   if (rows.length === 0) return '`No times recorded`';
 
-  const lines: string[] = [];
-  lines.push(`\`   WR      ${wrTotalDisplay}\``);
+  const anchorMs = rows[0].total_ms;
+  const wrDiff = wrTotalMs > 0 ? formatTimeDifference(wrTotalMs - anchorMs) : '';
+  const rowDiffs = alignDiffColumn(rows.map((r, i) => (i === 0 ? '' : formatTimeDifference(r.total_ms - anchorMs))));
 
+  const lines = [`\`   WR      ${wrTotalDisplay}${wrDiff ? `  (${wrDiff})` : ''}\``];
   const maxName = Math.max(...rows.map((r) => r.name.length));
   const maxTime = Math.max(...rows.map((r) => r.total_display.length));
-
-  // Build chained diffs: gap to the previous entry's total_ms (wrTotalMs for the first row).
-  let last_total_ms = wrTotalMs;
-  const timeDiffs: string[] = rows.map((r) => {
-    const diff = (last_total_ms > 0 && r.total_ms > last_total_ms) ? formatTimeDifference(r.total_ms - last_total_ms) : '';
-    last_total_ms = r.total_ms;
-    return diff;
-  });
-
-  const aligned = alignDiffColumn(timeDiffs);
-
   for (let i = 0; i < rows.length; i++) {
-    const { position, name, total_display, points } = rows[i];
+    const { position, name, total_display } = rows[i];
     const paddedName = name + ' '.repeat(maxName - name.length + 2);
-    const paddedTotal = total_display + ' '.repeat(maxTime - total_display.length + 1);
-    const diff = aligned[i] ? ` (${aligned[i]})` : '';
-    lines.push(`\`${position}. ${paddedName}${paddedTotal}${diff} [${points}]\``);
+    const cell = rowDiffs[i] ? `${total_display}${' '.repeat(maxTime - total_display.length + 1)} (${rowDiffs[i]})` : total_display;
+    lines.push(`\`${position}. ${paddedName}${cell}\``);
   }
-
   return lines.join('\n');
 }
 
