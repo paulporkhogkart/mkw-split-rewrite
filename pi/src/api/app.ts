@@ -7,6 +7,9 @@ import { runsRoutes } from './runs';
 import { readsRoutes } from './reads';
 import { createStatsApp } from './stats';
 import { screenRoutes } from './screen';
+import { presenceHandlers } from './presence';
+import { playerByToken } from '../db/players';
+import type { PresenceHub } from '../presence/hub';
 
 export type Env = { Variables: { playerId: number; playerName: string } };
 
@@ -29,8 +32,8 @@ export function createApp(db: DatabaseSync, hub: EventHub): Hono<Env> {
 
 import { createNodeWebSocket } from '@hono/node-ws';
 
-/** Attach the /v1/events WebSocket route. Returns { injectWebSocket } to call on the Node server. */
-export function makeWs(app: Hono<Env>, hub: EventHub) {
+/** Attach the /v1/events + /v1/presence WebSocket routes. Returns { injectWebSocket }. */
+export function makeWs(app: Hono<Env>, hub: EventHub, presence: PresenceHub, db: DatabaseSync) {
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
   app.get('/v1/events', upgradeWebSocket(() => {
     let unsub = () => {};
@@ -40,6 +43,13 @@ export function makeWs(app: Hono<Env>, hub: EventHub) {
       },
       onClose() { unsub(); },
     };
+  }));
+  // Live presence: a token (query param - a browser WS can't set headers) attributes the
+  // sender's frames to their player; a token-less socket is receive-only.
+  app.get('/v1/presence', upgradeWebSocket((c) => {
+    const token = c.req.query('token');
+    const player = token ? playerByToken(db, token) : null;
+    return presenceHandlers(presence, player ? player.id : null);
   }));
   return { injectWebSocket };
 }
