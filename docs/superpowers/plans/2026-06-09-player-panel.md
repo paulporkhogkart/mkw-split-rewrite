@@ -43,8 +43,8 @@ describe('pbMsFor', () => {
     d.exec(`INSERT INTO seasons(id,name,is_active) VALUES(1,'S1',1);
             INSERT INTO players(id,display_name) VALUES(1,'P');
             INSERT INTO courses(id,slug,display_name) VALUES(7,'rainbow_road','Rainbow Road');
-            INSERT INTO runs(season_id,player_id,course_id,cc,status,total_time_ms,is_pb)
-              VALUES(1,1,7,150,'finished',83000,0),(1,1,7,150,'finished',79880,1);`);
+            INSERT INTO runs(season_id,player_id,course_id,cc,status,total_time_ms,is_pb,provenance)
+              VALUES(1,1,7,150,'finished',83000,0,'live'),(1,1,7,150,'finished',79880,1,'live');`);
     expect(pbMsFor(d, 1, 1, 7, 150)).toBe(79880);
     expect(pbMsFor(d, 1, 1, 999, 150)).toBeNull();
   });
@@ -96,8 +96,8 @@ git commit -m "feat(presence): pbMsFor reader for current-course PB lookup"
   it('passes resets through and enriches pb_ms for the current course', () => {
     const d = db();
     d.exec(`INSERT INTO courses(id,slug,display_name) VALUES(7,'rainbow_road','Rainbow Road');
-            INSERT INTO runs(season_id,player_id,course_id,cc,status,total_time_ms,is_pb)
-              VALUES(1,1,7,150,'finished',79880,1);`);
+            INSERT INTO runs(season_id,player_id,course_id,cc,status,total_time_ms,is_pb,provenance)
+              VALUES(1,1,7,150,'finished',79880,1,'live');`);
     const hub = new PresenceHub(d, () => null, () => 5000);
     const got: any[] = [];
     hub.addSink((m) => got.push(m));
