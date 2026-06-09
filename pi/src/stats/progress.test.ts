@@ -88,3 +88,47 @@ describe('step (tracking)', () => {
     expect(r.s).toBeCloseTo(0.496, 3);         // clamped to 0.5 - EPS_BACK, not 0.48
   });
 });
+
+describe('step (bootstrap edges)', () => {
+  it('uses heading to pick the right branch at a crossing', () => {
+    const ref = prepareReference(XPATH, [300]);
+    // dt > DROPOUT_MS forces bootstrap; state supplies only the heading
+    const upRight = step({ s: 0.18, t: 0, x: 5, y: 5 }, ref, { x: 10, y: 10, lap: 1, t: 5000, stale: false });
+    expect(upRight.s).toBeLessThan(0.4);       // heading (1,1) -> branch 1
+    const upLeft = step({ s: 0.8, t: 0, x: 15, y: 5 }, ref, { x: 10, y: 10, lap: 1, t: 5000, stale: false });
+    expect(upLeft.s).toBeGreaterThan(0.7);     // heading (-1,1) -> branch 3
+  });
+
+  it('re-bootstraps after a dropout (a backward correction is allowed)', () => {
+    const LINE = [{ cx: 0, cy: 0, t_ms: 0 }, { cx: 100, cy: 0, t_ms: 100 }];
+    const ref = prepareReference(LINE, [100]);
+    const dropout = step({ s: 0.2, t: 0, x: 20, y: 0 }, ref, { x: 10, y: 0, lap: 1, t: 5000, stale: false });
+    expect(dropout.s).toBeCloseTo(0.1, 2);     // free re-bootstrap, not clamped to ~0.196
+    const tracked = step({ s: 0.2, t: 0, x: 20, y: 0 }, ref, { x: 10, y: 0, lap: 1, t: 100, stale: false });
+    expect(tracked.s).toBeGreaterThanOrEqual(0.196); // in-window tracking clamps the reversal
+  });
+
+  it('holds s while the fix is stale', () => {
+    const ref = prepareReference([{ cx: 0, cy: 0, t_ms: 0 }, { cx: 100, cy: 0, t_ms: 100 }], [100]);
+    const r = step({ s: 0.42, t: 0, x: 5, y: 5 }, ref, { x: 99, y: 0, lap: 1, t: 100, stale: true });
+    expect(r.s).toBe(0.42);
+  });
+});
+
+describe('step (window isolation)', () => {
+  it('the local window — not heading — excludes the far branch of a near-parallel overlap', () => {
+    // branch1 along y=0 (s ~0..0.45), branch2 along y=2 (s ~0.5..0.95). A noisy point sits
+    // slightly CLOSER to branch2 with a heading (0,1) perpendicular to both branches' tangents,
+    // so heading gives no bonus to either -> only the tracking window keeps it on branch1.
+    // (Falsifier: bootstrap-only would snap to the nearer far branch at ~0.727.)
+    const NEAR = [
+      { cx: 0, cy: 0, t_ms: 0 }, { cx: 20, cy: 0, t_ms: 100 },
+      { cx: 20, cy: 2, t_ms: 150 }, { cx: 0, cy: 2, t_ms: 250 }, { cx: 0, cy: 4, t_ms: 300 },
+    ];
+    const ref = prepareReference(NEAR, [300]);
+    let st: ProjState = null;
+    const run = (x: number, y: number, t: number) => { const r = step(st, ref, { x, y, lap: 1, t, stale: false }); st = r.state; return r.s!; };
+    run(0, 0, 0); run(5, 0, 100); run(10, 0, 200);
+    expect(run(10, 1.1, 300)).toBeLessThan(0.4); // stays on branch1 (~0.227)
+  });
+});
