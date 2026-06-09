@@ -1,5 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { activeSeasonId } from '../db/seasons';
+import { activeSeasonId, courseIdBySlug } from '../db/seasons';
+import { slugify } from '../db/slug';
+import { pbMsFor } from '../db/pb';
 import type { LiveCompletion } from './completion';
 
 /** What an app sends each frame (its identity comes from the token, not the frame). */
@@ -8,6 +10,7 @@ export interface PresenceFrame {
   character?: string | null; kart?: string | null; costume?: string | null;
   cur_lap?: number | null; tot_lap?: number | null;
   coins?: number | null; mushrooms?: number | null;
+  resets?: number | null;
   pos?: [number, number] | null; final_time?: string | null;
 }
 
@@ -16,6 +19,7 @@ export interface PresenceEntry {
   player_id: number; name: string; color: string | null; online: boolean;
   screen: string | null; course: string | null; character: string | null; kart: string | null; costume: string | null;
   cur_lap: number | null; tot_lap: number | null; coins: number | null; mushrooms: number | null;
+  resets: number | null; pb_ms: number | null;
   completion: number | null; final_time: string | null; updated_at: number;
 }
 
@@ -23,8 +27,8 @@ type Sink = (msg: unknown) => void;
 
 function offlineEntry(player_id: number, name: string, color: string | null, now: number): PresenceEntry {
   return { player_id, name, color, online: false, screen: null, course: null, character: null, kart: null,
-           costume: null, cur_lap: null, tot_lap: null, coins: null, mushrooms: null, completion: null,
-           final_time: null, updated_at: now };
+           costume: null, cur_lap: null, tot_lap: null, coins: null, mushrooms: null, resets: null,
+           pb_ms: null, completion: null, final_time: null, updated_at: now };
 }
 
 /** In-memory live presence, keyed by the active-season roster (seeded offline so every card
@@ -42,7 +46,7 @@ export class PresenceHub {
     const rows = this.db.prepare(
       `SELECT p.id, p.display_name, p.color FROM season_rosters sr JOIN players p ON p.id=sr.player_id WHERE sr.season_id=?`
     ).all(activeSeasonId(this.db)) as { id: number; display_name: string; color: string | null }[];
-    for (const r of rows) if (!this.map.has(r.id)) this.map.set(r.id, offlineEntry(r.id, r.display_name, r.color, this.now()));
+    for (const r of rows) if (!this.map.has(r.id)) this.map.set(r.id, offlineEntry(r.id, r.display_name, r.color, 0));
   }
 
   snapshot(): { type: 'presence_snapshot'; players: PresenceEntry[] } {
@@ -64,8 +68,9 @@ export class PresenceHub {
       screen: frame.screen ?? null, course: frame.course ?? null,
       character: frame.character ?? null, kart: frame.kart ?? null, costume: frame.costume ?? null,
       cur_lap: frame.cur_lap ?? null, tot_lap: frame.tot_lap ?? null,
-      coins: frame.coins ?? null, mushrooms: frame.mushrooms ?? null,
+      coins: frame.coins ?? null, mushrooms: frame.mushrooms ?? null, resets: frame.resets ?? null,
       completion: this.completion(frame.course, frame.cur_lap, frame.pos),
+      pb_ms: this.pbForCourse(playerId, frame.course),
       final_time: frame.final_time ?? null, updated_at: this.now(),
     };
     this.map.set(playerId, entry);
@@ -85,6 +90,13 @@ export class PresenceHub {
   sweep(maxAgeMs: number): void {
     const cutoff = this.now() - maxAgeMs;
     for (const e of this.map.values()) if (e.online && e.updated_at < cutoff) this.setOffline(e.player_id);
+  }
+
+  private pbForCourse(playerId: number, course: string | null | undefined): number | null {
+    if (!course) return null;
+    const courseId = courseIdBySlug(this.db, slugify(course));
+    if (courseId == null) return null;
+    return pbMsFor(this.db, activeSeasonId(this.db), playerId, courseId, 150);
   }
 
   private broadcast(msg: unknown): void { for (const s of [...this.sinks]) { try { s(msg); } catch { /* sink gone */ } } }

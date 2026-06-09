@@ -51,4 +51,23 @@ describe('PresenceHub', () => {
     hub.sweep(15000);                                        // already offline -> no new broadcast
     expect(got.filter((m) => m.type === 'presence_update' && m.player.player_id === 1 && !m.player.online)).toHaveLength(1);
   });
+
+  it('passes resets through and enriches pb_ms for the current course', () => {
+    const d = db();
+    d.exec(`INSERT INTO courses(id,slug,display_name) VALUES(7,'rainbow_road','Rainbow Road');
+            INSERT INTO runs(season_id,player_id,course_id,cc,status,total_time_ms,is_pb,provenance)
+              VALUES(1,1,7,150,'finished',79880,1,'live');`);
+    const hub = new PresenceHub(d, () => null, () => 5000);
+    const got: any[] = [];
+    hub.addSink((m) => got.push(m));
+    hub.update(1, { screen: 'RACING', course: 'Rainbow Road', resets: 3 });
+    expect(got.at(-1).player).toMatchObject({ player_id: 1, resets: 3, pb_ms: 79880 });
+  });
+
+  it('seeds offline entries with updated_at 0 (never seen)', () => {
+    const hub = new PresenceHub(db(), noCompletion, () => 1000);
+    const got: any[] = [];
+    hub.addSink((m) => got.push(m));
+    expect(got[0].players[0].updated_at).toBe(0);
+  });
 });
