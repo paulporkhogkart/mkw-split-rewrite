@@ -1,0 +1,71 @@
+// Pure mapping: a presence entry -> the player-card view model, plus formatters.
+// No Svelte/Tauri imports, so it's unit-testable. See docs/superpowers/specs/2026-06-09-player-panel-design.md.
+import { parseTime } from "./discordFormat.js";
+
+const SETUP = { CHARACTER_SELECT: "Choosing character", KART_SELECT: "Choosing kart", COURSE_SELECT: "Choosing track" };
+
+/** ms -> "m:ss.SSS" (always shows minutes), or null. */
+export function fmtTimeMs(ms) {
+  if (ms == null || Number.isNaN(ms)) return null;
+  const m = Math.floor(ms / 60000), s = Math.floor((ms % 60000) / 1000), msec = ms % 1000;
+  return `${m}:${String(s).padStart(2, "0")}.${String(msec).padStart(3, "0")}`;
+}
+
+/** completion (0..1) over `totLap` laps -> array of per-lap fill fractions (defaults to 3 laps). */
+export function lapSegments(completion, totLap) {
+  const n = totLap && totLap > 0 ? totLap : 3;
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const lo = i / n, hi = (i + 1) / n;
+    out.push(completion == null ? 0 : completion <= lo ? 0 : completion >= hi ? 1 : (completion - lo) / (hi - lo));
+  }
+  return out;
+}
+
+/** elapsed ms since last seen -> coarse relative label, or null. */
+export function lastSeen(deltaMs) {
+  if (deltaMs == null) return null;
+  const s = Math.floor(deltaMs / 1000);
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60); if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60); if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+/** final time string vs PB ms -> { text:"+1.16"|"-1.00", cls:"slow"|"fast" } or null. */
+export function pbDelta(finalStr, pbMs) {
+  if (!finalStr || pbMs == null) return null;
+  const f = parseTime(finalStr);
+  if (f == null) return null;
+  const d = f - pbMs, ahead = d < 0;
+  return { text: `${ahead ? "-" : "+"}${(Math.abs(d) / 1000).toFixed(2)}`, cls: ahead ? "fast" : "slow" };
+}
+
+/** A presence entry -> the card view model. `now` is a fn (Date.now) for testability. */
+export function viewModel(e, now = Date.now) {
+  const t = typeof now === "function" ? now() : now;
+  const color = e.color || "#888";
+  if (!e.online) {
+    const seen = e.updated_at > 0 ? lastSeen(t - e.updated_at) : null;
+    return { state: "offline", name: e.name, color, online: false, char: null, kart: null, trk: null,
+      primary: { kind: "seen", text: seen ? `last seen ${seen}` : "offline" },
+      resets: null, pbStr: null, delta: null, segments: null, dotPct: null };
+  }
+  const racing = e.screen === "RACING" && !e.final_time;
+  const finished = (e.screen === "RACING" && e.final_time) || e.screen === "POST_TIME_TRIAL";
+  let state, primary;
+  if (SETUP[e.screen]) { state = "setup"; primary = { kind: "activity", text: SETUP[e.screen] }; }
+  else if (racing) { state = "racing"; primary = { kind: "time", text: "—" }; }
+  else if (finished) { state = "finished"; primary = { kind: "time", text: e.final_time }; }
+  else { state = "menus"; primary = { kind: "activity", text: "In the menus" }; }
+  const race = state === "racing" || state === "finished";
+  return {
+    state, name: e.name, color, online: true,
+    char: e.character || null, kart: e.kart || null, trk: e.course || null, primary,
+    resets: race ? (e.resets ?? 0) : null,
+    pbStr: race && e.pb_ms != null ? fmtTimeMs(e.pb_ms) : null,
+    delta: state === "finished" ? pbDelta(e.final_time, e.pb_ms) : null,
+    segments: race ? lapSegments(e.completion, e.tot_lap) : null,
+    dotPct: state === "racing" && e.completion != null && e.completion > 0 && e.completion < 1 ? e.completion * 100 : null,
+  };
+}
