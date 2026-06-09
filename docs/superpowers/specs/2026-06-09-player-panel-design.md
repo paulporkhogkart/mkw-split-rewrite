@@ -51,7 +51,10 @@ bottom for a single "how's the race" glance, with the live time largest, sitting
 | **Racing** | colour, end-frame | colour | filled | resets · PB · bar filling + dot | live time |
 | **Setup** (char/kart/course select) | colour | colour | fills in as picked | hidden | "Choosing character/kart/track" |
 | **Finished** | colour | colour | filled | resets · PB+delta · bar full (no dot) | final time |
-| **Offline** | greyscale, start-frame | muted | dimmed (last `TRK` shown) | hidden | "last seen 3h ago" |
+| **Offline** | greyscale, start-frame | muted | cleared (`—`) | hidden | "last seen 3h ago" |
+
+The **Racing** "time" is `—` until the engine provides a live clock (see Data); the bar + dot still
+move via `completion`.
 
 **Explicitly dropped** (from earlier rounds): coins & mushrooms (replaced by **resets**), the
 course icon/image (distorts at this size — course is **text** only), the track-photo background,
@@ -72,23 +75,18 @@ card does not display them.)
   known, look up the player's PB from the server PB cache **keyed on the course slug** (reuse the
   server's existing slugify so apostrophe courses like "Wario's Galleon" match) and set
   `pb_ms` + `pb_str` on the entry. The finished delta (`final_time − pb`) is computed client-side.
-- **Live timer** — *not wired* (the engine does not read the on-screen clock). The card renders a
-  **client-side elapsed** timer while racing: it starts counting when this client first observes the
-  player on `screen == "RACING"` and shows `mm:ss.SSS`; `final_time` replaces it when finished. This
-  is a best-effort wall-clock approximation (it does not pause with the in-game timer and resets if
-  the monitor reconnects mid-race). **Flagged for replacement** by an engine-sourced time later. No
-  server change for the interim.
+- **Live timer** — *not wired* (the engine does not read the on-screen clock). While racing the time
+  slot simply shows **`—`** (dashes); `final_time` fills it once the run finishes. A real live timer
+  is future engine work — no interim/client-side ticking.
 
-**Offline must retain last-known selection:** `PresenceHub.setOffline` currently nulls every field.
-Change it to **preserve the last `course / character / kart`** (and `pb_ms/pb_str`) so a monitor that
-connects *after* a player went offline still shows their last track; it clears the live-race fields
-(`completion`, `resets`, and the entry stays `final_time`-free) and stamps `updated_at` = go-offline
-time. A player seeded offline at boot (never seen this session) has no last selection (`—`) and no
-real last-seen time → the card shows plain "offline" without a timestamp.
+**Offline clears state.** `PresenceHub.setOffline` keeps its current behaviour — null every live
+field. The offline card shows only the greyscale figure, the muted name, and a "last seen X" line;
+selection rows render `—`. (No last-track retention — not wanted.)
 
 **Derived, not stored:**
-- **"last seen"** (offline) — relative format of `now − updated_at`
-  (`just now` / `Xm` / `Xh` / `Xd`), shown only when the player was actually seen this session.
+- **"last seen"** (offline) — relative format of `now − updated_at` (`just now` / `Xm` / `Xh` /
+  `Xd`), where `updated_at` is the go-offline time. A player seeded offline at boot (never seen this
+  session) shows plain "offline" with no timestamp.
 
 ## State derivation (pure mapping)
 
@@ -110,28 +108,34 @@ composited, or late frames ghost).
 
 - **Source:** move the chosen gifs into `assets/player_gifs/` (committed via Git LFS, matching the
   `captures/**` LFS convention).
-- **Prep script** `scripts/gen_player_figures.py` (Pillow): for each rostered player, read its mapped
-  gif, extract two standalone frames — **start** (first frame with >10% opaque pixels) and **end**
-  (~88% through) — crop each to its alpha bounding box, resize to ~260px tall, write transparent
-  PNGs to `src/assets/players/<name>__on.png` (end) and `__off.png` (start). Greyscale is applied in
-  CSS at render time, not baked in.
-- **Mapping:** a `name → gif` table in the script (default each player's `*Posted` pose). **Alex has
-  no gif** → falls back to one of Adymer's until Alex has art. A player with no mapping → a neutral
-  silhouette placeholder.
+- **Prep script** `scripts/gen_player_figures.py` (Pillow): for each rostered player, take the **end**
+  frame (~88%) of its **online** gif and the **start** frame (first frame with >10% opaque pixels) of
+  its **offline** gif, crop each to its alpha bounding box, resize to ~260px tall, write transparent
+  PNGs to `src/assets/players/<name>__on.png` (end of online gif) and `__off.png` (start of offline
+  gif). Greyscale is applied in CSS at render time, not baked in.
+- **Mapping** — `name → { online_gif (end frame), offline_gif (start frame) }`:
+  | Player | online (end) | offline (start) |
+  |---|---|---|
+  | Paul | `paulPosted` | `paulPosted` |
+  | Aliias | `aliiasPosted` | `aliiasBird` |
+  | Luke | `lukePosted` | `lukeThumbsUp` |
+  | Adymer | `adymerPosted` | `adymerPosted` |
+  | Alex | `adymerPosted` (borrowed) | `adymerPosted` (borrowed) |
+
+  A player with no mapping → a neutral silhouette placeholder.
 - The Svelte card imports the generated PNGs (vite bundles them), keyed by player name (lowercased).
 
 ## Components & files
 
 - `src/lib/playerCard.js` — **pure**, unit-tested: `viewModel(entry, now)` (state + fields),
-  `lapSegments(completion, totLap)`, `lastSeen(ms)`, `pbDelta(finalStr, pbMs)`, `liveElapsed(...)`.
+  `lapSegments(completion, totLap)`, `lastSeen(ms)`, `pbDelta(finalStr, pbMs)`.
 - `src/components/PlayerCard.svelte` — renders one card from a view-model; all the locked CSS.
 - `src/components/PlayerPanel.svelte` — the band: subscribes to `presence`, renders one `PlayerCard`
   per roster entry **in roster order** (stable), as a CSS grid of N equal columns.
 - `src/App.svelte` — replace the `.player-band` placeholder with `<PlayerPanel/>`.
 - `src/lib/presence.js` — add `resets` to `frame()`.
 - `pi/src/presence/hub.ts` — `PresenceFrame` += `resets`; `PresenceEntry` += `resets, pb_ms, pb_str`;
-  `update()` passes resets through and enriches PB from the cache; `setOffline()` preserves the
-  last `course/character/kart` + PB (clears live-race fields).
+  `update()` passes resets through and enriches PB from the cache. `setOffline()` unchanged (clears all).
 - `scripts/gen_player_figures.py` + `assets/player_gifs/` (LFS) + `src/assets/players/*.png`.
 
 ## Error / edge handling
@@ -140,14 +144,14 @@ composited, or late frames ghost).
 - Missing figure PNG → neutral silhouette placeholder (card still renders).
 - Unknown course or no PB → PB line hidden.
 - `tot_lap` unknown → default to **3** segments (MKW standard) so the bar still reads.
-- No live-timer start observed → time slot shows `—`.
+- Racing time always shows `—` (engine timer not wired); only `final_time` ever populates it.
 - Roster larger/smaller than 5 → grid uses N columns; cards keep min width and the band scrolls only
   if absurdly many (not expected).
 
 ## Testing
 
 - **vitest** (`src/lib/playerCard.test.js`): state derivation for each state; `lapSegments` (e.g.
-  0.63 over 3 laps → [full, ~0.89, 0]); `lastSeen` buckets; `pbDelta` sign/format; `liveElapsed`.
+  0.63 over 3 laps → [full, ~0.89, 0]); `lastSeen` buckets; `pbDelta` sign/format.
 - **svelte-check** 0/0 and **vite build** pass.
 - Server: extend `pi/src/presence/hub.test.ts` for `resets` passthrough + PB enrichment.
 - **Manual:** mock the `presence` store with all four states and confirm the band renders 5
@@ -155,8 +159,7 @@ composited, or late frames ghost).
 
 ## Out of scope / future
 
-- **Real in-game timer** (engine reads the on-screen clock, with pause semantics) — the interim is a
-  client-side wall-clock elapsed.
+- **Real in-game timer** (engine reads the on-screen clock) — until then the racing time shows `—`.
 - Displaying coins/mushrooms/costume.
 - Alex's own figure art (borrows Adymer's for now).
 - Online-first / rank sorting (roster order for v1).
