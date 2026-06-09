@@ -73,6 +73,11 @@ export type ProjState = { s: number; t: number; x: number; y: number } | null;
 export interface Obs { x: number; y: number; lap: number; t: number; stale: boolean; }
 
 const HEADING_BONUS = 6;        // px-equivalent bonus for a heading-aligned branch at bootstrap
+const EPS_BACK = 0.004;         // backward tolerance in s (noise)
+const K_REACH = 2.5;            // forward window = K * pixelsMoved / totalLen
+const EPS_FWD_MIN = 0.01;       // minimum forward reach in s
+const DROPOUT_MS = 1500;        // dt above this => re-bootstrap
+const MAX_JUMP_DIST = 60;       // tracking best-distance over this (px) => re-bootstrap
 
 /** Nearest point on the polyline, restricted to s in [loS,hiS] (projections clamped into-window).
  *  When useH, a heading-aligned segment tangent discounts the cost (bootstrap tie-break). */
@@ -102,8 +107,24 @@ export function step(state: ProjState, ref: Reference, obs: Obs): { state: ProjS
   const loS = obs.lap >= 2 ? (b[obs.lap - 2] ?? 0) : 0;
   const hiS = (obs.lap - 1) < b.length ? b[obs.lap - 1] : 1;
 
-  // bootstrap: no heading on a truly fresh state
-  const r = nearestOnPath(ref.ref, loS, hiS, obs.x, obs.y);
+  if (obs.stale) return { state, s: state ? state.s : null };
+
+  if (state && (obs.t - state.t) <= DROPOUT_MS) {
+    const move = dist(state.x, state.y, obs.x, obs.y);
+    const reach = Math.max(EPS_FWD_MIN, K_REACH * move / ref.totalLen);
+    const lo = Math.max(loS, state.s - EPS_BACK);
+    const hi = Math.min(hiS, state.s + reach);
+    const r = nearestOnPath(ref.ref, lo, hi, obs.x, obs.y);
+    if (r.dist <= MAX_JUMP_DIST) {
+      const s = Math.min(hiS, Math.max(loS, Math.max(r.s, state.s - EPS_BACK)));
+      return { state: { s, t: obs.t, x: obs.x, y: obs.y }, s };
+    }
+  }
+
+  // bootstrap (fresh state, dropout, or implausible tracking match)
+  let hx = 0, hy = 0, useH = false;
+  if (state) { const mx = obs.x - state.x, my = obs.y - state.y, ml = Math.hypot(mx, my); if (ml > 1e-6) { hx = mx / ml; hy = my / ml; useH = true; } }
+  const r = nearestOnPath(ref.ref, loS, hiS, obs.x, obs.y, hx, hy, useH);
   const s = Math.min(hiS, Math.max(loS, r.s));
   return { state: { s, t: obs.t, x: obs.x, y: obs.y }, s };
 }

@@ -61,3 +61,30 @@ describe('step (bootstrap)', () => {
     expect(step(null, { ref: [], bounds: [], totalLen: 0 }, { x: 0, y: 0, lap: 1, t: 0, stale: false }).s).toBeNull();
   });
 });
+
+// Self-crossing "X": (0,0)->(20,20)->(20,0)->(0,20); diagonals cross at (10,10) (s~0.185 & ~0.815)
+const XPATH = [
+  { cx: 0, cy: 0, t_ms: 0 }, { cx: 20, cy: 20, t_ms: 100 }, { cx: 20, cy: 0, t_ms: 200 }, { cx: 0, cy: 20, t_ms: 300 },
+];
+
+describe('step (tracking)', () => {
+  it('stays on the entered branch through a self-crossing', () => {
+    const ref = prepareReference(XPATH, [300]);
+    let st: ProjState = null;
+    const run = (x: number, y: number, t: number) => { const r = step(st, ref, { x, y, lap: 1, t, stale: false }); st = r.state; return r.s!; };
+    run(0, 0, 0);
+    run(5, 5, 100);
+    const atCrossing1 = run(10, 10, 200);
+    expect(atCrossing1).toBeLessThan(0.4);     // branch 1, not the s~0.815 branch
+    run(20, 0, 300);
+    const atCrossing2 = run(10, 10, 400);
+    expect(atCrossing2).toBeGreaterThan(0.7);  // now legitimately on branch 3
+  });
+
+  it('clamps a small backward-noisy observation (no reversal beyond EPS_BACK)', () => {
+    const LINE = [{ cx: 0, cy: 0, t_ms: 0 }, { cx: 100, cy: 0, t_ms: 100 }];
+    const ref = prepareReference(LINE, [100]);
+    const r = step({ s: 0.5, t: 0, x: 50, y: 0 }, ref, { x: 48, y: 0, lap: 1, t: 50, stale: false });
+    expect(r.s).toBeCloseTo(0.496, 3);         // clamped to 0.5 - EPS_BACK, not 0.48
+  });
+});
