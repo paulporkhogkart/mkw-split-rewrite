@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildReference, lapBoundaries, prepareReference } from './progress';
+import { buildReference, lapBoundaries, prepareReference, step, type ProjState } from './progress';
 
 const LOOP = [
   { cx: 0, cy: 0, t_ms: 0 }, { cx: 10, cy: 0, t_ms: 50 }, { cx: 0, cy: 0, t_ms: 100 },
@@ -41,5 +41,23 @@ describe('prepareReference', () => {
     const at10 = ref.ref.filter((p) => Math.abs(p.cx - 10) < 1e-6).map((p) => p.s);
     expect(at10.some((s) => Math.abs(s - 0.25) < 0.02)).toBe(true);
     expect(at10.some((s) => Math.abs(s - 0.75) < 0.02)).toBe(true);
+  });
+});
+
+describe('step (bootstrap)', () => {
+  it('lap-gates a recurring position to the current lap (3 identical laps)', () => {
+    // 3 laps of (0,0)->(10,0)->(0,0): lap ends at t=2,4,6
+    const THREE = [
+      { cx: 0, cy: 0, t_ms: 0 }, { cx: 10, cy: 0, t_ms: 1 }, { cx: 0, cy: 0, t_ms: 2 },
+      { cx: 10, cy: 0, t_ms: 3 }, { cx: 0, cy: 0, t_ms: 4 },
+      { cx: 10, cy: 0, t_ms: 5 }, { cx: 0, cy: 0, t_ms: 6 },
+    ];
+    const ref = prepareReference(THREE, [2, 4, 6]);
+    const onLap2 = step(null, ref, { x: 10, y: 0, lap: 2, t: 0, stale: false });
+    expect(onLap2.s).toBeCloseTo(0.5, 2);   // lap-2 copy of (10,0), not 0.167 or 0.833
+  });
+
+  it('returns null s for an empty reference', () => {
+    expect(step(null, { ref: [], bounds: [], totalLen: 0 }, { x: 0, y: 0, lap: 1, t: 0, stale: false }).s).toBeNull();
   });
 });

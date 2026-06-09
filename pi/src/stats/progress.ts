@@ -69,6 +69,45 @@ function resample(raw: RefPt[], spacingPx: number, totalLen: number): RefPt[] {
   return out;
 }
 
+export type ProjState = { s: number; t: number; x: number; y: number } | null;
+export interface Obs { x: number; y: number; lap: number; t: number; stale: boolean; }
+
+const HEADING_BONUS = 6;        // px-equivalent bonus for a heading-aligned branch at bootstrap
+
+/** Nearest point on the polyline, restricted to s in [loS,hiS] (projections clamped into-window).
+ *  When useH, a heading-aligned segment tangent discounts the cost (bootstrap tie-break). */
+function nearestOnPath(ref: RefPt[], loS: number, hiS: number, px: number, py: number, hx = 0, hy = 0, useH = false) {
+  let best = Infinity, bestS = loS;
+  for (let i = 1; i < ref.length; i++) {
+    const a = ref[i - 1], b = ref[i];
+    if (Math.max(a.s, b.s) < loS || Math.min(a.s, b.s) > hiS) continue;
+    const dx = b.cx - a.cx, dy = b.cy - a.cy, L2 = dx * dx + dy * dy;
+    let t = L2 > 0 ? ((px - a.cx) * dx + (py - a.cy) * dy) / L2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    let s = a.s + t * (b.s - a.s);
+    const sC = Math.max(loS, Math.min(hiS, s));
+    if (sC !== s) { t = b.s !== a.s ? Math.max(0, Math.min(1, (sC - a.s) / (b.s - a.s))) : 0; s = sC; }
+    const x = a.cx + t * dx, y = a.cy + t * dy;
+    let cost = dist(px, py, x, y);
+    if (useH) { const tl = Math.hypot(dx, dy) || 1; cost -= HEADING_BONUS * Math.max(0, (dx / tl) * hx + (dy / tl) * hy); }
+    if (cost < best) { best = cost; bestS = s; }
+  }
+  return { s: bestS, dist: best };
+}
+
+/** Project one observation onto the route, carrying per-player state. */
+export function step(state: ProjState, ref: Reference, obs: Obs): { state: ProjState; s: number | null } {
+  if (ref.ref.length === 0) return { state, s: state ? state.s : null };
+  const b = ref.bounds;
+  const loS = obs.lap >= 2 ? (b[obs.lap - 2] ?? 0) : 0;
+  const hiS = (obs.lap - 1) < b.length ? b[obs.lap - 1] : 1;
+
+  // bootstrap: no heading on a truly fresh state
+  const r = nearestOnPath(ref.ref, loS, hiS, obs.x, obs.y);
+  const s = Math.min(hiS, Math.max(loS, r.s));
+  return { state: { s, t: obs.t, x: obs.x, y: obs.y }, s };
+}
+
 /** Clean + arc-length-normalise + resample a trail; bounds computed on the raw (timed) path. */
 export function prepareReference(points: { cx: number; cy: number; t_ms: number }[], lapCumMs: number[]): Reference {
   const cleaned = clipTeleports(dedup(points));
