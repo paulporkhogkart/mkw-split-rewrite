@@ -65,7 +65,8 @@ src/lib/presence.js             (forwards track_state in the frame)
 5. **Lap bounds** `S_k` via the existing time-nearest method on `lapCumMs`. `bounds[k]` = route fraction at the **end of lap (k+1)** (0-indexed); `bounds.length` = lap count; `bounds[last] ≈ 1`.
 
 ```ts
-interface Reference { pts: { x: number; y: number; s: number }[]; bounds: number[]; }
+interface RefPt { cx: number; cy: number; s: number; t: number; }
+interface Reference { ref: RefPt[]; bounds: number[]; totalLen: number; }  // totalLen = route arc length in px
 ```
 
 ## 6. The projector — `step(state, ref, obs) -> { state, s }`
@@ -86,7 +87,7 @@ This window alone kills lap-to-lap snapping.
 **Stale / freeze** (`obs.stale === true`): return `state.s` unchanged — hold, do not advance, do not snap. (If `state` is null, return `null`.)
 
 **Tracking** — `state` present, fresh (`obs.t - state.t <= DROPOUT_MS`), and the window search succeeds:
-1. `pace` = EMA of recent `Δs/Δt` (`PACE_EMA_ALPHA`); forward reach = `pace * (obs.t - state.t) * PACE_WINDOW_K`.
+1. **Displacement-scaled reach:** `reach = max(EPS_FWD_MIN, K_REACH * |obs − state.pos|px / totalLen)` — the window scales with how far the dot moved this frame (no pace state; an idle heartbeat repeat ⇒ ~0 reach ⇒ `s` holds).
 2. Search nearest-point-**on-segment** over `ref` restricted to `s ∈ [max(loS, state.s - EPS_BACK), min(hiS, state.s + reach)]`.
 3. If the best distance > `MAX_JUMP_DIST`, the local window is wrong → fall through to **bootstrap**.
 4. **Monotonic clamp:** `s_new = max(candidate_s, state.s - EPS_BACK)`, then clamp to `[loS, hiS]`.
@@ -104,8 +105,8 @@ This window alone kills lap-to-lap snapping.
 | `RESAMPLE_SPACING` | target arc-length between reference vertices (px) | ~5 px |
 | `TELEPORT_CLIP_FACTOR` | segment length > factor × median ⇒ clip | 8× |
 | `EPS_BACK` | backward tolerance in `s` (noise) | ~0.004 |
-| `PACE_WINDOW_K` | forward reach multiplier over `pace·Δt` | 3 |
-| `PACE_EMA_ALPHA` | EMA weight for pace estimate | 0.3 |
+| `K_REACH` | forward reach multiplier over `pixelsMoved/totalLen` | 2.5 |
+| `EPS_FWD_MIN` | minimum forward reach in `s` | 0.01 |
 | `DROPOUT_MS` | `Δt` above which we re-bootstrap | 1500 |
 | `MAX_JUMP_DIST` | tracking best-distance over which we re-bootstrap (px) | tuned to minimap scale |
 | `BOOTSTRAP_TIE_TOL` | distance ratio that counts as a tie ⇒ heading breaks it | 1.25× |
