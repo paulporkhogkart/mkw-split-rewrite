@@ -39,3 +39,11 @@ export function backfillWasPb(db: DatabaseSync): void {
   ).all() as { season_id: number; player_id: number; course_id: number; cc: number }[];
   for (const g of groups) recomputeWasPb(db, g.season_id, g.player_id, g.course_id, g.cc);
 }
+
+/** Total time (ms) of the player's PB run for a (season,player,course,cc) scope, or null. */
+export function pbMsFor(db: DatabaseSync, seasonId: number, playerId: number, courseId: number, cc: number): number | null {
+  const row = db.prepare(
+    "SELECT total_time_ms FROM runs WHERE season_id=? AND player_id=? AND course_id=? AND cc=? AND is_pb=1 LIMIT 1"
+  ).get(seasonId, playerId, courseId, cc) as { total_time_ms: number } | undefined;
+  return row ? row.total_time_ms : null;
+}

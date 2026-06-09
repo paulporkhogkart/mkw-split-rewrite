@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { openDb, applySchema } from './connect';
-import { recomputeIsPb, recomputeWasPb, backfillWasPb } from './pb';
+import { recomputeIsPb, recomputeWasPb, backfillWasPb, pbMsFor } from './pb';
 
 function withRuns() {
   const db = openDb(':memory:');
@@ -65,5 +65,18 @@ describe('backfillWasPb', () => {
     backfillWasPb(db);
     const pbs = db.prepare('SELECT id FROM runs WHERE was_pb=1 ORDER BY id').all();
     expect(pbs).toEqual([{ id: 1 }, { id: 2 }]);
+  });
+});
+
+describe('pbMsFor', () => {
+  it('returns the is_pb run time for the scope, else null', () => {
+    const d = new DatabaseSync(':memory:'); applySchema(d);
+    d.exec(`INSERT INTO seasons(id,name,is_active) VALUES(1,'S1',1);
+            INSERT INTO players(id,display_name) VALUES(1,'P');
+            INSERT INTO courses(id,slug,display_name) VALUES(7,'rainbow_road','Rainbow Road');
+            INSERT INTO runs(season_id,player_id,course_id,cc,status,provenance,total_time_ms,is_pb)
+              VALUES(1,1,7,150,'finished','live',83000,0),(1,1,7,150,'finished','live',79880,1);`);
+    expect(pbMsFor(d, 1, 1, 7, 150)).toBe(79880);
+    expect(pbMsFor(d, 1, 1, 999, 150)).toBeNull();
   });
 });
