@@ -4,6 +4,8 @@ import { slugify } from '../db/slug';
 import { pbMsFor } from '../db/pb';
 import type { LiveCompletion } from './completion';
 
+// The engine's _TrackState values (mkw_tracker/minimap/tracker.py) that mean a confident live
+// fix; anything else it emits (e.g. 'reacquire') is treated as stale so completion holds.
 const FRESH_TRACK = new Set(['tracking', 'ring_only']);
 
 /** What an app sends each frame (its identity comes from the token, not the frame). */

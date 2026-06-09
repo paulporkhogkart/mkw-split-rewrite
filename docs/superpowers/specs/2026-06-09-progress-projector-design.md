@@ -32,7 +32,7 @@ Grounding facts that shape the filter:
 - The engine emits `minimap_update` **only while locked** (`mkw_tracker/ipc/protocol.py:248` — returns `None` when `not state.tracking` or `cx/cy is None`). On freeze/suspend it emits nothing, so the frontend `minimap` store **holds its last value**.
 - `presence.js:frame()` (`src/lib/presence.js:13`) sends `pos = mm ? [mm.cx, mm.cy] : null` — i.e. a **stale** position during a dropout, `null` only once the store is cleared (screen change / race end).
 - Frames are throttled to **~4 Hz** with a **5 s heartbeat** (`THROTTLE_MS=250`, `HEARTBEAT_MS=5000`). So steps are ~250 ms, and idle heartbeats repeat an identical pos. → the projector uses a **time-scaled** forward window, not a fixed per-frame step.
-- The `minimap_update` payload already carries **`track_state`** (`live`/`freeze`/`suspend`) and `radius` (`protocol.py:257`), but `frame()` drops `track_state`. We forward it so the projector can hold/​re-bootstrap explicitly rather than inferring a dropout from a position jump.
+- The `minimap_update` payload already carries **`track_state`** (the engine's `_TrackState` values `tracking`/`ring_only`/`reacquire`; only `tracking`/`ring_only` are confident fixes) and `radius` (`protocol.py:257`), but `frame()` drops `track_state`. We forward it so the projector can hold/​re-bootstrap explicitly rather than inferring a dropout from a position jump.
 
 ## 4. Architecture
 
@@ -114,7 +114,7 @@ This window alone kills lap-to-lap snapping.
 ## 8. Live wiring
 
 - `makeLiveCompletion(db)` keeps a `Map<playerId, ProjState>` and the per-course reference cache. Signature becomes `(playerId, course, curLap, pos, t, stale) -> number | null`.
-- `hub.update(playerId, frame)` already runs `this.now()` and has `playerId`; it passes both plus `frame.track_state` (mapped to `stale = track_state !== 'live'`).
+- `hub.update(playerId, frame)` already runs `this.now()` and has `playerId`; it passes both plus `frame.track_state` (mapped to `stale` = not a confident-fix state, i.e. not `tracking`/`ring_only`).
 - **State reset** for a player when a new run starts: `course` changed, or `cur_lap` decreased, or the player went offline (`setOffline`). Clears the `Map` entry so the next frame bootstraps.
 - `null` handling: `pos == null` (store cleared) → return `null` *and* clear state. `stale` (frozen) → hold last `s`. Net card effect: the bar advances smoothly and **no longer collapses to 0 on a tracking blip**.
 - `src/lib/presence.js:frame()` adds `track_state: mm ? mm.track_state : null`. `PresenceFrame` (server) gains `track_state?: string | null`.
