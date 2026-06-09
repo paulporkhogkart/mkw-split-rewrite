@@ -4,6 +4,8 @@ import { slugify } from '../db/slug';
 import { pbMsFor } from '../db/pb';
 import type { LiveCompletion } from './completion';
 
+const FRESH_TRACK = new Set(['tracking', 'ring_only']);
+
 /** What an app sends each frame (its identity comes from the token, not the frame). */
 export interface PresenceFrame {
   screen?: string | null; course?: string | null;
@@ -12,6 +14,7 @@ export interface PresenceFrame {
   coins?: number | null; mushrooms?: number | null;
   resets?: number | null;
   pos?: [number, number] | null; final_time?: string | null;
+  track_state?: string | null;
 }
 
 /** What the server broadcasts per roster player. */
@@ -63,15 +66,17 @@ export class PresenceHub {
   update(playerId: number, frame: PresenceFrame): void {
     const cur = this.map.get(playerId);
     if (!cur) return;
+    const now = this.now();
+    const stale = frame.track_state != null && !FRESH_TRACK.has(frame.track_state);
     const entry: PresenceEntry = {
       player_id: playerId, name: cur.name, color: cur.color, online: true,
       screen: frame.screen ?? null, course: frame.course ?? null,
       character: frame.character ?? null, kart: frame.kart ?? null, costume: frame.costume ?? null,
       cur_lap: frame.cur_lap ?? null, tot_lap: frame.tot_lap ?? null,
       coins: frame.coins ?? null, mushrooms: frame.mushrooms ?? null, resets: frame.resets ?? null,
-      completion: this.completion(frame.course, frame.cur_lap, frame.pos),
+      completion: this.completion(frame.course, frame.cur_lap, frame.pos, playerId, now, stale),
       pb_ms: this.pbForCourse(playerId, frame.course),
-      final_time: frame.final_time ?? null, updated_at: this.now(),
+      final_time: frame.final_time ?? null, updated_at: now,
     };
     this.map.set(playerId, entry);
     this.broadcast({ type: 'presence_update', player: entry });

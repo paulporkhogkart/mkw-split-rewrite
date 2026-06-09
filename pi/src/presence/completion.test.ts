@@ -28,4 +28,19 @@ describe('makeLiveCompletion', () => {
     expect(live('Bowsers Castle', 2, null)).toBeNull();
     expect(live('Nope', 1, [0, 0])).toBeNull();
   });
+
+  it('keeps per-player state and resets it on a new run', () => {
+    const live = makeLiveCompletion(db());
+    // Player 1 advances on lap 2; a self-recurring (10,0) tracks forward, never snapping back to lap 1
+    expect(live('Bowsers Castle', 2, [10, 0], 1, 1000, false)).toBeCloseTo(0.75, 2);
+    expect(live('Bowsers Castle', 2, [0, 0], 1, 1100, false)).toBeGreaterThanOrEqual(0.75 - 0.01); // (0,0)=lap2 end ~1.0, forward
+    // A new run for player 1 (lap drops to 1) resets state -> back near the start
+    expect(live('Bowsers Castle', 1, [0, 0], 1, 5000, false)).toBeLessThan(0.2);
+  });
+
+  it('holds completion while the fix is stale', () => {
+    const live = makeLiveCompletion(db());
+    live('Bowsers Castle', 2, [10, 0], 1, 1000, false);              // s ~ 0.75
+    expect(live('Bowsers Castle', 2, [0, 0], 1, 1100, true)).toBeCloseTo(0.75, 2); // stale -> hold
+  });
 });

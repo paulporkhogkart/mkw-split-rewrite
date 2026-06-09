@@ -70,4 +70,12 @@ describe('PresenceHub', () => {
     hub.addSink((m) => got.push(m));
     expect(got[0].players[0].updated_at).toBe(0);
   });
+
+  it('maps a non-fresh track_state to a held (stale) completion', () => {
+    const seen: boolean[] = [];
+    const hub = new PresenceHub(db(), (_c, _l, _p, _pid, _t, stale) => { seen.push(!!stale); return stale ? 0.9 : 0.1; }, () => 3000);
+    hub.addSink(() => {});
+    hub.update(1, { screen: 'RACING', course: 'bc', cur_lap: 2, pos: [1, 2], track_state: 'reacquire' });
+    expect(seen).toEqual([true]);
+  });
 });
