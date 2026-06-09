@@ -1,8 +1,10 @@
 <script>
   import { viewModel } from "../lib/playerCard.js";
   import { figureFor } from "../lib/playerFigures.js";
+  import { nowTick } from "../lib/clock.js";
   export let entry;
-  $: vm = viewModel(entry, Date.now());
+  // $nowTick drives recompute so "last seen" advances even when an offline player sends no frames.
+  $: vm = viewModel(entry, $nowTick);
   $: fig = figureFor(vm.name, vm.online);
 </script>
 

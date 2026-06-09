@@ -1,8 +1,8 @@
 <script>
   import { presence } from "../lib/stores.js";
   import PlayerCard from "./PlayerCard.svelte";
-  // presence is { [player_id]: entry }; object order = server roster order.
-  $: players = Object.values($presence);
+  // presence is { [player_id]: entry }; render in stable ascending player_id order.
+  $: players = Object.values($presence).sort((a, b) => a.player_id - b.player_id);
 </script>
 
 {#if players.length}
