@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { screen, selection, race, minimap } from "./stores.js";
+import { resets } from "./resets.js";
 import { serverUrl, authToken } from "./syncSettings.js";
 import { frame, wsUrl } from "./presence.js";
 
@@ -9,9 +10,10 @@ describe("presence frame()", () => {
     selection.set({ char: "Mario", costume: "Base", kart: "Std", course: "Bowsers Castle" });
     race.set({ curLap: 2, totLap: 3, coins: 7, mushrooms: 1, splits: {}, finishTime: null });
     minimap.set({ cx: 12, cy: 34, radius: 5, trackState: 1, roi: [0, 0, 1, 1] });
+    resets.set(4);
     expect(frame()).toEqual({
       screen: "RACING", course: "Bowsers Castle", character: "Mario", kart: "Std", costume: "Base",
-      cur_lap: 2, tot_lap: 3, coins: 7, mushrooms: 1, pos: [12, 34], final_time: null,
+      cur_lap: 2, tot_lap: 3, coins: 7, mushrooms: 1, pos: [12, 34], final_time: null, resets: 4,
     });
   });
   it("pos is null with no minimap fix", () => {

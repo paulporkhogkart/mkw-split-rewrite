@@ -3,6 +3,7 @@
 // the bot's ws.ts (reconnect). Presence is ephemeral - a dropped frame self-corrects.
 import { get } from "svelte/store";
 import { screen, selection, race, minimap, presence } from "./stores.js";
+import { resets } from "./resets.js";
 import { serverUrl, authToken } from "./syncSettings.js";
 
 const THROTTLE_MS = 250;    // ~4 Hz cap on outbound frames
@@ -15,7 +16,7 @@ export function frame() {
     screen: get(screen),
     course: sel.course, character: sel.char, kart: sel.kart, costume: sel.costume,
     cur_lap: r.curLap, tot_lap: r.totLap, coins: r.coins, mushrooms: r.mushrooms,
-    pos: mm ? [mm.cx, mm.cy] : null, final_time: r.finishTime,
+    pos: mm ? [mm.cx, mm.cy] : null, final_time: r.finishTime, resets: get(resets),
   };
 }
 
