@@ -52,6 +52,17 @@ describe('resolveCompletion', () => {
     expect(r.unevaluable).toBe(0);
   });
 
+  it('replays a self-crossing reset without snapping to the far branch', () => {
+    const d = base();
+    // reference X: crossing at (10,10); single lap
+    const X = [{ cx: 0, cy: 0, t_ms: 0 }, { cx: 20, cy: 20, t_ms: 100 }, { cx: 20, cy: 0, t_ms: 200 }, { cx: 0, cy: 20, t_ms: 300 }];
+    addRun(d, 1, 'finished'); addPoints(d, 1, X); addLaps(d, 1, [300]);
+    addRun(d, 2, 'reset'); addLaps(d, 2, []);                       // 0 completed laps
+    addPoints(d, 2, [{ cx: 0, cy: 0, t_ms: 0 }, { cx: 5, cy: 5, t_ms: 50 }, { cx: 10, cy: 10, t_ms: 100 }]); // along branch 1
+    const r = resolveCompletion(d, { metric: 'avg_completion_before_reset', period: allTime(), filters: { course: 'bc' }, seasonId: 1 });
+    expect(r.total).toBeLessThan(0.4);                              // branch 1 (~0.185), not ~0.815
+  });
+
   it('counts resets with no trail as unevaluable', () => {
     const d = base();
     addRun(d, 1, 'finished'); addPoints(d, 1, LOOP); addLaps(d, 1, [100, 100]);

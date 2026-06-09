@@ -1,7 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { Dimension, Period, StatResult, StatRow } from './types';
 import { getMetric } from './metrics';
-import { buildReference, lapBoundaries, type RefPt } from './progress';
+import { prepareReference, step, type RefPt, type Reference, type ProjState } from './progress';
 
 const dist = (ax: number, ay: number, bx: number, by: number) => Math.hypot(ax - bx, ay - by);
 
@@ -38,19 +38,17 @@ function nameOf(db: DatabaseSync, table: 'players' | 'courses', id: number): str
 
 export interface RefEntry { ref: RefPt[]; bounds: number[]; }
 
-/** The per-course completion reference: the densest finished run's trail (arc-length
- *  normalised) + its per-lap boundary fractions. null if no finished run with a trail. */
-export function courseReference(db: DatabaseSync, seasonId: number, courseId: number, cc: number): RefEntry | null {
+/** Per-course completion reference: the densest finished run's prepared trail + lap bounds. */
+export function courseReference(db: DatabaseSync, seasonId: number, courseId: number, cc: number): Reference | null {
   const refRun = db.prepare(
     `SELECT r.id, COUNT(p.run_id) AS n FROM runs r JOIN run_points p ON p.run_id=r.id
      WHERE r.season_id=? AND r.course_id=? AND r.cc=? AND r.status='finished'
      GROUP BY r.id ORDER BY n DESC LIMIT 1`).get(seasonId, courseId, cc) as { id: number; n: number } | undefined;
   if (!refRun) return null;
   const pts = db.prepare('SELECT cx, cy, t_ms FROM run_points WHERE run_id=? ORDER BY t_ms').all(refRun.id) as { cx: number; cy: number; t_ms: number }[];
-  const ref = buildReference(pts);
   const laps = db.prepare('SELECT lap_time_ms FROM run_laps WHERE run_id=? ORDER BY lap_index').all(refRun.id) as { lap_time_ms: number }[];
   let cum = 0; const cumMs = laps.map((l) => (cum += l.lap_time_ms));
-  return { ref, bounds: lapBoundaries(ref, cumMs) };
+  return prepareReference(pts, cumMs);
 }
 
 export function resolveCompletion(db: DatabaseSync, q: CompletionQuery): StatResult {
@@ -69,16 +67,16 @@ export function resolveCompletion(db: DatabaseSync, q: CompletionQuery): StatRes
   const resets = db.prepare(`SELECT r.id, r.player_id, r.course_id FROM runs r WHERE ${where.join(' AND ')}`)
     .all(...params) as { id: number; player_id: number; course_id: number }[];
 
-  const refCache = new Map<number, RefEntry | null>();
-  const getRef = (courseIdv: number): RefEntry | null => {
+  const refCache = new Map<number, Reference | null>();
+  const getRef = (courseIdv: number): Reference | null => {
     if (refCache.has(courseIdv)) return refCache.get(courseIdv)!;
     const entry = courseReference(db, q.seasonId, courseIdv, cc);
     refCache.set(courseIdv, entry);
     return entry;
   };
 
-  const lastPt = db.prepare('SELECT cx, cy FROM run_points WHERE run_id=? ORDER BY t_ms DESC LIMIT 1');
-  const lapCount = db.prepare('SELECT COUNT(*) AS n FROM run_laps WHERE run_id=?');
+  const ptsStmt = db.prepare('SELECT cx, cy, t_ms FROM run_points WHERE run_id=? ORDER BY t_ms');
+  const lapsStmt = db.prepare('SELECT lap_time_ms FROM run_laps WHERE run_id=? ORDER BY lap_index');
 
   const byKey = new Map<string, { sum: number; n: number }>();
   let overallSum = 0, overallN = 0, unevaluable = 0;
@@ -89,11 +87,13 @@ export function resolveCompletion(db: DatabaseSync, q: CompletionQuery): StatRes
 
   for (const reset of resets) {
     const entry = getRef(reset.course_id);
-    const last = lastPt.get(reset.id) as { cx: number; cy: number } | undefined;
-    if (!entry || entry.ref.length === 0 || !last) { unevaluable++; continue; }
-    const L = (lapCount.get(reset.id) as { n: number }).n;
-    const lowerS = L > 0 && L <= entry.bounds.length ? entry.bounds[L - 1] : 0;
-    const frac = completionFraction(entry.ref, lowerS, last.cx, last.cy);
+    const pts = ptsStmt.all(reset.id) as { cx: number; cy: number; t_ms: number }[];
+    if (!entry || entry.ref.length === 0 || pts.length === 0) { unevaluable++; continue; }
+    const laps = lapsStmt.all(reset.id) as { lap_time_ms: number }[];
+    let c = 0; const cum = laps.map((l) => (c += l.lap_time_ms));
+    const lapOf = (t: number) => { let L = 1; for (const bnd of cum) { if (t >= bnd) L++; else break; } return L; };
+    let st: ProjState = null, frac = 0;
+    for (const p of pts) { const r = step(st, entry, { x: p.cx, y: p.cy, lap: lapOf(p.t_ms), t: p.t_ms, stale: false }); st = r.state; if (r.s != null) frac = r.s; }
     overallSum += frac; overallN += 1;
     const k = keyOf(reset);
     const cur = byKey.get(k) ?? { sum: 0, n: 0 };
