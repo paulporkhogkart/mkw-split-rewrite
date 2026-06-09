@@ -1,8 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { applySchema } from '../db/connect';
-import { completionFraction, resolveCompletion } from './completion';
-import { buildReference } from './progress';
+import { resolveCompletion } from './completion';
 import { resolvePeriod } from './period';
 
 const allTime = () => resolvePeriod('all_time', 'Australia/Melbourne');
@@ -12,15 +11,6 @@ const LOOP = [
   { cx: 0, cy: 0, t_ms: 0 }, { cx: 10, cy: 0, t_ms: 50 }, { cx: 0, cy: 0, t_ms: 100 },
   { cx: 10, cy: 0, t_ms: 150 }, { cx: 0, cy: 0, t_ms: 200 },
 ];
-
-describe('completionFraction', () => {
-  it('uses lowerS to pick the correct lap when a position recurs', () => {
-    const ref = buildReference(LOOP);
-    // (10,0) appears at s=0.25 (lap 1) and s=0.75 (lap 2)
-    expect(completionFraction(ref, 0, 10, 0)).toBe(0.25);     // no gate -> first match
-    expect(completionFraction(ref, 0.5, 10, 0)).toBe(0.75);   // gated past lap 1 -> lap 2
-  });
-});
 
 function base(): DatabaseSync {
   const d = new DatabaseSync(':memory:');
@@ -60,7 +50,7 @@ describe('resolveCompletion', () => {
     addRun(d, 2, 'reset'); addLaps(d, 2, []);                       // 0 completed laps
     addPoints(d, 2, [{ cx: 0, cy: 0, t_ms: 0 }, { cx: 5, cy: 5, t_ms: 50 }, { cx: 10, cy: 10, t_ms: 100 }]); // along branch 1
     const r = resolveCompletion(d, { metric: 'avg_completion_before_reset', period: allTime(), filters: { course: 'bc' }, seasonId: 1 });
-    expect(r.total).toBeLessThan(0.4);                              // branch 1 (~0.185), not ~0.815
+    expect(r.total).toBeLessThan(0.4);                              // replayed trail stabilises on branch 1 (~0.185)
   });
 
   it('counts resets with no trail as unevaluable', () => {

@@ -1,20 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { Dimension, Period, StatResult, StatRow } from './types';
 import { getMetric } from './metrics';
-import { prepareReference, step, type RefPt, type Reference, type ProjState } from './progress';
-
-const dist = (ax: number, ay: number, bx: number, by: number) => Math.hypot(ax - bx, ay - by);
-
-/** Nearest-vertex route fraction for P, restricted to vertices with s >= lowerS. */
-export function completionFraction(ref: RefPt[], lowerS: number, px: number, py: number): number {
-  let best = Infinity, bestS = lowerS;
-  for (const p of ref) {
-    if (p.s < lowerS) continue;
-    const d = dist(p.cx, p.cy, px, py);
-    if (d < best) { best = d; bestS = p.s; }
-  }
-  return bestS;
-}
+import { prepareReference, step, type Reference, type ProjState } from './progress';
 
 export interface CompletionQuery {
   metric: string;
@@ -35,8 +22,6 @@ function courseId(db: DatabaseSync, v: string): number | null {
 function nameOf(db: DatabaseSync, table: 'players' | 'courses', id: number): string {
   return (db.prepare(`SELECT display_name FROM ${table} WHERE id=?`).get(id) as { display_name: string }).display_name;
 }
-
-export interface RefEntry { ref: RefPt[]; bounds: number[]; }
 
 /** Per-course completion reference: the densest finished run's prepared trail + lap bounds. */
 export function courseReference(db: DatabaseSync, seasonId: number, courseId: number, cc: number): Reference | null {
@@ -93,7 +78,10 @@ export function resolveCompletion(db: DatabaseSync, q: CompletionQuery): StatRes
     let c = 0; const cum = laps.map((l) => (c += l.lap_time_ms));
     const lapOf = (t: number) => { let L = 1; for (const bnd of cum) { if (t >= bnd) L++; else break; } return L; };
     let st: ProjState = null, frac = 0;
-    for (const p of pts) { const r = step(st, entry, { x: p.cx, y: p.cy, lap: lapOf(p.t_ms), t: p.t_ms, stale: false }); st = r.state; if (r.s != null) frac = r.s; }
+    for (const p of pts) {
+      const r = step(st, entry, { x: p.cx, y: p.cy, lap: lapOf(p.t_ms), t: p.t_ms, stale: false });
+      st = r.state; if (r.s != null) frac = r.s;
+    }
     overallSum += frac; overallN += 1;
     const k = keyOf(reset);
     const cur = byKey.get(k) ?? { sum: 0, n: 0 };
