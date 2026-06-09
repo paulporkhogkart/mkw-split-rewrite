@@ -20,6 +20,7 @@
   import LanguageSelectors from "./components/LanguageSelectors.svelte";
   import SettingsModal from "./components/SettingsModal.svelte";
   import RunReviewModal from "./components/RunReviewModal.svelte";
+  import PlayerPanel from "./components/PlayerPanel.svelte";
   import { screen as screenStore, liveScore as liveScoreStore,
            candidates as candidatesStore, selection as selectionStore,
            race as raceStore, logs as logsStore,
@@ -1549,9 +1550,9 @@
           </button>
         </div>
 
-        <!-- Reserved band for the live player panel (sub-project #3) -->
+        <!-- Live player panel (sub-project #3) -->
         <div class="player-band">
-          <span class="player-band-ph">player status panel</span>
+          <PlayerPanel />
         </div>
       </div>
 
@@ -1882,13 +1883,10 @@
     position: relative; overflow: hidden; background: var(--feed-bg);
   }
   .player-band {
-    /* Reserved for the live player panel (sub-project #3). Grows to fill the space below the
-       feed + controls; never shrinks below room for the cards. */
+    /* Live player panel (sub-project #3): fills the space below the feed + controls. */
     flex: 1 0 0; min-height: 130px; overflow: hidden;
     border-top: 1px solid var(--bd); background: var(--bg);
-    display: flex; align-items: center; justify-content: center;
   }
-  .player-band-ph { font-size: .66rem; color: var(--tx-dim); letter-spacing: .05em; text-transform: uppercase; }
   .feed-placeholder {
     position: absolute; inset: 0;
     display: flex; flex-direction: column; align-items: center;
