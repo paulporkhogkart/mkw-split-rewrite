@@ -829,7 +829,7 @@ export function makeLiveCompletion(db: DatabaseSync, cc = 150): LiveCompletion {
     const al = playerId != null ? loadPlayerAlignment(db, playerId) : { dx: 0, dy: 0, scale: 1 };
     const x = pos[0] * al.scale + al.dx, y = pos[1] * al.scale + al.dy;
     let ps = playerId != null ? pstate.get(playerId) : undefined;
-    if (ps && (ps.course !== courseId || lap < ps.lap)) ps = undefined;          // new run -> reset
+    if (ps && (ps.course !== courseId || lap !== ps.lap)) ps = undefined;          // new run OR lap change -> reset (wraps within-lap progress at the start/finish seam; otherwise monotonic progress sticks near 1.0 on laps 2+)
     const r = projectStep(ps?.st ?? null, entry.g, entry.pe, { x, y, lap, totLap, t, stale });
     if (playerId != null) pstate.set(playerId, { st: r.state, course: courseId, lap });
     return r.completion;

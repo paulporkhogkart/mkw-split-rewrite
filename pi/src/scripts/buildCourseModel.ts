@@ -30,6 +30,9 @@ function main() {
   const ptsStmt = db.prepare('SELECT t_ms, cx, cy, score, lap FROM run_points WHERE run_id=? ORDER BY t_ms');
   const lapStmt = db.prepare('SELECT lap_time_ms FROM run_laps WHERE run_id=? ORDER BY lap_index');
   const inputs: RunInput[] = runs.map((r) => {
+    // run_laps.lap_time_ms is a per-lap DURATION (verified across runs: SUM(lap_time_ms) == runs.total_time_ms,
+    // values non-monotonic). Accumulate into cumulative lap end-times, which is what foldRun's `f` expects.
+    // (Do NOT treat these as already-cumulative splits - the reads.ts:myPbSplits docstring mislabels them.)
     let c = 0; const cum = (lapStmt.all(r.id) as { lap_time_ms: number }[]).map((l) => (c += l.lap_time_ms));
     return { playerId: r.player_id, lapCumMs: cum,
       points: ptsStmt.all(r.id) as RunInput['points'] };
