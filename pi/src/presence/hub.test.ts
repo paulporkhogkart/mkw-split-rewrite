@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { applySchema } from '../db/connect';
-import { PresenceHub } from './hub';
+import { PresenceHub, type PresenceEntry } from './hub';
 
 function db() {
   const d = new DatabaseSync(':memory:'); applySchema(d);
@@ -77,5 +77,18 @@ describe('PresenceHub', () => {
     hub.addSink(() => {});
     hub.update(1, { screen: 'RACING', course: 'bc', cur_lap: 2, pos: [1, 2], track_state: 'reacquire' });
     expect(seen).toEqual([true]);
+  });
+
+  it('records a divider (the live completion) at each in-race lap tick, reset on a new run', () => {
+    const seen: PresenceEntry[] = [];
+    const hub = new PresenceHub(db(), () => 0.3, () => 1000);   // completion double returns 0.3 always
+    hub.addSink((m: any) => { if (m.type === 'presence_update') seen.push(m.player); });
+    const f = (cur_lap: number, course = 'bc') => ({ screen: 'RACING', course, cur_lap, tot_lap: 3, pos: [1, 2] as [number, number] });
+    hub.update(1, f(1)); hub.update(1, f(1));        // lap 1, no tick yet
+    hub.update(1, f(2));                              // 1->2 tick
+    hub.update(1, f(3));                              // 2->3 tick
+    expect(seen.at(-1)!.dividers).toEqual([0.3, 0.3]);
+    hub.update(1, f(1));                              // lap drops -> new run resets
+    expect(seen.at(-1)!.dividers).toEqual([]);
   });
 });
