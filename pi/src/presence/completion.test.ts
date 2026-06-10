@@ -30,38 +30,47 @@ function seedModel(d: DatabaseSync) {
 }
 
 describe('makeLiveCompletion', () => {
-  it('returns null with no position or an unknown course', () => {
+  it('returns null completion with no position or an unknown course', () => {
     const d = db(); seedModel(d);
     const live = makeLiveCompletion(d);
-    expect(live('Bowsers Castle', 2, null)).toBeNull();
-    expect(live('Nope', 1, [0, 0])).toBeNull();
+    expect(live('Bowsers Castle', 2, null).completion).toBeNull();
+    expect(live('Nope', 1, [0, 0]).completion).toBeNull();
   });
 
-  it('returns null when the course has no stored model', () => {
+  it('returns null completion when the course has no stored model', () => {
     const d = db();   // no seedModel
     const live = makeLiveCompletion(d);
-    expect(live('Bowsers Castle', 1, [10, 0], 1, 1000, false, 2)).toBeNull();
+    expect(live('Bowsers Castle', 1, [10, 0], 1, 1000, false, 2).completion).toBeNull();
+  });
+
+  it('exposes the model interior lap boundaries as dividers, from the first frame', () => {
+    const d = db(); seedModel(d);
+    const live = makeLiveCompletion(d);
+    // total 80, laps start at 0 and 40 -> one interior boundary at 40/80 = 0.5
+    expect(live('Bowsers Castle', 1, [10, 0], 1, 1000, false, 2).dividers).toEqual([0.5]);
+    expect(live('Bowsers Castle', 1, null, 1, 1000, false, 2).dividers).toEqual([0.5]);   // known even with no position
+    expect(live('Nope', 1, [0, 0]).dividers).toEqual([]);                                 // unknown course -> none
   });
 
   it('projects live position onto the course model, monotonic per lap (cumulative distance)', () => {
     const d = db(); seedModel(d);
     const live = makeLiveCompletion(d);
-    expect(live('Bowsers Castle', 1, [10, 0], 1, 1000, false, 2)).toBeCloseTo(10 / 80, 2);    // quarter of lap 1 -> 10/80
-    expect(live('Bowsers Castle', 1, [10, 10], 1, 1100, false, 2)).toBeCloseTo(20 / 80, 2);   // half of lap 1  -> 20/80
+    expect(live('Bowsers Castle', 1, [10, 0], 1, 1000, false, 2).completion).toBeCloseTo(10 / 80, 2);    // quarter of lap 1 -> 10/80
+    expect(live('Bowsers Castle', 1, [10, 10], 1, 1100, false, 2).completion).toBeCloseTo(20 / 80, 2);   // half of lap 1  -> 20/80
   });
 
   it('holds completion while stale', () => {
     const d = db(); seedModel(d);
     const live = makeLiveCompletion(d);
     live('Bowsers Castle', 1, [10, 0], 1, 1000, false, 2);
-    expect(live('Bowsers Castle', 1, [0, 0], 1, 1100, true, 2)).toBeCloseTo(10 / 80, 2);       // held
+    expect(live('Bowsers Castle', 1, [0, 0], 1, 1100, true, 2).completion).toBeCloseTo(10 / 80, 2);       // held
   });
 
   it('wraps into lap 2 at the seam (resets + bootstraps onto lap-2 route)', () => {
     const d = db(); seedModel(d);
     const live = makeLiveCompletion(d);
     live('Bowsers Castle', 1, [10, 10], 1, 1000, false, 2);                                     // lap 1, progress 0.25 (10,10 quarter)
-    const c2 = live('Bowsers Castle', 2, [10, 0], 1, 2000, false, 2);                           // lap 2, quarter
+    const c2 = live('Bowsers Castle', 2, [10, 0], 1, 2000, false, 2).completion;                // lap 2, quarter
     expect(c2).toBeCloseTo((40 + 10) / 80, 2);   // 50/80 = 0.625 — reset wrapped onto lap-2 route
   });
 
@@ -69,8 +78,8 @@ describe('makeLiveCompletion', () => {
     const d = db(); seedModel(d);
     const live = makeLiveCompletion(d);
     live('Bowsers Castle', 1, [10, 10], 1, 1000, false, 2);
-    expect(live('Bowsers Castle', 1, null, 1, 1100, false, 2)).toBeNull();   // pos clears -> state dropped
-    expect(live('Bowsers Castle', 1, [10, 0], 1, 1200, false, 2)).toBeCloseTo(10 / 80, 2);   // fresh quarter
+    expect(live('Bowsers Castle', 1, null, 1, 1100, false, 2).completion).toBeNull();   // pos clears -> state dropped
+    expect(live('Bowsers Castle', 1, [10, 0], 1, 1200, false, 2).completion).toBeCloseTo(10 / 80, 2);   // fresh quarter
   });
 
   it('holds at 100% past the final lap (post-finish frames report lap > totLap)', () => {
@@ -78,6 +87,6 @@ describe('makeLiveCompletion', () => {
     const live = makeLiveCompletion(d);
     live('Bowsers Castle', 2, [10, 10], 1, 1000, false, 2);                  // final lap, mid
     live('Bowsers Castle', 2, [0, 0], 1, 1100, false, 2);                    // reach the line, progress ~1
-    expect(live('Bowsers Castle', 3, [10, 0], 1, 1200, false, 2)).toBe(1);   // lap 3 of 2 -> held at 100%, not wrapped
+    expect(live('Bowsers Castle', 3, [10, 0], 1, 1200, false, 2).completion).toBe(1);   // lap 3 of 2 -> held at 100%, not wrapped
   });
 });

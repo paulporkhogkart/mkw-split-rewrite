@@ -10,7 +10,7 @@ function db() {
           INSERT INTO season_rosters(season_id,player_id) VALUES(1,1),(1,2);`);
   return d;
 }
-const noCompletion = () => null;
+const noCompletion = () => ({ completion: null, dividers: [] });
 
 describe('PresenceHub', () => {
   it('seeds the roster offline and snapshots it to a new sink', () => {
@@ -22,7 +22,7 @@ describe('PresenceHub', () => {
   });
 
   it('a frame marks the player online + broadcasts a delta with enriched completion', () => {
-    const hub = new PresenceHub(db(), (_c, _l, pos) => (pos ? 0.5 : null), () => 2000);
+    const hub = new PresenceHub(db(), (_c, _l, pos) => ({ completion: pos ? 0.5 : null, dividers: [] }), () => 2000);
     const got: any[] = [];
     hub.addSink((m) => got.push(m));                         // got[0] = snapshot
     hub.update(2, { screen: 'RACING', course: 'bc', cur_lap: 2, coins: 7, pos: [1, 2] });
@@ -40,7 +40,7 @@ describe('PresenceHub', () => {
 
   it('setOffline / sweep flip a stale player offline (idempotently)', () => {
     let t = 1000;
-    const hub = new PresenceHub(db(), () => null, () => t);
+    const hub = new PresenceHub(db(), () => ({ completion: null, dividers: [] }), () => t);
     const got: any[] = [];
     hub.addSink((m) => got.push(m));
     hub.update(1, { screen: 'MAIN_MENU' });                  // Paul online @1000
@@ -57,7 +57,7 @@ describe('PresenceHub', () => {
     d.exec(`INSERT INTO courses(id,slug,display_name) VALUES(7,'rainbow_road','Rainbow Road');
             INSERT INTO runs(season_id,player_id,course_id,cc,status,total_time_ms,is_pb,provenance)
               VALUES(1,1,7,150,'finished',79880,1,'live');`);
-    const hub = new PresenceHub(d, () => null, () => 5000);
+    const hub = new PresenceHub(d, () => ({ completion: null, dividers: [] }), () => 5000);
     const got: any[] = [];
     hub.addSink((m) => got.push(m));
     hub.update(1, { screen: 'RACING', course: 'Rainbow Road', resets: 3 });
@@ -73,22 +73,19 @@ describe('PresenceHub', () => {
 
   it('maps a non-fresh track_state to a held (stale) completion', () => {
     const seen: boolean[] = [];
-    const hub = new PresenceHub(db(), (_c, _l, _p, _pid, _t, stale) => { seen.push(!!stale); return stale ? 0.9 : 0.1; }, () => 3000);
+    const hub = new PresenceHub(db(), (_c, _l, _p, _pid, _t, stale) => { seen.push(!!stale); return { completion: stale ? 0.9 : 0.1, dividers: [] }; }, () => 3000);
     hub.addSink(() => {});
     hub.update(1, { screen: 'RACING', course: 'bc', cur_lap: 2, pos: [1, 2], track_state: 'reacquire' });
     expect(seen).toEqual([true]);
   });
 
-  it('records a divider (the live completion) at each in-race lap tick, reset on a new run', () => {
+  it('passes the model-derived dividers from the completion provider straight through', () => {
     const seen: PresenceEntry[] = [];
-    const hub = new PresenceHub(db(), () => 0.3, () => 1000);   // completion double returns 0.3 always
+    // The provider returns the model's known interior boundaries (constant per course); the hub
+    // just forwards them — they appear on the very first frame, not only as laps complete.
+    const hub = new PresenceHub(db(), () => ({ completion: 0.3, dividers: [0.33, 0.66] }), () => 1000);
     hub.addSink((m: any) => { if (m.type === 'presence_update') seen.push(m.player); });
-    const f = (cur_lap: number, course = 'bc') => ({ screen: 'RACING', course, cur_lap, tot_lap: 3, pos: [1, 2] as [number, number] });
-    hub.update(1, f(1)); hub.update(1, f(1));        // lap 1, no tick yet
-    hub.update(1, f(2));                              // 1->2 tick
-    hub.update(1, f(3));                              // 2->3 tick
-    expect(seen.at(-1)!.dividers).toEqual([0.3, 0.3]);
-    hub.update(1, f(1));                              // lap drops -> new run resets
-    expect(seen.at(-1)!.dividers).toEqual([]);
+    hub.update(1, { screen: 'RACING', course: 'bc', cur_lap: 1, tot_lap: 3, pos: [1, 2] });
+    expect(seen.at(-1)!.dividers).toEqual([0.33, 0.66]);   // present from the first frame (lap 1)
   });
 });

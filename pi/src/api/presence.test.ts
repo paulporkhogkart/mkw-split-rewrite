@@ -9,7 +9,7 @@ function hub() {
   d.exec(`INSERT INTO seasons(id,name,is_active) VALUES(1,'S1',1);
           INSERT INTO players(id,display_name,color) VALUES(1,'Paul',NULL);
           INSERT INTO season_rosters(season_id,player_id) VALUES(1,1);`);
-  return new PresenceHub(d, () => null, () => 1000);
+  return new PresenceHub(d, () => ({ completion: null, dividers: [] }), () => 1000);
 }
 
 describe('presenceHandlers', () => {
