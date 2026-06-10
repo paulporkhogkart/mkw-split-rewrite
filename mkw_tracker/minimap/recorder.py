@@ -10,7 +10,9 @@ class MinimapRecorder:
     Records raw minimap positions during a race and saves them to the DB
     on completion or abort.
 
-    Points are stored as (t_ms, cx, cy, score).
+    Points are stored as (t_ms, cx, cy, score, lap) - lap is the live HUD lap at
+    capture time (None until the lap counter is first read), so the server can group
+    a trail by lap index exactly instead of inferring it from cumulative lap times.
     Supports pause/resume with continuous timestamps.
     """
 
@@ -33,7 +35,7 @@ class MinimapRecorder:
 
     @property
     def points(self) -> list:
-        """Read-only copy of the recorded points (list of (t_ms, cx, cy, score))."""
+        """Read-only copy of the recorded points (list of (t_ms, cx, cy, score, lap))."""
         return list(self._points)
 
     def start(self):
@@ -68,14 +70,15 @@ class MinimapRecorder:
             paused += (time.perf_counter() - self._pause_start) * 1000.0
         return int(raw - paused)
 
-    def update(self, mm: MinimapState):
-        """Append a position point whenever the tracker has an active position."""
+    def update(self, mm: MinimapState, lap: Optional[int] = None):
+        """Append a position point (stamped with the current HUD lap) whenever the
+        tracker has an active position."""
         if not self._recording or self._pause_start is not None:
             return
         if not mm.tracking or mm.cx is None:
             return
         t_ms = self._elapsed_ms()
-        self._points.append((t_ms, mm.cx_smooth, mm.cy_smooth, mm.last_score))
+        self._points.append((t_ms, mm.cx_smooth, mm.cy_smooth, mm.last_score, lap))
 
     def retroactive_filter(self, threshold: float):
         """
@@ -85,7 +88,7 @@ class MinimapRecorder:
         if not self._points:
             return
 
-        good = [(t, cx, cy, sc) for t, cx, cy, sc in self._points if sc >= threshold]
+        good = [(t, cx, cy, sc, lap) for t, cx, cy, sc, lap in self._points if sc >= threshold]
         if len(good) < 2:
             print(f"  [Replay] retroactive_filter: too few good points ({len(good)}), keeping original")
             return
@@ -118,7 +121,7 @@ class MinimapRecorder:
         new_cys = _interp(orig_ts, good_ts, good_cys)
 
         removed = sum(1 for p in self._points if p[3] < threshold)
-        self._points = [(t, cx, cy, self._points[i][3])
+        self._points = [(t, cx, cy, self._points[i][3], self._points[i][4])
                         for i, (t, cx, cy) in enumerate(zip(orig_ts, new_cxs, new_cys))]
         print(f"  [Replay] Retroactive filter: removed {removed}/{len(self._points)} "
               f"points below thr={threshold:.3f}")

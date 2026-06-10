@@ -1060,7 +1060,7 @@ def run(args):
             lapstats.update(mush_state.count)
             lapstats.update_coins(coin_state.coins)
             mm_state           = minimap.update(frame, screen)
-            mm_rec.update(mm_state)
+            mm_rec.update(mm_state, lap_state.current_lap)
         else:
             lap_state, lap_inc = laps.state, False
             coin_state         = coins.state

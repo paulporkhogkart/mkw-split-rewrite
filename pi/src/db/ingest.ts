@@ -41,8 +41,8 @@ export function upsertRun(db: DatabaseSync, p: AttemptPayload, playerId: number,
     );
     for (const lap of p.laps ?? []) lapStmt.run(runId, lap.lap, lap.time_ms, lap.time_str ?? null, lap.coins ?? null, lap.shrooms ?? null);
 
-    const ptStmt = db.prepare('INSERT INTO run_points(run_id, t_ms, cx, cy, score) VALUES (?,?,?,?,?)');
-    for (const [t, cx, cy, sc] of p.points ?? []) ptStmt.run(runId, t, cx, cy, sc);
+    const ptStmt = db.prepare('INSERT INTO run_points(run_id, t_ms, cx, cy, score, lap) VALUES (?,?,?,?,?,?)');
+    for (const [t, cx, cy, sc, lap] of p.points ?? []) ptStmt.run(runId, t, cx, cy, sc, lap ?? null);
 
     db.exec('COMMIT');
     return runId;

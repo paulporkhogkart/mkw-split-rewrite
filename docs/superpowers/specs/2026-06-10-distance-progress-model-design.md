@@ -103,7 +103,7 @@ The card's lap bar changes from **N equal segments** to **one continuous fill** 
 
 ## 7. Engine — per-point lap stamp
 
-`mkw_tracker/minimap/recorder.py` stamps each recorded point with the current HUD lap (from the lap tracker) → `run_points.lap` (column added in Plan 1). The Rust app payload (`AttemptPayload.points`) carries lap per point; `pi/src/db/ingest.ts` stores it. Makes the builder's lap grouping exact (no countdown/boundary ambiguity). Old data still works via the time-derived fallback.
+`mkw_tracker/minimap/recorder.py` stamps each recorded point with the current HUD lap (from the lap tracker) → emitted in the `run_finalized` `points` payload as a 5-element array `[t, cx, cy, score, lap]` → `run_points.lap` (column added in Plan 1). The **Rust uploader (`src-tauri/src/sync.rs`) forwards the run_finalized JSON opaquely** (it only strips `type` / nulls a partial `laps` set — it never restructures `points`), so the lap rides through with no Rust change. `pi/src/db/ingest.ts` reads the optional 5th element (legacy 4-tuples → `lap = null`) and stores it. Makes the builder's lap grouping exact (no countdown/boundary ambiguity). Old data still works via the time-derived fallback. The only piece that needs the user's hardware to verify is the `main.py` wiring of `lap_state.current_lap` into the recorder during live play; the recorder/serialisation/ingest are all unit-tested.
 
 ---
 

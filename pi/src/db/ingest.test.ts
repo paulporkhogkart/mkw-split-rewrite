@@ -52,6 +52,16 @@ describe('upsertRun', () => {
     expect((db.prepare('SELECT COUNT(*) c FROM run_points WHERE run_id=?').get(runId) as any).c).toBe(2);
   });
 
+  it('stores the per-point lap stamp (null when a legacy 4-tuple omits it)', () => {
+    const db = base();
+    const runId = upsertRun(db, {
+      attempt_id: 'L1', course: 'Rainbow Road', status: 'reset',
+      points: [[0, 1, 2, 0.9, 1], [16, 1.1, 2.1, 0.95, 2], [32, 1.2, 2.2, 0.8]],   // last omits lap
+    } as any, 1, 1);
+    const rows = db.prepare('SELECT lap FROM run_points WHERE run_id=? ORDER BY t_ms').all(runId) as { lap: number | null }[];
+    expect(rows.map((r) => r.lap)).toEqual([1, 2, null]);
+  });
+
   it('is idempotent by attempt_id (re-send replaces, no dup)', () => {
     const db = base();
     upsertRun(db, payload, 1, 1);

@@ -209,7 +209,7 @@ class RaceLifecycle:
                 "ended_at":   datetime.now(timezone.utc).isoformat(),
                 "total_time": best_total_time,
                 "laps":       laps,
-                "points":     [[t, cx, cy, sc] for (t, cx, cy, sc) in self._mm_rec.points],
+                "points":     [list(p) for p in self._mm_rec.points],
                 "coins_gained":   self._lapstats.coins_gained if self._lapstats is not None else None,
                 "coins_lost":     self._lapstats.coins_lost if self._lapstats is not None else None,
                 "mushrooms_used": self._lapstats.mushrooms_used if self._lapstats is not None else None,

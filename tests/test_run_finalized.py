@@ -6,11 +6,35 @@ from mkw_tracker.ipc.protocol import emit_run_finalized
 
 def test_recorder_points_returns_copy():
     rec = MinimapRecorder()
-    rec._points = [(0, 1.0, 2.0, 0.9), (16, 1.1, 2.1, 0.95)]
+    rec._points = [(0, 1.0, 2.0, 0.9, 1), (16, 1.1, 2.1, 0.95, 1)]
     pts = rec.points
-    assert pts == [(0, 1.0, 2.0, 0.9), (16, 1.1, 2.1, 0.95)]
-    pts.append((99, 0.0, 0.0, 0.0))            # mutating the copy
+    assert pts == [(0, 1.0, 2.0, 0.9, 1), (16, 1.1, 2.1, 0.95, 1)]
+    pts.append((99, 0.0, 0.0, 0.0, 2))         # mutating the copy
     assert len(rec._points) == 2               # ...does not touch the recorder
+
+
+def _mm(score=0.9, cx=1.0, cy=2.0):
+    from unittest.mock import MagicMock
+    m = MagicMock(); m.tracking = True; m.cx = 1
+    m.cx_smooth = cx; m.cy_smooth = cy; m.last_score = score
+    return m
+
+
+def test_update_stamps_the_current_hud_lap():
+    rec = MinimapRecorder(); rec.start()
+    rec.update(_mm(), 1)
+    rec.update(_mm(), 2)
+    rec.update(_mm())                          # no lap known yet -> None
+    assert [p[4] for p in rec.points] == [1, 2, None]
+
+
+def test_retroactive_filter_preserves_lap_per_point():
+    rec = MinimapRecorder()
+    # 3 points; the middle one is below threshold (its cx/cy get interpolated away),
+    # but each point's t and lap stamp must ride through untouched.
+    rec._points = [(0, 1.0, 1.0, 0.9, 1), (10, 9.0, 9.0, 0.1, 1), (20, 2.0, 2.0, 0.9, 2)]
+    rec.retroactive_filter(0.5)
+    assert [(p[0], p[4]) for p in rec.points] == [(0, 1), (10, 1), (20, 2)]
 
 
 def test_emit_run_finalized_shapes_the_line():
@@ -49,7 +73,7 @@ def _lifecycle(ipc, total_time, splits):
     sel.state.kart = "Standard Kart"
     ts = MagicMock(); ts.total_time = total_time; ts.splits = splits
     minimap = MagicMock(); minimap._calibrated = True   # skip calibrate branch
-    mm_rec = MagicMock(); mm_rec.points = [(0, 1.0, 2.0, 0.9)]; mm_rec.save.return_value = None
+    mm_rec = MagicMock(); mm_rec.points = [(0, 1.0, 2.0, 0.9, 2)]; mm_rec.save.return_value = None
     laps = MagicMock(); laps.state.total_laps = 3
     lapstats = LapStatsTracker()
     lapstats.per_lap = {1: {"coins": 5, "shrooms": 2}, 2: {"coins": -1, "shrooms": 0}}
@@ -77,7 +101,7 @@ def test_finish_emits_run_finalized():
         {"lap": 1, "time_ms": 41000, "time_str": "0:41.000", "coins": 5, "shrooms": 2},
         {"lap": 2, "time_ms": 83456, "time_str": "1:23.456", "coins": -1, "shrooms": 0},
     ]
-    assert evt["points"] == [[0, 1.0, 2.0, 0.9]]
+    assert evt["points"] == [[0, 1.0, 2.0, 0.9, 2]]    # the per-point lap stamp rides into the payload
     assert isinstance(evt["attempt_id"], str) and len(evt["attempt_id"]) >= 8
     assert evt["ended_at"] is not None
     assert evt["started_at"] is None             # no _start_race ran in this shortcut

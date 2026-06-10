@@ -1,5 +1,7 @@
 export type Lap = { lap: number; time_ms: number; time_str?: string | null; coins?: number | null; shrooms?: number | null };
-export type Point = [number, number, number, number];
+// [t_ms, cx, cy, score, lap?] — lap is the engine's per-point HUD lap stamp (added 2026-06);
+// legacy payloads omit it (4-tuple) and it may be null when the lap counter wasn't yet read.
+export type Point = [number, number, number, number, (number | null)?];
 export type AttemptPayload = {
   attempt_id: string; course: string; cc?: number; total_laps?: number | null;
   status: 'finished' | 'reset' | 'dnf';
