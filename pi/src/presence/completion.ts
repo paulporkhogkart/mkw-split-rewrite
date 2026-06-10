@@ -1,33 +1,40 @@
+// pi/src/presence/completion.ts
 import type { DatabaseSync } from 'node:sqlite';
-import { courseReference } from '../stats/completion';
-import { step, type Reference, type ProjState } from '../stats/progress';
-import { activeSeasonId, courseIdBySlug } from '../db/seasons';
+import { loadCourseModel, loadPlayerAlignment } from '../db/courseModels';
+import { prepareEdges, projectStep, type Prepared } from '../progress/project';
+import type { CourseGraph, ProjState } from '../progress/types';
+import { courseIdBySlug } from '../db/seasons';
 import { slugify } from '../db/slug';
 
 export type LiveCompletion = (
   course: string | null | undefined, curLap: number | null | undefined, pos: [number, number] | null | undefined,
-  playerId?: number, t?: number, stale?: boolean,
+  playerId?: number, t?: number, stale?: boolean, totLap?: number | null,
 ) => number | null;
 
-/** A stateful live-completion function for the presence hub: projects each player's minimap
- *  position onto the course route (reference cached per course) with per-player continuity.
- *  Resets a player's state on a new run (course change or lap decrease) or when pos clears.
- *  Returns 0..1, or null with no position / no reference. cc fixed at 150 (live runs are 150). */
+/** Stateful live-completion: projects each player's minimap position onto the stored course
+ *  model (cached per course). Resets a player's state on a new run (course change or lap CHANGE,
+ *  so within-lap progress wraps at the start/finish seam) or when pos clears. Returns 0..1 or null. */
 export function makeLiveCompletion(db: DatabaseSync, cc = 150): LiveCompletion {
-  const refCache = new Map<number, Reference | null>();
+  const modelCache = new Map<number, { g: CourseGraph; pe: Prepared } | null>();
   const pstate = new Map<number, { st: ProjState; course: number; lap: number }>();
-  return (course, curLap, pos, playerId, t = Date.now(), stale = false) => {
+  return (course, curLap, pos, playerId, t = Date.now(), stale = false, totLap = 3) => {
     if (!course || !pos) { if (playerId != null) pstate.delete(playerId); return null; }
     const courseId = courseIdBySlug(db, slugify(course));
     if (courseId == null) return null;
-    let entry = refCache.get(courseId);
-    if (entry === undefined) { entry = courseReference(db, activeSeasonId(db), courseId, cc); refCache.set(courseId, entry); }
-    if (!entry || entry.ref.length === 0) return null;
+    let entry = modelCache.get(courseId);
+    if (entry === undefined) {
+      const g = loadCourseModel(db, courseId, cc);
+      entry = g ? { g, pe: prepareEdges(g) } : null;
+      modelCache.set(courseId, entry);
+    }
+    if (!entry) return null;
     const lap = curLap ?? 1;
+    const al = playerId != null ? loadPlayerAlignment(db, playerId) : { dx: 0, dy: 0, scale: 1 };
+    const x = pos[0] * al.scale + al.dx, y = pos[1] * al.scale + al.dy;
     let ps = playerId != null ? pstate.get(playerId) : undefined;
-    if (ps && (ps.course !== courseId || lap < ps.lap)) ps = undefined;   // new run -> reset
-    const r = step(ps?.st ?? null, entry, { x: pos[0], y: pos[1], lap, t, stale });
+    if (ps && (ps.course !== courseId || lap !== ps.lap)) ps = undefined;   // new run OR lap change -> reset (wraps progress at the seam)
+    const r = projectStep(ps?.st ?? null, entry.g, entry.pe, { x, y, lap, totLap: totLap ?? 3, t, stale });
     if (playerId != null) pstate.set(playerId, { st: r.state, course: courseId, lap });
-    return r.s;
+    return r.completion;
   };
 }

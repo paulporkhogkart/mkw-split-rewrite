@@ -76,7 +76,7 @@ export class PresenceHub {
       character: frame.character ?? null, kart: frame.kart ?? null, costume: frame.costume ?? null,
       cur_lap: frame.cur_lap ?? null, tot_lap: frame.tot_lap ?? null,
       coins: frame.coins ?? null, mushrooms: frame.mushrooms ?? null, resets: frame.resets ?? null,
-      completion: this.completion(frame.course, frame.cur_lap, frame.pos, playerId, now, stale),
+      completion: this.completion(frame.course, frame.cur_lap, frame.pos, playerId, now, stale, frame.tot_lap),
       pb_ms: this.pbForCourse(playerId, frame.course),
       final_time: frame.final_time ?? null, updated_at: now,
     };
