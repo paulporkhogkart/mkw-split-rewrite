@@ -15,7 +15,7 @@ Raw distance-travelled (movement ÷ a reference total) was rejected: as players 
 ### Goals
 - **Completion is distance-along-route, not lap count:** `% = distance reached along the course / total course distance`. Always reaches 100% at the finish regardless of shortcuts (it measures route *position*, not wheels turned).
 - **Per-lap geometry:** each lap index has its own route; laps may differ in shape and length. Lap counts vary per course.
-- **Lap dividers are placed live**, dropped at each in-game `cur_lap` tick, so they land at the true per-lap proportions instead of assumed 1/N.
+- **Lap dividers are the model's known per-lap boundaries** (`laps[k].startOffsetPx / totalLengthPx`), shown from the start of the race, so they land at the true per-lap proportions instead of assumed 1/N. (Superseded the original "placed live at each `cur_lap` tick" idea: live-only dividers leave the bar an undivided mass until the first lap completes — wrong, since the model already knows where the boundaries are.)
 - **Branch- and self-crossing-aware** within each lap (the graph work deferred from Plan 1).
 - Fixes the residual **~5% lap-1 start offset** as a side effect (lap 1 gets its own grid-inclusive geometry).
 
@@ -81,23 +81,23 @@ This is the original spec's graph builder (§5) applied **once per lap index** i
 
 Replaces Plan 1's `makeLiveCompletion`/`projectStep` arithmetic; keeps the forward-window matching core.
 
-**Per-player state:** `{ lap, edge, u, x, y, t, dividers: number[] }`.
+**Per-player state:** `{ lap, edge, u, x, y, t }`.
 
 **Per frame** (aligned position, HUD `cur_lap` k, `tot_lap`, `track_state`, `t`):
 1. **Stale** (`track_state` not fresh) → hold last completion.
-2. **Run reset** (course changed, or `k` < stored lap) → clear state + dividers (bootstrap).
-3. **Lap advance** (`k` > stored lap, in-race) → **push current completion into `dividers`**, reset within-lap matcher onto `laps[k-1]`.
+2. **Run reset** (course changed, or `k` < stored lap) → clear state (bootstrap).
+3. **Lap advance** (`k` > stored lap, in-race) → reset within-lap matcher onto `laps[k-1]`.
 4. **Project** the position onto `laps[k-1].graph` with the forward-window matcher (monotonic within lap, branch-agnostic, no snap — the Plan-1 projector, scoped to this lap-route) → within-lap fraction `u`.
 5. **Completion** = `(laps[k-1].startOffsetPx + u·laps[k-1].lengthPx) / totalLengthPx`, clamped `[0,1]`, monotonic.
 6. **Post-finish** (`k` > N) → hold 100%.
 
-Returns `{ completion, dividers }`. `dividers` are the live-recorded completion-% at each lap tick (reset per run).
+Returns `{ completion, dividers }`. `dividers` are the **model's interior lap boundaries** — `laps[k].startOffsetPx / totalLengthPx` for k = 1..N−1 (lap 1 starts at 0, the finish at 1.0 — neither is drawn) — a constant per course, available the moment the model loads, so the bar shows its lap segments from the gun. No per-frame state.
 
 ---
 
 ## 6. Frontend
 
-The card's lap bar changes from **N equal segments** to **one continuous fill** at `completion`, plus **divider ticks** at the live-recorded `dividers[]` positions. `src/lib/playerCard.js`: `lapSegments(...)` → `{ fill: completion, dividers }`; `PlayerCard.svelte` renders one bar + ticks. Uneven, non-1/N gaps fall out automatically. The presence frame already carries `completion`; it gains `dividers`. The temp yellow debug `%` is removed once validated.
+The card's lap bar changes from **N equal segments** to **one continuous fill** at `completion`, plus **divider ticks** at the model-derived `dividers[]` boundaries (drawn from the start, not as laps complete). `src/lib/playerCard.js`: `lapSegments(...)` → `{ fill: completion, dividers }`; `PlayerCard.svelte` renders one bar + ticks. Uneven, non-1/N gaps fall out automatically. The presence frame already carries `completion`; it gains `dividers`. The temp yellow debug `%` is removed once validated.
 
 ---
 
