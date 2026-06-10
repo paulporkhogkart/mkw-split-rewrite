@@ -17,6 +17,7 @@ export interface PresenceFrame {
   resets?: number | null;
   pos?: [number, number] | null; final_time?: string | null;
   track_state?: string | null;
+  elapsed_ms?: number | null;
 }
 
 /** What the server broadcasts per roster player. */
@@ -26,6 +27,7 @@ export interface PresenceEntry {
   cur_lap: number | null; tot_lap: number | null; coins: number | null; mushrooms: number | null;
   resets: number | null; pb_ms: number | null;
   completion: number | null; dividers: number[]; final_time: string | null; updated_at: number;
+  elapsed_ms: number | null;
 }
 
 type Sink = (msg: unknown) => void;
@@ -33,7 +35,7 @@ type Sink = (msg: unknown) => void;
 function offlineEntry(player_id: number, name: string, color: string | null, now: number): PresenceEntry {
   return { player_id, name, color, online: false, screen: null, course: null, character: null, kart: null,
            costume: null, cur_lap: null, tot_lap: null, coins: null, mushrooms: null, resets: null,
-           pb_ms: null, completion: null, dividers: [], final_time: null, updated_at: now };
+           pb_ms: null, completion: null, dividers: [], final_time: null, updated_at: now, elapsed_ms: null };
 }
 
 /** In-memory live presence, keyed by the active-season roster (seeded offline so every card
@@ -78,6 +80,7 @@ export class PresenceHub {
       character: frame.character ?? null, kart: frame.kart ?? null, costume: frame.costume ?? null,
       cur_lap: frame.cur_lap ?? null, tot_lap: frame.tot_lap ?? null,
       coins: frame.coins ?? null, mushrooms: frame.mushrooms ?? null, resets: frame.resets ?? null,
+      elapsed_ms: frame.elapsed_ms ?? null,
       completion, pb_ms: this.pbForCourse(playerId, frame.course),
       dividers, final_time: frame.final_time ?? null, updated_at: now,
     };

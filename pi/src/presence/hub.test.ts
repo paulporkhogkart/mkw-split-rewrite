@@ -64,6 +64,16 @@ describe('PresenceHub', () => {
     expect(got.at(-1).player).toMatchObject({ player_id: 1, resets: 3, pb_ms: 79880 });
   });
 
+  it('passes elapsed_ms through (present -> value, absent -> null)', () => {
+    const hub = new PresenceHub(db(), noCompletion, () => 2000);
+    const got: any[] = [];
+    hub.addSink((m) => got.push(m));
+    hub.update(1, { screen: 'RACING', elapsed_ms: 12345 });
+    expect(got.at(-1).player).toMatchObject({ elapsed_ms: 12345 });
+    hub.update(2, { screen: 'RACING' });
+    expect(got.at(-1).player).toMatchObject({ elapsed_ms: null });
+  });
+
   it('seeds offline entries with updated_at 0 (never seen)', () => {
     const hub = new PresenceHub(db(), noCompletion, () => 1000);
     const got: any[] = [];
