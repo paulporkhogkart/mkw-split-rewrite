@@ -9,8 +9,10 @@
   // One clock for all cards: ~30 fps while someone races (so the ms timer ticks),
   // else a cheap 1 s tick (offline "last seen"). Avoids a per-card animation loop.
   let now = Date.now();
-  let fast = 0, slow = 0;
+  let fast = 0, slow = 0, clockRacing = null;
   function setClock(racing) {
+    if (racing === clockRacing) return;        // only re-arm on an actual mode change
+    clockRacing = racing;
     clearInterval(fast); clearInterval(slow); fast = 0; slow = 0;
     now = Date.now();
     if (racing) fast = setInterval(() => (now = Date.now()), 33);
