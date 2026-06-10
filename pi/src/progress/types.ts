@@ -27,3 +27,19 @@ export interface RunInput {
 
 export type ProjState = { edge: number; progress: number; x: number; y: number; t: number } | null;
 export interface Obs { x: number; y: number; lap: number; totLap: number; t: number; stale: boolean; }
+
+/** One lap's route (a CourseGraph scoped to a single lap) plus its place in the race. */
+export interface LapRoute {
+  index: number;          // 1-based lap index
+  lengthPx: number;       // arc-length of this lap's route
+  startOffsetPx: number;  // Σ lengthPx of prior laps (lap 1 = 0)
+  graph: CourseGraph;     // this lap's geometry; graph.lapLengthPx === lengthPx
+}
+
+/** A course as an ordered list of per-lap routes; completion is cumulative distance. */
+export interface CourseModel {
+  version: number;        // 2
+  totalLengthPx: number;  // Σ laps[].lengthPx
+  laps: LapRoute[];
+  status: 'graph' | 'centerline';
+}
