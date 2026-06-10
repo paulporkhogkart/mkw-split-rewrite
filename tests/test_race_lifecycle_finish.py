@@ -37,3 +37,16 @@ def test_finish_to_post_without_timestamp_does_not_crash():
     lc = _make_lifecycle(ts_total_time=None)
     lc.on_screen_change(Screen.RACING, Screen.POST_TIME_TRIAL)
     lc._laps.reset.assert_called()   # finalize + clear ran without crashing
+
+
+def test_clear_race_state_resets_the_race_timer():
+    ts = MagicMock(); ts.total_time = None
+    minimap = MagicMock(); minimap._calibrated = True
+    timer = MagicMock()
+    lc = RaceLifecycle(
+        selection=MagicMock(), laps=MagicMock(), coins=MagicMock(), ts=ts,
+        finish=FinishStillDetector(), mush=MagicMock(), minimap=minimap,
+        mm_rec=MagicMock(), timer=timer,
+    )
+    lc.on_screen_change(Screen.RACING, Screen.MAIN_MENU)   # finalize + clear
+    timer.reset.assert_called()

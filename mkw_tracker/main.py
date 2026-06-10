@@ -38,6 +38,7 @@ from .race.timestamp import TimestampTracker
 from .race.finish import FinishDetector, FinishStillDetector, load_finish_templates
 from .race.mushrooms import MushroomTracker, load_mushroom_templates, MUSHROOM_ROI, MUSHROOM_TEMPLATES
 from .race.lapstats import LapStatsTracker
+from .race.timer import RaceTimer
 from .minimap.tracker import MinimapTracker, MINIMAP_ROI as _MINIMAP_ROI
 from .minimap.recorder import MinimapRecorder
 from .overlay.debug import draw_debug_rois, draw_selection_rois
@@ -48,7 +49,7 @@ from .overlay.panels import draw_screen_badge, draw_legend, draw_state_panel
 from .lifecycle.race import RaceLifecycle
 from .ipc.sidecar import IpcServer
 from .ipc.protocol import (parse_inbound, emit_ready, emit_screen_change, emit_selection_update,
-                            emit_lap_update, emit_coin_update, emit_mush_update, emit_finish, emit_split_recorded,
+                            emit_lap_update, emit_coin_update, emit_mush_update, emit_race_time, emit_finish, emit_split_recorded,
                             emit_state, emit_devices_list,
                             emit_error, emit_heartbeat, emit_frame_data, emit_template_score,
                             emit_template_saved, emit_template_images, emit_tells_list, emit_rois_list,
@@ -805,6 +806,7 @@ def run(args):
     minimap   = MinimapTracker()
     mm_rec    = MinimapRecorder()
     lapstats  = LapStatsTracker()
+    timer     = RaceTimer()
 
     # ── IPC server ───────────────────────────────────────────────────────────
     # The WebSocket broadcaster is dev-only: the autotemplate tool subscribes to
@@ -843,10 +845,12 @@ def run(args):
         lapstats=lapstats,
         minimap=minimap,
         mm_rec=mm_rec,
+        timer=timer,
         transition_count=transition_count,
         ipc=ipc,
     )
     detector.on_screen_change = lifecycle.on_screen_change
+    _last_rt_emit = 0.0
 
     # ── Setup mode ───────────────────────────────────────────────────────────
     setup_mode = [not bool(settings.get("setup_complete", 0))]
@@ -1061,6 +1065,12 @@ def run(args):
             lapstats.update_coins(coin_state.coins)
             mm_state           = minimap.update(frame, screen)
             mm_rec.update(mm_state, lap_state.current_lap)
+            race_elapsed = timer.update(frame, screen)
+            if race_elapsed is not None:
+                _now_rt = time.perf_counter()
+                if _now_rt - _last_rt_emit >= 0.1:       # ~10 Hz cap on outbound
+                    _last_rt_emit = _now_rt
+                    ipc.emit(emit_race_time(race_elapsed))
         else:
             lap_state, lap_inc = laps.state, False
             coin_state         = coins.state

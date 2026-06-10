@@ -43,6 +43,11 @@ class Defaults:
     timestamp_digit_h: int = 42
     timestamp_digit_dir: str = 'images/timestamps/cropped'
 
+    # ── Race timer (live friend-card elapsed) ─────────────────────────────────
+    race_timer_resync_interval: float = 0.5
+    race_timer_tolerance_ms: int = 300
+    race_timer_forward_confirm: int = 3
+
     # ── Finish detector ───────────────────────────────────────────────────────
     finish_match_threshold: float = 0.60
     finish_confirm_frames: int = 3

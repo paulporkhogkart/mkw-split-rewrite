@@ -34,6 +34,7 @@ class RaceLifecycle:
         mush:       MushroomTracker,
         minimap:    MinimapTracker,
         mm_rec:     MinimapRecorder,
+        timer=None,
         lapstats=None,
         transition_count: Optional[list] = None,
         ipc=None,
@@ -47,6 +48,7 @@ class RaceLifecycle:
         self._lapstats   = lapstats
         self._minimap    = minimap
         self._mm_rec     = mm_rec
+        self._timer      = timer
         self._transition_count = transition_count if transition_count is not None else [0]
 
         self._ipc = ipc
@@ -136,6 +138,8 @@ class RaceLifecycle:
         if self._lapstats is not None:
             self._lapstats.reset()
         self._minimap.reset()
+        if self._timer is not None:
+            self._timer.reset()
         self._race_started_at = None
         self._finalized = False
         print("  [reset] Race stats cleared")

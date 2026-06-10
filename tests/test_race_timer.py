@@ -1,4 +1,7 @@
+import json
+
 from mkw_tracker.race.timer import RaceTimer
+from mkw_tracker.ipc.protocol import emit_race_time
 
 
 def _t():
@@ -61,3 +64,8 @@ def test_reset_clears_state():
     t.reset()
     assert t.running is False
     assert t.step(None, 11.0, racing=True) is None
+
+
+def test_emit_race_time_json():
+    assert json.loads(emit_race_time(5000)) == {"type": "race_time", "elapsed_ms": 5000}
+    assert json.loads(emit_race_time(None)) == {"type": "race_time", "elapsed_ms": None}

@@ -103,6 +103,10 @@ def emit_mush_update(count: int) -> str:
     return _emit("mush_update", count=count)
 
 
+def emit_race_time(elapsed_ms: Optional[int]) -> str:
+    return _emit("race_time", elapsed_ms=elapsed_ms)
+
+
 def emit_finish(result: Optional[str], total_time: Optional[str],
                 splits: Optional[Dict[int, str]] = None) -> str:
     return _emit("finish", result=result, total_time=total_time,
