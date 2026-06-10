@@ -14,8 +14,13 @@ import { extractGraph } from './graphExtract';
 
 const THR_FRAC = 0.12;          // binarise above frac*max
 const MIN_SKEL = 8;             // too few skeleton pixels -> nothing to extract
-const BRANCH_OVERLAP = 0.4;     // min f-range overlap (of the shorter) for two edges to be parallel
-const SEP_FRAC = 0.06;          // min spatial separation (fraction of course max-dim) for a parallel pair
+// Branch detection is deliberately HIGH-PRECISION: a false split can skew progress, a missed one just
+// falls back to the (already-acceptable) centerline. So a pair must be a clear, substantial, twin route.
+const BRANCH_OVERLAP = 0.6;     // overlap must be >= this fraction of the LONGER f-range (near-same interval)
+const SEP_FRAC = 0.08;          // min spatial separation (fraction of course max-dim)
+const MIN_FSPAN = 0.08;         // each edge must span a real chunk of the lap in time
+const MIN_ARC_FRAC = 0.12;      // each edge's arc >= 12% of course max-dim (not a stub)
+const ARC_RATIO = 2.5;          // twin routes are comparable in length (reject lopsided pairs)
 const MAX_VERTS = 40;           // decimate edge polylines
 const DEF_BINS = 180;
 
@@ -60,15 +65,22 @@ export function buildLapGraphCV(
 
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const p of pts) { if (p.x < minX) minX = p.x; if (p.y < minY) minY = p.y; if (p.x > maxX) maxX = p.x; if (p.y > maxY) maxY = p.y; }
-  const sep = SEP_FRAC * Math.max(maxX - minX, maxY - minY);
+  const maxDim = Math.max(maxX - minX, maxY - minY);
+  const sep = SEP_FRAC * maxDim, minArc = MIN_ARC_FRAC * maxDim;
 
-  // Branch pair = two edges that overlap in f (parallel in time) AND are spatially apart (different routes).
+  // Branch pair = two SUBSTANTIAL edges that cover ~the same f-interval (parallel in time), are
+  // comparable in length, and run spatially apart (genuinely different routes between the same points).
   const isBranch = new Array(cands.length).fill(false);
   for (let i = 0; i < cands.length; i++) for (let j = i + 1; j < cands.length; j++) {
     const a = cands[i], b = cands[j];
+    const ra = a.fHi - a.fLo, rb = b.fHi - b.fLo;
+    if (ra < MIN_FSPAN || rb < MIN_FSPAN) continue;                                       // tiny blip
+    if (a.arcLen < minArc || b.arcLen < minArc) continue;                                 // stub
+    if (Math.max(a.arcLen, b.arcLen) > ARC_RATIO * Math.min(a.arcLen, b.arcLen)) continue; // lopsided
     const overlap = Math.min(a.fHi, b.fHi) - Math.max(a.fLo, b.fLo);
-    const shorter = Math.min(a.fHi - a.fLo, b.fHi - b.fLo) || 1e-9;
-    if (overlap > BRANCH_OVERLAP * shorter && Math.hypot(a.cx - b.cx, a.cy - b.cy) > sep) { isBranch[i] = true; isBranch[j] = true; }
+    if (overlap < BRANCH_OVERLAP * Math.max(ra, rb)) continue;                            // not the same interval
+    if (Math.hypot(a.cx - b.cx, a.cy - b.cy) <= sep) continue;                            // not spatially apart
+    isBranch[i] = true; isBranch[j] = true;
   }
   const branches = cands.filter((_, i) => isBranch[i]);
   if (branches.length < 2) return null;                  // no real split -> caller uses the centerline

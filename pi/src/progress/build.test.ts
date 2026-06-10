@@ -108,4 +108,14 @@ describe('buildCourseModel (v2 per-lap)', () => {
     expect(res).not.toBeNull();                                            // the sparse "lap 3" must not abort the build
     expect(res!.model.laps).toHaveLength(2);                               // only laps 1 and 2
   });
+
+  it('carries a graph|centerline status and keeps cumulative offsets (no-branch fixture -> centerline)', () => {
+    const res = buildCourseModel([unevenRun(1), unevenRun(2)], { bins: 64, grid: 64 });
+    expect(res).not.toBeNull();
+    const m = res!.model;
+    expect(['graph', 'centerline']).toContain(m.status);
+    expect(m.status).toBe('centerline');                                   // plain circles, no split
+    expect(m.laps[1].startOffsetPx).toBeCloseTo(m.laps[0].lengthPx, 5);
+    expect(m.totalLengthPx).toBeCloseTo(m.laps[0].lengthPx + m.laps[1].lengthPx, 5);
+  });
 });

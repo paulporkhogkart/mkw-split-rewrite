@@ -1,5 +1,6 @@
 // pi/src/progress/build.ts
 import type { RunInput, Transform, CourseGraph, GraphEdge, GraphNode, CourseModel, LapRoute } from './types';
+import { buildLapGraphCV } from './lapGraphCV';
 
 export interface FoldPt { x: number; y: number; f: number; score: number; }
 
@@ -75,7 +76,7 @@ function lapGraph(poly: [number, number][]): { graph: CourseGraph; lengthPx: num
   return { graph, lengthPx };
 }
 
-export function buildCourseModel(runs: RunInput[], opts: { bins?: number } = {}): BuildResult | null {
+export function buildCourseModel(runs: RunInput[], opts: { bins?: number; grid?: number; splatR?: number } = {}): BuildResult | null {
   const bins = opts.bins ?? DEF_BINS;
   const grouped = runs.map(groupByLap);
   // The real lap count; points after the final lap (post-finish coast) get a spurious lap N+1 from
@@ -97,18 +98,24 @@ export function buildCourseModel(runs: RunInput[], opts: { bins?: number } = {})
   }
 
   const laps: LapRoute[] = [];
-  let offset = 0;
+  let offset = 0, anyGraph = false;
   for (const k of lapIndices) {
     const merged: FoldPt[] = [];
     grouped.forEach((g, i) => { for (const p of g.get(k) ?? []) merged.push(applyTransform(p, perRunTransform[i])); });
-    const poly = centerline(merged, bins);
-    if (poly.length < 3) return null;
-    const { graph, lengthPx } = lapGraph(poly);
+    // Branch-aware CV graph if this lap has a real split; else the plain f-bin centerline.
+    const cv = buildLapGraphCV(merged, { grid: opts.grid, splatR: opts.splatR, bins });
+    let graph: CourseGraph, lengthPx: number;
+    if (cv) { graph = cv; lengthPx = cv.lapLengthPx; anyGraph = true; }
+    else {
+      const poly = centerline(merged, bins);
+      if (poly.length < 3) return null;
+      ({ graph, lengthPx } = lapGraph(poly));
+    }
     laps.push({ index: k, lengthPx, startOffsetPx: offset, graph });
     offset += lengthPx;
   }
 
-  const model: CourseModel = { version: 2, totalLengthPx: offset, laps, status: 'centerline' };
+  const model: CourseModel = { version: 2, totalLengthPx: offset, laps, status: anyGraph ? 'graph' : 'centerline' };
 
   const byPlayer = new Map<number, { dx: number; dy: number; n: number }>();
   runs.forEach((r, i) => {
