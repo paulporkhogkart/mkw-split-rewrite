@@ -42,6 +42,22 @@ describe('prepareReference', () => {
     expect(at10.some((s) => Math.abs(s - 0.25) < 0.02)).toBe(true);
     expect(at10.some((s) => Math.abs(s - 0.75) < 0.02)).toBe(true);
   });
+
+  it('keeps the whole trail after a single fast (non-teleport) step, so lap bounds stay monotonic', () => {
+    // Sustained ~1px/sample motion along a line with ONE 10px step at the midpoint
+    // (10 > 8x median of 1). A teleport-clip that anchors on the last *kept* point would
+    // freeze at the step and cascade-drop the entire tail, collapsing every lap boundary
+    // to s=1 (the real bowsers_castle bug: 180s reference truncated to 38s, bounds [1,1,1]).
+    const pts: { cx: number; cy: number; t_ms: number }[] = [];
+    for (let i = 0; i <= 60; i++) pts.push({ cx: i, cy: 0, t_ms: i * 1000 });   // x 0..60
+    for (let i = 70; i <= 120; i++) pts.push({ cx: i, cy: 0, t_ms: i * 1000 });  // 60->70 = 10px step, then 70..120
+    const ref = prepareReference(pts, [40000, 80000, 120000]);                   // laps end at x ~ 40, 80, 120
+    expect(ref.bounds[0]).toBeLessThan(ref.bounds[1]);
+    expect(ref.bounds[1]).toBeLessThan(ref.bounds[2]);                           // strictly increasing, not [.., 1, 1]
+    expect(ref.bounds[0]).toBeGreaterThan(0.25);
+    expect(ref.bounds[0]).toBeLessThan(0.45);                                    // lap-1 boundary ~1/3, not 1.0
+    expect(ref.bounds[2]).toBeGreaterThan(0.95);                                 // full coverage reaches the end
+  });
 });
 
 describe('step (bootstrap)', () => {

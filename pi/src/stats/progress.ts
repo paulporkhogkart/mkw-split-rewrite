@@ -44,10 +44,19 @@ function clipTeleports(p: { cx: number; cy: number; t_ms: number }[]) {
   const sorted = [...seg].sort((a, b) => a - b);
   const med = sorted[Math.floor((sorted.length - 1) / 2)] || 0;
   if (med <= 0) return p;
+  const thresh = TELEPORT_CLIP_FACTOR * med;
   const out = [p[0]];
   for (let i = 1; i < p.length; i++) {
     const last = out[out.length - 1];
-    if (dist(last.cx, last.cy, p[i].cx, p[i].cy) <= TELEPORT_CLIP_FACTOR * med) out.push(p[i]);
+    const next = p[i + 1];
+    const dPrev = dist(last.cx, last.cy, p[i].cx, p[i].cy);
+    const dNext = next ? dist(p[i].cx, p[i].cy, next.cx, next.cy) : 0;
+    // Drop only an *isolated* spike: a point far from the last kept point AND from the next
+    // raw point (a lone off-route outlier). Sustained motion has a small dNext and is kept,
+    // so one legitimately large step can't freeze the anchor and cascade-drop the rest of the
+    // trail (which truncated the reference and collapsed multi-lap bounds to [1,1,1]).
+    if (dPrev > thresh && dNext > thresh) continue;
+    out.push(p[i]);
   }
   return out;
 }
