@@ -1,28 +1,16 @@
 import { describe, it, expect } from "vitest";
-import { viewModel, lapSegments, lastSeen, pbDelta, fmtTimeMs } from "./playerCard.js";
+import { viewModel, lastSeen, pbDelta, fmtTimeMs } from "./playerCard.js";
 
 const base = { player_id: 1, name: "Paul", color: "#a78bfa", online: true, screen: "RACING",
   course: "Rainbow Road", character: "Mario", kart: "Standard", cur_lap: 2, tot_lap: 3,
-  coins: 7, mushrooms: 2, resets: 3, pb_ms: 79880, completion: 0.63, final_time: null, updated_at: 1000 };
+  coins: 7, mushrooms: 2, resets: 3, pb_ms: 79880, completion: 0.63, dividers: [0.33, 0.67],
+  final_time: null, updated_at: 1000 };
 
 describe("fmtTimeMs", () => {
   it("formats ms as m:ss.SSS", () => {
     expect(fmtTimeMs(79880)).toBe("1:19.880");
     expect(fmtTimeMs(2044)).toBe("0:02.044");
     expect(fmtTimeMs(null)).toBeNull();
-  });
-});
-
-describe("lapSegments", () => {
-  it("splits completion across laps", () => {
-    const s = lapSegments(0.63, 3);
-    expect(s.length).toBe(3);
-    expect(s[0]).toBe(1);
-    expect(s[1]).toBeCloseTo(0.89, 2);
-    expect(s[2]).toBe(0);
-  });
-  it("defaults to 3 segments when tot_lap is missing", () => {
-    expect(lapSegments(0, null).length).toBe(3);
   });
 });
 
@@ -50,21 +38,29 @@ describe("viewModel", () => {
     expect(vm.primary).toEqual({ kind: "time", text: "—" });
     expect(vm.resets).toBe(3);
     expect(vm.pbStr).toBe("1:19.880");
-    expect(vm.dotPct).toBeCloseTo(63, 0);
-    expect(vm.segments.length).toBe(3);
+  });
+  it("exposes a continuous bar fill + live dividers while racing", () => {
+    const e = { online: true, screen: "RACING", course: "Bowsers Castle", cur_lap: 2, tot_lap: 3,
+      completion: 0.42, dividers: [0.31], updated_at: 1, name: "P", color: "#888" };
+    const vm = viewModel(e, () => 2);
+    expect(vm.bar).toEqual({ fill: 0.42, dividers: [0.31] });
+  });
+  it("has no bar when not racing/finished", () => {
+    const e = { online: true, screen: "MAIN_MENU", updated_at: 1, name: "P", color: "#888" };
+    expect(viewModel(e, () => 2).bar).toBeNull();
   });
   it("setup: activity phrase, no race cluster", () => {
     const vm = viewModel({ ...base, screen: "KART_SELECT" }, () => 2000);
     expect(vm.state).toBe("setup");
     expect(vm.primary).toEqual({ kind: "activity", text: "Choosing kart" });
-    expect(vm.segments).toBeNull();
+    expect(vm.bar).toBeNull();
   });
-  it("finished: final time + delta, full bar, no dot", () => {
+  it("finished: final time + delta, bar present, no racing-only dot", () => {
     const vm = viewModel({ ...base, final_time: "1:21.044" }, () => 2000);
     expect(vm.state).toBe("finished");
     expect(vm.primary).toEqual({ kind: "time", text: "1:21.044" });
     expect(vm.delta).toEqual({ text: "+1.16", cls: "slow" });
-    expect(vm.dotPct).toBeNull();
+    expect(vm.bar).not.toBeNull();
   });
   it("offline seen: last seen line; never-seen: plain offline", () => {
     const seen = viewModel({ ...base, online: false, updated_at: 1000 }, () => 1000 + 3 * 3600000);

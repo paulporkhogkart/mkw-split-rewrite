@@ -11,17 +11,6 @@ export function fmtTimeMs(ms) {
   return `${m}:${String(s).padStart(2, "0")}.${String(msec).padStart(3, "0")}`;
 }
 
-/** completion (0..1) over `totLap` laps -> array of per-lap fill fractions (defaults to 3 laps). */
-export function lapSegments(completion, totLap) {
-  const n = totLap && totLap > 0 ? totLap : 3;
-  const out = [];
-  for (let i = 0; i < n; i++) {
-    const lo = i / n, hi = (i + 1) / n;
-    out.push(completion == null ? 0 : completion <= lo ? 0 : completion >= hi ? 1 : (completion - lo) / (hi - lo));
-  }
-  return out;
-}
-
 /** elapsed ms since last seen -> coarse relative label, or null. */
 export function lastSeen(deltaMs) {
   if (deltaMs == null) return null;
@@ -49,7 +38,7 @@ export function viewModel(e, now = Date.now) {
     const seen = e.updated_at > 0 ? lastSeen(t - e.updated_at) : null;
     return { state: "offline", name: e.name, color, online: false, char: null, kart: null, trk: null,
       primary: { kind: "seen", text: seen ? `last seen ${seen}` : "offline" },
-      resets: null, pbStr: null, delta: null, segments: null, dotPct: null };
+      resets: null, pbStr: null, delta: null, bar: null };
   }
   const racing = e.screen === "RACING" && !e.final_time;
   const finished = (e.screen === "RACING" && e.final_time) || e.screen === "POST_TIME_TRIAL";
@@ -65,7 +54,7 @@ export function viewModel(e, now = Date.now) {
     resets: race ? (e.resets ?? 0) : null,
     pbStr: race && e.pb_ms != null ? fmtTimeMs(e.pb_ms) : null,
     delta: state === "finished" ? pbDelta(e.final_time, e.pb_ms) : null,
-    segments: race ? lapSegments(e.completion, e.tot_lap) : null,
-    dotPct: state === "racing" && e.completion != null && e.completion > 0 && e.completion < 1 ? e.completion * 100 : null,
+    bar: race ? { fill: e.completion == null ? 0 : Math.max(0, Math.min(1, e.completion)),
+                  dividers: Array.isArray(e.dividers) ? e.dividers : [] } : null,
   };
 }
