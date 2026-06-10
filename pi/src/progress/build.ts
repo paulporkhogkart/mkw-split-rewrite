@@ -135,3 +135,20 @@ export function buildCourseModel(runs: RunInput[], opts: { bins?: number } = {})
 
   return { graph, alignments };
 }
+
+/** Split a run into per-lap-index point lists, each tagged with that lap's within-lap fraction f. */
+export function groupByLap(run: RunInput): Map<number, FoldPt[]> {
+  const cum = run.lapCumMs;
+  const lapOfT = (t: number) => { let L = 1; for (const b of cum) { if (t >= b) L++; else break; } return L; };
+  const out = new Map<number, FoldPt[]>();
+  for (const p of run.points) {
+    const lap = p.lap ?? lapOfT(p.t_ms);
+    const lo = lap >= 2 ? (cum[lap - 2] ?? 0) : 0;
+    const hi = cum[lap - 1] ?? (cum[cum.length - 1] ?? lo + 1);
+    const span = hi - lo;
+    const f = span > 0 ? Math.min(0.999999, Math.max(0, (p.t_ms - lo) / span)) : 0;
+    if (!out.has(lap)) out.set(lap, []);
+    out.get(lap)!.push({ x: p.cx, y: p.cy, f, score: p.score });
+  }
+  return out;
+}

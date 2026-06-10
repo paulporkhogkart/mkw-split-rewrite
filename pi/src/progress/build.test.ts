@@ -1,6 +1,6 @@
 // pi/src/progress/build.test.ts
 import { describe, it, expect } from 'vitest';
-import { foldRun, fBinCentroids, fitTranslation, buildCourseModel, anchorAtLine, type FoldPt } from './build';
+import { foldRun, fBinCentroids, fitTranslation, buildCourseModel, anchorAtLine, groupByLap, type FoldPt } from './build';
 import type { RunInput } from './types';
 
 describe('foldRun', () => {
@@ -82,5 +82,22 @@ describe('anchorAtLine', () => {
     expect(a[0]).toEqual([10, 10]);                 // progress 0 now at that vertex
     expect(a[a.length - 1]).toEqual([10, 10]);      // re-closed
     expect(a.length).toBe(sq.length);               // same vertex count
+  });
+});
+
+describe('groupByLap', () => {
+  it('splits points by lap index with per-lap fraction f', () => {
+    const run: RunInput = {
+      playerId: 1, lapCumMs: [100, 200],
+      points: [
+        { t_ms: 0,   cx: 0, cy: 0, score: 1, lap: 1 },
+        { t_ms: 50,  cx: 5, cy: 0, score: 1, lap: 1 },   // lap1 f=0.5
+        { t_ms: 150, cx: 9, cy: 0, score: 1, lap: 2 },   // lap2 f=0.5
+      ],
+    };
+    const g = groupByLap(run);
+    expect([...g.keys()].sort()).toEqual([1, 2]);
+    expect(g.get(1)!.map((p) => Number(p.f.toFixed(2)))).toEqual([0, 0.5]);
+    expect(g.get(2)!.map((p) => Number(p.f.toFixed(2)))).toEqual([0.5]);
   });
 });
