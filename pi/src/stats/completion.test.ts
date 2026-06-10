@@ -1,16 +1,21 @@
 import { describe, it, expect } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { applySchema } from '../db/connect';
+import { saveCourseModel } from '../db/courseModels';
 import { resolveCompletion } from './completion';
 import { resolvePeriod } from './period';
+import type { CourseModel } from '../progress/types';
 
 const allTime = () => resolvePeriod('all_time', 'Australia/Melbourne');
 
-// A 2-lap loop: (0,0)->(10,0)->(0,0) [lap 1 end] ->(10,0)->(0,0) [finish]
-const LOOP = [
-  { cx: 0, cy: 0, t_ms: 0 }, { cx: 10, cy: 0, t_ms: 50 }, { cx: 0, cy: 0, t_ms: 100 },
-  { cx: 10, cy: 0, t_ms: 150 }, { cx: 0, cy: 0, t_ms: 200 },
-];
+// Single-lap straight-line model: (0,0) -> (10,0), total 10 px.
+// projectStep onto this line at (x,0) -> completion = x/10.
+const LINE: [number, number][] = [[0, 0], [10, 0]];
+const lineModel = (): CourseModel => ({ version: 2, totalLengthPx: 10, status: 'centerline',
+  laps: [{ index: 1, lengthPx: 10, startOffsetPx: 0,
+    graph: { version: 1, startNode: 0, lapLengthPx: 10, status: 'centerline',
+      nodes: [{ id: 0, x: 0, y: 0, progress: 0 }],
+      edges: [{ id: 0, a: 0, b: 0, poly: LINE, arcLen: 10, pLo: 0, pHi: 1, kind: 'main', passThrough: null }] }}] });
 
 function base(): DatabaseSync {
   const d = new DatabaseSync(':memory:');
@@ -32,38 +37,40 @@ function addLaps(d: DatabaseSync, runId: number, times: number[]) {
 }
 
 describe('resolveCompletion', () => {
-  it('estimates a reset that stopped mid lap-2 at ~0.75 of the route', () => {
+  it('estimates a reset that stopped mid-run at ~0.75 of the route', () => {
     const d = base();
-    addRun(d, 1, 'finished'); addPoints(d, 1, LOOP); addLaps(d, 1, [100, 100]); // 2-lap reference
-    addRun(d, 2, 'reset'); addLaps(d, 2, [100]);                                  // completed 1 lap
-    addPoints(d, 2, [{ cx: 5, cy: 0, t_ms: 140 }, { cx: 10, cy: 0, t_ms: 150 }]); // last point (10,0)
+    saveCourseModel(d, 1, 150, lineModel(), 1);
+    addRun(d, 2, 'reset'); addLaps(d, 2, []);
+    // last point at x=7.5 on the LINE -> completion = 7.5/10 = 0.75
+    addPoints(d, 2, [{ cx: 0, cy: 0, t_ms: 0 }, { cx: 7.5, cy: 0, t_ms: 50 }]);
     const r = resolveCompletion(d, { metric: 'avg_completion_before_reset', period: allTime(), filters: { course: 'bc' }, seasonId: 1 });
     expect(r.total).toBeCloseTo(0.75, 5);
     expect(r.unevaluable).toBe(0);
   });
 
-  it('replays a self-crossing reset without snapping to the far branch', () => {
+  it('replays a partial reset and returns a partial score', () => {
     const d = base();
-    // reference X: crossing at (10,10); single lap
-    const X = [{ cx: 0, cy: 0, t_ms: 0 }, { cx: 20, cy: 20, t_ms: 100 }, { cx: 20, cy: 0, t_ms: 200 }, { cx: 0, cy: 20, t_ms: 300 }];
-    addRun(d, 1, 'finished'); addPoints(d, 1, X); addLaps(d, 1, [300]);
-    addRun(d, 2, 'reset'); addLaps(d, 2, []);                       // 0 completed laps
-    addPoints(d, 2, [{ cx: 0, cy: 0, t_ms: 0 }, { cx: 5, cy: 5, t_ms: 50 }, { cx: 10, cy: 10, t_ms: 100 }]); // along branch 1
+    saveCourseModel(d, 1, 150, lineModel(), 1);
+    addRun(d, 2, 'reset'); addLaps(d, 2, []);
+    // last point at x=5 on the LINE -> completion = 5/10 = 0.5
+    addPoints(d, 2, [{ cx: 0, cy: 0, t_ms: 0 }, { cx: 5, cy: 0, t_ms: 50 }]);
     const r = resolveCompletion(d, { metric: 'avg_completion_before_reset', period: allTime(), filters: { course: 'bc' }, seasonId: 1 });
-    expect(r.total).toBeLessThan(0.4);                              // replayed trail stabilises on branch 1 (~0.185)
+    expect(r.total).toBeCloseTo(0.5, 5);
+    expect(r.unevaluable).toBe(0);
   });
 
   it('counts resets with no trail as unevaluable', () => {
     const d = base();
-    addRun(d, 1, 'finished'); addPoints(d, 1, LOOP); addLaps(d, 1, [100, 100]);
+    saveCourseModel(d, 1, 150, lineModel(), 1);
     addRun(d, 2, 'reset'); // no points
     const r = resolveCompletion(d, { metric: 'avg_completion_before_reset', period: allTime(), filters: { course: 'bc' }, seasonId: 1 });
     expect(r.total).toBeNull();
     expect(r.unevaluable).toBe(1);
   });
 
-  it('is null when the course has no finished reference', () => {
+  it('is null when the course has no saved model', () => {
     const d = base();
+    // no saveCourseModel call -> getModel returns null -> unevaluable
     addRun(d, 2, 'reset'); addPoints(d, 2, [{ cx: 10, cy: 0, t_ms: 10 }]);
     const r = resolveCompletion(d, { metric: 'avg_completion_before_reset', period: allTime(), filters: { course: 'bc' }, seasonId: 1 });
     expect(r.total).toBeNull();
