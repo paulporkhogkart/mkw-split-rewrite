@@ -1,5 +1,5 @@
 // pi/src/progress/project.ts
-import type { CourseGraph, GraphEdge, ProjState, Obs } from './types';
+import type { CourseModel, GraphEdge, ProjState, Obs } from './types';
 
 const EPS_BACK = 0.004;       // backward tolerance in within-lap progress
 const REACH_K = 2.5;          // forward window = K * pixelsMoved / lapLengthPx
@@ -7,17 +7,18 @@ const EPS_FWD_MIN = 0.02;     // minimum forward reach in progress
 const MATCH_DIST = 60;        // px; nearest edge beyond this -> hold/bootstrap
 // staleness is decided by the caller (hub) and passed in as obs.stale.
 
-export interface PreparedEdge { edge: GraphEdge; cumFrac: number[]; }     // arc fraction at each poly vertex
-export interface Prepared { edges: PreparedEdge[]; }
+interface PreparedEdge { edge: GraphEdge; cumFrac: number[]; }
+export interface PreparedLap { edges: PreparedEdge[]; }
+export interface Prepared { laps: PreparedLap[]; }
 
-export function prepareEdges(g: CourseGraph): Prepared {
-  return { edges: g.edges.map((edge) => {
+export function prepareModel(m: CourseModel): Prepared {
+  return { laps: m.laps.map((lap) => ({ edges: lap.graph.edges.map((edge) => {
     const cum = [0];
     for (let i = 1; i < edge.poly.length; i++)
       cum.push(cum[i - 1] + Math.hypot(edge.poly[i][0] - edge.poly[i - 1][0], edge.poly[i][1] - edge.poly[i - 1][1]));
     const total = cum[cum.length - 1] || 1;
     return { edge, cumFrac: cum.map((c) => c / total) };
-  }) };
+  }) })) };
 }
 
 /** Nearest point on one edge's poly, restricted to progress in [loP, hiP]. */
@@ -41,27 +42,33 @@ function nearestOnEdge(pe: PreparedEdge, loP: number, hiP: number, px: number, p
   return { dist: best, progress: bestProg };
 }
 
-export function projectStep(state: ProjState, g: CourseGraph, pe: Prepared, obs: Obs):
+/** Project onto the current lap's route; completion is cumulative distance over the whole course. */
+export function projectStep(state: ProjState, m: CourseModel, pe: Prepared, obs: Obs):
     { state: ProjState; completion: number | null } {
-  const laps = obs.totLap > 0 ? obs.totLap : 3;
-  const lap = Math.min(Math.max(obs.lap, 1), laps);                 // post-finish frames may report lap > totLap
-  const done = (progress: number) => Math.max(0, Math.min(1, (lap - 1 + progress) / laps));
-  if (obs.stale) return { state, completion: state ? done(state.progress) : null };
-  if (pe.edges.length === 0) return { state, completion: state ? done(state.progress) : null };
+  const N = m.laps.length || 1;
+  const k = Math.min(Math.max(obs.lap, 1), N);
+  const lapRoute = m.laps[k - 1];
+  const plap = pe.laps[k - 1];
+  const toPct = (u: number) =>
+    Math.max(0, Math.min(1, (lapRoute.startOffsetPx + u * lapRoute.lengthPx) / (m.totalLengthPx || 1)));
+  const finished = obs.lap > N;
+  if (finished) return { state, completion: 1 };
+  if (obs.stale) return { state, completion: state ? toPct(state.progress) : null };
+  if (!plap || plap.edges.length === 0) return { state, completion: state ? toPct(state.progress) : null };
 
   const tracking = state != null;
   const loP = tracking ? Math.max(0, state!.progress - EPS_BACK) : 0;
   const moved = tracking ? Math.hypot(obs.x - state!.x, obs.y - state!.y) : 0;
-  const reach = Math.max(EPS_FWD_MIN, REACH_K * moved / (g.lapLengthPx || 1));
+  const reach = Math.max(EPS_FWD_MIN, REACH_K * moved / (lapRoute.lengthPx || 1));
   const hiP = tracking ? Math.min(1, state!.progress + reach) : 1;
 
-  let best = Infinity, bestProg = tracking ? state!.progress : 0;
-  for (const e of pe.edges) {
+  let best = Infinity, bestU = tracking ? state!.progress : 0;
+  for (const e of plap.edges) {
     const r = nearestOnEdge(e, loP, hiP, obs.x, obs.y);
-    if (r.dist < best) { best = r.dist; bestProg = r.progress; }
+    if (r.dist < best) { best = r.dist; bestU = r.progress; }
   }
-  if (best > MATCH_DIST && tracking) return { state, completion: done(state!.progress) };   // implausible -> hold
+  if (best > MATCH_DIST && tracking) return { state, completion: toPct(state!.progress) };
 
-  const progress = Math.max(tracking ? state!.progress - EPS_BACK : 0, Math.min(1, bestProg));
-  return { state: { edge: 0, progress, x: obs.x, y: obs.y, t: obs.t }, completion: done(progress) };
+  const u = Math.max(tracking ? state!.progress - EPS_BACK : 0, Math.min(1, bestU));
+  return { state: { edge: 0, progress: u, x: obs.x, y: obs.y, t: obs.t }, completion: toPct(u) };
 }
