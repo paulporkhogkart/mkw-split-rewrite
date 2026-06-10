@@ -1,6 +1,6 @@
 // pi/src/progress/build.test.ts
 import { describe, it, expect } from 'vitest';
-import { foldRun, fBinCentroids, fitTranslation, type FoldPt } from './build';
+import { foldRun, fBinCentroids, fitTranslation, buildCourseModel, type FoldPt } from './build';
 import type { RunInput } from './types';
 
 describe('foldRun', () => {
@@ -40,5 +40,37 @@ describe('alignment', () => {
     const t = fitTranslation(fBinCentroids(ref, 16), fBinCentroids(drifted, 16));
     expect(t.dx).toBeCloseTo(-7, 1);                       // maps drifted -> ref
     expect(t.dy).toBeCloseTo(3, 1);
+  });
+});
+
+function loopRun(playerId: number, ox = 0, oy = 0): RunInput {
+  // 2 laps around a unit circle, 1 lap = 36 pts, lap ends 1000/2000ms.
+  const pts = [];
+  for (let lap = 1; lap <= 2; lap++) for (let i = 0; i < 36; i++) {
+    const a = (i / 36) * 2 * Math.PI;
+    pts.push({ t_ms: (lap - 1) * 1000 + (i / 36) * 1000, cx: ox + 50 * Math.cos(a),
+      cy: oy + 50 * Math.sin(a), score: 1, lap });
+  }
+  return { playerId, lapCumMs: [1000, 2000], points: pts };
+}
+
+describe('buildCourseModel', () => {
+  it('builds a centerline graph that closes the loop with monotonic progress', () => {
+    const res = buildCourseModel([loopRun(1), loopRun(2, 6, 0)], { bins: 72 });
+    expect(res).not.toBeNull();
+    const g = res!.graph;
+    expect(g.status).toBe('centerline');
+    expect(g.edges).toHaveLength(1);
+    expect(g.edges[0].pLo).toBe(0);
+    expect(g.edges[0].pHi).toBe(1);
+    expect(g.edges[0].poly.length).toBeGreaterThan(40);
+    expect(g.lapLengthPx).toBeGreaterThan(250);            // ~2*pi*50 ≈ 314
+    // player 2 was offset +6 -> its alignment maps roughly -6 back
+    const a2 = res!.alignments.find((a) => a.playerId === 2)!;
+    expect(a2.transform.dx).toBeCloseTo(-6, 0);
+  });
+
+  it('returns null with no usable points', () => {
+    expect(buildCourseModel([], {})).toBeNull();
   });
 });
