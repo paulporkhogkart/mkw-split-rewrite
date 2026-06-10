@@ -30,8 +30,11 @@ export function pbDelta(finalStr, pbMs) {
   return { text: `${ahead ? "-" : "+"}${(Math.abs(d) / 1000).toFixed(2)}`, cls: ahead ? "fast" : "slow" };
 }
 
-/** A presence entry -> the card view model. `now` is a fn (Date.now) for testability. */
-export function viewModel(e, now = Date.now) {
+/** A presence entry -> the card view model. `now` is a fn (Date.now) or a number
+ *  for testability. `delayed` is the interpolated { elapsed_ms, completion } from
+ *  the delay buffer (or null) - the racing timer + bar render from it so the
+ *  display lags real time and lines up at the finish. */
+export function viewModel(e, now = Date.now, delayed = null) {
   const t = typeof now === "function" ? now() : now;
   const color = e.color || "#888";
   if (!e.online) {
@@ -44,17 +47,24 @@ export function viewModel(e, now = Date.now) {
   const finished = (e.screen === "RACING" && e.final_time) || e.screen === "POST_TIME_TRIAL";
   let state, primary;
   if (SETUP[e.screen]) { state = "setup"; primary = { kind: "activity", text: SETUP[e.screen] }; }
-  else if (racing) { state = "racing"; primary = { kind: "time", text: "—" }; }
+  else if (racing) {
+    state = "racing";
+    const ms = delayed && delayed.elapsed_ms != null ? delayed.elapsed_ms : null;
+    primary = { kind: "time", text: ms != null ? fmtTimeMs(Math.round(ms)) : "—" };
+  }
   else if (finished) { state = "finished"; primary = { kind: "time", text: e.final_time }; }
   else { state = "menus"; primary = { kind: "activity", text: "In the menus" }; }
   const race = state === "racing" || state === "finished";
+  const clamp01 = (x) => Math.max(0, Math.min(1, x));
+  let fill = 0;
+  if (state === "finished") fill = e.completion == null ? 1 : clamp01(e.completion);
+  else if (state === "racing") fill = delayed && delayed.completion != null ? clamp01(delayed.completion) : 0;
   return {
     state, name: e.name, color, online: true,
     char: e.character || null, kart: e.kart || null, trk: e.course || null, primary,
     resets: race ? (e.resets ?? 0) : null,
     pbStr: race && e.pb_ms != null ? fmtTimeMs(e.pb_ms) : null,
     delta: state === "finished" ? pbDelta(e.final_time, e.pb_ms) : null,
-    bar: race ? { fill: e.completion == null ? 0 : Math.max(0, Math.min(1, e.completion)),
-                  dividers: Array.isArray(e.dividers) ? e.dividers : [] } : null,
+    bar: race ? { fill, dividers: Array.isArray(e.dividers) ? e.dividers : [] } : null,
   };
 }

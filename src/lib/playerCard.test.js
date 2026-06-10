@@ -39,11 +39,19 @@ describe("viewModel", () => {
     expect(vm.resets).toBe(3);
     expect(vm.pbStr).toBe("1:19.880");
   });
-  it("exposes a continuous bar fill + live dividers while racing", () => {
+  it("racing bar fill + timer come from the delayed sample; dividers immediate", () => {
     const e = { online: true, screen: "RACING", course: "Bowsers Castle", cur_lap: 2, tot_lap: 3,
-      completion: 0.42, dividers: [0.31], updated_at: 1, name: "P", color: "#888" };
-    const vm = viewModel(e, () => 2);
-    expect(vm.bar).toEqual({ fill: 0.42, dividers: [0.31] });
+      completion: 0.9, dividers: [0.31], updated_at: 1, name: "P", color: "#888" };
+    const vm = viewModel(e, () => 2, { elapsed_ms: 1234, completion: 0.42 });
+    expect(vm.bar).toEqual({ fill: 0.42, dividers: [0.31] });   // delayed completion, not e.completion
+    expect(vm.primary).toEqual({ kind: "time", text: "0:01.234" });
+  });
+  it("racing with no delayed sample yet: timer is a dash, bar fill 0", () => {
+    const e = { online: true, screen: "RACING", course: "Bowsers Castle", cur_lap: 1, tot_lap: 3,
+      completion: 0.5, dividers: [0.31], updated_at: 1, name: "P", color: "#888" };
+    const vm = viewModel(e, () => 2, null);
+    expect(vm.primary).toEqual({ kind: "time", text: "—" });
+    expect(vm.bar).toEqual({ fill: 0, dividers: [0.31] });
   });
   it("has no bar when not racing/finished", () => {
     const e = { online: true, screen: "MAIN_MENU", updated_at: 1, name: "P", color: "#888" };
