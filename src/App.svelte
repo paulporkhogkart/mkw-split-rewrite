@@ -81,6 +81,7 @@
   let curLap = null, totLap = null;
   let coins = null;
   let mushrooms = 0;
+  let elapsedMs = null;
   let raceSplits = {};      // lap number → split time string
   let raceFinishTime = null; // total time string from finish event
 
@@ -814,6 +815,7 @@
         break;
       case "coin_update": coins = msg.coins; pushLog(`[coins] ${msg.coins}`); break;
       case "mush_update": mushrooms = msg.count; pushLog(`[mush] ${msg.count}`); break;
+      case "race_time": elapsedMs = msg.elapsed_ms; break;
       case "split_recorded":
         raceSplits = { ...raceSplits, [msg.lap]: msg.time };
         if (msg.is_final) raceFinishTime = msg.time;
@@ -1394,7 +1396,7 @@
                           kart: selKart, kartConf: selKartConf,
                           course: selCourse, courseConf: selCourseConf });
   $: raceStore.set({ curLap, totLap, coins, mushrooms,
-                     splits: raceSplits, finishTime: raceFinishTime });
+                     splits: raceSplits, finishTime: raceFinishTime, elapsedMs });
   $: tellsStore.set(tells);
   $: roisStore.set(rois);
 

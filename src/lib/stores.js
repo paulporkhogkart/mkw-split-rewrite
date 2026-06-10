@@ -11,7 +11,7 @@ export const candidates = writable({});                   // { screen:[{name,sco
 export const selection  = writable({ char: null, charConf: 0, costume: null, costumeConf: 0,
                                      kart: null, kartConf: 0, course: null, courseConf: 0 });
 export const race       = writable({ curLap: null, totLap: null, coins: null, mushrooms: 0,
-                                     splits: {}, finishTime: null });
+                                     splits: {}, finishTime: null, elapsedMs: null });
 export const minimap    = writable(null);                 // { cx, cy, radius, trackState, roi:[x,y,w,h] } | null (current run only)
 export const sample     = writable(null);                 // raw base64 PNG (no data-URI prefix) of the locked icon template | null
 export const devices    = writable({ video: [], audio: [], selectedVideo: "", selectedAudio: "" });

@@ -8,13 +8,13 @@ describe("presence frame()", () => {
   it("maps the live stores into a frame", () => {
     screen.set("RACING");
     selection.set({ char: "Mario", costume: "Base", kart: "Std", course: "Bowsers Castle" });
-    race.set({ curLap: 2, totLap: 3, coins: 7, mushrooms: 1, splits: {}, finishTime: null });
+    race.set({ curLap: 2, totLap: 3, coins: 7, mushrooms: 1, splits: {}, finishTime: null, elapsedMs: 5000 });
     minimap.set({ cx: 12, cy: 34, radius: 5, trackState: "tracking", roi: [0, 0, 1, 1] });
     resets.set(4);
     expect(frame()).toEqual({
       screen: "RACING", course: "Bowsers Castle", character: "Mario", kart: "Std", costume: "Base",
       cur_lap: 2, tot_lap: 3, coins: 7, mushrooms: 1, pos: [12, 34], final_time: null, resets: 4,
-      track_state: "tracking",
+      track_state: "tracking", elapsed_ms: 5000,
     });
   });
   it("pos is null with no minimap fix", () => {
