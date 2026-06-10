@@ -72,7 +72,9 @@ export function resolveCompletion(db: DatabaseSync, q: CompletionQuery): StatRes
     let st: ProjState = null, prevLap = 0, frac = 0;
     for (const p of pts) {
       const lap = p.lap ?? lapOf(p.t_ms);
-      if (st && lap !== prevLap && lap <= N) st = null;          // reset on in-race lap change
+      // Crossing the line seeds the new lap at progress 0 (its start), as the live hub does — a blind
+      // reset would let the bootstrap snap to the lap's end on the same start/finish line.
+      if (st && lap !== prevLap) st = (lap > prevLap && lap <= N) ? { edge: 0, progress: 0, x: p.cx, y: p.cy, t: p.t_ms } : null;
       const r = projectStep(st, entry.m, entry.pe, { x: p.cx, y: p.cy, lap, totLap: N, t: p.t_ms, stale: false });
       st = r.state; prevLap = lap; if (r.completion != null) frac = r.completion;
     }

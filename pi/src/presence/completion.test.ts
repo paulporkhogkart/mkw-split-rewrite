@@ -66,12 +66,14 @@ describe('makeLiveCompletion', () => {
     expect(live('Bowsers Castle', 1, [0, 0], 1, 1100, true, 2).completion).toBeCloseTo(10 / 80, 2);       // held
   });
 
-  it('wraps into lap 2 at the seam (resets + bootstraps onto lap-2 route)', () => {
+  it('starts a new lap at its boundary, not snapped to the lap end on the same line', () => {
     const d = db(); seedModel(d);
     const live = makeLiveCompletion(d);
-    live('Bowsers Castle', 1, [10, 10], 1, 1000, false, 2);                                     // lap 1, progress 0.25 (10,10 quarter)
-    const c2 = live('Bowsers Castle', 2, [10, 0], 1, 2000, false, 2).completion;                // lap 2, quarter
-    expect(c2).toBeCloseTo((40 + 10) / 80, 2);   // 50/80 = 0.625 — reset wrapped onto lap-2 route
+    live('Bowsers Castle', 1, [10, 10], 1, 1000, false, 2);                       // lap 1
+    const a = live('Bowsers Castle', 2, [1, 0], 1, 2000, false, 2).completion!;   // just across the line into lap 2
+    const b = live('Bowsers Castle', 2, [10, 0], 1, 2100, false, 2).completion!;  // advancing through lap 2
+    expect(a).toBeCloseTo(0.5, 1);     // the lap-2 boundary (40/80), NOT ~0.97 (its end sits on the same line)
+    expect(b).toBeGreaterThan(a);      // sweeps forward instead of freezing near the boundary
   });
 
   it('resets a player on a course change / pos clear', () => {
