@@ -6,13 +6,10 @@
   // $nowTick drives recompute so "last seen" advances even when an offline player sends no frames.
   $: vm = viewModel(entry, $nowTick);
   $: fig = figureFor(vm.name, vm.online);
-  // TEMP debug: raw live completion % straight off the presence entry. Remove when done.
-  $: dbgPct = entry && entry.completion != null ? (entry.completion * 100).toFixed(1) : null;
 </script>
 
 <div class="tt" class:off={!vm.online} style="--pc:{vm.color}">
   <div class="spine"></div>
-  {#if dbgPct != null}<div class="dbg">{dbgPct}%</div>{/if}<!-- TEMP debug % -->
   {#if fig}<div class="fig" style="background-image:url({fig})"></div>{/if}
   <div class="data">
     <div class="nm">{vm.name}</div>
@@ -35,12 +32,11 @@
     {:else}
       <div class="prim seen">{vm.primary.text}</div>
     {/if}
-    {#if vm.segments}
+    {#if vm.bar}
       <div class="barwrap">
-        <div class="lapbar">
-          {#each vm.segments as f}<span class="seg"><i style="width:{f * 100}%"></i></span>{/each}
-        </div>
-        {#if vm.dotPct != null}<span class="live" style="left:{vm.dotPct}%"></span>{/if}
+        <div class="bar"><i style="width:{vm.bar.fill * 100}%"></i></div>
+        {#each vm.bar.dividers as d}<span class="tick" style="left:{d * 100}%"></span>{/each}
+        <span class="live" style="left:{vm.bar.fill * 100}%"></span>
       </div>
     {/if}
   </div>
@@ -51,8 +47,6 @@
         overflow: hidden; }
   .tt.off { background: var(--well); }
   .spine { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--pc); }
-  .dbg { position: absolute; top: 4px; right: 6px; z-index: 2; font-size: 11px; font-weight: 700;
-         color: #ffd24d; font-variant-numeric: tabular-nums; letter-spacing: .02em; } /* TEMP debug */
   .tt.off .spine { background: var(--idle); }
   .fig { position: absolute; left: 6px; bottom: 0; top: 11px; width: 33%; background-repeat: no-repeat;
          background-position: bottom center; background-size: auto 100%; }
@@ -80,9 +74,10 @@
   .prim.act { font-size: 11.5px; font-weight: 600; color: var(--tx-mut); margin-top: 4px; }
   .prim.seen { font-size: 10.5px; color: var(--tx-dim); margin-top: 4px; }
   .barwrap { position: relative; margin-top: 7px; }
-  .lapbar { display: flex; gap: 2px; }
-  .seg { flex: 1; height: 4px; background: var(--track); overflow: hidden; border-radius: 1px; }
-  .seg > i { display: block; height: 100%; background: var(--pc); }
+  .bar { height: 4px; background: var(--track); overflow: hidden; border-radius: 1px; }
+  .bar > i { display: block; height: 100%; background: var(--pc); }
+  .tick { position: absolute; top: 0; width: 1.5px; height: 4px; margin-left: -0.75px; background: var(--panel);
+          box-shadow: 0 0 0 0.5px rgba(0,0,0,.35); }
   .live { position: absolute; top: 2px; width: 7px; height: 7px; margin-left: -3.5px; border-radius: 50%;
           background: var(--pc); transform: translateY(-50%); box-shadow: 0 0 0 1.5px var(--panel); }
   .live::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--pc);
