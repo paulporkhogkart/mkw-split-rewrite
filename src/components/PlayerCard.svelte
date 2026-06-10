@@ -79,11 +79,15 @@
   .prim.seen { font-size: 10.5px; color: var(--tx-dim); margin-top: 4px; }
   .barwrap { position: relative; margin-top: 7px; }
   .bar { height: 4px; background: var(--track); overflow: hidden; border-radius: 1px; }
-  .bar > i { display: block; height: 100%; background: var(--pc); }
+  /* Ease the fill so it glides between frames — the live % unavoidably holds for a beat at each
+     start/finish line (the minimap can't resolve progress where the lap loops on itself); easing
+     keeps the bar gliding through that beat instead of freezing then snapping. */
+  .bar > i { display: block; height: 100%; background: var(--pc); transition: width .22s linear; }
   .tick { position: absolute; top: 0; width: 1.5px; height: 4px; margin-left: -0.75px; background: var(--panel);
           box-shadow: 0 0 0 0.5px rgba(0,0,0,.35); }
   .live { position: absolute; top: 2px; width: 7px; height: 7px; margin-left: -3.5px; border-radius: 50%;
-          background: var(--pc); transform: translateY(-50%); box-shadow: 0 0 0 1.5px var(--panel); }
+          background: var(--pc); transform: translateY(-50%); box-shadow: 0 0 0 1.5px var(--panel);
+          transition: left .22s linear; }
   .live::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--pc);
                  animation: ppulse 1.7s ease-out infinite; }
   @keyframes ppulse { 0% { transform: scale(1); opacity: .55; } 100% { transform: scale(2.6); opacity: 0; } }
