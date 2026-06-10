@@ -5,6 +5,7 @@ import { get } from "svelte/store";
 import { screen, selection, race, minimap, presence } from "./stores.js";
 import { resets } from "./resets.js";
 import { serverUrl, authToken } from "./syncSettings.js";
+import { pushSample } from "./raceTimerBuffer.js";
 
 const THROTTLE_MS = 250;    // ~4 Hz cap on outbound frames
 const HEARTBEAT_MS = 5000;  // idle keep-alive so the server's sweep keeps us online
@@ -50,10 +51,16 @@ function connect() {
     try {
       const msg = JSON.parse(e.data);
       if (msg.type === "presence_snapshot") {
-        const map = {}; for (const p of msg.players) map[p.player_id] = p;
+        const map = {}, t = Date.now();
+        for (const p of msg.players) {
+          p._rxAt = t; map[p.player_id] = p;
+          pushSample(p.player_id, { t, elapsed_ms: p.elapsed_ms, completion: p.completion });
+        }
         presence.set(map);
       } else if (msg.type === "presence_update") {
-        presence.update((m) => ({ ...m, [msg.player.player_id]: msg.player }));
+        const t = Date.now(), p = { ...msg.player, _rxAt: t };
+        pushSample(p.player_id, { t, elapsed_ms: p.elapsed_ms, completion: p.completion });
+        presence.update((m) => ({ ...m, [p.player_id]: p }));
       }
     } catch { /* ignore malformed */ }
   });
