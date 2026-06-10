@@ -36,4 +36,24 @@ describe('projectStep (distance, per-lap)', () => {
     expect(projectStep({ edge: 0, progress: 1, x: 0, y: 0, t: 0 }, M, pe, obs(0, 0, 3, 9)).completion).toBe(1);
     expect(projectStep({ edge: 0, progress: 0.5, x: 5, y: 0, t: 0 }, M, pe, obs(9, 9, 1, 9, true)).completion).toBeCloseTo((0 + 0.5 * 40) / 80, 4);
   });
+
+  it('with branch edges, picks the nearest branch -> same % whichever route you took', () => {
+    // a straight main spine [0,1] with two branch arcs (bump up / bump down) over progress [0.4,0.6]
+    const poly = (a: [number, number][]): [number, number][] => a;
+    const G = {
+      version: 1, startNode: 0, lapLengthPx: 40, status: 'graph' as const,
+      nodes: [{ id: 0, x: 0, y: 0, progress: 0 }],
+      edges: [
+        { id: 0, a: 0, b: 0, poly: poly([[0, 0], [40, 0]]), arcLen: 40, pLo: 0, pHi: 1, kind: 'main' as const, passThrough: null },
+        { id: 1, a: 0, b: 0, poly: poly([[16, 0], [20, -10], [24, 0]]), arcLen: 21.5, pLo: 0.4, pHi: 0.6, kind: 'branch' as const, passThrough: null },
+        { id: 2, a: 0, b: 0, poly: poly([[16, 0], [20, 10], [24, 0]]), arcLen: 21.5, pLo: 0.4, pHi: 0.6, kind: 'branch' as const, passThrough: null },
+      ],
+    };
+    const BM: CourseModel = { version: 2, totalLengthPx: 40, status: 'graph', laps: [{ index: 1, lengthPx: 40, startOffsetPx: 0, graph: G }] };
+    const pe = prepareModel(BM);
+    const up = projectStep(null, BM, pe, { x: 20, y: -9, lap: 1, totLap: 1, t: 0, stale: false }).completion;
+    const dn = projectStep(null, BM, pe, { x: 20, y: 9, lap: 1, totLap: 1, t: 0, stale: false }).completion;
+    expect(up).toBeCloseTo(0.5, 1);
+    expect(dn).toBeCloseTo(0.5, 1);       // both branches map to the same progress (~mid of [0.4,0.6])
+  });
 });
