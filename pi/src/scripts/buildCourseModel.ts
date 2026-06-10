@@ -40,11 +40,8 @@ function main() {
 
   const res = buildCourseModel(inputs);
   if (!res) { console.error(`no usable runs for ${slug}`); process.exitCode = 1; return; }
-  // TODO(Task-5): replace with saveCourseModel accepting CourseModel v2.
-  // For now, persist lap 1's graph so existing storage schema is not broken.
-  const lap1Graph = res.model.laps[0].graph;
-  saveCourseModel(db, course.id, cc, lap1Graph, inputs.length);
+  saveCourseModel(db, course.id, cc, res.model, inputs.length);
   for (const a of res.alignments) savePlayerAlignment(db, a.playerId, a.transform, 1);
-  console.log(`[course-model] ${slug} cc${cc}: ${res.model.status}, laps=${res.model.laps.length}, ${inputs.length} runs, totalLen=${res.model.totalLengthPx.toFixed(0)}px`);
+  console.log(`[course-model] ${slug} cc${cc}: ${res.model.status}, ${res.model.laps.length} laps, total=${res.model.totalLengthPx.toFixed(0)}px, ${inputs.length} runs`);
 }
 main();

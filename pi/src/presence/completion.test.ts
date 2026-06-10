@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { applySchema } from '../db/connect';
 import { makeLiveCompletion } from './completion';
 import { saveCourseModel } from '../db/courseModels';
-import type { CourseGraph } from '../progress/types';
+import type { CourseModel } from '../progress/types';
 import { courseIdBySlug } from '../db/seasons';
 import { slugify } from '../db/slug';
 
@@ -17,9 +17,12 @@ function db() {
 
 // A unit square centerline: (0,0)->(10,0)->(10,10)->(0,10)->(0,0), perimeter 40px, progress 0..1.
 const SQUARE: [number, number][] = [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]];
-const MODEL: CourseGraph = { version: 1, startNode: 0, lapLengthPx: 40, status: 'centerline',
-  nodes: [{ id: 0, x: 0, y: 0, progress: 0 }],
-  edges: [{ id: 0, a: 0, b: 0, poly: SQUARE, arcLen: 40, pLo: 0, pHi: 1, kind: 'main', passThrough: null }] };
+const lapRoute = (index: number, startOffsetPx: number) => ({ index, lengthPx: 40, startOffsetPx,
+  graph: { version: 1, startNode: 0, lapLengthPx: 40, status: 'centerline' as const,
+    nodes: [{ id: 0, x: 0, y: 0, progress: 0 }],
+    edges: [{ id: 0, a: 0, b: 0, poly: SQUARE, arcLen: 40, pLo: 0, pHi: 1, kind: 'main' as const, passThrough: null }] } });
+// Two laps, total perimeter 80px; completion is cumulative distance.
+const MODEL: CourseModel = { version: 2, totalLengthPx: 80, status: 'centerline', laps: [lapRoute(1, 0), lapRoute(2, 40)] };
 
 function seedModel(d: DatabaseSync) {
   const id = courseIdBySlug(d, slugify('Bowsers Castle'))!;
@@ -37,44 +40,44 @@ describe('makeLiveCompletion', () => {
   it('returns null when the course has no stored model', () => {
     const d = db();   // no seedModel
     const live = makeLiveCompletion(d);
-    expect(live('Bowsers Castle', 1, [10, 0], 1, 1000, false, 3)).toBeNull();
+    expect(live('Bowsers Castle', 1, [10, 0], 1, 1000, false, 2)).toBeNull();
   });
 
-  it('projects live position onto the course model, monotonic per lap', () => {
+  it('projects live position onto the course model, monotonic per lap (cumulative distance)', () => {
     const d = db(); seedModel(d);
     const live = makeLiveCompletion(d);
-    expect(live('Bowsers Castle', 1, [10, 0], 1, 1000, false, 3)).toBeCloseTo(0.25 / 3, 2);   // quarter -> 0.25/3
-    expect(live('Bowsers Castle', 1, [10, 10], 1, 1100, false, 3)).toBeCloseTo(0.5 / 3, 2);    // half  -> 0.5/3
+    expect(live('Bowsers Castle', 1, [10, 0], 1, 1000, false, 2)).toBeCloseTo(10 / 80, 2);    // quarter of lap 1 -> 10/80
+    expect(live('Bowsers Castle', 1, [10, 10], 1, 1100, false, 2)).toBeCloseTo(20 / 80, 2);   // half of lap 1  -> 20/80
   });
 
   it('holds completion while stale', () => {
     const d = db(); seedModel(d);
     const live = makeLiveCompletion(d);
-    live('Bowsers Castle', 1, [10, 0], 1, 1000, false, 3);
-    expect(live('Bowsers Castle', 1, [0, 0], 1, 1100, true, 3)).toBeCloseTo(0.25 / 3, 2);       // held
+    live('Bowsers Castle', 1, [10, 0], 1, 1000, false, 2);
+    expect(live('Bowsers Castle', 1, [0, 0], 1, 1100, true, 2)).toBeCloseTo(10 / 80, 2);       // held
   });
 
-  it('wraps within-lap progress at the seam (advances into lap 2, no stick)', () => {
+  it('wraps into lap 2 at the seam (resets + bootstraps onto lap-2 route)', () => {
     const d = db(); seedModel(d);
     const live = makeLiveCompletion(d);
-    live('Bowsers Castle', 1, [10, 10], 1, 1000, false, 3);                                      // lap 1, progress 0.5
-    const c2 = live('Bowsers Castle', 2, [10, 0], 1, 2000, false, 3);                            // lap 2, quarter
-    expect(c2).toBeCloseTo((1 + 0.25) / 3, 2);   // (2-1+0.25)/3 ≈ 0.417 — reset wrapped; NOT 0.5 (stuck) or 0.667
+    live('Bowsers Castle', 1, [10, 10], 1, 1000, false, 2);                                     // lap 1, progress 0.25 (10,10 quarter)
+    const c2 = live('Bowsers Castle', 2, [10, 0], 1, 2000, false, 2);                           // lap 2, quarter
+    expect(c2).toBeCloseTo((40 + 10) / 80, 2);   // 50/80 = 0.625 — reset wrapped onto lap-2 route
   });
 
-  it('resets a player on a course change', () => {
+  it('resets a player on a course change / pos clear', () => {
     const d = db(); seedModel(d);
     const live = makeLiveCompletion(d);
-    live('Bowsers Castle', 1, [10, 10], 1, 1000, false, 3);
-    expect(live('Bowsers Castle', 1, null, 1, 1100, false, 3)).toBeNull();   // pos clears -> state dropped
-    expect(live('Bowsers Castle', 1, [10, 0], 1, 1200, false, 3)).toBeCloseTo(0.25 / 3, 2);   // fresh quarter
+    live('Bowsers Castle', 1, [10, 10], 1, 1000, false, 2);
+    expect(live('Bowsers Castle', 1, null, 1, 1100, false, 2)).toBeNull();   // pos clears -> state dropped
+    expect(live('Bowsers Castle', 1, [10, 0], 1, 1200, false, 2)).toBeCloseTo(10 / 80, 2);   // fresh quarter
   });
 
   it('holds at 100% past the final lap (post-finish frames report lap > totLap)', () => {
     const d = db(); seedModel(d);
     const live = makeLiveCompletion(d);
-    live('Bowsers Castle', 3, [10, 10], 1, 1000, false, 3);                  // final lap, mid
-    live('Bowsers Castle', 3, [0, 0], 1, 1100, false, 3);                    // reach the line, progress ~1
-    expect(live('Bowsers Castle', 4, [10, 0], 1, 1200, false, 3)).toBe(1);   // lap 4 of 3 -> held at 100%, not wrapped
+    live('Bowsers Castle', 2, [10, 10], 1, 1000, false, 2);                  // final lap, mid
+    live('Bowsers Castle', 2, [0, 0], 1, 1100, false, 2);                    // reach the line, progress ~1
+    expect(live('Bowsers Castle', 3, [10, 0], 1, 1200, false, 2)).toBe(1);   // lap 3 of 2 -> held at 100%, not wrapped
   });
 });

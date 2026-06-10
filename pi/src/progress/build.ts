@@ -62,21 +62,6 @@ export function centerline(pts: FoldPt[], bins: number): [number, number][] {
   return fBinCentroids(pts, bins).filter((p): p is [number, number] => p != null);
 }
 
-/** Rotate a closed centerline so progress 0 starts at the vertex nearest the start/finish line. */
-export function anchorAtLine(poly: [number, number][], line: [number, number]): [number, number][] {
-  if (poly.length < 3) return poly;
-  const open = poly.slice(0, poly.length - 1);          // drop the duplicated closing vertex
-  let bi = 0, bd = Infinity;
-  for (let i = 0; i < open.length; i++) {
-    const d = Math.hypot(open[i][0] - line[0], open[i][1] - line[1]);
-    if (d < bd) { bd = d; bi = i; }
-  }
-  if (bi === 0) return poly;                            // already anchored at the line
-  const rot = [...open.slice(bi), ...open.slice(0, bi)];
-  rot.push([rot[0][0], rot[0][1]]);                     // re-close
-  return rot;
-}
-
 export interface BuildResult {
   model: CourseModel;
   alignments: { playerId: number; transform: Transform }[];
