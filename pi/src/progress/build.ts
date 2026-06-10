@@ -64,6 +64,21 @@ export function centerline(pts: FoldPt[], bins: number): [number, number][] {
   return c;
 }
 
+/** Rotate a closed centerline so progress 0 starts at the vertex nearest the start/finish line. */
+export function anchorAtLine(poly: [number, number][], line: [number, number]): [number, number][] {
+  if (poly.length < 3) return poly;
+  const open = poly.slice(0, poly.length - 1);          // drop the duplicated closing vertex
+  let bi = 0, bd = Infinity;
+  for (let i = 0; i < open.length; i++) {
+    const d = Math.hypot(open[i][0] - line[0], open[i][1] - line[1]);
+    if (d < bd) { bd = d; bi = i; }
+  }
+  if (bi === 0) return poly;                            // already anchored at the line
+  const rot = [...open.slice(bi), ...open.slice(0, bi)];
+  rot.push([rot[0][0], rot[0][1]]);                     // re-close
+  return rot;
+}
+
 export interface BuildResult {
   graph: CourseGraph;
   alignments: { playerId: number; transform: Transform }[];
@@ -86,8 +101,23 @@ export function buildCourseModel(runs: RunInput[], opts: { bins?: number } = {})
   const merged: FoldPt[] = [];
   folded.forEach((f, i) => { for (const p of f) merged.push(applyTransform(p, perRun[i])); });
 
-  const poly = centerline(merged, bins);
+  // Start/finish line = mean of each run's lap-end crossings (ends of laps 1..N-1), in the common
+  // frame (lap-1 START is the grid, excluded). Anchoring progress 0 here makes within-lap progress
+  // 0 at the line and 1 back at the line, so the live bar starts at 0% and the lap seam stays continuous.
+  const lineAcc = { x: 0, y: 0, n: 0 };
+  runs.forEach((r, i) => {
+    const t = perRun[i];
+    for (let k = 0; k < r.lapCumMs.length - 1; k++) {
+      const tb = r.lapCumMs[k];
+      let best: { cx: number; cy: number } | null = null, bd = Infinity;
+      for (const p of r.points) { const d = Math.abs(p.t_ms - tb); if (d < bd) { bd = d; best = p; } }
+      if (best) { lineAcc.x += best.cx * t.scale + t.dx; lineAcc.y += best.cy * t.scale + t.dy; lineAcc.n++; }
+    }
+  });
+
+  let poly = centerline(merged, bins);
   if (poly.length < 3) return null;
+  if (lineAcc.n > 0) poly = anchorAtLine(poly, [lineAcc.x / lineAcc.n, lineAcc.y / lineAcc.n]);
 
   const lapLen = arcLen(poly);
   const node: GraphNode = { id: 0, x: poly[0][0], y: poly[0][1], progress: 0 };

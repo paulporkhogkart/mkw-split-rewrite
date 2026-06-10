@@ -32,7 +32,10 @@ export function makeLiveCompletion(db: DatabaseSync, cc = 150): LiveCompletion {
     const al = playerId != null ? loadPlayerAlignment(db, playerId) : { dx: 0, dy: 0, scale: 1 };
     const x = pos[0] * al.scale + al.dx, y = pos[1] * al.scale + al.dy;
     let ps = playerId != null ? pstate.get(playerId) : undefined;
-    if (ps && (ps.course !== courseId || lap !== ps.lap)) ps = undefined;   // new run OR lap change -> reset (wraps progress at the seam)
+    // Reset on a new run OR an in-race lap change (wraps within-lap progress at the seam). Do NOT
+    // reset once past the final lap (post-finish frames report lap > totLap): hold at 100% instead
+    // of re-bootstrapping to ~0 as the coast wraps the position past the line.
+    if (ps && (ps.course !== courseId || (lap !== ps.lap && lap <= (totLap ?? 3)))) ps = undefined;
     const r = projectStep(ps?.st ?? null, entry.g, entry.pe, { x, y, lap, totLap: totLap ?? 3, t, stale });
     if (playerId != null) pstate.set(playerId, { st: r.state, course: courseId, lap });
     return r.completion;

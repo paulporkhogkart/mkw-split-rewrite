@@ -69,4 +69,12 @@ describe('makeLiveCompletion', () => {
     expect(live('Bowsers Castle', 1, null, 1, 1100, false, 3)).toBeNull();   // pos clears -> state dropped
     expect(live('Bowsers Castle', 1, [10, 0], 1, 1200, false, 3)).toBeCloseTo(0.25 / 3, 2);   // fresh quarter
   });
+
+  it('holds at 100% past the final lap (post-finish frames report lap > totLap)', () => {
+    const d = db(); seedModel(d);
+    const live = makeLiveCompletion(d);
+    live('Bowsers Castle', 3, [10, 10], 1, 1000, false, 3);                  // final lap, mid
+    live('Bowsers Castle', 3, [0, 0], 1, 1100, false, 3);                    // reach the line, progress ~1
+    expect(live('Bowsers Castle', 4, [10, 0], 1, 1200, false, 3)).toBe(1);   // lap 4 of 3 -> held at 100%, not wrapped
+  });
 });

@@ -42,4 +42,10 @@ describe('projectStep', () => {
     const st: ProjState = { edge: 0, progress: 0.4, x: 4, y: 0, t: 0 };
     expect(projectStep(st, G, pe, obs(9, 9, 1, 50, true)).completion).toBeCloseTo(0.4 / 3, 4);
   });
+
+  it('clamps completion to [0,1] past the final lap (no post-finish overshoot)', () => {
+    const pe = prepareEdges(G);
+    const st: ProjState = { edge: 0, progress: 1, x: 0, y: 0, t: 0 };
+    expect(projectStep(st, G, pe, obs(0, 0, 4, 100)).completion).toBe(1);   // lap 4 of 3 -> clamped, not 1.33
+  });
 });

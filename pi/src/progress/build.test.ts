@@ -1,6 +1,6 @@
 // pi/src/progress/build.test.ts
 import { describe, it, expect } from 'vitest';
-import { foldRun, fBinCentroids, fitTranslation, buildCourseModel, type FoldPt } from './build';
+import { foldRun, fBinCentroids, fitTranslation, buildCourseModel, anchorAtLine, type FoldPt } from './build';
 import type { RunInput } from './types';
 
 describe('foldRun', () => {
@@ -72,5 +72,15 @@ describe('buildCourseModel', () => {
 
   it('returns null with no usable points', () => {
     expect(buildCourseModel([], {})).toBeNull();
+  });
+});
+
+describe('anchorAtLine', () => {
+  it('rotates a closed centerline so progress 0 starts nearest the line', () => {
+    const sq: [number, number][] = [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]];
+    const a = anchorAtLine(sq, [9, 10]);            // line nearest the [10,10] vertex
+    expect(a[0]).toEqual([10, 10]);                 // progress 0 now at that vertex
+    expect(a[a.length - 1]).toEqual([10, 10]);      // re-closed
+    expect(a.length).toBe(sq.length);               // same vertex count
   });
 });

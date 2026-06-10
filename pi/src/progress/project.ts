@@ -44,7 +44,8 @@ function nearestOnEdge(pe: PreparedEdge, loP: number, hiP: number, px: number, p
 export function projectStep(state: ProjState, g: CourseGraph, pe: Prepared, obs: Obs):
     { state: ProjState; completion: number | null } {
   const laps = obs.totLap > 0 ? obs.totLap : 3;
-  const done = (progress: number) => (obs.lap - 1 + progress) / laps;
+  const lap = Math.min(Math.max(obs.lap, 1), laps);                 // post-finish frames may report lap > totLap
+  const done = (progress: number) => Math.max(0, Math.min(1, (lap - 1 + progress) / laps));
   if (obs.stale) return { state, completion: state ? done(state.progress) : null };
   if (pe.edges.length === 0) return { state, completion: state ? done(state.progress) : null };
 
