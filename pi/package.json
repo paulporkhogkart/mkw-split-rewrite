@@ -8,6 +8,7 @@
     "mint-token": "node --no-warnings --import tsx src/scripts/mintToken.ts",
     "set-color": "node --no-warnings --import tsx src/scripts/setColor.ts",
     "scrape-wr": "node --no-warnings --import tsx src/scripts/scrapeWr.ts",
+    "build-course-model": "node --no-warnings --import tsx src/scripts/buildCourseModel.ts",
     "bot": "node --env-file=.env --no-warnings --import tsx src/bot/index.ts"
   },
   "dependencies": {
