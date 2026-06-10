@@ -1,6 +1,6 @@
 // pi/src/progress/build.test.ts
 import { describe, it, expect } from 'vitest';
-import { foldRun, fBinCentroids, fitTranslation, buildCourseModel, anchorAtLine, groupByLap, type FoldPt } from './build';
+import { foldRun, fBinCentroids, fitTranslation, buildCourseModel, groupByLap, type FoldPt } from './build';
 import type { RunInput } from './types';
 
 describe('foldRun', () => {
@@ -54,36 +54,6 @@ function loopRun(playerId: number, ox = 0, oy = 0): RunInput {
   return { playerId, lapCumMs: [1000, 2000], points: pts };
 }
 
-describe('buildCourseModel', () => {
-  it('builds a centerline graph that closes the loop with monotonic progress', () => {
-    const res = buildCourseModel([loopRun(1), loopRun(2, 6, 0)], { bins: 72 });
-    expect(res).not.toBeNull();
-    const g = res!.graph;
-    expect(g.status).toBe('centerline');
-    expect(g.edges).toHaveLength(1);
-    expect(g.edges[0].pLo).toBe(0);
-    expect(g.edges[0].pHi).toBe(1);
-    expect(g.edges[0].poly.length).toBeGreaterThan(40);
-    expect(g.lapLengthPx).toBeGreaterThan(250);            // ~2*pi*50 ≈ 314
-    // player 2 was offset +6 -> its alignment maps roughly -6 back
-    const a2 = res!.alignments.find((a) => a.playerId === 2)!;
-    expect(a2.transform.dx).toBeCloseTo(-6, 0);
-  });
-
-  it('returns null with no usable points', () => {
-    expect(buildCourseModel([], {})).toBeNull();
-  });
-});
-
-describe('anchorAtLine', () => {
-  it('rotates a closed centerline so progress 0 starts nearest the line', () => {
-    const sq: [number, number][] = [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]];
-    const a = anchorAtLine(sq, [9, 10]);            // line nearest the [10,10] vertex
-    expect(a[0]).toEqual([10, 10]);                 // progress 0 now at that vertex
-    expect(a[a.length - 1]).toEqual([10, 10]);      // re-closed
-    expect(a.length).toBe(sq.length);               // same vertex count
-  });
-});
 
 describe('groupByLap', () => {
   it('splits points by lap index with per-lap fraction f', () => {
@@ -99,5 +69,34 @@ describe('groupByLap', () => {
     expect([...g.keys()].sort()).toEqual([1, 2]);
     expect(g.get(1)!.map((p) => Number(p.f.toFixed(2)))).toEqual([0, 0.5]);
     expect(g.get(2)!.map((p) => Number(p.f.toFixed(2)))).toEqual([0.5]);
+  });
+});
+
+// lap 1 is a big circle (r=50), lap 2 a small one (r=20): unequal lengths.
+function unevenRun(playerId: number): RunInput {
+  const pts: RunInput['points'] = [];
+  const add = (lap: number, r: number, base: number) => {
+    for (let i = 0; i < 48; i++) { const a = (i / 48) * 2 * Math.PI;
+      pts.push({ t_ms: base + (i / 48) * 1000, cx: r * Math.cos(a), cy: r * Math.sin(a), score: 1, lap }); }
+  };
+  add(1, 50, 0); add(2, 20, 1000);
+  return { playerId, lapCumMs: [1000, 2000], points: pts };
+}
+
+describe('buildCourseModel (v2 per-lap)', () => {
+  it('builds one LapRoute per lap, with cumulative offsets and a distance total', () => {
+    const res = buildCourseModel([unevenRun(1), unevenRun(2)], { bins: 64 });
+    expect(res).not.toBeNull();
+    const m = res!.model;
+    expect(m.version).toBe(2);
+    expect(m.laps).toHaveLength(2);
+    expect(m.laps[0].startOffsetPx).toBe(0);
+    expect(m.laps[1].startOffsetPx).toBeCloseTo(m.laps[0].lengthPx, 5);   // offset = prior length
+    expect(m.totalLengthPx).toBeCloseTo(m.laps[0].lengthPx + m.laps[1].lengthPx, 5);
+    expect(m.laps[0].lengthPx).toBeGreaterThan(m.laps[1].lengthPx * 2);    // r50 lap >> r20 lap
+  });
+
+  it('returns null with no usable points', () => {
+    expect(buildCourseModel([], {})).toBeNull();
   });
 });

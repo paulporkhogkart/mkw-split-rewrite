@@ -1,5 +1,5 @@
 // pi/src/progress/build.ts
-import type { RunInput, Transform, CourseGraph, GraphEdge, GraphNode } from './types';
+import type { RunInput, Transform, CourseGraph, GraphEdge, GraphNode, CourseModel, LapRoute } from './types';
 
 export interface FoldPt { x: number; y: number; f: number; score: number; }
 
@@ -57,11 +57,9 @@ function arcLen(poly: [number, number][]): number {
   return s;
 }
 
-/** Ordered cyclic centerline from merged points: score-weighted centroid per f-bin. */
+/** Ordered centerline (open) from points: score-weighted centroid per f-bin. */
 export function centerline(pts: FoldPt[], bins: number): [number, number][] {
-  const c = fBinCentroids(pts, bins).filter((p): p is [number, number] => p != null);
-  if (c.length >= 2) c.push(c[0]);          // close the loop
-  return c;
+  return fBinCentroids(pts, bins).filter((p): p is [number, number] => p != null);
 }
 
 /** Rotate a closed centerline so progress 0 starts at the vertex nearest the start/finish line. */
@@ -80,60 +78,57 @@ export function anchorAtLine(poly: [number, number][], line: [number, number]): 
 }
 
 export interface BuildResult {
-  graph: CourseGraph;
+  model: CourseModel;
   alignments: { playerId: number; transform: Transform }[];
 }
 
-/** Build a centerline CourseGraph from a set of runs + per-player alignment transforms. */
+function lapGraph(poly: [number, number][]): { graph: CourseGraph; lengthPx: number } {
+  const lengthPx = arcLen(poly);
+  const node: GraphNode = { id: 0, x: poly[0][0], y: poly[0][1], progress: 0 };
+  const edge: GraphEdge = { id: 0, a: 0, b: 0, poly, arcLen: lengthPx, pLo: 0, pHi: 1, kind: 'main', passThrough: null };
+  const graph: CourseGraph = { version: 1, startNode: 0, lapLengthPx: lengthPx, nodes: [node], edges: [edge], status: 'centerline' };
+  return { graph, lengthPx };
+}
+
 export function buildCourseModel(runs: RunInput[], opts: { bins?: number } = {}): BuildResult | null {
   const bins = opts.bins ?? DEF_BINS;
-  const folded = runs.map(foldRun);
-  if (folded.length === 0 || folded.every((f) => f.length === 0)) return null;
+  const grouped = runs.map(groupByLap);
+  const lapIndices = [...new Set(grouped.flatMap((g) => [...g.keys()]))].sort((a, b) => a - b);
+  if (lapIndices.length === 0) return null;
 
-  // Reference = densest run; align the rest to it by f-binned centroids.
-  let refIdx = 0;
-  for (let i = 1; i < folded.length; i++) if (folded[i].length > folded[refIdx].length) refIdx = i;
-  const refC = fBinCentroids(folded[refIdx], Math.min(bins, 32));
+  // Per-player alignment estimated once on lap 1 (cheap; the live frame is one capture).
+  const perRunTransform: Transform[] = grouped.map(() => ({ dx: 0, dy: 0, scale: 1 }));
+  {
+    const lap1 = grouped.map((g) => g.get(lapIndices[0]) ?? []);
+    let refIdx = 0;
+    for (let i = 1; i < lap1.length; i++) if (lap1[i].length > lap1[refIdx].length) refIdx = i;
+    const refC = fBinCentroids(lap1[refIdx], Math.min(bins, 32));
+    lap1.forEach((f, i) => { if (i !== refIdx && f.length) perRunTransform[i] = fitTranslation(refC, fBinCentroids(f, Math.min(bins, 32))); });
+  }
 
-  const perRun: Transform[] = folded.map((f, i) =>
-    i === refIdx ? { dx: 0, dy: 0, scale: 1 } : fitTranslation(refC, fBinCentroids(f, Math.min(bins, 32))));
+  const laps: LapRoute[] = [];
+  let offset = 0;
+  for (const k of lapIndices) {
+    const merged: FoldPt[] = [];
+    grouped.forEach((g, i) => { for (const p of g.get(k) ?? []) merged.push(applyTransform(p, perRunTransform[i])); });
+    const poly = centerline(merged, bins);
+    if (poly.length < 3) return null;
+    const { graph, lengthPx } = lapGraph(poly);
+    laps.push({ index: k, lengthPx, startOffsetPx: offset, graph });
+    offset += lengthPx;
+  }
 
-  const merged: FoldPt[] = [];
-  folded.forEach((f, i) => { for (const p of f) merged.push(applyTransform(p, perRun[i])); });
+  const model: CourseModel = { version: 2, totalLengthPx: offset, laps, status: 'centerline' };
 
-  // Start/finish line = mean of each run's lap-end crossings (ends of laps 1..N-1), in the common
-  // frame (lap-1 START is the grid, excluded). Anchoring progress 0 here makes within-lap progress
-  // 0 at the line and 1 back at the line, so the live bar starts at 0% and the lap seam stays continuous.
-  const lineAcc = { x: 0, y: 0, n: 0 };
-  runs.forEach((r, i) => {
-    const t = perRun[i];
-    for (let k = 0; k < r.lapCumMs.length - 1; k++) {
-      const tb = r.lapCumMs[k];
-      let best: { cx: number; cy: number } | null = null, bd = Infinity;
-      for (const p of r.points) { const d = Math.abs(p.t_ms - tb); if (d < bd) { bd = d; best = p; } }
-      if (best) { lineAcc.x += best.cx * t.scale + t.dx; lineAcc.y += best.cy * t.scale + t.dy; lineAcc.n++; }
-    }
-  });
-
-  let poly = centerline(merged, bins);
-  if (poly.length < 3) return null;
-  if (lineAcc.n > 0) poly = anchorAtLine(poly, [lineAcc.x / lineAcc.n, lineAcc.y / lineAcc.n]);
-
-  const lapLen = arcLen(poly);
-  const node: GraphNode = { id: 0, x: poly[0][0], y: poly[0][1], progress: 0 };
-  const edge: GraphEdge = { id: 0, a: 0, b: 0, poly, arcLen: lapLen, pLo: 0, pHi: 1, kind: 'main', passThrough: null };
-  const graph: CourseGraph = { version: 1, startNode: 0, lapLengthPx: lapLen, nodes: [node], edges: [edge], status: 'centerline' };
-
-  // Per-player transform = mean of that player's runs' transforms.
   const byPlayer = new Map<number, { dx: number; dy: number; n: number }>();
   runs.forEach((r, i) => {
     const cur = byPlayer.get(r.playerId) ?? { dx: 0, dy: 0, n: 0 };
-    cur.dx += perRun[i].dx; cur.dy += perRun[i].dy; cur.n++; byPlayer.set(r.playerId, cur);
+    cur.dx += perRunTransform[i].dx; cur.dy += perRunTransform[i].dy; cur.n++; byPlayer.set(r.playerId, cur);
   });
   const alignments = [...byPlayer.entries()].map(([playerId, v]) =>
     ({ playerId, transform: { dx: v.dx / v.n, dy: v.dy / v.n, scale: 1 } as Transform }));
 
-  return { graph, alignments };
+  return { model, alignments };
 }
 
 /** Split a run into per-lap-index point lists, each tagged with that lap's within-lap fraction f. */
