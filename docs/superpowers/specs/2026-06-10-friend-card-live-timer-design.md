@@ -173,6 +173,11 @@ indicators**:
   move. Cards keep `nowTick` for offline "last seen". This replaces the earlier
   forward-extrapolation + staleness-freeze design — interpolating *within* known
   samples is simpler and cannot overshoot.
+- `src/components/PlayerCard.svelte`: take the fast `now` (prop/store) and read
+  the delayed sample so `vm.primary.time` and `vm.bar.fill` reflect `now − DELAY_MS`.
+  **Also remove the TEMP debug `%` readout** added during bar tuning — the
+  `dbgPct` reactive, its `{#if dbgPct != null}…{/if}` markup, and the `.dbg`
+  style — now that the bar is being finalised.
 
 ## Edge cases
 
@@ -239,5 +244,6 @@ documented as tied to `FinishStillDetector.STILL_SECONDS`.
 | `src/lib/presence.js` | send `elapsed_ms`; stamp `_rxAt` + buffer on receive |
 | `src/lib/raceTimerBuffer.js` | **new** pure buffer + interpolation |
 | `src/lib/playerCard.js` | delayed timer + bar in `viewModel` |
+| `src/components/PlayerCard.svelte` | fast `now` + delayed sample read; **remove TEMP debug `%` readout** |
 | `src/components/PlayerPanel.svelte` | one ~30 fps tick while any card racing |
 | `pi/src/presence/hub.ts` | `elapsed_ms` on `PresenceFrame`/`PresenceEntry` + pass-through |
