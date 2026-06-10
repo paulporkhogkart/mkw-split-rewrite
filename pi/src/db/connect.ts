@@ -35,6 +35,8 @@ export function applySchema(db: DatabaseSync): void {
   try { db.exec('ALTER TABLE runs ADD COLUMN coins_gained INTEGER'); } catch { /* present */ }
   try { db.exec('ALTER TABLE runs ADD COLUMN coins_lost INTEGER'); } catch { /* present */ }
   try { db.exec('ALTER TABLE runs ADD COLUMN mushrooms_used INTEGER'); } catch { /* present */ }
+  // Additive: per-point HUD lap (1-based). Null for legacy rows; builder falls back to time.
+  try { db.exec('ALTER TABLE run_points ADD COLUMN lap INTEGER'); } catch { /* present */ }
   // Idempotent: at most one current WR per (course,cc). Created here (not in schema.sql)
   // so the column is guaranteed present for both fresh and migrated DBs.
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_wr_current ON world_records(course_id, cc) WHERE is_current=1');

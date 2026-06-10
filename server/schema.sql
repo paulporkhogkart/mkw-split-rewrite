@@ -68,6 +68,27 @@ CREATE TABLE IF NOT EXISTS run_points (
     score    REAL NOT NULL DEFAULT 1.0
 );
 
+CREATE TABLE IF NOT EXISTS course_models (
+    course_id        INTEGER NOT NULL REFERENCES courses(id),
+    cc               INTEGER NOT NULL,
+    model_json       TEXT NOT NULL,
+    lap_length_px    REAL NOT NULL,
+    status           TEXT NOT NULL CHECK (status IN ('graph','centerline')),
+    source_run_count INTEGER NOT NULL,
+    version          INTEGER NOT NULL,
+    built_at         TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (course_id, cc)
+);
+
+CREATE TABLE IF NOT EXISTS player_alignment (
+    player_id     INTEGER PRIMARY KEY REFERENCES players(id),
+    dx            REAL NOT NULL,
+    dy            REAL NOT NULL,
+    scale         REAL NOT NULL DEFAULT 1.0,
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    sample_count  INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS world_records (
     id           INTEGER PRIMARY KEY,
     course_id    INTEGER NOT NULL REFERENCES courses(id),
