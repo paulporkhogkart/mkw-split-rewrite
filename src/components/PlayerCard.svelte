@@ -6,10 +6,13 @@
   // $nowTick drives recompute so "last seen" advances even when an offline player sends no frames.
   $: vm = viewModel(entry, $nowTick);
   $: fig = figureFor(vm.name, vm.online);
+  // TEMP debug: raw live completion % straight off the presence entry. Remove when done.
+  $: dbgPct = entry && entry.completion != null ? (entry.completion * 100).toFixed(1) : null;
 </script>
 
 <div class="tt" class:off={!vm.online} style="--pc:{vm.color}">
   <div class="spine"></div>
+  {#if dbgPct != null}<div class="dbg">{dbgPct}%</div>{/if}<!-- TEMP debug % -->
   {#if fig}<div class="fig" style="background-image:url({fig})"></div>{/if}
   <div class="data">
     <div class="nm">{vm.name}</div>
@@ -48,6 +51,8 @@
         overflow: hidden; }
   .tt.off { background: var(--well); }
   .spine { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--pc); }
+  .dbg { position: absolute; top: 4px; right: 6px; z-index: 2; font-size: 11px; font-weight: 700;
+         color: #ffd24d; font-variant-numeric: tabular-nums; letter-spacing: .02em; } /* TEMP debug */
   .tt.off .spine { background: var(--idle); }
   .fig { position: absolute; left: 6px; bottom: 0; top: 11px; width: 33%; background-repeat: no-repeat;
          background-position: bottom center; background-size: auto 100%; }
