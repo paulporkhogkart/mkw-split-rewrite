@@ -99,4 +99,13 @@ describe('buildCourseModel (v2 per-lap)', () => {
   it('returns null with no usable points', () => {
     expect(buildCourseModel([], {})).toBeNull();
   });
+
+  it('drops the post-finish coast (a spurious lap N+1) and builds N laps', () => {
+    const run = unevenRun(1);                                              // laps 1,2; lapCumMs [1000,2000]
+    run.points.push({ t_ms: 2100, cx: 50, cy: 0, score: 1, lap: null });   // post-finish coast -> lapOf = 3
+    run.points.push({ t_ms: 2150, cx: 49, cy: 1, score: 1, lap: null });
+    const res = buildCourseModel([run, unevenRun(2)], { bins: 64 });
+    expect(res).not.toBeNull();                                            // the sparse "lap 3" must not abort the build
+    expect(res!.model.laps).toHaveLength(2);                               // only laps 1 and 2
+  });
 });

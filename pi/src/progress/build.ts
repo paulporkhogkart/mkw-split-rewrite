@@ -78,7 +78,12 @@ function lapGraph(poly: [number, number][]): { graph: CourseGraph; lengthPx: num
 export function buildCourseModel(runs: RunInput[], opts: { bins?: number } = {}): BuildResult | null {
   const bins = opts.bins ?? DEF_BINS;
   const grouped = runs.map(groupByLap);
-  const lapIndices = [...new Set(grouped.flatMap((g) => [...g.keys()]))].sort((a, b) => a - b);
+  // The real lap count; points after the final lap (post-finish coast) get a spurious lap N+1 from
+  // the time-derived lapOf — cap at N so that sparse trailing "lap" can't abort the whole build.
+  const N = Math.max(0, ...runs.map((r) => r.lapCumMs.length));
+  const lapIndices = [...new Set(grouped.flatMap((g) => [...g.keys()]))]
+    .filter((k) => N === 0 || k <= N)
+    .sort((a, b) => a - b);
   if (lapIndices.length === 0) return null;
 
   // Per-player alignment estimated once on lap 1 (cheap; the live frame is one capture).
