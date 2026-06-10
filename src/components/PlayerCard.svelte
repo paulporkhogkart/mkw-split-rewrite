@@ -6,6 +6,8 @@
   // $nowTick drives recompute so "last seen" advances even when an offline player sends no frames.
   $: vm = viewModel(entry, $nowTick);
   $: fig = figureFor(vm.name, vm.online);
+  // TEMP debug: raw projector completion %, for live-tuning the progress bar. Remove when validated.
+  $: dbgPct = entry && entry.completion != null ? (entry.completion * 100).toFixed(1) : null;
 </script>
 
 <div class="tt" class:off={!vm.online} style="--pc:{vm.color}">
@@ -39,6 +41,8 @@
         <span class="live" style="left:{vm.bar.fill * 100}%"></span>
       </div>
     {/if}
+    <!-- TEMP debug: raw % progression. Remove when validated. -->
+    {#if dbgPct != null}<div class="dbg">{dbgPct}%</div>{/if}
   </div>
 </div>
 
@@ -83,4 +87,7 @@
   .live::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--pc);
                  animation: ppulse 1.7s ease-out infinite; }
   @keyframes ppulse { 0% { transform: scale(1); opacity: .55; } 100% { transform: scale(2.6); opacity: 0; } }
+  /* TEMP debug: raw % progression. Remove when validated. */
+  .dbg { margin-top: 3px; font-family: ui-monospace, "Cascadia Code", monospace; font-size: 9px;
+         font-variant-numeric: tabular-nums; color: #ffd23f; letter-spacing: .03em; }
 </style>
