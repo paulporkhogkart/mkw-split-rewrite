@@ -22,7 +22,7 @@ class Defaults:
 
     # ── Lap counter ───────────────────────────────────────────────────────────
     lap_scan_interval: float = 0.1
-    lap_digit_threshold: float = 0.70
+    lap_digit_threshold: float = 0.60
     lap_current_digit_h: int = 40
     lap_total_digit_h: int = 28
 
@@ -39,9 +39,13 @@ class Defaults:
 
     # ── Timestamp tracker ─────────────────────────────────────────────────────
     timestamp_scan_interval: float = 0.1
+    # Conjunction consumers (6 slots ANDed per timer read) run at 0.50: the
+    # best-vs-second margin gate does the discrimination (measured 0 wrong
+    # reads at 0.50 across all clips); the threshold only needs to reject
+    # absent digits. Single-slot consumers (lap/coin) stay at 0.60.
     timestamp_digit_threshold: float = 0.50
     timestamp_digit_h: int = 42
-    timestamp_digit_dir: str = 'images/timestamps/cropped'
+    timestamp_digit_dir: str = 'images/digits'
 
     # ── Race timer (live friend-card elapsed) ─────────────────────────────────
     race_timer_resync_interval: float = 0.5

@@ -11,7 +11,7 @@ from ..utils.paths import resource_path
 
 LAP_CURRENT_ROI = (282, 979, 282 + 38, 979 + 49)
 LAP_TOTAL_ROI   = (341, 990, 341 + 27, 990 + 38)
-LAP_DIGIT_THRESHOLD = 0.70
+LAP_DIGIT_THRESHOLD = 0.60
 
 
 def load_digit_templates(
