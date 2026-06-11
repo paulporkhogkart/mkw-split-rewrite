@@ -119,14 +119,14 @@ class RaceLifecycle:
     # ── Private helpers ─────────────────────────────────────────────────────
 
     def _pause(self):
-        self._mm_rec.pause()
+        # Recorder needs no pause call: the RaceTimer clock freezes off-RACING,
+        # so its monotonic guard drops paused frames.
         self._paused_from_racing = True
         print("  [Race] Paused (entering pause screen)")
 
     def _resume(self):
         self._resuming_race      = True
         self._paused_from_racing = False
-        self._mm_rec.resume()
         print("  [Race] Resumed")
 
     def _clear_race_state(self):
@@ -174,7 +174,6 @@ class RaceLifecycle:
 
         if completed and best_total_time and not self._minimap._calibrated:
             new_threshold = self._minimap.calibrate_from_race()
-            self._mm_rec.retroactive_filter(new_threshold)
             if course and character:
                 from ..database.replay_repo import set_minimap_threshold
                 set_minimap_threshold(course, character, costume or "", new_threshold)

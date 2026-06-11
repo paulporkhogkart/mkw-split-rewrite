@@ -22,19 +22,10 @@ def _mm(score=0.9, cx=1.0, cy=2.0):
 
 def test_update_stamps_the_current_hud_lap():
     rec = MinimapRecorder(); rec.start()
-    rec.update(_mm(), 1)
-    rec.update(_mm(), 2)
-    rec.update(_mm())                          # no lap known yet -> None
+    rec.update(_mm(), 1, race_ms=100, now=1.0)
+    rec.update(_mm(), 2, race_ms=116, now=1.016)
+    rec.update(_mm(), None, race_ms=132, now=1.032)   # no lap known yet -> None
     assert [p[4] for p in rec.points] == [1, 2, None]
-
-
-def test_retroactive_filter_preserves_lap_per_point():
-    rec = MinimapRecorder()
-    # 3 points; the middle one is below threshold (its cx/cy get interpolated away),
-    # but each point's t and lap stamp must ride through untouched.
-    rec._points = [(0, 1.0, 1.0, 0.9, 1), (10, 9.0, 9.0, 0.1, 1), (20, 2.0, 2.0, 0.9, 2)]
-    rec.retroactive_filter(0.5)
-    assert [(p[0], p[4]) for p in rec.points] == [(0, 1), (10, 1), (20, 2)]
 
 
 def test_emit_run_finalized_shapes_the_line():

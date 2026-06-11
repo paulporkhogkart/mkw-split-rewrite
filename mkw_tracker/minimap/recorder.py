@@ -1,4 +1,4 @@
-"""MinimapRecorder - records minimap positions and saves to DB."""
+"""MinimapRecorder - records minimap trail points on the race clock."""
 import time
 from typing import Optional
 
@@ -6,122 +6,64 @@ from .tracker import MinimapState
 
 
 class MinimapRecorder:
-    """
-    Records raw minimap positions during a race and saves them to the DB
-    on completion or abort.
+    """Records (race_ms, cx, cy, score, lap) during a race.
 
-    Points are stored as (t_ms, cx, cy, score, lap) - lap is the live HUD lap at
-    capture time (None until the lap counter is first read), so the server can group
-    a trail by lap index exactly instead of inferring it from cumulative lap times.
-    Supports pause/resume with continuous timestamps.
+    Timestamps are the RaceTimer race clock (passed in by the main loop), so
+    trails share the clock shown on the cards and t=0 is GO. Points seen
+    before the timer's first anchor (countdown + ~0.5s) are buffered with
+    their perf time and back-stamped when the anchor arrives; the countdown
+    remainder (t < 0) is dropped. RaceTimer freezes during pauses, so the
+    monotonic guard drops paused frames - no pause bookkeeping needed here.
     """
-
-    INTERP_SCORE = 0.0
 
     def __init__(self):
-        self._points:       list           = []
-        self._race_start:   float          = 0.0
-        self._pause_start:  Optional[float] = None
-        self._paused_total: float          = 0.0
-        self._recording:    bool           = False
+        self._points:    list = []
+        self._pending:   list = []   # (perf_now, cx, cy, score, lap) pre-anchor
+        self._recording: bool = False
+        self._last_t:    int  = -1
 
     @property
     def is_recording(self) -> bool:
         return self._recording
 
     @property
-    def is_paused(self) -> bool:
-        return self._pause_start is not None
-
-    @property
     def points(self) -> list:
-        """Read-only copy of the recorded points (list of (t_ms, cx, cy, score, lap))."""
+        """Read-only copy of recorded points (list of (t_ms, cx, cy, score, lap))."""
         return list(self._points)
 
     def start(self):
         """Call when RACING begins (new race instance)."""
-        self._points       = []
-        self._race_start   = time.perf_counter()
-        self._pause_start  = None
-        self._paused_total = 0.0
-        self._recording    = True
-
-    def pause(self):
-        if self._recording and self._pause_start is None:
-            self._pause_start = time.perf_counter()
-            print("  [Replay] Recording paused")
-
-    def resume(self):
-        if self._recording and self._pause_start is not None:
-            self._paused_total += (time.perf_counter() - self._pause_start) * 1000.0
-            self._pause_start  = None
-            print("  [Replay] Recording resumed")
+        self._points    = []
+        self._pending   = []
+        self._recording = True
+        self._last_t    = -1
 
     def stop(self):
-        self._recording    = False
-        self._points       = []
-        self._pause_start  = None
-        self._paused_total = 0.0
+        self._recording = False
+        self._points    = []
+        self._pending   = []
+        self._last_t    = -1
 
-    def _elapsed_ms(self) -> int:
-        raw    = (time.perf_counter() - self._race_start) * 1000.0
-        paused = self._paused_total
-        if self._pause_start is not None:
-            paused += (time.perf_counter() - self._pause_start) * 1000.0
-        return int(raw - paused)
-
-    def update(self, mm: MinimapState, lap: Optional[int] = None):
-        """Append a position point (stamped with the current HUD lap) whenever the
-        tracker has an active position."""
-        if not self._recording or self._pause_start is not None:
+    def update(self, mm: MinimapState, lap: Optional[int] = None,
+               race_ms: Optional[int] = None, now: Optional[float] = None):
+        """Append a position point stamped with the race clock."""
+        if not self._recording or not mm.tracking or mm.cx is None:
             return
-        if not mm.tracking or mm.cx is None:
+        if now is None:
+            now = time.perf_counter()
+        if race_ms is None:
+            self._pending.append((now, mm.cx_smooth, mm.cy_smooth,
+                                  mm.last_score, lap))
             return
-        t_ms = self._elapsed_ms()
-        self._points.append((t_ms, mm.cx_smooth, mm.cy_smooth, mm.last_score, lap))
-
-    def retroactive_filter(self, threshold: float):
-        """
-        Filter ALL recorded points using the calibrated threshold, then
-        linearly interpolate over the removed gaps.
-        """
-        if not self._points:
+        if self._pending:
+            for p_now, cx, cy, sc, lp in self._pending:
+                t = int(round(race_ms - (now - p_now) * 1000.0))
+                if 0 <= t and t > self._last_t:
+                    self._points.append((t, cx, cy, sc, lp))
+                    self._last_t = t
+            self._pending = []
+        t = int(race_ms)
+        if t <= self._last_t:
             return
-
-        good = [(t, cx, cy, sc, lap) for t, cx, cy, sc, lap in self._points if sc >= threshold]
-        if len(good) < 2:
-            print(f"  [Replay] retroactive_filter: too few good points ({len(good)}), keeping original")
-            return
-
-        good_ts  = [p[0] for p in good]
-        good_cxs = [p[1] for p in good]
-        good_cys = [p[2] for p in good]
-
-        def _interp(ts_out, ts_in, vals_in):
-            out = []
-            for t in ts_out:
-                if t <= ts_in[0]:
-                    out.append(vals_in[0])
-                elif t >= ts_in[-1]:
-                    out.append(vals_in[-1])
-                else:
-                    lo, hi = 0, len(ts_in) - 1
-                    while lo + 1 < hi:
-                        mid = (lo + hi) // 2
-                        if ts_in[mid] <= t:
-                            lo = mid
-                        else:
-                            hi = mid
-                    frac = (t - ts_in[lo]) / (ts_in[hi] - ts_in[lo])
-                    out.append(vals_in[lo] + frac * (vals_in[hi] - vals_in[lo]))
-            return out
-
-        orig_ts = [p[0] for p in self._points]
-        new_cxs = _interp(orig_ts, good_ts, good_cxs)
-        new_cys = _interp(orig_ts, good_ts, good_cys)
-
-        removed = sum(1 for p in self._points if p[3] < threshold)
-        self._points = [(t, cx, cy, self._points[i][3], self._points[i][4])
-                        for i, (t, cx, cy) in enumerate(zip(orig_ts, new_cxs, new_cys))]
-        print(f"  [Replay] Retroactive filter: removed {removed}/{len(self._points)} "
-              f"points below thr={threshold:.3f}")
+        self._points.append((t, mm.cx_smooth, mm.cy_smooth, mm.last_score, lap))
+        self._last_t = t

@@ -1085,7 +1085,6 @@ def run(args):
         if finish_just_detected and not minimap._calibrated:
             sel = selection
             new_thr = minimap.calibrate_from_race()
-            mm_rec.retroactive_filter(new_thr)
             if sel.course and sel.character:
                 from .database.replay_repo import set_minimap_threshold
                 set_minimap_threshold(sel.course, sel.character,
@@ -1097,7 +1096,6 @@ def run(args):
             if lap_state.current_lap == total_laps and total_laps > 0:
                 sel     = selection
                 new_thr = minimap.calibrate_from_race()
-                mm_rec.retroactive_filter(new_thr)
                 if sel.course and sel.character:
                     from .database.replay_repo import set_minimap_threshold
                     set_minimap_threshold(sel.course, sel.character,
