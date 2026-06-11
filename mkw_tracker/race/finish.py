@@ -1,4 +1,4 @@
-"""FinishDetector, FinishState, load_finish_templates."""
+﻿"""FinishDetector, FinishState, load_finish_templates."""
 import os
 import time
 import cv2
@@ -123,7 +123,7 @@ class FinishValueLatch:
     TOLERANCE_MS    = 800
     LAP_REFRACTORY_S = 1.0
 
-    def __init__(self, templates=None, digit_dir: str = 'images/timestamps/cropped',
+    def __init__(self, templates=None, digit_dir: str = 'images/digits',
                  digit_h: int = 42, digit_threshold: float = 0.50):
         from .timer import read_timer_ms
         from .laps import load_digit_templates

@@ -1,4 +1,4 @@
-"""RaceTimer - live in-race elapsed estimate for the friend-card timer.
+﻿"""RaceTimer - live in-race elapsed estimate for the friend-card timer.
 
 Produces the engine's best estimate of the *real* in-game elapsed ms during
 RACING, cheaply: a wall-clock counter anchored on the existing digit timer read
@@ -38,7 +38,7 @@ def read_timer_ms(frame, templates, threshold: float) -> Optional[int]:
 
 
 class RaceTimer:
-    def __init__(self, digit_dir: str = 'images/timestamps/cropped', digit_h: int = 42,
+    def __init__(self, digit_dir: str = 'images/digits', digit_h: int = 42,
                  digit_threshold: float = 0.50, resync_interval: float = 0.5,
                  tolerance_ms: int = 300, forward_confirm: int = 3, templates=None):
         self._templates = templates if templates is not None else load_digit_templates(digit_dir, digit_h)

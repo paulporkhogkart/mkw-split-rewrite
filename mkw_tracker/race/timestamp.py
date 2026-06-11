@@ -1,4 +1,4 @@
-"""TimestampTracker, TimestampState."""
+﻿"""TimestampTracker, TimestampState."""
 import time
 import cv2
 import numpy as np
@@ -51,7 +51,7 @@ class TimestampTracker:
 
     def __init__(
         self,
-        digit_dir: str = 'images/timestamps/cropped',
+        digit_dir: str = 'images/digits',
         scan_interval: float = 0.1,
         digit_h: int = 42,
     ):

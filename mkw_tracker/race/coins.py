@@ -1,4 +1,4 @@
-"""CoinTracker, CoinState."""
+﻿"""CoinTracker, CoinState."""
 import os
 import time
 import cv2
@@ -26,7 +26,7 @@ class CoinTracker:
 
     def __init__(
         self,
-        digit_dir: str = 'images/timestamps/cropped',
+        digit_dir: str = 'images/digits',
         scan_interval: float = 0.1,
         digit_h: int = 35,
     ):

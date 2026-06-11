@@ -1,4 +1,4 @@
-"""LapTracker, LapState, digit template loading."""
+﻿"""LapTracker, LapState, digit template loading."""
 import os
 import time
 import cv2
@@ -17,43 +17,38 @@ LAP_DIGIT_THRESHOLD = 0.70
 def load_digit_templates(
     directory: str,
     target_height: int,
-    binary_thresh: int = 127,
+    blur_ksize: int = 3,
 ) -> Dict[str, np.ndarray]:
-    """Load digit templates from *directory*, scaled to *target_height*."""
+    """Load grayscale common-canvas digit templates, scaled so the glyph is
+    ~target_height tall (canvas = glyph + 2*2px pad, built by
+    scripts/harvest_digit_templates.py from real capture). All ten templates
+    share one shape - matching compares every candidate over the same
+    support, which is what stops a narrow '1' from winning inside a damaged
+    '8'."""
     templates: Dict[str, np.ndarray] = {}
     directory = resource_path(directory)
     if not os.path.exists(directory):
         print(f"[LapTracker] Template directory not found: {directory}")
         return templates
 
+    out_h = out_w = 0
     for filename in sorted(os.listdir(directory)):
-        if not filename.lower().endswith('.png'):
-            continue
         stem = filename[:-4]
-        if not (len(stem) == 1 and stem.isdigit()):
+        if not filename.lower().endswith('.png') or not (len(stem) == 1 and stem.isdigit()):
             continue
-        path = os.path.join(directory, filename)
-        src  = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+        src = cv2.imread(os.path.join(directory, filename), cv2.IMREAD_GRAYSCALE)
         if src is None:
-            print(f"[WARN] Could not load {path}")
+            print(f"[WARN] Could not load {filename}")
             continue
-
-        _, binary = cv2.threshold(src, binary_thresh, 255, cv2.THRESH_BINARY)
-        coords = cv2.findNonZero(binary)
-        if coords is None:
-            continue
-        x, y, w, h = cv2.boundingRect(coords)
-        cropped = binary[y:y + h, x:x + w]
-
-        scale  = target_height / h
-        new_w  = max(1, int(w * scale))
+        scale  = target_height / (src.shape[0] - 4)      # canvas pad = 2 each side
+        out_w  = max(1, int(round(src.shape[1] * scale)))
+        out_h  = max(1, int(round(src.shape[0] * scale)))
         interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
-        scaled = cv2.resize(cropped, (new_w, target_height), interpolation=interp)
-        _, scaled = cv2.threshold(scaled, 127, 255, cv2.THRESH_BINARY)
-        templates[stem] = scaled
+        scaled = cv2.resize(src, (out_w, out_h), interpolation=interp)
+        templates[stem] = cv2.GaussianBlur(scaled, (blur_ksize, blur_ksize), 0)
 
     print(f"[LapTracker] Loaded {len(templates)} digit templates "
-          f"(target h={target_height}px) from '{directory}'")
+          f"(glyph h~{target_height}px, canvas {out_h}x{out_w}) from '{directory}'")
     return templates
 
 
@@ -62,45 +57,43 @@ def read_digit_roi(
     roi: tuple,
     templates: Dict[str, np.ndarray],
     threshold: float = LAP_DIGIT_THRESHOLD,
-    binary_thresh: int = 170,
+    binary_thresh: int = 170,            # kept for call-site compatibility; unused
     reconfirm_digit: Optional[int] = None,
     reconfirm_threshold: float = 0.85,
+    margin: float = 0.05,
 ) -> tuple:
-    """Crop *roi* from *frame* and match against *templates*. Returns (digit, score)."""
+    """Match the slot against all digit templates over a common support.
+
+    Grayscale NCC (TM_CCOEFF_NORMED) - gain/offset invariant, survives washed
+    capture. Returns (digit, score); (None, best_score) when below threshold
+    OR when the winner fails the best-vs-second margin (an ambiguous slot is
+    safer unread than guessed: every consumer re-reads)."""
     x1, y1, x2, y2 = roi
     crop = frame[y1:y2, x1:x2]
-    if crop.size == 0:
+    if crop.size == 0 or not templates:
         return None, 0.0
-
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop
-    _, processed = cv2.threshold(gray, binary_thresh, 255, cv2.THRESH_BINARY)
+    gray = cv2.GaussianBlur(gray, (3, 3), 0)
 
     def _score(tmpl: np.ndarray) -> float:
-        if tmpl.shape[0] > processed.shape[0] or tmpl.shape[1] > processed.shape[1]:
+        if tmpl.shape[0] > gray.shape[0] or tmpl.shape[1] > gray.shape[1]:
             return 0.0
-        result = cv2.matchTemplate(processed, tmpl, cv2.TM_CCOEFF_NORMED)
+        result = cv2.matchTemplate(gray, tmpl, cv2.TM_CCOEFF_NORMED)
         return float(cv2.minMaxLoc(result)[1])
 
-    reconfirm_score: float = 0.0
     reconfirm_key = str(reconfirm_digit) if reconfirm_digit is not None else None
     if reconfirm_key and reconfirm_key in templates:
-        reconfirm_score = _score(templates[reconfirm_key])
-        if reconfirm_score >= reconfirm_threshold:
-            return reconfirm_digit, reconfirm_score
+        s = _score(templates[reconfirm_key])
+        if s >= reconfirm_threshold:
+            return reconfirm_digit, s
 
-    best_name: Optional[str] = reconfirm_key if reconfirm_score >= threshold else None
-    best_score: float = reconfirm_score if reconfirm_score >= threshold else 0.0
-    for name, tmpl in templates.items():
-        if name == reconfirm_key:
-            continue
-        s = _score(tmpl)
-        if s > best_score:
-            best_score = s
-            best_name  = name
-
-    if best_score < threshold or best_name is None:
-        return None, best_score
-    return int(best_name), best_score
+    scores = sorted(((name, _score(t)) for name, t in templates.items()),
+                    key=lambda kv: kv[1], reverse=True)
+    best_name, best = scores[0]
+    second = scores[1][1] if len(scores) > 1 else 0.0
+    if best < threshold or (best - second) < margin:
+        return None, best
+    return int(best_name), best
 
 
 @dataclass
@@ -116,7 +109,7 @@ class LapTracker:
 
     def __init__(
         self,
-        digit_dir: str = 'images/timestamps/cropped',
+        digit_dir: str = 'images/digits',
         scan_interval: float = 0.1,
         current_lap_digit_h: int = 40,
         total_laps_digit_h:  int = 28,
