@@ -69,7 +69,13 @@ export function extractGraph(skel: Uint8Array, w: number, h: number): { nodes: R
       if (!on(qi, qj) || nodeOf[idx(qi, qj)] === pnode) continue;     // off, or internal to this node
       if (traced.has(key(idx(pi, pj), idx(qi, qj)))) continue;
       const cells: [number, number][] = [[pi, pj], [qi, qj]];
-      let prevI = pi, prevJ = pj, curI = qi, curJ = qj;
+      // Excluding only `prev` is not enough: thinning residue at multi-lap
+      // crossings can leave small pixel cycles with no node pixel on them, and
+      // a prev-only walk orbits such a cycle forever (real-data OOM: the walk
+      // allocated 4GB of cells on one KTB trail). A revisited pixel can never
+      // be part of a simple node-to-node chain - abandon the chain instead.
+      const visited = new Set<number>([idx(pi, pj), idx(qi, qj)]);
+      let prevI = pi, prevJ = pj, curI = qi, curJ = qj, looped = false;
       while (nodeOf[idx(curI, curJ)] < 0) {                            // walk path pixels to the next node
         // next = a set neighbour that isn't prev; prefer one NOT 8-adjacent to prev (the true forward
         // step) so a path pixel with a staircase sibling in prev's run doesn't divert the trace.
@@ -82,9 +88,13 @@ export function extractGraph(skel: Uint8Array, w: number, h: number): { nodes: R
         }
         if (ni < 0) { ni = fbI; nj = fbJ; }
         if (ni < 0) break;
+        const nk = idx(ni, nj);
+        if (nodeOf[nk] < 0 && visited.has(nk)) { looped = true; break; }
+        visited.add(nk);
         prevI = curI; prevJ = curJ; curI = ni; curJ = nj;
         cells.push([curI, curJ]);
       }
+      if (looped) continue;                                            // skeleton-artifact cycle: drop chain
       if (nodeOf[idx(curI, curJ)] < 0) continue;                       // never reached a node
       traced.add(key(idx(pi, pj), idx(qi, qj)));
       const sl = cells[cells.length - 2];

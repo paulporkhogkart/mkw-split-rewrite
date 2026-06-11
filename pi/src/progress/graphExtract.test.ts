@@ -35,4 +35,20 @@ describe('extractGraph', () => {
     expect(g.edges.length).toBe(1);
     expect(g.edges[0].a).toBe(g.edges[0].b);                    // cyclic
   });
+
+  it('terminates on dense non-thinned clumps (chain walks must be bounded)', { timeout: 5000 }, () => {
+    // Zhang-Suen residue at multi-lap crossings can leave thick clumps whose
+    // pixel cycles trap a prev-only walk forever (real-data OOM: koops trail).
+    // Any input must terminate with every chain bounded by the pixel count.
+    const { b, w, h } = grid([
+      '#.........',
+      '.####.....',
+      '.####.....',
+      '.####.....',
+      '..........',
+    ]);
+    const g = extractGraph(b, w, h);
+    const onCount = b.reduce((s, v) => s + v, 0);
+    for (const e of g.edges) expect(e.cells.length).toBeLessThanOrEqual(onCount + 1);
+  });
 });

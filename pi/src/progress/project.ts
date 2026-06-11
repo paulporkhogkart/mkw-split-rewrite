@@ -4,9 +4,13 @@ import type { CourseModel, GraphEdge, ProjState, Obs } from './types';
 const EPS_BACK = 0.004;       // backward tolerance in within-lap progress
 const REACH_K = 2.5;          // forward window = K * pixelsMoved / lapLengthPx
 const EPS_FWD_MIN = 0.02;     // minimum forward reach in progress
-const MATCH_DIST = 60;        // px; nearest edge beyond this -> hold/bootstrap
 const RATE_ALPHA = 0.2;       // pace EMA (within-course completion per ms)
 const GLIDE_MAX_MS = 2000;    // hold paths dead-reckon at pace for at most this long
+// Mutable so the projector-lab sweep can tune against recorded trails;
+// production code treats it as a constant.
+export const TUNING = {
+  matchDist: 60,              // px; nearest edge beyond this -> hold/bootstrap
+};
 // staleness is decided by the caller (hub) and passed in as obs.stale.
 
 interface PreparedEdge { edge: GraphEdge; cumFrac: number[]; }
@@ -79,7 +83,7 @@ export function projectStep(state: ProjState, m: CourseModel, pe: Prepared, obs:
     const r = nearestOnEdge(e, loP, hiP, obs.x, obs.y);
     if (r.dist < best) { best = r.dist; bestU = r.progress; }
   }
-  if (best > MATCH_DIST && tracking) return hold();
+  if (best > TUNING.matchDist && tracking) return hold();
 
   const u = Math.max(tracking ? state!.progress - EPS_BACK : 0, Math.min(1, bestU));
   const cTrue = toPct(u);
