@@ -5,6 +5,8 @@ const EPS_BACK = 0.004;       // backward tolerance in within-lap progress
 const REACH_K = 2.5;          // forward window = K * pixelsMoved / lapLengthPx
 const EPS_FWD_MIN = 0.02;     // minimum forward reach in progress
 const MATCH_DIST = 60;        // px; nearest edge beyond this -> hold/bootstrap
+const RATE_ALPHA = 0.2;       // pace EMA (within-course completion per ms)
+const GLIDE_MAX_MS = 2000;    // hold paths dead-reckon at pace for at most this long
 // staleness is decided by the caller (hub) and passed in as obs.stale.
 
 interface PreparedEdge { edge: GraphEdge; cumFrac: number[]; }
@@ -51,10 +53,20 @@ export function projectStep(state: ProjState, m: CourseModel, pe: Prepared, obs:
   const plap = pe.laps[k - 1];
   const toPct = (u: number) =>
     Math.max(0, Math.min(1, (lapRoute.startOffsetPx + u * lapRoute.lengthPx) / (m.totalLengthPx || 1)));
+  // Hold paths publish the anchor dead-reckoned at the learned pace (bounded),
+  // floored by the last published value so re-acquisition can never snap the
+  // bar backward; the stored anchor itself is never advanced.
+  const hold = (): { state: ProjState; completion: number | null } => {
+    if (!state) return { state, completion: null };
+    const dt = Math.max(0, obs.t - state.t);
+    const glide = state.rate != null ? state.rate * Math.min(dt, GLIDE_MAX_MS) : 0;
+    const c = Math.max(toPct(state.progress) + glide, state.pub ?? 0);
+    return { state: { ...state, pub: c }, completion: c };
+  };
   const finished = obs.lap > N;
   if (finished) return { state, completion: 1 };
-  if (obs.stale) return { state, completion: state ? toPct(state.progress) : null };
-  if (!plap || plap.edges.length === 0) return { state, completion: state ? toPct(state.progress) : null };
+  if (obs.stale) return hold();
+  if (!plap || plap.edges.length === 0) return hold();
 
   const tracking = state != null;
   const loP = tracking ? Math.max(0, state!.progress - EPS_BACK) : 0;
@@ -67,8 +79,17 @@ export function projectStep(state: ProjState, m: CourseModel, pe: Prepared, obs:
     const r = nearestOnEdge(e, loP, hiP, obs.x, obs.y);
     if (r.dist < best) { best = r.dist; bestU = r.progress; }
   }
-  if (best > MATCH_DIST && tracking) return { state, completion: toPct(state!.progress) };
+  if (best > MATCH_DIST && tracking) return hold();
 
   const u = Math.max(tracking ? state!.progress - EPS_BACK : 0, Math.min(1, bestU));
-  return { state: { edge: 0, progress: u, x: obs.x, y: obs.y, t: obs.t }, completion: toPct(u) };
+  const cTrue = toPct(u);
+  // Pace EMA on the true (un-floored) completion deltas of confident steps.
+  const dt = tracking ? Math.max(0, obs.t - state!.t) : 0;
+  const obsRate = tracking && dt > 0 ? Math.max(0, (cTrue - toPct(state!.progress)) / dt) : null;
+  const rate = !tracking ? null
+    : obsRate == null ? (state!.rate ?? null)
+    : state!.rate == null ? obsRate
+    : state!.rate + RATE_ALPHA * (obsRate - state!.rate);
+  const c = Math.max(cTrue, (tracking ? state!.pub : undefined) ?? 0);
+  return { state: { edge: 0, progress: u, x: obs.x, y: obs.y, t: obs.t, rate, pub: c }, completion: c };
 }

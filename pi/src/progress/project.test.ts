@@ -37,6 +37,41 @@ describe('projectStep (distance, per-lap)', () => {
     expect(projectStep({ edge: 0, progress: 0.5, x: 5, y: 0, t: 0 }, M, pe, obs(9, 9, 1, 9, true)).completion).toBeCloseTo((0 + 0.5 * 40) / 80, 4);
   });
 
+  it('learns a pace EMA from confident steps', () => {
+    const pe = prepareModel(M);
+    let r = projectStep(null, M, pe, obs(10, 0, 1, 0));
+    expect(r.state!.rate ?? null).toBeNull();                  // one fix: no pace yet
+    r = projectStep(r.state, M, pe, obs(10, 8, 1, 1000));      // +8px course = +0.1 completion over 1s
+    expect(r.state!.rate).toBeCloseTo(0.1 / 1000, 6);
+  });
+
+  it('glides on stale at the learned pace, capped at GLIDE_MAX_MS', () => {
+    const pe = prepareModel(M);
+    let r = projectStep(null, M, pe, obs(10, 0, 1, 0));
+    r = projectStep(r.state, M, pe, obs(10, 8, 1, 1000));      // anchor 0.225, rate 1e-4/ms
+    expect(r.completion).toBeCloseTo(0.225, 3);
+    let h = projectStep(r.state, M, pe, obs(0, 0, 1, 1500, true));    // stale +500ms
+    expect(h.completion).toBeCloseTo(0.225 + 1e-4 * 500, 3);
+    h = projectStep(h.state, M, pe, obs(0, 0, 1, 2500, true));        // stale +1500ms
+    expect(h.completion).toBeCloseTo(0.225 + 1e-4 * 1500, 3);
+    h = projectStep(h.state, M, pe, obs(0, 0, 1, 9000, true));        // way past the cap
+    expect(h.completion).toBeCloseTo(0.225 + 1e-4 * 2000, 3);         // clamped at 2s of pace
+  });
+
+  it('after a glide, re-acquisition never snaps the published value backward', () => {
+    const pe = prepareModel(M);
+    let r = projectStep(null, M, pe, obs(10, 0, 1, 0));
+    r = projectStep(r.state, M, pe, obs(10, 8, 1, 1000));             // anchor 0.225, rate 1e-4
+    const g = projectStep(r.state, M, pe, obs(0, 0, 1, 3000, true));  // glide to 0.425 (capped)
+    expect(g.completion).toBeCloseTo(0.425, 3);
+    // kart re-acquired barely past the anchor: truth ~0.2375 < glided 0.425
+    const back = projectStep(g.state, M, pe, obs(10, 9, 1, 3100));
+    expect(back.completion).toBeCloseTo(0.425, 3);                    // floored, no backward snap
+    // a later fix beyond the floor publishes truth again
+    const fwd = projectStep(back.state, M, pe, obs(0, 4, 1, 9000));   // 36px course -> 0.45
+    expect(fwd.completion!).toBeGreaterThan(0.425);
+  });
+
   it('with branch edges, picks the nearest branch -> same % whichever route you took', () => {
     // a straight main spine [0,1] with two branch arcs (bump up / bump down) over progress [0.4,0.6]
     const poly = (a: [number, number][]): [number, number][] => a;

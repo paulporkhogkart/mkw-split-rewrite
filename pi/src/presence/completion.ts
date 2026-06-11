@@ -57,7 +57,8 @@ export function makeLiveCompletion(db: DatabaseSync, cc = 150): LiveCompletion {
       // Crossing the line (lap up, in-race) seeds the NEW lap at progress 0 — its start. A blind
       // reset would let the global-nearest bootstrap snap to the lap's f≈1 END instead, which sits on
       // the very same start/finish line, freezing the bar near the boundary for the whole lap.
-      if (lap > ps.lap && lap <= N) seed = { edge: 0, progress: 0, x, y, t };
+      if (lap > ps.lap && lap <= N) seed = { edge: 0, progress: 0, x, y, t,
+                                            rate: ps.st?.rate ?? null, pub: ps.st?.pub };
       else if (lap < ps.lap) seed = null;                                  // restart / new run -> cold bootstrap
     } else if (ps) seed = null;                                            // course changed -> cold bootstrap
     const r = projectStep(seed, entry.m, entry.pe, { x, y, lap, totLap: totLap ?? N, t, stale });

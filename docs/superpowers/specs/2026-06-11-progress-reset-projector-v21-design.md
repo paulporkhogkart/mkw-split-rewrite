@@ -43,21 +43,27 @@ without operator action:
 
 `progress/project.ts`, behind the same `projectStep` seam:
 
-- **Pace estimate**: `ProjState` gains `rate` (within-course progress per
+- **Pace estimate**: `ProjState` gains `rate` (within-course completion per
   ms), an EMA (alpha 0.2) updated on each confident step with `dt > 0`,
   clamped to >= 0. No DB dependency - the player's own live pace.
-- **Forward reach** becomes the max of the current movement term and a time
-  term: `reach = max(EPS_FWD_MIN, REACH_K * movedPx / lapLengthPx,
-  K_T * rate * dt)`. Strictly-wider-than-today, so no new failure mode; the
-  time term keeps the window honest when position jitter no longer inflates
-  `movedPx` (post-badge) and self-widens across gaps via `dt`.
-- **Bounded glide instead of freeze**: on the hold paths (stale, no-match)
-  with a known rate, completion = held progress + `rate * dt`, capped at
-  `rate * GLIDE_MAX_MS` (2000ms) past the anchor. Display-only: the stored
-  anchor (`state.progress`) is not advanced, so re-acquisition still
-  projects from the last confirmed fix. Rate unknown -> freeze exactly as
-  today. The `!pos` path in presence/completion.ts (state deleted) is
-  unchanged.
+- **Forward reach: unchanged.** (The planned time term was dropped during
+  implementation: nearest-point projection moves at most as far as the
+  position does, and `movedPx` is measured from the last *confirmed* fix, so
+  the movement window already self-widens across gaps. A time term could
+  never admit a match the movement term excludes.)
+- **Bounded glide instead of freeze, with a monotonic display floor**: on
+  the hold paths (stale, no-match) with a known rate, completion = held
+  progress + `rate * min(dt, GLIDE_MAX_MS=2000)`. The anchor
+  (`state.progress`) is not advanced, so re-acquisition still projects from
+  the last confirmed fix - and the new `pub` field (last published
+  completion) floors every subsequent publish, so the bar never snaps
+  backward when reality (the re-acquired projection) is behind the glide;
+  it holds until the kart catches up. This matches the projector's existing
+  no-backward semantics (EPS_BACK) and also smooths the lap-seam re-seed.
+  Its real payoff is off-model excursions (shortcuts beyond MATCH_DIST):
+  the bar glides through them at pace instead of freezing for seconds.
+  Rate unknown -> freeze exactly as today. The `!pos` path in
+  presence/completion.ts (state deleted) is unchanged.
 
 Rejected again for the record: time-only completion (`elapsed/expected`) -
 smoother but positionally dishonest; distance stays the backbone, time is a

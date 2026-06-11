@@ -25,7 +25,11 @@ export interface RunInput {
   lapCumMs: number[];                      // cumulative lap end-times (run_laps), ascending
 }
 
-export type ProjState = { edge: number; progress: number; x: number; y: number; t: number } | null;
+export type ProjState = {
+  edge: number; progress: number; x: number; y: number; t: number;
+  rate?: number | null;   // within-course completion per ms (EMA of confident steps)
+  pub?: number;           // last published completion - monotonic display floor
+} | null;
 export interface Obs { x: number; y: number; lap: number; totLap: number; t: number; stale: boolean; }
 
 /** One lap's route (a CourseGraph scoped to a single lap) plus its place in the race. */
