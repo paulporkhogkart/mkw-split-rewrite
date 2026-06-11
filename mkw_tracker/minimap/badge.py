@@ -67,7 +67,9 @@ def refine_seed_centre(roi: np.ndarray, cx: int, cy: int,
         if mx > best:
             half = tpl.shape[0] // 2
             best, bx, by = mx, x1 + loc[0] + half, y1 + loc[1] + half
-    if best < 0.2:
+    # Floor between terrain-noise peaks (<=0.31 measured) and seed-time ring
+    # scores (>=0.49 across the bootest/koops/short clips). No ring -> no move.
+    if best < 0.35:
         return cx, cy
     # clamp to the window: a stronger ring elsewhere must not steal the seed
     bx = max(cx - window, min(cx + window, bx))

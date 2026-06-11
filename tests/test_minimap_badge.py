@@ -80,3 +80,22 @@ def test_not_ready_returns_zero():
     assert score == 0.0 and pos is None
     b.clear()
     assert not b.ready
+
+
+def test_refine_seed_centre_recovers_offset():
+    """An 8px-off stored seed snaps onto the drawn ring centre."""
+    roi = draw_badge(make_roi(), 170, 190)
+    cx, cy = refine_seed_centre(roi, 178, 187)
+    assert abs(cx - 170) <= 1 and abs(cy - 190) <= 1
+
+
+def test_refine_seed_centre_no_ring_is_identity():
+    roi = make_roi(seed=9)
+    assert refine_seed_centre(roi, 100, 120) == (100, 120)
+
+
+def test_refine_seed_centre_clamps_to_window():
+    """A ring far outside the window cannot steal the seed."""
+    roi = draw_badge(make_roi(), 170, 190)
+    cx, cy = refine_seed_centre(roi, 250, 190, window=16)
+    assert abs(cx - 250) <= 16 and abs(cy - 190) <= 16
