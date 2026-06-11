@@ -83,20 +83,28 @@ class BadgeTemplate:
     def __init__(self):
         self._tpl:  Optional[np.ndarray] = None   # (44, 44, 3) float32 Lab
         self._mask: Optional[np.ndarray] = None   # (44, 44, 3) float32 0/1
+        self._bgr:  Optional[np.ndarray] = None   # (44, 44, 3) uint8, for display
 
     @property
     def ready(self) -> bool:
         return self._tpl is not None
 
+    @property
+    def bgr(self) -> Optional[np.ndarray]:
+        """The raw BGR badge crop (for overlay / IPC sample display)."""
+        return self._bgr
+
     def clear(self):
         self._tpl = None
         self._mask = None
+        self._bgr = None
 
     def build(self, roi: np.ndarray, cx: int, cy: int) -> bool:
         h = BADGE_HALF
         crop = _crop_padded(roi, cx - h, cy - h, cx + h, cy + h)
         if crop.shape[:2] != (2 * h, 2 * h):
             return False
+        self._bgr = crop.copy()
         self._tpl = _lab(crop)
         m = np.zeros((2 * h, 2 * h), dtype=np.float32)
         cv2.circle(m, (h, h), BADGE_MASK_R, 1.0, -1)

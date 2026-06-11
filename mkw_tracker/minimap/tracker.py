@@ -1,19 +1,19 @@
-"""MinimapTracker – Hough-first tracking.
+"""MinimapTracker - Hough-first ring detection, badge-NCC identity + position.
 
 Each frame during RACING:
 
   1. Find the player ring with HoughCircles in the search window.
-  2. Score the character template at the ring centre (single-point correlation).
+  2. Score the badge template (face + ring, masked Lab NCC) slid around the
+     ring centre; the correlation argmax is the position candidate.
   3. Classify by score:
-       ≥ confident_score  →  TRACKING   (full confidence, calibrate)
-       ≥ accept_score     →  RING_ONLY  (ring found, face swapped: hazard/ghost)
-       <  accept_score    →  reject     (probably another player's ring)
-  4. No ring found        →  miss
+       >= confident_score  ->  TRACKING   (full confidence, calibrate)
+       >= accept_score     ->  RING_ONLY  (ring found, face swapped/washed)
+       <  accept_score     ->  reject     (probably another player's ring)
+  4. No ring found         ->  miss
 
-This inverts the old template-first design.  Ghosts that appear without a ring
-are automatically rejected at step 1.  The character template is only used for
-identity confirmation at a known ring position - so it never needs to slide
-across the search window.
+Ring-first means markers without a ring (the TT ghost) are rejected at step 1.
+Publishing the badge argmax instead of the raw Hough centre is what keeps the
+published position pixel-stable (see the 2026-06-11 design spec).
 """
 import math
 import cv2
@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from ..detection.screen import Screen
+from .badge import BadgeTemplate, refine_seed_centre
 from ..database.replay_repo import (
     get_minimap_threshold, set_minimap_threshold,
     get_minimap_roi, set_minimap_roi,
@@ -34,13 +35,9 @@ MINIMAP_ROI = (1442, 251, 466, 796)   # x, y, w, h
 # ── Tuning constants ──────────────────────────────────────────────────────────
 _MM_RADIUS_MIN        = 12
 _MM_RADIUS_MAX        = 42
-_MM_CHAR_W_F          = 0.30   # interior crop width  = radius × this
-_MM_CHAR_H_F          = 0.45   # interior crop height = radius × this
-_MM_CHAR_W_PX         = 24     # template canonical width
-_MM_CHAR_H_PX         = 36     # template canonical height
 _MM_EMA_ALPHA         = 0.25
-_MM_ACCEPT_SCORE      = 0.18   # minimum template score to accept a ring hit
-_MM_CONFIDENT_SCORE   = 0.90   # default confidence threshold (auto-calibrated)
+_MM_ACCEPT_SCORE      = 0.45   # badge-NCC floor: below = wrong target
+_MM_CONFIDENT_SCORE   = 0.65   # default confidence threshold (auto-calibrated)
 _MM_MAX_JUMP_PX       = 40     # position jump that triggers re-acquire
 _MM_REACQUIRE_FRAMES  = 4      # consecutive confirmed hits to commit after jump
 _MM_LOST_FRAMES       = 36     # consecutive misses before entering LOST
@@ -57,8 +54,8 @@ _MM_HOUGH_PARAM2      = 18
 # Should be just inside the ring's inner edge: _MM_HOUGH_R_MIN - ~4px.
 _MM_HOUGH_FACE_MASK_R = 13
 _MM_CALIB_MARGIN_BASE = 0.50
-_MM_CALIB_MIN         = 0.75
-_MM_CALIB_MAX         = 0.98
+_MM_CALIB_MIN         = 0.55
+_MM_CALIB_MAX         = 0.90
 
 
 # ── Internal state enum ───────────────────────────────────────────────────────
@@ -121,9 +118,8 @@ class MinimapTracker:
     def __init__(self):
         self._roi_x, self._roi_y = MINIMAP_ROI[0], MINIMAP_ROI[1]
         self._roi_w, self._roi_h = MINIMAP_ROI[2], MINIMAP_ROI[3]
-        self._char_template: Optional[np.ndarray] = None
-        self._char_mask:     Optional[np.ndarray] = None
-        self._clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
+        self._badge = BadgeTemplate()
+        self._last_refined: Optional[tuple] = None
         self._ts    = _TrackState.IDLE
         self.state  = MinimapState()
         self._miss_streak:      int   = 0
@@ -140,8 +136,8 @@ class MinimapTracker:
         self.state             = MinimapState()
         self._miss_streak      = 0
         self._reacquire_streak = 0
-        self._char_template    = None
-        self._char_mask        = None
+        self._badge.clear()
+        self._last_refined     = None
         self._confident_score  = _MM_CONFIDENT_SCORE
         self._calib_scores     = []
         self._calibrated       = False
@@ -154,7 +150,7 @@ class MinimapTracker:
              frame: Optional[np.ndarray] = None,
              confident_score: Optional[float] = None):
         if radius == 0:
-            radius = (_MM_RADIUS_MIN + _MM_RADIUS_MAX) // 2
+            radius = (_MM_HOUGH_R_MIN + _MM_HOUGH_R_MAX) // 2   # stay inside the Hough band
         self._confident_score   = confident_score if confident_score is not None \
                                   else _MM_CONFIDENT_SCORE
         self.state.cx           = cx_full
@@ -173,19 +169,17 @@ class MinimapTracker:
         if frame is not None:
             roi = frame[self._roi_y:self._roi_y + self._roi_h,
                         self._roi_x:self._roi_x + self._roi_w]
-            interior = self._crop_interior(
-                roi,
-                float(cx_full - self._roi_x),
-                float(cy_full - self._roi_y),
-                float(radius),
-            )
-            if interior is not None:
-                self._char_template = self._make_template(interior)
-                self._char_mask     = self._make_circle_mask(
-                    _MM_CHAR_H_PX, _MM_CHAR_W_PX)
-                print("  [MinimapTracker] Character template locked from seed frame")
+            cx_r, cy_r = refine_seed_centre(
+                roi, cx_full - self._roi_x, cy_full - self._roi_y)
+            if self._badge.build(roi, cx_r, cy_r):
+                # keep the published point consistent with the template centre
+                self.state.cx        = cx_r + self._roi_x
+                self.state.cy        = cy_r + self._roi_y
+                self.state.cx_smooth = float(self.state.cx)
+                self.state.cy_smooth = float(self.state.cy)
+                print("  [MinimapTracker] Badge template locked from seed frame")
             else:
-                print("  [MinimapTracker] WARNING: could not crop template at seed point")
+                print("  [MinimapTracker] WARNING: could not build badge template at seed point")
 
     def calibrate_from_race(self) -> float:
         """
@@ -220,7 +214,7 @@ class MinimapTracker:
     def update(self, frame: np.ndarray, screen: Screen) -> MinimapState:
         if screen != Screen.RACING:
             return self.state
-        if self._char_template is None:
+        if not self._badge.ready:
             return self.state
 
         roi = frame[self._roi_y:self._roi_y + self._roi_h,
@@ -248,11 +242,11 @@ class MinimapTracker:
             self._sync_state_field()
             return self.state
 
-        # ── Step 2: score character template at ring centre ───────────────────
+        # ── Step 2: score the badge template at the ring centre ───────────────
         r = hr if hr > 0 else (self.state.radius
                                 if self.state.radius > 0
-                                else (_MM_RADIUS_MIN + _MM_RADIUS_MAX) // 2)
-        score = self._score_at(roi, hx, hy, r)
+                                else (_MM_HOUGH_R_MIN + _MM_HOUGH_R_MAX) // 2)
+        score = self._score_at(roi, hx, hy)
         self.state.last_score = score
 
         if score < _MM_ACCEPT_SCORE:
@@ -270,6 +264,8 @@ class MinimapTracker:
     # ── Confirmed-hit state machine ───────────────────────────────────────────
 
     def _on_confirmed_hit(self, cx_r: int, cy_r: int, radius: int, score: float):
+        if self._last_refined is not None:
+            cx_r, cy_r = self._last_refined
         dist      = self._dist_from_smooth(cx_r, cy_r)
         confident = score >= self._confident_score
 
@@ -391,56 +387,10 @@ class MinimapTracker:
         )
         return True, int(best[0]) + x1, int(best[1]) + y1, int(best[2])
 
-    # ── Template scoring ──────────────────────────────────────────────────────
+    # ── Badge scoring ─────────────────────────────────────────────────────────
 
-    def _score_at(self, roi: np.ndarray, cx_r: int, cy_r: int,
-                  radius: int) -> float:
-        """
-        Single-point template correlation at the ring centre.
-        Crops the character interior, normalises to the template canonical size,
-        and returns TM_CCORR_NORMED score (1×1 result - no sliding window).
-        """
-        interior = self._crop_interior(roi, float(cx_r), float(cy_r),
-                                        float(radius))
-        if interior is None:
-            return 0.0
-        patch = self._make_template(interior)
-        # patch and self._char_template are identical shape → result is (1, 1)
-        result = cv2.matchTemplate(
-            patch, self._char_template, cv2.TM_CCORR_NORMED,
-            mask=self._char_mask,
-        )
-        return float(result[0, 0])
-
-    # ── Template / mask construction ──────────────────────────────────────────
-
-    def _make_template(self, bgr: np.ndarray) -> np.ndarray:
-        """Resize to canonical size and convert to normalised HSV-CLAHE float."""
-        patch = cv2.resize(bgr, (_MM_CHAR_W_PX, _MM_CHAR_H_PX),
-                           interpolation=cv2.INTER_AREA)
-        hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
-        h   = hsv[:, :, 0].astype(np.float32) / 179.0
-        s   = hsv[:, :, 1].astype(np.float32) / 255.0
-        v   = self._clahe.apply(hsv[:, :, 2]).astype(np.float32) / 255.0
-        return np.stack([h, s, v], axis=2)
-
-    @staticmethod
-    def _make_circle_mask(h_px: int, w_px: int) -> np.ndarray:
-        mask = np.zeros((h_px, w_px), dtype=np.float32)
-        cv2.circle(mask, (w_px // 2, h_px // 2),
-                   int(round(min(h_px, w_px) * 0.45)), 255.0, -1)
-        return mask
-
-    @staticmethod
-    def _crop_interior(bgr: np.ndarray, cx: float, cy: float,
-                       r: float) -> Optional[np.ndarray]:
-        """Crop the character face interior from inside the ring."""
-        half_w = max(4, int(round(r * _MM_CHAR_W_F)))
-        half_h = max(4, int(round(r * _MM_CHAR_H_F)))
-        x1, y1 = int(round(cx)) - half_w, int(round(cy)) - half_h
-        x2, y2 = int(round(cx)) + half_w, int(round(cy)) + half_h
-        hh, ww = bgr.shape[:2]
-        if x1 < 0 or y1 < 0 or x2 > ww or y2 > hh:
-            return None
-        patch = bgr[y1:y2, x1:x2]
-        return patch if patch.size > 0 else None
+    def _score_at(self, roi: np.ndarray, cx_r: int, cy_r: int) -> float:
+        """Badge NCC at the ring centre; stashes the argmax for publishing."""
+        score, refined = self._badge.score(roi, cx_r, cy_r)
+        self._last_refined = refined
+        return score

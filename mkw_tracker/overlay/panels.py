@@ -69,14 +69,6 @@ def draw_legend(display: np.ndarray):
         y += LINE_H + 2
 
 
-def _template_to_bgr(tmpl: np.ndarray) -> np.ndarray:
-    """Convert the stored HSV-CLAHE float32 template back to a uint8 BGR image."""
-    h_ch = (tmpl[:, :, 0] * 179).astype(np.uint8)
-    s_ch = (tmpl[:, :, 1] * 255).astype(np.uint8)
-    v_ch = (tmpl[:, :, 2] * 255).astype(np.uint8)
-    return cv2.cvtColor(np.stack([h_ch, s_ch, v_ch], axis=2), cv2.COLOR_HSV2BGR)
-
-
 def draw_state_panel(
     display:    np.ndarray,
     screen:     Screen,
@@ -94,7 +86,7 @@ def draw_state_panel(
     peak_ms:    float,
     transition_count: int,
     lap_splits:     Optional[dict]       = None,
-    char_template:  Optional[np.ndarray] = None,
+    badge_bgr:      Optional[np.ndarray] = None,
 ):
     """Draw a compact state panel on the right side of the display."""
     h, w = display.shape[:2]
@@ -127,9 +119,9 @@ def draw_state_panel(
                     FONT, FONT_SMALL, (200, 200, 200), 1, cv2.LINE_AA)
         y += LINE_H
 
-    # ── Face template thumbnail ───────────────────────────────────────────────
-    if char_template is not None:
-        bgr   = _template_to_bgr(char_template)
+    # ── Badge template thumbnail ──────────────────────────────────────────────
+    if badge_bgr is not None:
+        bgr   = badge_bgr
         th, tw = bgr.shape[:2]
         thumb = cv2.resize(bgr, (tw * 3, th * 3), interpolation=cv2.INTER_NEAREST)
         # Position: just left of the minimap ROI, bottom-aligned to it

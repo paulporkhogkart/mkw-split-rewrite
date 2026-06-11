@@ -251,20 +251,13 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
         _png_b64 = None
         if _seed is not None:
             # The minimap_seeds table stores only (cx, cy, radius, conf) -
-            # no image blob.  The in-memory character template (float32
-            # HSV-CLAHE) is only available while a race is active.
-            # Try the live tracker first; fall back to null when unavailable.
-            _tmpl = getattr(minimap, "_char_template", None)
-            if _tmpl is not None:
+            # no image blob.  The in-memory badge crop is only available while
+            # a race is active. Try the live tracker; fall back to null.
+            _badge = getattr(minimap, "_badge", None)
+            _bgr = _badge.bgr if _badge is not None else None
+            if _bgr is not None:
                 try:
                     import cv2 as _cv2
-                    import numpy as _np
-                    # Convert float32 HSV-CLAHE channels back to uint8 BGR for display
-                    _h = (_tmpl[:, :, 0] * 179.0).astype(_np.uint8)
-                    _s = (_tmpl[:, :, 1] * 255.0).astype(_np.uint8)
-                    _v = (_tmpl[:, :, 2] * 255.0).astype(_np.uint8)
-                    _hsv = _np.stack([_h, _s, _v], axis=2)
-                    _bgr = _cv2.cvtColor(_hsv, _cv2.COLOR_HSV2BGR)
                     _, _buf = _cv2.imencode(".png", _bgr)
                     _png_b64 = _b64.b64encode(_buf.tobytes()).decode("ascii")
                 except Exception:
@@ -1299,7 +1292,7 @@ def run(args):
                     avg_fps=avg_fps, avg_ms=avg_ms, avg_tells=avg_tells,
                     peak_ms=peak_ms, transition_count=transition_count[0],
                     lap_splits=ts.splits,
-                    char_template=minimap._char_template,
+                    badge_bgr=minimap._badge.bgr,
                 )
 
                 cv2.imshow("MKW Tracker", display)
