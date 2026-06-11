@@ -38,7 +38,11 @@
       <div class="barwrap">
         <div class="bar"><i style="width:{vm.bar.fill * 100}%"></i></div>
         {#each vm.bar.dividers as d}<span class="tick" style="left:{d * 100}%"></span>{/each}
-        <span class="live" style="left:{vm.bar.fill * 100}%"></span>
+        {#if vm.bar.calibrating}
+          <span class="callab">calibrating</span>
+        {:else}
+          <span class="live" style="left:{vm.bar.fill * 100}%"></span>
+        {/if}
       </div>
     {/if}
   </div>
@@ -89,4 +93,8 @@
   .live::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--pc);
                  animation: ppulse 1.7s ease-out infinite; }
   @keyframes ppulse { 0% { transform: scale(1); opacity: .55; } 100% { transform: scale(2.6); opacity: 0; } }
+  /* First run on a course: no model yet, the bar shell shows placeholder lap ticks. */
+  .callab { position: absolute; top: -2px; left: 0; right: 0; text-align: center; font-size: 8px;
+            line-height: 8px; letter-spacing: .12em; text-transform: uppercase; color: var(--idle);
+            pointer-events: none; }
 </style>

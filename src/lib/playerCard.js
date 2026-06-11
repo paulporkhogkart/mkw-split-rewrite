@@ -59,12 +59,23 @@ export function viewModel(e, now = Date.now, delayed = null) {
   let fill = 0;
   if (state === "finished") fill = e.completion == null ? 1 : clamp01(e.completion);
   else if (state === "racing") fill = delayed && delayed.completion != null ? clamp01(delayed.completion) : 0;
+  // No stored model for this course yet (first finished run builds it): show the
+  // bar shell with evenly-spaced placeholder dividers and a "calibrating" label.
+  // Real dividers sit at measured distance proportions, so these are stand-ins.
+  const evenDividers = (n) =>
+    Number.isInteger(n) && n >= 2 ? Array.from({ length: n - 1 }, (_, i) => (i + 1) / n) : [];
+  let bar = null;
+  if (race) {
+    bar = e.has_model === false
+      ? { fill: state === "finished" ? 1 : 0, dividers: evenDividers(e.tot_lap), calibrating: true }
+      : { fill, dividers: Array.isArray(e.dividers) ? e.dividers : [] };
+  }
   return {
     state, name: e.name, color, online: true,
     char: e.character || null, kart: e.kart || null, trk: e.course || null, primary,
     resets: race ? (e.resets ?? 0) : null,
     pbStr: race && e.pb_ms != null ? fmtTimeMs(e.pb_ms) : null,
     delta: state === "finished" ? pbDelta(e.final_time, e.pb_ms) : null,
-    bar: race ? { fill, dividers: Array.isArray(e.dividers) ? e.dividers : [] } : null,
+    bar,
   };
 }

@@ -6,7 +6,9 @@ import type { CourseModel, ProjState } from '../progress/types';
 import { courseIdBySlug } from '../db/seasons';
 import { slugify } from '../db/slug';
 
-export interface LiveResult { completion: number | null; dividers: number[]; }
+/** `model` = a stored course model exists (false -> the bar is "calibrating":
+ *  the course has no finished run yet; the first upload builds it). */
+export interface LiveResult { completion: number | null; dividers: number[]; model: boolean; }
 
 export type LiveCompletion = ((
   course: string | null | undefined, curLap: number | null | undefined, pos: [number, number] | null | undefined,
@@ -35,18 +37,18 @@ export function makeLiveCompletion(db: DatabaseSync, cc = 150): LiveCompletion {
   const modelCache = new Map<number, { m: CourseModel; pe: Prepared; dividers: number[] } | null>();
   const pstate = new Map<number, { st: ProjState; course: number; lap: number }>();
   const fn = ((course, curLap, pos, playerId, t = Date.now(), stale = false, totLap) => {
-    if (!course) { if (playerId != null) pstate.delete(playerId); return { completion: null, dividers: [] }; }
+    if (!course) { if (playerId != null) pstate.delete(playerId); return { completion: null, dividers: [], model: false }; }
     const courseId = courseIdBySlug(db, slugify(course));
-    if (courseId == null) return { completion: null, dividers: [] };
+    if (courseId == null) return { completion: null, dividers: [], model: false };
     let entry = modelCache.get(courseId);
     if (entry === undefined) {
       const m = loadCourseModel(db, courseId, cc);
       entry = m ? { m, pe: prepareModel(m), dividers: modelDividers(m) } : null;
       modelCache.set(courseId, entry);
     }
-    if (!entry) return { completion: null, dividers: [] };
+    if (!entry) return { completion: null, dividers: [], model: false };
     const dividers = entry.dividers;
-    if (!pos) { if (playerId != null) pstate.delete(playerId); return { completion: null, dividers }; }
+    if (!pos) { if (playerId != null) pstate.delete(playerId); return { completion: null, dividers, model: true }; }
     const lap = curLap ?? 1;
     const N = entry.m.laps.length;
     const al = playerId != null ? loadPlayerAlignment(db, playerId) : { dx: 0, dy: 0, scale: 1 };
@@ -63,7 +65,7 @@ export function makeLiveCompletion(db: DatabaseSync, cc = 150): LiveCompletion {
     } else if (ps) seed = null;                                            // course changed -> cold bootstrap
     const r = projectStep(seed, entry.m, entry.pe, { x, y, lap, totLap: totLap ?? N, t, stale });
     if (playerId != null) pstate.set(playerId, { st: r.state, course: courseId, lap });
-    return { completion: r.completion, dividers };
+    return { completion: r.completion, dividers, model: true };
   }) as LiveCompletion;
   fn.invalidate = (courseId: number) => { modelCache.delete(courseId); };
   return fn;

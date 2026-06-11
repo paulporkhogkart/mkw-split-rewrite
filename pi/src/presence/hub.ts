@@ -28,6 +28,7 @@ export interface PresenceEntry {
   resets: number | null; pb_ms: number | null;
   completion: number | null; dividers: number[]; final_time: string | null; updated_at: number;
   elapsed_ms: number | null;
+  has_model: boolean;   // false -> course has no model yet (bar shows "calibrating")
 }
 
 type Sink = (msg: unknown) => void;
@@ -35,7 +36,8 @@ type Sink = (msg: unknown) => void;
 function offlineEntry(player_id: number, name: string, color: string | null, now: number): PresenceEntry {
   return { player_id, name, color, online: false, screen: null, course: null, character: null, kart: null,
            costume: null, cur_lap: null, tot_lap: null, coins: null, mushrooms: null, resets: null,
-           pb_ms: null, completion: null, dividers: [], final_time: null, updated_at: now, elapsed_ms: null };
+           pb_ms: null, completion: null, dividers: [], final_time: null, updated_at: now, elapsed_ms: null,
+           has_model: false };
 }
 
 /** In-memory live presence, keyed by the active-season roster (seeded offline so every card
@@ -72,7 +74,7 @@ export class PresenceHub {
     if (!cur) return;
     const now = this.now();
     const stale = frame.track_state != null && !FRESH_TRACK.has(frame.track_state);
-    const { completion, dividers } = this.completion(frame.course, frame.cur_lap, frame.pos, playerId, now, stale, frame.tot_lap);
+    const { completion, dividers, model } = this.completion(frame.course, frame.cur_lap, frame.pos, playerId, now, stale, frame.tot_lap);
 
     const entry: PresenceEntry = {
       player_id: playerId, name: cur.name, color: cur.color, online: true,
@@ -83,6 +85,7 @@ export class PresenceHub {
       elapsed_ms: frame.elapsed_ms ?? null,
       completion, pb_ms: this.pbForCourse(playerId, frame.course),
       dividers, final_time: frame.final_time ?? null, updated_at: now,
+      has_model: model,
     };
     this.map.set(playerId, entry);
     this.broadcast({ type: 'presence_update', player: entry });

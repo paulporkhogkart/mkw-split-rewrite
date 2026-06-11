@@ -59,6 +59,16 @@ describe('makeLiveCompletion', () => {
     expect(live('Bowsers Castle', 1, [10, 10], 1, 1100, false, 2).completion).toBeCloseTo(20 / 80, 2);   // half of lap 1  -> 20/80
   });
 
+  it('reports has-model truthfully (the calibrating signal)', () => {
+    const noModel = makeLiveCompletion(db());        // course exists, no stored model
+    expect(noModel('Bowsers Castle', 1, [10, 0], 1, 1000, false, 2).model).toBe(false);
+    expect(noModel('Nope', 1, [10, 0]).model).toBe(false);   // unknown course
+    const d = db(); seedModel(d);
+    const withModel = makeLiveCompletion(d);
+    expect(withModel('Bowsers Castle', 1, [10, 0], 1, 1000, false, 2).model).toBe(true);
+    expect(withModel('Bowsers Castle', 1, null, 1, 1000, false, 2).model).toBe(true);  // no pos, model known
+  });
+
   it('invalidate() makes the next call reload the stored model', () => {
     const d = db(); seedModel(d);
     const id = courseIdBySlug(d, slugify('Bowsers Castle'))!;
