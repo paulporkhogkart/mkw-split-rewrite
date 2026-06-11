@@ -35,7 +35,7 @@ from .detection.selection import SelectionTracker
 from .race.laps import LapTracker
 from .race.coins import CoinTracker
 from .race.timestamp import TimestampTracker
-from .race.finish import FinishDetector, FinishStillDetector, load_finish_templates
+from .race.finish import FinishDetector, FinishLatch, load_finish_templates
 from .race.mushrooms import MushroomTracker, load_mushroom_templates, MUSHROOM_ROI, MUSHROOM_TEMPLATES
 from .race.lapstats import LapStatsTracker
 from .race.timer import RaceTimer
@@ -794,12 +794,12 @@ def run(args):
     laps      = LapTracker()
     coins     = CoinTracker()
     ts        = TimestampTracker()
-    finish    = FinishStillDetector()   # final-lap finish via frozen timer (position-ROI scan disabled)
+    timer     = RaceTimer()
+    finish    = FinishLatch(templates=timer._templates)   # value latch + still fallback
     mush      = MushroomTracker()
     minimap   = MinimapTracker()
     mm_rec    = MinimapRecorder()
     lapstats  = LapStatsTracker()
-    timer     = RaceTimer()
 
     # ── IPC server ───────────────────────────────────────────────────────────
     # The WebSocket broadcaster is dev-only: the autotemplate tool subscribes to
@@ -1057,8 +1057,11 @@ def run(args):
             lapstats.update(mush_state.count)
             lapstats.update_coins(coin_state.coins)
             mm_state           = minimap.update(frame, screen)
-            mm_rec.update(mm_state, lap_state.current_lap)
             race_elapsed = timer.update(frame, screen)
+            if screen == Screen.RACING:
+                # Trail points ride the race clock (t=0 == GO); pre-anchor
+                # points are buffered + back-stamped inside the recorder.
+                mm_rec.update(mm_state, lap_state.current_lap, race_elapsed)
             if race_elapsed is not None:
                 _now_rt = time.perf_counter()
                 if _now_rt - _last_rt_emit >= 0.1:       # ~10 Hz cap on outbound
@@ -1069,13 +1072,16 @@ def run(args):
             coin_state         = coins.state
             mush_state         = mush.state
             mm_state           = minimap.state
+            race_elapsed       = None
 
         # Final-lap finish: the timer freezes (no gold/white flash) on the final
-        # lap.  See FinishStillDetector.  (Position-ROI scan stays disabled.)
+        # lap.  See FinishLatch (value latch primary, pixel-still fallback).
         _on_final_lap = (lap_state.current_lap is not None
                          and lap_state.total_laps
                          and lap_state.current_lap == lap_state.total_laps)
-        finish_just_detected  = (finish.update(frame, screen, bool(_on_final_lap))
+        finish_just_detected  = (finish.update(frame, screen, bool(_on_final_lap),
+                                               lap_inc=lap_inc,
+                                               estimate_ms=race_elapsed)
                                  and ts.total_time is None)
 
         if finish_just_detected and lap_state.current_lap is not None:
