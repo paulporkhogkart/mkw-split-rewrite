@@ -32,12 +32,23 @@ def test_lap_flash_rejected_by_estimate_guard():
     assert not l.detected
 
 
-def test_lap_inc_resets_streak():
+def test_lap_inc_arms_refractory():
+    """A lap increment suppresses latching for LAP_REFRACTORY_S, not just one feed:
+    at the lap-1 crossing the frozen split EQUALS the cumulative estimate for
+    ~300ms (measured on real footage), outliving a one-shot streak reset."""
     l = make_latch()
-    l.feed(96_713, lap_inc=False, estimate_ms=96_713)
-    l.feed(96_713, lap_inc=True, estimate_ms=96_763)    # increment mid-streak
-    assert not l.feed(96_713, lap_inc=False, estimate_ms=96_813)
-    assert not l.detected                                # streak restarted: 1 then 2 < 3
+    l.feed(19_440, lap_inc=False, estimate_ms=19_440, now=10.00)
+    l.feed(19_440, lap_inc=True,  estimate_ms=19_490, now=10.05)   # crossing
+    # frozen split still matches the estimate for a while - must stay suppressed
+    assert not l.feed(19_440, lap_inc=False, estimate_ms=19_540, now=10.10)
+    assert not l.feed(19_440, lap_inc=False, estimate_ms=19_590, now=10.15)
+    assert not l.feed(19_440, lap_inc=False, estimate_ms=19_640, now=10.20)
+    assert not l.detected
+    # after the refractory, a genuine freeze (value == estimate) latches again
+    assert not l.feed(96_713, lap_inc=False, estimate_ms=96_713, now=11.10)
+    assert not l.feed(96_713, lap_inc=False, estimate_ms=96_763, now=11.15)
+    assert l.feed(96_713, lap_inc=False, estimate_ms=96_813, now=11.20)
+    assert l.detected and l.final_ms == 96_713
 
 
 def test_none_read_resets_streak():

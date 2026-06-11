@@ -104,14 +104,24 @@ class FinishValueLatch:
       * per-read |value - RaceTimer estimate| <= TOLERANCE_MS - rejects the
         lap-split flash, whose frozen value falls behind the climbing
         cumulative estimate within a fraction of a second;
-      * lap_inc resets the streak - covers the first instants after the
-        final-lap crossing where split ~ cumulative on short races;
+      * a refractory period after any lap increment - within the first
+        ~300ms of a crossing flash the frozen split can still equal the
+        cumulative estimate (measured on real footage: the lap-1 flash
+        false-latches with this guard disabled), and a one-shot streak reset
+        is outlived by the 150ms streak rebuild. No real finish can occur
+        within LAP_REFRACTORY_S of a lap crossing;
       * a failed read resets the streak (conservative).
     The latched value IS the final total (final_ms).
     """
-    N_CONFIRM     = 3
-    READ_INTERVAL = 0.05
-    TOLERANCE_MS  = 300
+    N_CONFIRM       = 3
+    READ_INTERVAL   = 0.05
+    # Wide enough to admit the true freeze even when the RaceTimer estimate
+    # lags reality (measured ~700ms on bootest: digit misreads drag the anchor
+    # low); still rejects every real hazard - lap>=2 flash values sit SECONDS
+    # below the cumulative estimate, and the lap-1 window where split ~
+    # cumulative dies by +TOLERANCE_MS, inside LAP_REFRACTORY_S.
+    TOLERANCE_MS    = 800
+    LAP_REFRACTORY_S = 1.0
 
     def __init__(self, templates=None, digit_dir: str = 'images/timestamps/cropped',
                  digit_h: int = 42, digit_threshold: float = 0.50):
@@ -124,18 +134,21 @@ class FinishValueLatch:
         self.reset()
 
     def reset(self):
-        self.detected    = False
-        self.final_ms    = None
-        self._streak_val = None
-        self._streak_n   = 0
-        self._last_read  = 0.0
+        self.detected         = False
+        self.final_ms         = None
+        self._streak_val      = None
+        self._streak_n        = 0
+        self._last_read       = 0.0
+        self._suppress_until  = 0.0
 
     def feed(self, read_ms: Optional[int], lap_inc: bool,
-             estimate_ms: Optional[int]) -> bool:
+             estimate_ms: Optional[int], now: float = 0.0) -> bool:
         """Streak logic only (no frame I/O) - unit-testable."""
         if self.detected:
             return True
-        if lap_inc or read_ms is None or estimate_ms is None \
+        if lap_inc:
+            self._suppress_until = now + self.LAP_REFRACTORY_S
+        if now < self._suppress_until or read_ms is None or estimate_ms is None \
                 or abs(read_ms - estimate_ms) > self.TOLERANCE_MS:
             self._streak_val, self._streak_n = None, 0
             return False
@@ -155,19 +168,20 @@ class FinishValueLatch:
                now: Optional[float] = None) -> bool:
         if self.detected:
             return True
+        if now is None:
+            now = time.perf_counter()
+        if lap_inc:
+            # a lap increment must arm the refractory even between reads
+            self._suppress_until = now + self.LAP_REFRACTORY_S
+            self._streak_val, self._streak_n = None, 0
         if screen != Screen.RACING or not on_final_lap:
             self._streak_val, self._streak_n = None, 0
             return False
-        if now is None:
-            now = time.perf_counter()
         if (now - self._last_read) < self.READ_INTERVAL:
-            # a lap increment must reset the streak even between reads
-            if lap_inc:
-                self._streak_val, self._streak_n = None, 0
             return False
         self._last_read = now
         read_ms = self._read_timer_ms(frame, self._templates, self.digit_threshold)
-        return self.feed(read_ms, lap_inc, estimate_ms)
+        return self.feed(read_ms, lap_inc=False, estimate_ms=estimate_ms, now=now)
 
 
 class FinishLatch:

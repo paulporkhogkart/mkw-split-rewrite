@@ -88,12 +88,16 @@ templates as RaceTimer) every 0.05s; latch when ALL of:
 2. **no lap increment occurred during the streak** (`lap_inc` resets it) -
    covers the first ~300ms after the final-lap crossing, where the frozen
    split can still numerically resemble the cumulative estimate;
-3. **the frozen value matches the RaceTimer estimate within +/-300ms**
-   (`RaceTimer.tolerance_ms`). This is the main flash-killer: the lap-split
-   flash stays frozen on screen for ~6-7s (long after `lap_inc`), but a lap
-   duration falls behind the climbing cumulative estimate within a fraction
-   of a second and stays rejected. The true finish freeze IS the cumulative
-   time and passes.
+3. **the frozen value matches the RaceTimer estimate within +/-800ms**
+   (`TOLERANCE_MS`). This is the main flash-killer: the lap-split flash stays
+   frozen on screen for ~6-7s (long after `lap_inc`), but a lap duration sits
+   SECONDS below the climbing cumulative estimate and stays rejected. The
+   true finish freeze IS the cumulative time and passes. 800 (not 300)
+   because the estimate itself lags reality by up to ~700ms on washed
+   footage - frequent low digit misreads drag RaceTimer's anchor down
+   (measured on bootest; with 300 the latch waited 0.6s for the estimate to
+   catch up to the frozen value). The lap-1 window where split == cumulative
+   dies by +TOLERANCE_MS, still inside the 1s refractory.
 
 On latch, the frozen value is the authoritative final total in ms - exposed as
 `latch.final_ms`. The existing TimestampTracker burst flow stays (it still
@@ -124,16 +128,37 @@ presence are unchanged; only their display delay shrinks.
   [finish], lap_inc reset, None reads); recorder back-stamping (pending buffer
   -> t>=0 kept, countdown dropped, monotonic guard); filter call sites gone.
 - **Offline (real footage):** both validation clips contain real finishes with
-  known totals - bootest 1:36.713, koops 1:38.185. A probe script runs the
-  latch over the final-lap segment and reports (a) latched value == known
-  total, (b) latch latency vs the first frozen frame, (c) no false latch at
-  the final-lap crossing flash. Acceptance: exact value match on both clips,
-  latency <= 0.2s, zero false latches.
+  known totals - bootest 1:36.713, koops 1:38.185.
+
+  **Measured results (production-faithful gating: real LapTracker +
+  RaceTimer):**
+  - bootest: latched **96713ms exactly**, latency **0.150s** after the first
+    frozen frame, zero false latches across 4 lap crossings. PASS.
+  - koops: **no latch, no false value** - the digit reader consistently
+    misreads '8' as '1' on this capture (1:38.185 reads as 1:31.115 for the
+    entire freeze; a sliding narrow '1' template outscores a washed '8'
+    glyph). The estimate guard rejects the wrong value (-6.4s off), so the
+    race finishes via the 0.6s pixel-still fallback. Correct behaviour,
+    degraded latency. The digit-matcher redesign is follow-up work - note it
+    also implicates TimestampTracker burst totals (a consistent 8->1 misread
+    of frozen digits would store a wrong split/total today, independent of
+    this feature).
+  - A worst-case probe (final-lap gating + refractory disabled) false-latched
+    on the lap-1 split flash, where split == cumulative - this is what
+    motivated the LAP_REFRACTORY_S guard; with production gating the case is
+    doubly covered.
 - **Frontend:** existing raceTimerBuffer tests keep passing with DELAY_MS=100.
+  Snap-back reality under DELAY_MS=100: ~50ms (imperceptible) when the value
+  latch fires; up to ~500ms on races where digit misreads force the pixel
+  fallback, until the digit matcher is fixed.
 - **Live:** user race - trail starts on the line at 0:00.000ish, card timer
   ~300ms behind reality, finish lands without snap.
 
 ## Out of scope
 
 Time-synced ghost playback of trails; rewiring TimestampTracker to consume
-`final_ms`; any server-side trail timebase migration.
+`final_ms`; any server-side trail timebase migration; the digit-matcher
+redesign (sliding per-digit templates -> fixed-support comparison or
+edge-based matching) that the koops 8->1 finding motivates - that follow-up
+also needs a TimestampTracker audit, since stored totals/splits share the
+same reader.
