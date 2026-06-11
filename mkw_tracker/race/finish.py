@@ -38,7 +38,7 @@ class FinishStillDetector:
       BRIGHT_THRESHOLD - grayscale cutoff isolating the (near-white / gold) digits from
                          the background; raise it if bright moving background leaks in.
     """
-    STILL_SECONDS    = 2.5
+    STILL_SECONDS    = 0.6
     DIFF_THRESHOLD   = 8.0
     BRIGHT_THRESHOLD = 175
     MIN_BRIGHT_PX    = 40
@@ -93,6 +93,111 @@ class FinishStillDetector:
             print(f"  [finish] digits frozen >= {self.STILL_SECONDS}s on final lap "
                   f"-> capturing final time")
         return self.detected
+
+
+class FinishValueLatch:
+    """Latch the final-lap finish by reading the frozen timer VALUE.
+
+    On the final lap the timer freezes on the total with no flash. A running
+    timer's ms digit changes every frame, so N_CONFIRM identical reads at
+    READ_INTERVAL means frozen (~150ms worst-case latency). Guards:
+      * per-read |value - RaceTimer estimate| <= TOLERANCE_MS - rejects the
+        lap-split flash, whose frozen value falls behind the climbing
+        cumulative estimate within a fraction of a second;
+      * lap_inc resets the streak - covers the first instants after the
+        final-lap crossing where split ~ cumulative on short races;
+      * a failed read resets the streak (conservative).
+    The latched value IS the final total (final_ms).
+    """
+    N_CONFIRM     = 3
+    READ_INTERVAL = 0.05
+    TOLERANCE_MS  = 300
+
+    def __init__(self, templates=None, digit_dir: str = 'images/timestamps/cropped',
+                 digit_h: int = 42, digit_threshold: float = 0.50):
+        from .timer import read_timer_ms
+        from .laps import load_digit_templates
+        self._read_timer_ms = read_timer_ms
+        self._templates = templates if templates is not None \
+            else load_digit_templates(digit_dir, digit_h)
+        self.digit_threshold = digit_threshold
+        self.reset()
+
+    def reset(self):
+        self.detected    = False
+        self.final_ms    = None
+        self._streak_val = None
+        self._streak_n   = 0
+        self._last_read  = 0.0
+
+    def feed(self, read_ms: Optional[int], lap_inc: bool,
+             estimate_ms: Optional[int]) -> bool:
+        """Streak logic only (no frame I/O) - unit-testable."""
+        if self.detected:
+            return True
+        if lap_inc or read_ms is None or estimate_ms is None \
+                or abs(read_ms - estimate_ms) > self.TOLERANCE_MS:
+            self._streak_val, self._streak_n = None, 0
+            return False
+        if read_ms == self._streak_val:
+            self._streak_n += 1
+        else:
+            self._streak_val, self._streak_n = read_ms, 1
+        if self._streak_n >= self.N_CONFIRM:
+            self.detected = True
+            self.final_ms = read_ms
+            print(f"  [finish] timer value frozen x{self.N_CONFIRM} on final lap "
+                  f"-> final time {read_ms}ms")
+        return self.detected
+
+    def update(self, frame: np.ndarray, screen: Screen, on_final_lap: bool,
+               lap_inc: bool = False, estimate_ms: Optional[int] = None,
+               now: Optional[float] = None) -> bool:
+        if self.detected:
+            return True
+        if screen != Screen.RACING or not on_final_lap:
+            self._streak_val, self._streak_n = None, 0
+            return False
+        if now is None:
+            now = time.perf_counter()
+        if (now - self._last_read) < self.READ_INTERVAL:
+            # a lap increment must reset the streak even between reads
+            if lap_inc:
+                self._streak_val, self._streak_n = None, 0
+            return False
+        self._last_read = now
+        read_ms = self._read_timer_ms(frame, self._templates, self.digit_threshold)
+        return self.feed(read_ms, lap_inc, estimate_ms)
+
+
+class FinishLatch:
+    """Final-finish seam: value latch primary, pixel-still fallback.
+
+    Drop-in where FinishStillDetector was used - lifecycle only touches
+    .detected / .reset(). final_ms is set only when the value path fired.
+    """
+
+    def __init__(self, templates=None):
+        self.value = FinishValueLatch(templates=templates)
+        self.still = FinishStillDetector()
+
+    @property
+    def detected(self) -> bool:
+        return self.value.detected or self.still.detected
+
+    @property
+    def final_ms(self) -> Optional[int]:
+        return self.value.final_ms
+
+    def reset(self):
+        self.value.reset()
+        self.still.reset()
+
+    def update(self, frame: np.ndarray, screen: Screen, on_final_lap: bool,
+               lap_inc: bool = False, estimate_ms: Optional[int] = None) -> bool:
+        v = self.value.update(frame, screen, on_final_lap, lap_inc, estimate_ms)
+        s = self.still.update(frame, screen, on_final_lap)
+        return v or s
 FINISH_MATCH_THRESHOLD = 0.60
 FINISH_CONFIRM_FRAMES  = 3
 
