@@ -9,6 +9,8 @@
     "set-color": "node --no-warnings --import tsx src/scripts/setColor.ts",
     "scrape-wr": "node --no-warnings --import tsx src/scripts/scrapeWr.ts",
     "build-course-model": "node --no-warnings --import tsx src/scripts/buildCourseModel.ts",
+    "wipe-runs": "node --no-warnings --import tsx src/scripts/wipeRuns.ts",
+    "projector-lab": "node --no-warnings --import tsx src/scripts/projectorLab.ts",
     "bot": "node --env-file=.env --no-warnings --import tsx src/bot/index.ts"
   },
   "dependencies": {
