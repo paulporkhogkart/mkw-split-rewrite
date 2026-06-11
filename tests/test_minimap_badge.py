@@ -99,3 +99,16 @@ def test_refine_seed_centre_clamps_to_window():
     roi = draw_badge(make_roi(), 170, 190)
     cx, cy = refine_seed_centre(roi, 250, 190, window=16)
     assert abs(cx - 250) <= 16 and abs(cy - 190) <= 16
+
+
+def test_migration_v5_wipes_old_scale_thresholds(memdb):
+    from mkw_tracker.database.connection import get_connection
+    from mkw_tracker.database.migrations import apply_migrations
+    conn = get_connection()
+    conn.execute("INSERT INTO minimap_thresholds(course, character, costume, threshold)"
+                 " VALUES ('X', 'Y', '', 0.9)")
+    conn.execute("UPDATE schema_version SET version=4")
+    conn.commit()
+    apply_migrations(memdb)
+    assert conn.execute("SELECT COUNT(*) FROM minimap_thresholds").fetchone()[0] == 0
+    assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == 5

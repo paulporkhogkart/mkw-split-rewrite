@@ -117,6 +117,12 @@ INSERT OR IGNORE INTO minimap_rois (course, x, y, w, h) VALUES
 _SCHEMA_V4 = "-- replay_splits removed in Phase 2 (race data moved to server)"
 
 
+# v5: minimap identity scores moved from raw-CCORR to badge-NCC scale; stored
+# per-combo confident thresholds are meaningless on the new scale and would
+# lock races into ring_only. Auto-calibration repopulates them per race.
+_SCHEMA_V5 = "DELETE FROM minimap_thresholds;"
+
+
 def apply_migrations(db_path: str | None = None):
     """Apply pending schema migrations. Safe to call on every startup."""
     conn = get_connection(db_path)
@@ -170,3 +176,12 @@ def apply_migrations(db_path: str | None = None):
         conn.execute("UPDATE schema_version SET version=4")
         conn.commit()
         print("[DB] Schema version bumped to v4")
+
+    cur.execute("SELECT version FROM schema_version")
+    row = cur.fetchone()
+    current = row[0] if row else 0
+    if current < 5:
+        conn.executescript(_SCHEMA_V5)
+        conn.execute("UPDATE schema_version SET version=5")
+        conn.commit()
+        print("[DB] v5: cleared minimap_thresholds (badge score rescale)")
