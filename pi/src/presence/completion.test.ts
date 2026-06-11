@@ -59,6 +59,20 @@ describe('makeLiveCompletion', () => {
     expect(live('Bowsers Castle', 1, [10, 10], 1, 1100, false, 2).completion).toBeCloseTo(20 / 80, 2);   // half of lap 1  -> 20/80
   });
 
+  it('invalidate() makes the next call reload the stored model', () => {
+    const d = db(); seedModel(d);
+    const id = courseIdBySlug(d, slugify('Bowsers Castle'))!;
+    const live = makeLiveCompletion(d);
+    expect(live('Bowsers Castle', 1, [10, 0], 1, 1000, false, 2).completion).toBeCloseTo(10 / 80, 2);
+    // a rebuilt model with twice the total length lands in the db...
+    saveCourseModel(d, id, 150, { ...MODEL, totalLengthPx: 160 }, 2);
+    // ...still cached: same value
+    expect(live('Bowsers Castle', 1, [10, 0], 2, 1000, false, 2).completion).toBeCloseTo(10 / 80, 2);
+    live.invalidate(id);
+    // fresh player projects on the new model: 10/160
+    expect(live('Bowsers Castle', 1, [10, 0], 3, 1000, false, 2).completion).toBeCloseTo(10 / 160, 2);
+  });
+
   it('holds completion while stale', () => {
     const d = db(); seedModel(d);
     const live = makeLiveCompletion(d);

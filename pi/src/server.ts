@@ -12,8 +12,9 @@ const PORT = Number(process.env.PORT ?? 8787);
 const db = openDb(DB_PATH);
 applySchema(db);
 const hub = new EventHub();
-const presence = new PresenceHub(db, makeLiveCompletion(db));
-const app = createApp(db, hub);
+const live = makeLiveCompletion(db);
+const presence = new PresenceHub(db, live);
+const app = createApp(db, hub, live.invalidate);
 const { injectWebSocket } = makeWs(app, hub, presence, db);
 const server = serve({ fetch: app.fetch, port: PORT }, (info) => {
   console.log(`[pi] listening on http://127.0.0.1:${info.port}`);

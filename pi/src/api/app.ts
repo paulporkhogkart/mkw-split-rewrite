@@ -16,10 +16,11 @@ export type Env = { Variables: { playerId: number; playerName: string } };
 /** The self-contained stat-explorer page (pi/stat-explorer.html), served same-origin. */
 const EXPLORER_HTML = fileURLToPath(new URL('../../stat-explorer.html', import.meta.url));
 
-export function createApp(db: DatabaseSync, hub: EventHub): Hono<Env> {
+export function createApp(db: DatabaseSync, hub: EventHub,
+                          invalidateModel?: (courseId: number) => void): Hono<Env> {
   const app = new Hono<Env>();
   app.get('/health', (c) => c.json({ status: 'ok' }));
-  app.route('/', runsRoutes(db, hub));
+  app.route('/', runsRoutes(db, hub, invalidateModel));
   app.route('/', readsRoutes(db));
   app.route('/', createStatsApp(db, { porkerPath: process.env.STATS_PORKER_DB ?? 'porker.db' }));
   app.route('/', screenRoutes(db));

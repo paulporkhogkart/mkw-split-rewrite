@@ -8,10 +8,14 @@ import { slugify } from '../db/slug';
 
 export interface LiveResult { completion: number | null; dividers: number[]; }
 
-export type LiveCompletion = (
+export type LiveCompletion = ((
   course: string | null | undefined, curLap: number | null | undefined, pos: [number, number] | null | undefined,
   playerId?: number, t?: number, stale?: boolean, totLap?: number | null,
-) => LiveResult;
+) => LiveResult) & {
+  /** Drop the cached model for a course (call after a rebuild so the next
+   *  frame projects on the fresh model without a process restart). */
+  invalidate(courseId: number): void;
+};
 
 /** The model's interior lap boundaries as completion fractions: laps[1..N-1].startOffsetPx / total.
  *  Lap 1 begins at 0 and the finish is 1.0 — neither is drawn. Constant per course model. */
@@ -30,7 +34,7 @@ function modelDividers(m: CourseModel): number[] {
 export function makeLiveCompletion(db: DatabaseSync, cc = 150): LiveCompletion {
   const modelCache = new Map<number, { m: CourseModel; pe: Prepared; dividers: number[] } | null>();
   const pstate = new Map<number, { st: ProjState; course: number; lap: number }>();
-  return (course, curLap, pos, playerId, t = Date.now(), stale = false, totLap) => {
+  const fn = ((course, curLap, pos, playerId, t = Date.now(), stale = false, totLap) => {
     if (!course) { if (playerId != null) pstate.delete(playerId); return { completion: null, dividers: [] }; }
     const courseId = courseIdBySlug(db, slugify(course));
     if (courseId == null) return { completion: null, dividers: [] };
@@ -59,5 +63,7 @@ export function makeLiveCompletion(db: DatabaseSync, cc = 150): LiveCompletion {
     const r = projectStep(seed, entry.m, entry.pe, { x, y, lap, totLap: totLap ?? N, t, stale });
     if (playerId != null) pstate.set(playerId, { st: r.state, course: courseId, lap });
     return { completion: r.completion, dividers };
-  };
+  }) as LiveCompletion;
+  fn.invalidate = (courseId: number) => { modelCache.delete(courseId); };
+  return fn;
 }

@@ -9,8 +9,10 @@ import { slugify } from '../db/slug';
 import { upsertRun } from '../db/ingest';
 import { recomputeIsPb, recomputeWasPb } from '../db/pb';
 import { courseLeaderboard, currentWr } from '../db/reads';
+import { rebuildCourseModel } from '../db/courseModels';
 
-export function runsRoutes(db: DatabaseSync, hub: EventHub): Hono<Env> {
+export function runsRoutes(db: DatabaseSync, hub: EventHub,
+                           invalidateModel?: (courseId: number) => void): Hono<Env> {
   const r = new Hono<Env>();
 
   r.post('/v1/runs', requireToken(db), async (c) => {
@@ -34,6 +36,22 @@ export function runsRoutes(db: DatabaseSync, hub: EventHub): Hono<Env> {
 
     recomputeIsPb(db, seasonId, playerId, courseId, cc);
     recomputeWasPb(db, seasonId, playerId, courseId, cc);
+
+    // Models heal themselves: a finished run with a trail rebuilds this
+    // course's model and drops the presence hub's cached copy, so the very
+    // next frame projects on the fresh geometry. Uploads are ~once per race;
+    // the build is cheap at the <=40-run window.
+    if ((p.points?.length ?? 0) > 0) {
+      try {
+        const built = rebuildCourseModel(db, courseId, cc);
+        if (built) {
+          invalidateModel?.(courseId);
+          console.log(`[course-model] ${slugify(p.course)} cc${cc}: ${built.status}, ${built.laps} laps, ${built.runs} runs`);
+        }
+      } catch (e) {
+        console.error('[course-model] rebuild failed:', e);
+      }
+    }
     const lb = courseLeaderboard(db, seasonId, courseId, cc);
     const mine = lb.find(x => x.player_id === playerId) ?? null;
     const newMineMs = mine ? mine.total_time_ms : null;
