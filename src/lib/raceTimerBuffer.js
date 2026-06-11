@@ -1,10 +1,11 @@
 // Per-player rolling sample buffer for the live friend-card timer + bar.
 // The card renders these two live indicators DELAYED by DELAY_MS so the finish
-// lines up: the real finish is only confirmed STILL_SECONDS (2.5 s) after the
-// timer freezes, so the engine keeps emitting a climbing time for ~2.5 s; running
-// the display 2.5 s behind makes it reach the total exactly as the finished
-// result arrives. Engine/server stay un-lagged; the delay is purely display-side.
-export const DELAY_MS = 2500;          // == FinishStillDetector.STILL_SECONDS
+// lands cleanly: the engine confirms the finish ~150ms after the timer freezes
+// (FinishValueLatch: 3 identical digit reads at 50ms cadence), and keeps
+// emitting a climbing time until then. 100ms of display delay absorbs most of
+// that window; any residual overshoot is <~50ms - invisible on a spinning
+// millisecond wheel. Engine/server stay un-lagged; the delay is display-only.
+export const DELAY_MS = 100;           // ~= FinishValueLatch worst-case latency
 const MAX_AGE_MS = DELAY_MS + 1000;
 
 const buffers = new Map();             // player_id -> [{ t, elapsed_ms, completion }] ascending t
