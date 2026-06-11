@@ -33,6 +33,9 @@
   let currentLegend  = [];
   let sampleImg      = null;   // decoded HTMLImageElement | null
   let raceFinishTime = null;   // non-null once the final time is detected
+  let anchorMs   = null;       // engine race clock at the anchor | null = no clock yet this race
+  let anchorWall = 0;          // performance.now() when anchored
+  let staleMs    = null;       // a PREVIOUS race's final clock value, ignored until it changes
 
   const unsubScreen  = screenStore.subscribe(v  => { currentScreen  = v;      });
   const unsubTells   = tellsStore.subscribe(v   => { currentTells   = v ?? []; });
@@ -40,7 +43,10 @@
   const unsubMinimap = minimapStore.subscribe(v => { currentMinimap = v ?? null; });
   const unsubTrails  = trailRunsStore.subscribe(v  => { currentTrails  = v ?? []; });
   const unsubLegend  = trailLegendStore.subscribe(v => { currentLegend  = v ?? []; });
-  const unsubRace    = raceStore.subscribe(v    => { raceFinishTime = v?.finishTime ?? null; });
+  const unsubRace    = raceStore.subscribe(v    => {
+    raceFinishTime = v?.finishTime ?? null;
+    onEngineClock(v?.elapsedMs ?? null);
+  });
   const unsubSample  = sampleStore.subscribe(b64 => {
     if (!b64) { sampleImg = null; return; }
     const img = new Image();
@@ -113,33 +119,39 @@
   $: mmActive = currentScreen === "RACING" && raceFinishTime == null;
 
   // ── Race clock: drives replay-dot interpolation ───────────────────────────────
-  // Starts when the active window opens, so dot positions map to race-elapsed time
-  // (mirrors MinimapPlayer.start / _race_start).
-  // Pause screens mirror the engine's _PAUSE_SCREENS: leaving RACING to one of these
-  // is a pause (freeze the clock so replay dots resume in place); leaving to anything
-  // else ends the race (the clock resets on the next fresh RACING entry).
+  // Trails are recorded on the ENGINE's race clock (t=0 == GO, frozen through
+  // pauses), so playback rides the same clock: the engine's race_time stream
+  // (~10Hz via the race store), extrapolated with the wall clock between events
+  // for smooth dot motion. A local "since RACING appeared" clock would run the
+  // whole countdown ahead of every trail.
+  // Until this race's first clock event (countdown + the timer's first digit
+  // read) the clock is 0: ghosts wait on their start line.
+  // PAUSE_SCREENS mirrors the engine's _PAUSE_SCREENS: returning from one keeps
+  // the anchor (the engine clock froze meanwhile); any other fresh entry marks
+  // the previous race's final clock value stale until a new value arrives.
   const PAUSE_SCREENS = new Set(["RACE_MENU", "HOME"]);
-  let raceStartMs   = null;
-  let frozenElapsed = 0;     // elapsed (ms) captured at a pause, resumed from on return
   let _wasActive    = false;
   let _prevScreen   = null;
   let _raf          = 0;
 
+  function onEngineClock(v) {
+    if (v == null) return;
+    if (staleMs != null && v === staleMs) return;   // previous race's frozen value
+    staleMs = null;
+    anchorMs = v;
+    anchorWall = performance.now();
+  }
+
   $: onActiveChange(mmActive, currentScreen);
   function onActiveChange(active, screen) {
     if (active && !_wasActive) {
-      // Resume continues from where the pause froze; any other entry is a fresh race.
-      const resuming = PAUSE_SCREENS.has(_prevScreen);
-      raceStartMs = resuming ? performance.now() - frozenElapsed : performance.now();
-      if (!resuming) frozenElapsed = 0;
+      if (!PAUSE_SCREENS.has(_prevScreen)) {        // fresh race, not a pause return
+        staleMs = anchorMs;
+        anchorMs = null;
+      }
       startLoop();
     } else if (!active && _wasActive) {
       stopLoop();
-      // Freeze the clock for a pause; drop it for a finish/reset (end of race).
-      frozenElapsed = (PAUSE_SCREENS.has(screen) && raceStartMs != null)
-        ? performance.now() - raceStartMs
-        : 0;
-      raceStartMs = null;
       redraw();
     }
     _wasActive  = active;
@@ -160,7 +172,9 @@
     if (!ctx) return;
     if (canvasEl.width !== canvasW)  canvasEl.width  = canvasW;
     if (canvasEl.height !== canvasH) canvasEl.height = canvasH;
-    const elapsed = (mmActive && raceStartMs != null) ? performance.now() - raceStartMs : null;
+    const elapsed = mmActive
+      ? (anchorMs != null ? anchorMs + (performance.now() - anchorWall) : 0)
+      : null;
     drawOverlay(ctx, {
       canvasW, canvasH,
       rois:          activeRois,
