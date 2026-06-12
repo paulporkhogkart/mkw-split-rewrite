@@ -37,9 +37,14 @@ function lerp(a, b, f) {
  *  within `samples` (ascending t). Past the newest -> extrapolate elapsed_ms
  *  at 1ms/ms (capped at EXTRAPOLATE_CAP_MS) and HOLD completion + pb_delta_ms
  *  (a pace delta drifts at the unknown pace difference, not 1ms/ms - holding
- *  is the on-PB-pace assumption). Before the oldest or empty -> null. The
- *  in-window lerp is what makes the delta readout sweep smoothly between 4Hz
- *  server values instead of stepping. Pure (exported for tests). */
+ *  is the on-PB-pace assumption). Before the oldest -> CLAMP to the oldest
+ *  sample, never backward-extrapolate or go null: after a quiet stretch
+ *  (presence idles at the 5s heartbeat while paused, the values frozen) the
+ *  buffer restarts from one fresh sample, and the render target trails it by
+ *  DELAY_MS - nulling there flashed 0:00.000 + an empty bar on every resume.
+ *  Empty -> null. The in-window lerp is what makes the delta readout sweep
+ *  smoothly between 4Hz server values instead of stepping. Pure (exported
+ *  for tests). */
 export function interpolateAt(samples, target) {
   if (!samples || samples.length === 0) return null;
   const newest = samples[samples.length - 1];
@@ -48,7 +53,9 @@ export function interpolateAt(samples, target) {
     return { elapsed_ms: newest.elapsed_ms == null ? null : newest.elapsed_ms + ahead,
              completion: newest.completion, pb_delta_ms: newest.pb_delta_ms };
   }
-  if (target <= samples[0].t) return null;
+  if (target <= samples[0].t)
+    return { elapsed_ms: samples[0].elapsed_ms, completion: samples[0].completion,
+             pb_delta_ms: samples[0].pb_delta_ms };
   let lo = samples[0];
   for (let i = 1; i < samples.length; i++) {
     const hi = samples[i];

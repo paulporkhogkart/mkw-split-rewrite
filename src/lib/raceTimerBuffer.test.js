@@ -22,9 +22,15 @@ describe("interpolateAt", () => {
     const idle = [{ t: 1000, elapsed_ms: null, completion: null, pb_delta_ms: null }];
     expect(interpolateAt(idle, 2000)).toEqual({ elapsed_ms: null, completion: null, pb_delta_ms: null });
   });
-  it("is null before the oldest sample and for empty", () => {
-    expect(interpolateAt(S, 500)).toBeNull();
+  it("clamps to the oldest sample before the window; null only when empty", () => {
+    expect(interpolateAt(S, 500)).toEqual({ elapsed_ms: 0, completion: 0, pb_delta_ms: 0 });
     expect(interpolateAt([], 2500)).toBeNull();
+  });
+  it("pause-resume seam: a lone fresh sample serves a target trailing it", () => {
+    // After a pause the buffer restarts from one sample; the card's target sits
+    // DELAY_MS behind it for ~200ms. It must show the frozen values, not zeros.
+    const lone = [{ t: 10000, elapsed_ms: 51234, completion: 0.4, pb_delta_ms: 800 }];
+    expect(interpolateAt(lone, 9800)).toEqual({ elapsed_ms: 51234, completion: 0.4, pb_delta_ms: 800 });
   });
 });
 
