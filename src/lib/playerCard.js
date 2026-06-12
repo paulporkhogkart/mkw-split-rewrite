@@ -6,6 +6,7 @@ import { parseTime } from "./discordFormat.js";
 
 const SETUP = { CHARACTER_SELECT: "Choosing character", KART_SELECT: "Choosing kart", COURSE_SELECT: "Choosing track" };
 const PAUSE_SCREENS = new Set(["RACE_MENU", "HOME"]);
+const RESET_SCREENS = new Set(["RESET", "GHOST_RESET", "UNKNOWN_RESET"]);
 // Screens that sit BETWEEN race contexts (pause menus, reset loaders, mid-race
 // detection blips): the card keeps the last race readout instead of flashing
 // "In the menus". A real menu or the next race drops it.
@@ -142,7 +143,9 @@ export function viewModel(e, now = Date.now, delayed = null, opts = {}) {
     return { state: held.finished ? "finished" : "held", ...ident,
       primary: held.primary, resets: held.resets, pbStr: held.pbStr, delta: held.delta,
       finPb: held.finPb,
-      badge: held.finished ? "fin" : (PAUSE_SCREENS.has(e.screen) ? "pause" : null),
+      badge: held.finished ? "fin"
+        : PAUSE_SCREENS.has(e.screen) ? "pause"
+        : RESET_SCREENS.has(e.screen) ? "reset" : null,
       bar: held.bar };
   }
 

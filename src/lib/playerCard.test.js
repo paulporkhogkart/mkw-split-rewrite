@@ -167,7 +167,7 @@ describe("viewModel", () => {
     expect(held.primary).toEqual(racing.primary);                   // frozen time persists
     expect(held.delta).toEqual(racing.delta);
     expect(held.bar).toEqual(racing.bar);
-    expect(held.badge).toBeNull();                                  // a reset is not a pause
+    expect(held.badge).toBe("reset");                               // reset icon, not pause
     expect(viewModel({ ...base, screen: "MAIN_MENU" }, () => 4000).state).toBe("menus");
     expect(viewModel({ ...base, screen: "RESET" }, () => 5000).state).toBe("menus");  // dropped
   });

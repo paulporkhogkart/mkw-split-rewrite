@@ -23,9 +23,29 @@
   <div class="data">
     <div class="nm">{vm.name}</div>
     <div class="sel">
-      <div class="kv" class:dim={!vm.char}><span class="k">C</span><span class="v">{vm.char || "—"}</span></div>
-      <div class="kv" class:dim={!vm.kart}><span class="k">K</span><span class="v">{vm.kart || "—"}</span></div>
-      <div class="kv" class:dim={!vm.trk}><span class="k">T</span><span class="v">{vm.trk || "—"}</span></div>
+      <div class="kv" class:dim={!vm.char}>
+        <span class="k" title="Character">
+          <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M8.3 8.8v-.8a1.7 1.7 0 0 0-1.7-1.7H3.4a1.7 1.7 0 0 0-1.7 1.7v.8"/><circle cx="5" cy="3.4" r="1.7"/>
+          </svg>
+        </span><span class="v">{vm.char || "—"}</span>
+      </div>
+      <div class="kv" class:dim={!vm.kart}>
+        <span class="k" title="Kart">
+          <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M1 7.1V5.9c0-.4.3-.7.6-.8l1.6-.4 1-1.3c.2-.3.5-.4.8-.4h.9c.4 0 .7.2.9.4l1 1.3 1.5.4c.4.1.6.4.6.8v1.2"/>
+            <circle cx="3" cy="7.3" r="1.05"/><circle cx="7" cy="7.3" r="1.05"/>
+          </svg>
+        </span><span class="v">{vm.kart || "—"}</span>
+      </div>
+      <div class="kv" class:dim={!vm.trk}>
+        <span class="k" title="Track">
+          <svg viewBox="0 0 10 10" aria-hidden="true">
+            <path d="M2.2 1.2v7.9" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none"/>
+            <path d="M2.2 1.5l5.9 1.6-5.9 1.6z" fill="currentColor"/>
+          </svg>
+        </span><span class="v">{vm.trk || "—"}</span>
+      </div>
     </div>
     <div class="sp"></div>
     {#if vm.resets != null}
@@ -36,8 +56,34 @@
     {/if}
     {#if vm.primary.kind === "time"}
       <div class="prim time" class:fin={vm.state === "finished"} class:pb={vm.finPb}>
-        {#if vm.badge === "fin"}<span class="tag fintag">FIN</span>
-        {:else if vm.badge === "pause"}<span class="tag pausetag"><i></i><i></i></span>{/if}
+        {#if vm.badge === "fin"}
+          <span class="tag" title="Finished">
+            <svg viewBox="0 0 12 12" aria-hidden="true">
+              <path d="M2 1v10.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" fill="none"/>
+              <g fill="currentColor">
+                <rect x="3.1" y="1.1" width="2.6" height="2.55"/><rect x="8.3" y="1.1" width="2.6" height="2.55"/>
+                <rect x="5.7" y="3.65" width="2.6" height="2.55"/>
+                <g opacity=".28">
+                  <rect x="5.7" y="1.1" width="2.6" height="2.55"/><rect x="3.1" y="3.65" width="2.6" height="2.55"/>
+                  <rect x="8.3" y="3.65" width="2.6" height="2.55"/>
+                </g>
+              </g>
+            </svg>
+          </span>
+        {:else if vm.badge === "pause"}
+          <span class="tag" title="Paused">
+            <svg viewBox="0 0 12 12" aria-hidden="true">
+              <g fill="currentColor"><rect x="3.2" y="1.6" width="2.1" height="8.8" rx=".7"/><rect x="6.7" y="1.6" width="2.1" height="8.8" rx=".7"/></g>
+            </svg>
+          </span>
+        {:else if vm.badge === "reset"}
+          <span class="tag" title="Resetting">
+            <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="11.5 2 11.5 5 8.5 5"/>
+              <path d="M10.24 7.5A4.5 4.5 0 1 1 9.18 2.82L11.5 5"/>
+            </svg>
+          </span>
+        {/if}
         {vm.primary.text}
       </div>
     {:else if vm.primary.kind === "activity"}
@@ -79,7 +125,8 @@
   .tt.off .nm { color: var(--tx-mut); }
   .sel { margin-top: 6px; }
   .kv { font-size: 10px; color: var(--tx); display: flex; gap: 6px; line-height: 1.45; }
-  .kv .k { color: var(--tx-dim); font-size: 7.5px; letter-spacing: .08em; width: 8px; flex: 0 0 auto; padding-top: 2px; }
+  .kv .k { color: var(--tx-dim); width: 10px; flex: 0 0 auto; display: inline-flex; padding-top: 2.5px; }
+  .kv .k svg { width: 9px; height: 9px; }
   .kv .v { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .kv.dim { color: var(--tx-dim); }
   .sp { flex: 1; }
@@ -103,11 +150,9 @@
   /* Finished: the time takes the verdict colour - green beat the pre-race PB, red didn't. */
   .prim.time.fin { color: #e5484d; }
   .prim.time.fin.pb { color: #30c161; }
-  /* Vertical FIN tag / pause bars beside the time. */
-  .tag.fintag { writing-mode: vertical-rl; font-size: 6.5px; font-weight: 700; letter-spacing: .16em;
-                color: var(--tx-dim); line-height: 1; }
-  .tag.pausetag { display: inline-flex; gap: 2.5px; }
-  .tag.pausetag i { width: 2.5px; height: 10px; background: var(--tx-dim); border-radius: .5px; }
+  /* State badge beside the time: checkered flag / pause bars / reset arrow. */
+  .tag { display: inline-flex; color: var(--tx-dim); flex: 0 0 auto; }
+  .tag svg { width: 11px; height: 11px; }
   .prim.act { font-size: 11.5px; font-weight: 600; color: var(--tx-mut); margin-top: 4px; }
   .prim.seen { font-size: 10.5px; color: var(--tx-dim); margin-top: 4px; }
   .barwrap { position: relative; margin-top: 7px; }
