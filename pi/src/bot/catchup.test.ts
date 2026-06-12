@@ -10,7 +10,7 @@ function db1() {
   db.exec("INSERT INTO courses(id,slug,display_name) VALUES (1,'bc','Bowsers Castle')");
   const ins = (id: number, ms: number, str: string) => db.prepare(
     "INSERT INTO runs(id,season_id,player_id,course_id,cc,status,provenance,total_time_ms,total_time_str,ended_at,was_pb,is_pb) VALUES (?,1,1,1,150,'finished','live',?,?,?,1,0)"
-  ).run(id, ms, str, `2026-06-1${id}T00:00:00.000Z`);
+  ).run(id, ms, str, `2026-06-${String(id).padStart(2, "0")}T00:00:00.000Z`);
   ins(10, 153101, '2:33.101');     // PB-setting run
   ins(11, 152837, '2:32.837');     // a faster PB
   db.prepare('UPDATE runs SET is_pb=1 WHERE id=11').run();
@@ -60,5 +60,24 @@ describe('announceMissedPbs', () => {
     const sent: EmbedBuilder[] = [];
     announceMissedPbs(db, { send: (e) => sent.push(e), state: { lastPbRunId: 11 }, persist: () => {} });
     expect(sent).toHaveLength(0);
+  });
+
+  it('never announces imported/carryover rows, but uses them as the delta reference', () => {
+    const db = db1();
+    // A restored carryover PB: inserted AFTER the live runs (higher id) but achieved
+    // long before them (older ended_at). It must not be announced as a new PB, yet
+    // the first live improvement's delta must be measured against it.
+    db.prepare(
+      `INSERT INTO runs(id,season_id,player_id,course_id,cc,status,provenance,total_time_ms,total_time_str,ended_at,was_pb,is_pb)
+       VALUES (99,1,1,1,150,'finished','carryover',155000,'2:35.000','2026-06-01T00:00:00.000Z',1,0)`
+    ).run();
+    const sent: EmbedBuilder[] = [];
+    const state = { lastPbRunId: 0 };
+    const n = announceMissedPbs(db, { send: (e) => sent.push(e), state, persist: () => {} });
+    expect(n).toBe(2);                                 // only the live PBs
+    expect(state.lastPbRunId).toBe(11);
+    const delta = (e: EmbedBuilder) => e.toJSON().fields!.find((f) => f.name === 'DELTA')!.value;
+    expect(delta(sent[0])).toBe('`-1.899s`');          // run 10 vs the 2:35.000 carryover
+    expect(delta(sent[1])).toBe('`-0.264s`');          // run 11 vs run 10
   });
 });

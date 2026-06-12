@@ -175,6 +175,10 @@ def import_legacy(legacy_db_path: str, conn, cutover_iso: str | None = None) -> 
         n_wr = import_world_records(conn, legacy, course_map)
         recompute_is_pb(conn, s0_id)
         n_carry = build_carryover(conn, s0_id, s1_id, cutover_iso)
+        # The active season may already hold live runs (e.g. restoring the carryover
+        # after a wipe): reconcile so each scope keeps exactly one is_pb - the
+        # fastest finished run, whether that's a live run or the carryover seed.
+        recompute_is_pb(conn, s1_id)
         n_courses = conn.execute("SELECT COUNT(*) FROM courses").fetchone()[0]
         conn.commit()
     except Exception:

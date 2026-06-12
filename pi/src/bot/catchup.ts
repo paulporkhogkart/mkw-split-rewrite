@@ -26,25 +26,30 @@ export function announceMissedPbs(db: DatabaseSync, ctx: CatchupCtx): number {
     ctx.state.lastPbRunId = 0;
     ctx.persist(ctx.state);
   }
+  // provenance='live': imported/carryover history was announced by the legacy bot in
+  // its day - restoring it (with fresh high ids) must never re-announce it as news.
   const rows = db.prepare(
-    `SELECT r.id, r.cc, r.player_id, r.course_id, r.total_time_ms, r.total_time_str,
+    `SELECT r.id, r.cc, r.player_id, r.course_id, r.total_time_ms, r.total_time_str, r.ended_at,
             p.display_name AS player, c.display_name AS course
      FROM runs r JOIN players p ON p.id = r.player_id JOIN courses c ON c.id = r.course_id
-     WHERE r.was_pb = 1 AND r.season_id = ? AND r.id > ? AND r.total_time_str IS NOT NULL
+     WHERE r.was_pb = 1 AND r.provenance = 'live' AND r.season_id = ? AND r.id > ? AND r.total_time_str IS NOT NULL
      ORDER BY r.id`
   ).all(season, ctx.state.lastPbRunId) as Array<{
     id: number; cc: number; player_id: number; course_id: number;
-    total_time_ms: number; total_time_str: string; player: string; course: string;
+    total_time_ms: number; total_time_str: string; ended_at: string; player: string; course: string;
   }>;
 
   let n = 0;
   for (const r of rows) {
-    // The previous PB on this course = the prior was_pb run; its time gives the delta.
+    // The previous PB on this course = the chronologically-prior was_pb run (any
+    // provenance - a carryover PB is a valid reference even though its row id is
+    // higher than the live runs it predates). Its time gives the delta.
     const prev = db.prepare(
       `SELECT total_time_ms FROM runs
-       WHERE was_pb = 1 AND season_id = ? AND player_id = ? AND course_id = ? AND cc = ? AND id < ?
-       ORDER BY id DESC LIMIT 1`
-    ).get(season, r.player_id, r.course_id, r.cc, r.id) as { total_time_ms: number } | undefined;
+       WHERE was_pb = 1 AND season_id = ? AND player_id = ? AND course_id = ? AND cc = ?
+         AND (datetime(ended_at) < datetime(?) OR (datetime(ended_at) = datetime(?) AND id < ?))
+       ORDER BY datetime(ended_at) DESC, id DESC LIMIT 1`
+    ).get(season, r.player_id, r.course_id, r.cc, r.ended_at, r.ended_at, r.id) as { total_time_ms: number } | undefined;
     const delta = prev ? r.total_time_ms - prev.total_time_ms : null;
 
     const lb = courseLeaderboard(db, season, r.course_id, r.cc);

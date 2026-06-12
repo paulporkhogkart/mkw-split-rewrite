@@ -222,6 +222,44 @@ def test_import_legacy_is_idempotent(legacy_db):
                         ).fetchone()[0] == 3
 
 
+def test_reimport_reconciles_is_pb_against_live_runs(legacy_db):
+    # Live runs exist when the carryover is (re)stored - e.g. restoring history after
+    # a wipe. The active season must end up with exactly one is_pb per scope, the
+    # fastest finished run winning, whether that's the live run or the carryover.
+    conn = connect(":memory:")
+    importer.import_legacy(legacy_db, conn, CUTOVER)
+    s1 = conn.execute("SELECT id FROM seasons WHERE name='Season 1'").fetchone()["id"]
+    paul = conn.execute("SELECT id FROM players WHERE display_name='Paul'").fetchone()["id"]
+    bc = conn.execute("SELECT id FROM courses WHERE slug='bowsers_castle'").fetchone()["id"]
+    wario = conn.execute("SELECT id FROM courses WHERE slug='warios_galleon'").fetchone()["id"]
+    # Faster than Paul's 1:48.000 carryover on BC; slower than his 2:00.000 on Wario's.
+    conn.execute(
+        "INSERT INTO runs(season_id, player_id, course_id, cc, status, provenance, "
+        "ended_at, total_time_ms, total_time_str, is_pb) "
+        "VALUES (?,?,?,150,'finished','live','2026-06-12T05:01:01+00:00',107000,'1:47.000',1)",
+        (s1, paul, bc))
+    conn.execute(
+        "INSERT INTO runs(season_id, player_id, course_id, cc, status, provenance, "
+        "ended_at, total_time_ms, total_time_str, is_pb) "
+        "VALUES (?,?,?,150,'finished','live','2026-06-12T05:02:01+00:00',125000,'2:05.000',0)",
+        (s1, paul, wario))
+    conn.commit()
+    importer.import_legacy(legacy_db, conn, CUTOVER)   # restore on top of live data
+
+    def scope_pbs(course_id):
+        return conn.execute(
+            "SELECT provenance, total_time_ms FROM runs "
+            "WHERE season_id=? AND player_id=? AND course_id=? AND cc=150 AND is_pb=1",
+            (s1, paul, course_id)).fetchall()
+
+    bc_pbs = scope_pbs(bc)
+    assert len(bc_pbs) == 1
+    assert (bc_pbs[0]["provenance"], bc_pbs[0]["total_time_ms"]) == ("live", 107000)
+    w_pbs = scope_pbs(wario)
+    assert len(w_pbs) == 1
+    assert (w_pbs[0]["provenance"], w_pbs[0]["total_time_ms"]) == ("carryover", 120000)
+
+
 def test_import_legacy_preserves_live_rows(legacy_db):
     conn = connect(":memory:")
     importer.import_legacy(legacy_db, conn, CUTOVER)
