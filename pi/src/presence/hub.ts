@@ -1,7 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { activeSeasonId, courseIdBySlug } from '../db/seasons';
 import { slugify } from '../db/slug';
-import { pbMsFor } from '../db/pb';
+import { pbRunFor } from '../db/pb';
 import type { LiveCompletion } from './completion';
 
 // The engine's _TrackState values (mkw_tracker/minimap/tracker.py) that mean a confident live
@@ -31,9 +31,13 @@ export interface PresenceEntry {
   elapsed_ms: number | null;
   has_model: boolean;   // false -> course has no model yet (bar shows "calibrating")
   pb_delta_ms: number | null;   // live ahead(-)/behind(+) vs own PB at the same completion
-  lap_delta: { lap: number; delta_ms: number; gained: boolean; gold: boolean } | null;
+  lap_delta: LapD | null;       // latest completed lap (the card badge readout)
+  lap_deltas: LapD[] | null;    // one row per completed lap (the race rail)
+  pb_laps_ms: number[] | null;  // the PB run's lap durations (rail reference column)
   off_stats: { firsts: number; runs_7d: number; pbs_30d: number } | null;   // offline-card stats
 }
+
+interface LapD { lap: number; delta_ms: number; gained: boolean; gold: boolean; }
 
 /** Live PB pace delta (see presence/pace.ts); the hub only needs the call shape. */
 type PaceFn = (playerId: number, course: string | null | undefined,
@@ -41,7 +45,7 @@ type PaceFn = (playerId: number, course: string | null | undefined,
 
 /** Per-lap LiveSplit-style delta (see presence/lapDelta.ts); call shape only. */
 type LapFn = (playerId: number, course: string | null | undefined,
-              splitsMs: number[] | null | undefined) => PresenceEntry['lap_delta'];
+              splitsMs: number[] | null | undefined) => { pb_laps_ms: number[]; deltas: LapD[] } | null;
 
 type Sink = (msg: unknown) => void;
 
@@ -50,7 +54,7 @@ function offlineEntry(player_id: number, name: string, color: string | null, now
   return { player_id, name, color, online: false, screen: null, course: null, character: null, kart: null,
            costume: null, cur_lap: null, tot_lap: null, coins: null, mushrooms: null, resets: null,
            pb_ms: null, completion: null, dividers: [], final_time: null, updated_at: now, elapsed_ms: null,
-           has_model: false, pb_delta_ms: null, lap_delta: null, off_stats };
+           has_model: false, pb_delta_ms: null, lap_delta: null, lap_deltas: null, pb_laps_ms: null, off_stats };
 }
 
 /** In-memory live presence, keyed by the active-season roster (seeded offline so every card
@@ -59,10 +63,11 @@ function offlineEntry(player_id: number, name: string, color: string | null, now
 export class PresenceHub {
   private map = new Map<number, PresenceEntry>();
   private sinks = new Set<Sink>();
-  // pb_ms pinned per player for the duration of a race (RACING/POST_TIME_TRIAL): the
-  // finish upload updates the db PB within ~a second, but the card must keep showing
-  // the delta against the PRE-RACE PB until the next race starts.
-  private pbLatch = new Map<number, { course: string; pb: number | null }>();
+  // The PB (ms + run id) pinned per player for the duration of a race
+  // (RACING/POST_TIME_TRIAL): the finish upload updates the db PB within ~a second,
+  // but the card delta and the rail's lap comparison must keep reading against the
+  // PRE-RACE PB until the next race starts.
+  private pbLatch = new Map<number, { course: string; pb: number | null; runId: number | null }>();
 
   constructor(private db: DatabaseSync, private completion: LiveCompletion,
               private pace: PaceFn = () => null, private laps: LapFn = () => null,
@@ -117,9 +122,12 @@ export class PresenceHub {
     const { completion, dividers, model } = this.completion(frame.course, frame.cur_lap, frame.pos, playerId, now, stale, frame.tot_lap);
     // Live PB pace delta only while actually racing (the finished card shows the exact one).
     const racing = frame.screen === 'RACING' && !frame.final_time;
+    const inRaceCtx = frame.screen === 'RACING' || frame.screen === 'POST_TIME_TRIAL';
     const pb_delta_ms = racing ? this.pace(playerId, frame.course, completion, frame.elapsed_ms) : null;
-    const lap_delta = racing ? this.laps(playerId, frame.course, frame.splits_ms) : null;
-    const pb_ms = this.latchedPb(playerId, cur, frame);
+    const pin = this.latchedPb(playerId, cur, frame);
+    // Lap comparison stays up through the finished/results state (the rail reads
+    // it there), pinned to the pre-race PB run.
+    const li = inRaceCtx ? this.laps(playerId, frame.course, frame.splits_ms, pin.runId) : null;
 
     const entry: PresenceEntry = {
       player_id: playerId, name: cur.name, color: cur.color, online: true,
@@ -128,17 +136,22 @@ export class PresenceHub {
       cur_lap: frame.cur_lap ?? null, tot_lap: frame.tot_lap ?? null,
       coins: frame.coins ?? null, mushrooms: frame.mushrooms ?? null, resets: frame.resets ?? null,
       elapsed_ms: frame.elapsed_ms ?? null,
-      completion, pb_ms,
+      completion, pb_ms: pin.pb,
       dividers, final_time: frame.final_time ?? null, updated_at: now,
-      has_model: model, pb_delta_ms, lap_delta, off_stats: null,
+      has_model: model, pb_delta_ms,
+      lap_delta: li && li.deltas.length ? li.deltas[li.deltas.length - 1] : null,
+      lap_deltas: li ? li.deltas : null,
+      pb_laps_ms: li ? li.pb_laps_ms : null,
+      off_stats: null,
     };
     this.map.set(playerId, entry);
     this.broadcast({ type: 'presence_update', player: entry });
   }
 
-  /** pb_ms for the entry: pinned at race entry, held through RACING/POST_TIME_TRIAL
-   *  (so the finished delta reads against the pre-race PB), live everywhere else. */
-  private latchedPb(playerId: number, cur: PresenceEntry, frame: PresenceFrame): number | null {
+  /** The PB for the entry: pinned at race entry, held through RACING/POST_TIME_TRIAL
+   *  (so the finished delta + lap comparison read against the pre-race PB), live
+   *  everywhere else. Returns { pb, runId }. */
+  private latchedPb(playerId: number, cur: PresenceEntry, frame: PresenceFrame): { pb: number | null; runId: number | null } {
     const inRace = frame.screen === 'RACING' || frame.screen === 'POST_TIME_TRIAL';
     if (!inRace) {
       this.pbLatch.delete(playerId);
@@ -148,10 +161,10 @@ export class PresenceHub {
     const course = frame.course ?? '';
     let latch = this.pbLatch.get(playerId);
     if (!latch || !wasInRace || latch.course !== course) {
-      latch = { course, pb: this.pbForCourse(playerId, frame.course) };
+      latch = { course, ...this.pbForCourse(playerId, frame.course) };
       this.pbLatch.set(playerId, latch);
     }
-    return latch.pb;
+    return latch;
   }
 
   setOffline(playerId: number): void {
@@ -170,11 +183,12 @@ export class PresenceHub {
     for (const e of this.map.values()) if (e.online && e.updated_at < cutoff) this.setOffline(e.player_id);
   }
 
-  private pbForCourse(playerId: number, course: string | null | undefined): number | null {
-    if (!course) return null;
+  private pbForCourse(playerId: number, course: string | null | undefined): { pb: number | null; runId: number | null } {
+    if (!course) return { pb: null, runId: null };
     const courseId = courseIdBySlug(this.db, slugify(course));
-    if (courseId == null) return null;
-    return pbMsFor(this.db, activeSeasonId(this.db), playerId, courseId, 150);
+    if (courseId == null) return { pb: null, runId: null };
+    const run = pbRunFor(this.db, activeSeasonId(this.db), playerId, courseId, 150);
+    return run ? { pb: run.total_time_ms, runId: run.id } : { pb: null, runId: null };
   }
 
   private broadcast(msg: unknown): void { for (const s of [...this.sinks]) { try { s(msg); } catch { /* sink gone */ } } }

@@ -10,10 +10,14 @@ import { slugify } from '../db/slug';
 import { pbRunFor } from '../db/pb';
 
 export interface LapDeltaResult { lap: number; delta_ms: number; gained: boolean; gold: boolean; }
+/** PB lap durations + one delta row per completed lap (the race rail renders all
+ *  rows; the card shows the latest). */
+export interface LapInfo { pb_laps_ms: number[]; deltas: LapDeltaResult[]; }
 
 export type LapDelta = ((
   playerId: number, course: string | null | undefined, splitsMs: number[] | null | undefined,
-) => LapDeltaResult | null) & {
+  pinnedRunId?: number | null,
+) => LapInfo | null) & {
   /** Drop a course's cached PB laps + golds (chained into the model-rebuild
    *  invalidation, which fires on every finished trailed upload - keeps golds
    *  fresh across a session without per-frame queries). */
@@ -25,12 +29,16 @@ export function makeLapDelta(db: DatabaseSync, cc = 150): LapDelta {
   // self-heals) + lazily-filled best-ever segment per lap (one query per lap line).
   const cache = new Map<string, { runId: number; pbLaps: number[]; golds: Map<number, number | null> }>();
 
-  const fn = ((playerId, course, splitsMs) => {
-    if (!course || !splitsMs || splitsMs.length === 0) return null;
+  const fn = ((playerId, course, splitsMs, pinnedRunId = null) => {
+    if (!course) return null;
     const courseId = courseIdBySlug(db, slugify(course));
     if (courseId == null) return null;
     const season = activeSeasonId(db);
-    const pb = pbRunFor(db, season, playerId, courseId, cc);
+    // The hub pins the pre-race PB run for the duration of a race (the finish
+    // upload flips is_pb within a second); honour the pin so the rail's
+    // reference column never flips to the run that was just set.
+    const pb = pinnedRunId != null ? { id: pinnedRunId }
+      : pbRunFor(db, season, playerId, courseId, cc);
     if (!pb) return null;
     const key = `${courseId}:${playerId}`;
     let entry = cache.get(key);
@@ -42,26 +50,33 @@ export function makeLapDelta(db: DatabaseSync, cc = 150): LapDelta {
       cache.set(key, entry);
     }
     // No per-lap data on the PB (e.g. a carryover seed): no comparison to run.
-    const k = Math.min(splitsMs.length, entry.pbLaps.length);
-    if (k === 0) return null;
-    let live = 0, ref = 0;
-    for (let i = 0; i < k; i++) { live += splitsMs[i]; ref += entry.pbLaps[i]; }
-    let gold = entry.golds.get(k);
-    if (gold === undefined) {
-      const row = db.prepare(
-        `SELECT MIN(rl.lap_time_ms) AS m FROM run_laps rl JOIN runs r ON r.id = rl.run_id
-         WHERE r.season_id=? AND r.player_id=? AND r.course_id=? AND r.cc=?
-           AND r.status='finished' AND rl.lap_index=?`
-      ).get(season, playerId, courseId, cc, k) as { m: number | null };
-      gold = row.m;
-      entry.golds.set(k, gold);
-    }
-    return {
-      lap: k,
-      delta_ms: live - ref,
-      gained: splitsMs[k - 1] < entry.pbLaps[k - 1],
-      gold: gold != null && splitsMs[k - 1] < gold,
+    if (entry.pbLaps.length === 0) return null;
+    const goldFor = (lapIdx: number): number | null => {
+      let g = entry!.golds.get(lapIdx);
+      if (g === undefined) {
+        g = (db.prepare(
+          `SELECT MIN(rl.lap_time_ms) AS m FROM run_laps rl JOIN runs r ON r.id = rl.run_id
+           WHERE r.season_id=? AND r.player_id=? AND r.course_id=? AND r.cc=?
+             AND r.status='finished' AND rl.lap_index=?`
+        ).get(season, playerId, courseId, cc, lapIdx) as { m: number | null }).m;
+        entry!.golds.set(lapIdx, g);
+      }
+      return g;
     };
+    const deltas: LapDeltaResult[] = [];
+    const n = Math.min(splitsMs?.length ?? 0, entry.pbLaps.length);
+    let live = 0, ref = 0;
+    for (let i = 0; i < n; i++) {
+      live += splitsMs![i]; ref += entry.pbLaps[i];
+      const gold = goldFor(i + 1);
+      deltas.push({
+        lap: i + 1,
+        delta_ms: live - ref,
+        gained: splitsMs![i] < entry.pbLaps[i],
+        gold: gold != null && splitsMs![i] < gold,
+      });
+    }
+    return { pb_laps_ms: entry.pbLaps, deltas };
   }) as LapDelta;
 
   fn.invalidateCourse = (courseId: number) => {

@@ -32,62 +32,77 @@ function seeded() {
   insertRun(d, 2, 1, [51000, 52000, 53000], { isPb: 1 });
   return d;
 }
+const last = (r: ReturnType<ReturnType<typeof makeLapDelta>>) => r!.deltas[r!.deltas.length - 1];
 
 describe('makeLapDelta', () => {
+  it('returns one delta row per completed lap plus the PB laps', () => {
+    const r = makeLapDelta(seeded())(1, COURSE, [52000, 51500]);
+    expect(r!.pb_laps_ms).toEqual([51000, 52000, 53000]);
+    expect(r!.deltas).toEqual([
+      { lap: 1, delta_ms: 1000, gained: false, gold: false },
+      { lap: 2, delta_ms: 500, gained: true, gold: false },
+    ]);
+  });
+
   it('signs the cumulative delta and flags the segment gain per LiveSplit rules', () => {
     const lap = makeLapDelta(seeded());
-    // lap1 52.0 vs PB 51.0: lost the segment, behind overall
-    expect(lap(1, COURSE, [52000])).toEqual({ lap: 1, delta_ms: 1000, gained: false, gold: false });
-    // lap2 51.5 vs PB 52.0: gained the segment, still behind (+0.5 total)
-    expect(lap(1, COURSE, [52000, 51500])).toEqual({ lap: 2, delta_ms: 500, gained: true, gold: false });
-    // lap2 53.0 vs PB 52.0: lost the segment, still ahead (started -1.5)
-    expect(lap(1, COURSE, [49500, 53000])).toEqual({ lap: 2, delta_ms: -500, gained: false, gold: false });
-    // lap3 52.5 vs PB 53.0: gained and ahead
-    expect(lap(1, COURSE, [51000, 52000, 52500])).toEqual({ lap: 3, delta_ms: -500, gained: true, gold: false });
+    expect(last(lap(1, COURSE, [52000]))).toEqual({ lap: 1, delta_ms: 1000, gained: false, gold: false });
+    expect(last(lap(1, COURSE, [49500, 53000]))).toEqual({ lap: 2, delta_ms: -500, gained: false, gold: false });
+    expect(last(lap(1, COURSE, [51000, 52000, 52500]))).toEqual({ lap: 3, delta_ms: -500, gained: true, gold: false });
   });
 
   it('flags a gold when the lap beats the best-ever finished segment', () => {
     const lap = makeLapDelta(seeded());
-    // 49.0 beats the 50.0 gold (and the 51.0 PB lap)
-    expect(lap(1, COURSE, [49000])).toEqual({ lap: 1, delta_ms: -2000, gained: true, gold: true });
-    // 50.5 beats the PB lap but not the 50.0 gold
-    expect(lap(1, COURSE, [50500])!.gold).toBe(false);
-    // reset runs never hold golds
+    expect(last(lap(1, COURSE, [49000]))).toEqual({ lap: 1, delta_ms: -2000, gained: true, gold: true });
+    expect(last(lap(1, COURSE, [50500])).gold).toBe(false);   // beats the PB lap, not the 50.0 gold
     const d = seeded();
     insertRun(d, 3, 1, [40000], { status: 'reset' });
-    expect(makeLapDelta(d)(1, COURSE, [49000])!.gold).toBe(true);   // 40s reset lap ignored
+    expect(last(makeLapDelta(d)(1, COURSE, [49000])).gold).toBe(true);   // reset laps never hold golds
   });
 
-  it('gates: no PB / PB without laps / no splits / unknown course', () => {
+  it('with no completed laps yet, still serves the PB laps (the rail shows them from the start)', () => {
+    const lap = makeLapDelta(seeded());
+    expect(lap(1, COURSE, [])).toEqual({ pb_laps_ms: [51000, 52000, 53000], deltas: [] });
+    expect(lap(1, COURSE, null)).toEqual({ pb_laps_ms: [51000, 52000, 53000], deltas: [] });
+  });
+
+  it('gates: no PB / PB without laps / unknown course', () => {
     const d = db();
     const lap = makeLapDelta(d);
     expect(lap(1, COURSE, [50000])).toBeNull();                     // no runs at all
-    // a carryover PB has no run_laps -> nothing to compare against
     d.prepare(`INSERT INTO runs(id,season_id,player_id,course_id,cc,status,total_time_ms,is_pb,provenance)
                VALUES(9,1,2,${CID},150,'finished',150000,1,'carryover')`).run();
-    expect(lap(2, COURSE, [50000])).toBeNull();
-    expect(makeLapDelta(seeded())(1, COURSE, [])).toBeNull();
-    expect(makeLapDelta(seeded())(1, COURSE, null)).toBeNull();
+    expect(lap(2, COURSE, [50000])).toBeNull();                     // carryover PB has no run_laps
     expect(makeLapDelta(seeded())(1, 'Nope', [50000])).toBeNull();
   });
 
   it('clamps to the PB lap count and re-keys when the PB changes', () => {
     const d = seeded();
     const lap = makeLapDelta(d);
-    // 4 live laps vs a 3-lap PB: compared over the first 3
-    expect(lap(1, COURSE, [51000, 52000, 53000, 99000])!.lap).toBe(3);
-    // a new PB run (laps 50/51/52) takes over without invalidation
+    expect(lap(1, COURSE, [51000, 52000, 53000, 99000])!.deltas).toHaveLength(3);
     insertRun(d, 4, 1, [50000, 51000, 52000]);
     d.exec('UPDATE runs SET is_pb=0 WHERE id=2; UPDATE runs SET is_pb=1 WHERE id=4;');
-    expect(lap(1, COURSE, [51000])).toEqual({ lap: 1, delta_ms: 1000, gained: false, gold: false });
+    expect(last(lap(1, COURSE, [51000]))).toEqual({ lap: 1, delta_ms: 1000, gained: false, gold: false });
+    expect(lap(1, COURSE, [])!.pb_laps_ms).toEqual([50000, 51000, 52000]);
+  });
+
+  it('honours a pinned PB run id over the current is_pb (post-finish upload flip)', () => {
+    const d = seeded();
+    const lap = makeLapDelta(d);
+    insertRun(d, 4, 1, [50000, 51000, 52000]);   // the run just finished, now the db PB
+    d.exec('UPDATE runs SET is_pb=0 WHERE id=2; UPDATE runs SET is_pb=1 WHERE id=4;');
+    const pinned = lap(1, COURSE, [51000], 2);   // hub pins the pre-race PB (run 2)
+    expect(pinned!.pb_laps_ms).toEqual([51000, 52000, 53000]);
+    expect(last(pinned)).toEqual({ lap: 1, delta_ms: 0, gained: false, gold: false });
+    expect(lap(1, COURSE, [51000])!.pb_laps_ms).toEqual([50000, 51000, 52000]);  // unpinned: live PB
   });
 
   it('invalidateCourse drops the cached comparison', () => {
     const d = seeded();
     const lap = makeLapDelta(d);
-    expect(lap(1, COURSE, [52000])!.delta_ms).toBe(1000);
+    expect(last(lap(1, COURSE, [52000])).delta_ms).toBe(1000);
     d.exec('DELETE FROM run_laps WHERE run_id=2');        // PB loses its laps
-    expect(lap(1, COURSE, [52000])!.delta_ms).toBe(1000); // still cached
+    expect(last(lap(1, COURSE, [52000])).delta_ms).toBe(1000); // still cached
     lap.invalidateCourse(CID);
     expect(lap(1, COURSE, [52000])).toBeNull();           // fresh load -> no comparison
   });

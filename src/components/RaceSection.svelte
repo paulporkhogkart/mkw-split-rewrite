@@ -1,6 +1,8 @@
 <script>
-  import { race } from "../lib/stores.js";
+  import { race, presence, myPlayerId } from "../lib/stores.js";
   import { fmtSplit } from "../lib/format.js";
+  // Delta formatting/colour rules are shared with the player cards.
+  import { fmtTimeMs, lapDeltaVm, pbDelta } from "../lib/playerCard.js";
 
   /**
    * Build the lap list to render.
@@ -12,6 +14,14 @@
     if (!total) return [];
     return Array.from({ length: total }, (_, i) => i + 1);
   }
+
+  // My presence entry carries the server-side PB comparison: the PB run's lap
+  // durations, one LiveSplit delta row per completed lap, and the pinned PB total.
+  $: me = $myPlayerId != null ? $presence[$myPlayerId] : null;
+  $: pbLaps = me?.pb_laps_ms ?? null;
+  $: lapDs = me?.lap_deltas ?? null;
+  $: pbTotalMs = me?.pb_ms ?? null;
+  $: totalDelta = $race?.finishTime && pbTotalMs != null ? pbDelta($race.finishTime, pbTotalMs) : null;
 </script>
 
 {#if $race}
@@ -22,8 +32,11 @@
     {@const splitStr = fmtSplit(splits[n])}
     {@const isActive = n === $race.curLap}
     {@const hasValue = splits[n] != null && splits[n] !== ""}
+    {@const d = lapDs ? lapDeltaVm(lapDs[n - 1]) : null}
     <div class="row">
       <span class="lbl" class:lbl-dim={!hasValue && !isActive}>Lap {n}</span>
+      <span class="pbv">{pbLaps && pbLaps[n - 1] != null ? fmtTimeMs(pbLaps[n - 1]) : ""}</span>
+      <span class="dlt {d ? d.cls : ''}">{d ? d.text : ""}</span>
       <span
         class="val"
         class:val-dim={!hasValue && !isActive}
@@ -33,16 +46,20 @@
 
   <div class="row row-total">
     <span class="lbl-total">Total</span>
+    <span class="pbv">{pbTotalMs != null ? fmtTimeMs(pbTotalMs) : ""}</span>
+    <span class="dlt {totalDelta ? totalDelta.cls : ''}">{totalDelta ? totalDelta.text : ""}</span>
     <span class="val">{$race.finishTime ?? "-"}</span>
   </div>
 
   <div class="row">
     <span class="lbl">Coins</span>
+    <span class="pbv"></span><span class="dlt"></span>
     <span class="val">{$race.coins ?? "-"}</span>
   </div>
 
   <div class="row">
     <span class="lbl">Mushrooms</span>
+    <span class="pbv"></span><span class="dlt"></span>
     <span class="val">{$race.mushrooms != null ? `×${$race.mushrooms}` : "-"}</span>
   </div>
 {/if}
@@ -50,7 +67,9 @@
 <style>
   .row {
     display: grid;
-    grid-template-columns: 1fr auto;
+    /* label | PB reference | LiveSplit delta | live value */
+    grid-template-columns: 1fr auto auto auto;
+    column-gap: 9px;
     align-items: center;
     padding: 5px 12px;
     font-size: 12.5px;
@@ -71,6 +90,15 @@
   .lbl-dim {
     color: var(--tx-dim);
   }
+
+  .pbv { color: var(--tx-dim); font-size: 11px; white-space: nowrap; text-align: right; }
+
+  .dlt { font-size: 11px; font-weight: 600; white-space: nowrap; text-align: right; transition: color .35s; }
+  .dlt.behind-loss { color: var(--ls-behind); }
+  .dlt.behind-gain { color: var(--ls-behind-soft); }
+  .dlt.ahead-loss  { color: var(--ls-ahead-soft); }
+  .dlt.ahead-gain  { color: var(--ls-ahead); }
+  .dlt.gold        { color: var(--ls-gold); }
 
   .val {
     color: var(--tx);

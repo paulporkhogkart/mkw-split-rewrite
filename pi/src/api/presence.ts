@@ -9,7 +9,12 @@ interface WsLike { send(data: string): void; }
 export function presenceHandlers(presence: PresenceHub, playerId: number | null) {
   let unsub = () => {};
   return {
-    onOpen(_evt: unknown, ws: WsLike) { unsub = presence.addSink((msg) => ws.send(JSON.stringify(msg))); },
+    // Snapshots carry `you` (the authenticated sender's player id) so the client
+    // can find its own entry - the race rail reads its PB laps/deltas from it.
+    onOpen(_evt: unknown, ws: WsLike) {
+      unsub = presence.addSink((msg) => ws.send(JSON.stringify(
+        (msg as { type?: string }).type === 'presence_snapshot' ? { ...(msg as object), you: playerId } : msg)));
+    },
     onMessage(evt: { data: unknown }) {
       if (playerId == null) return;                       // token-less socket: receive-only
       try {

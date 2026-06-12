@@ -2,7 +2,7 @@
 // feeds the broadcast into the `presence` store. Mirrors discord.js (store-driven push) +
 // the bot's ws.ts (reconnect). Presence is ephemeral - a dropped frame self-corrects.
 import { get } from "svelte/store";
-import { screen, selection, race, minimap, presence } from "./stores.js";
+import { screen, selection, race, minimap, presence, myPlayerId } from "./stores.js";
 import { resets } from "./resets.js";
 import { serverUrl, authToken } from "./syncSettings.js";
 import { pushSample } from "./raceTimerBuffer.js";
@@ -63,6 +63,7 @@ function connect() {
     try {
       const msg = JSON.parse(e.data);
       if (msg.type === "presence_snapshot") {
+        if (msg.you != null) myPlayerId.set(msg.you);   // which entry is this client
         const map = {}, t = Date.now();
         for (const p of msg.players) {
           p._rxAt = t; map[p.player_id] = p;

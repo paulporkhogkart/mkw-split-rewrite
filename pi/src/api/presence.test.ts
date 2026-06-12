@@ -25,6 +25,8 @@ describe('presenceHandlers', () => {
     const sender = presenceHandlers(h, 1);
     sender.onOpen(null, { send: (s: string) => sent.push(JSON.parse(s)) });
     expect(sent[0].type).toBe('presence_snapshot');
+    expect(sent[0].you).toBe(1);                 // authed socket learns its own id
+    expect(obs[0].you).toBeNull();               // token-less observer has none
     sender.onMessage({ data: JSON.stringify({ screen: 'RACING' }) });
     expect(obs.at(-1)).toMatchObject({ type: 'presence_update', player: { player_id: 1, online: true, screen: 'RACING' } });
     sender.onClose();

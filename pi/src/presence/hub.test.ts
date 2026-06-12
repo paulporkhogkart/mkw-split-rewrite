@@ -152,18 +152,28 @@ describe('PresenceHub', () => {
     expect(got.at(-1).player.pb_delta_ms).toBeNull();
   });
 
-  it('attaches lap_delta while racing from the frame splits', () => {
+  it('attaches lap deltas + PB laps while racing from the frame splits', () => {
     const calls: unknown[] = [];
     const laps = (pid: number, course: unknown, splits: unknown) => {
-      calls.push([pid, course, splits]); return { lap: 2, delta_ms: -800, gained: true, gold: false };
+      calls.push([pid, course, splits]);
+      return { pb_laps_ms: [51000, 52000], deltas: [
+        { lap: 1, delta_ms: 300, gained: false, gold: false },
+        { lap: 2, delta_ms: -800, gained: true, gold: false }] };
     };
     const hub = new PresenceHub(db(), noCompletion, noPace, laps, () => 1000);
     const got: any[] = [];
     hub.addSink((m) => got.push(m));
     hub.update(1, { screen: 'RACING', course: 'bc', splits_ms: [51294, 50764] });
     expect(got.at(-1).player.lap_delta).toEqual({ lap: 2, delta_ms: -800, gained: true, gold: false });
+    expect(got.at(-1).player.lap_deltas).toHaveLength(2);
+    expect(got.at(-1).player.pb_laps_ms).toEqual([51000, 52000]);
     expect(calls.at(-1)).toEqual([1, 'bc', [51294, 50764]]);
-    hub.update(1, { screen: 'RACING', course: 'bc', final_time: '2:32.168' });
+    // The comparison stays up through the finished state (the rail reads it there)...
+    hub.update(1, { screen: 'RACING', course: 'bc', final_time: '2:32.168', splits_ms: [51294, 50764] });
+    expect(got.at(-1).player.lap_deltas).toHaveLength(2);
+    // ...and drops once the player leaves the race context.
+    hub.update(1, { screen: 'MAIN_MENU' });
+    expect(got.at(-1).player.lap_deltas).toBeNull();
     expect(got.at(-1).player.lap_delta).toBeNull();
   });
 
