@@ -33,17 +33,20 @@ function lerp(a, b, f) {
   return a + (b - a) * f;
 }
 
-/** Linear-interpolate { elapsed_ms, completion } at `target` within `samples`
- *  (ascending t). Past the newest -> extrapolate elapsed_ms at 1ms/ms (capped
- *  at EXTRAPOLATE_CAP_MS), hold completion. Before the oldest or empty ->
- *  null. Pure (exported for tests). */
+/** Linear-interpolate { elapsed_ms, completion, pb_delta_ms } at `target`
+ *  within `samples` (ascending t). Past the newest -> extrapolate elapsed_ms
+ *  at 1ms/ms (capped at EXTRAPOLATE_CAP_MS) and HOLD completion + pb_delta_ms
+ *  (a pace delta drifts at the unknown pace difference, not 1ms/ms - holding
+ *  is the on-PB-pace assumption). Before the oldest or empty -> null. The
+ *  in-window lerp is what makes the delta readout sweep smoothly between 4Hz
+ *  server values instead of stepping. Pure (exported for tests). */
 export function interpolateAt(samples, target) {
   if (!samples || samples.length === 0) return null;
   const newest = samples[samples.length - 1];
   if (target >= newest.t) {
     const ahead = Math.min(target - newest.t, EXTRAPOLATE_CAP_MS);
     return { elapsed_ms: newest.elapsed_ms == null ? null : newest.elapsed_ms + ahead,
-             completion: newest.completion };
+             completion: newest.completion, pb_delta_ms: newest.pb_delta_ms };
   }
   if (target <= samples[0].t) return null;
   let lo = samples[0];
@@ -52,11 +55,12 @@ export function interpolateAt(samples, target) {
     if (hi.t >= target) {
       const f = (target - lo.t) / (hi.t - lo.t || 1);
       return { elapsed_ms: lerp(lo.elapsed_ms, hi.elapsed_ms, f),
-               completion: lerp(lo.completion, hi.completion, f) };
+               completion: lerp(lo.completion, hi.completion, f),
+               pb_delta_ms: lerp(lo.pb_delta_ms, hi.pb_delta_ms, f) };
     }
     lo = hi;
   }
-  return { elapsed_ms: newest.elapsed_ms, completion: newest.completion };
+  return { elapsed_ms: newest.elapsed_ms, completion: newest.completion, pb_delta_ms: newest.pb_delta_ms };
 }
 
 /** interpolateAt over the player's buffer, with a monotonic display floor on
@@ -70,5 +74,5 @@ export function sampleAt(playerId, target) {
   let e = est.elapsed_ms;
   if (floor != null && e < floor && floor - e <= RESET_BACKWARD_MS) e = floor;
   floors.set(playerId, e);
-  return e === est.elapsed_ms ? est : { elapsed_ms: e, completion: est.completion };
+  return e === est.elapsed_ms ? est : { ...est, elapsed_ms: e };
 }

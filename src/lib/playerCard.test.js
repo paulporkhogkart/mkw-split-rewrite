@@ -83,9 +83,12 @@ describe("viewModel", () => {
       has_model: false, updated_at: 1, name: "P", color: "#888" };
     expect(viewModel(e, () => 2).bar).toEqual({ fill: 0, dividers: [], calibrating: true });
   });
-  it("racing with a live pace delta: full-precision readout next to PB; none without one", () => {
-    expect(viewModel({ ...base, pb_delta_ms: -432 }, () => 2000).delta).toEqual({ text: "-0.432", cls: "fast" });
-    expect(viewModel(base, () => 2000).delta).toBeNull();
+  it("racing pace delta reads from the delayed sample (same clock as timer/bar)", () => {
+    const delayed = { elapsed_ms: 1234, completion: 0.42, pb_delta_ms: -432 };
+    expect(viewModel(base, () => 2000, delayed).delta).toEqual({ text: "-0.432", cls: "fast" });
+    expect(viewModel(base, () => 2000, { ...delayed, pb_delta_ms: null }).delta).toBeNull();
+    // the raw entry field doesn't drive the readout - it rides the buffer
+    expect(viewModel({ ...base, pb_delta_ms: -432 }, () => 2000, null).delta).toBeNull();
   });
   it("finished: the exact delta wins over any stale live pace delta", () => {
     const vm = viewModel({ ...base, final_time: "1:21.044", pb_delta_ms: -50 }, () => 2000);

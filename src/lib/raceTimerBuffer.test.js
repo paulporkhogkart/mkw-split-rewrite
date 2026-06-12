@@ -2,25 +2,25 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { interpolateAt, pushSample, sampleAt, clearBuffer, EXTRAPOLATE_CAP_MS } from "./raceTimerBuffer.js";
 
 const S = [
-  { t: 1000, elapsed_ms: 0, completion: 0 },
-  { t: 2000, elapsed_ms: 1000, completion: 0.5 },
-  { t: 3000, elapsed_ms: 2000, completion: 1 },
+  { t: 1000, elapsed_ms: 0, completion: 0, pb_delta_ms: 0 },
+  { t: 2000, elapsed_ms: 1000, completion: 0.5, pb_delta_ms: 100 },
+  { t: 3000, elapsed_ms: 2000, completion: 1, pb_delta_ms: -300 },
 ];
 
 describe("interpolateAt", () => {
-  it("interpolates between bracketing samples", () => {
-    expect(interpolateAt(S, 2500)).toEqual({ elapsed_ms: 1500, completion: 0.75 });
+  it("interpolates between bracketing samples (delta sweeps, not steps)", () => {
+    expect(interpolateAt(S, 2500)).toEqual({ elapsed_ms: 1500, completion: 0.75, pb_delta_ms: -100 });
   });
-  it("extrapolates elapsed_ms past the newest sample at 1ms/ms, holding completion", () => {
-    expect(interpolateAt(S, 3500)).toEqual({ elapsed_ms: 2500, completion: 1 });
+  it("extrapolates elapsed_ms past the newest sample at 1ms/ms, holding completion + delta", () => {
+    expect(interpolateAt(S, 3500)).toEqual({ elapsed_ms: 2500, completion: 1, pb_delta_ms: -300 });
   });
   it("caps extrapolation at EXTRAPOLATE_CAP_MS past the newest sample", () => {
     expect(interpolateAt(S, 3000 + EXTRAPOLATE_CAP_MS + 5000))
-      .toEqual({ elapsed_ms: 2000 + EXTRAPOLATE_CAP_MS, completion: 1 });
+      .toEqual({ elapsed_ms: 2000 + EXTRAPOLATE_CAP_MS, completion: 1, pb_delta_ms: -300 });
   });
   it("does not invent elapsed_ms when the newest sample has none", () => {
-    const idle = [{ t: 1000, elapsed_ms: null, completion: null }];
-    expect(interpolateAt(idle, 2000)).toEqual({ elapsed_ms: null, completion: null });
+    const idle = [{ t: 1000, elapsed_ms: null, completion: null, pb_delta_ms: null }];
+    expect(interpolateAt(idle, 2000)).toEqual({ elapsed_ms: null, completion: null, pb_delta_ms: null });
   });
   it("is null before the oldest sample and for empty", () => {
     expect(interpolateAt(S, 500)).toBeNull();

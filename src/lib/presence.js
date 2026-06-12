@@ -54,12 +54,12 @@ function connect() {
         const map = {}, t = Date.now();
         for (const p of msg.players) {
           p._rxAt = t; map[p.player_id] = p;
-          pushSample(p.player_id, { t, elapsed_ms: p.elapsed_ms, completion: p.completion });
+          pushSample(p.player_id, { t, elapsed_ms: p.elapsed_ms, completion: p.completion, pb_delta_ms: p.pb_delta_ms });
         }
         presence.set(map);
       } else if (msg.type === "presence_update") {
         const t = Date.now(), p = { ...msg.player, _rxAt: t };
-        pushSample(p.player_id, { t, elapsed_ms: p.elapsed_ms, completion: p.completion });
+        pushSample(p.player_id, { t, elapsed_ms: p.elapsed_ms, completion: p.completion, pb_delta_ms: p.pb_delta_ms });
         presence.update((m) => ({ ...m, [p.player_id]: p }));
       }
     } catch { /* ignore malformed */ }

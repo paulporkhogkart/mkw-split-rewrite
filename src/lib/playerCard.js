@@ -41,9 +41,11 @@ export function pbDelta(finalStr, pbMs) {
 }
 
 /** A presence entry -> the card view model. `now` is a fn (Date.now) or a number
- *  for testability. `delayed` is the interpolated { elapsed_ms, completion } from
- *  the delay buffer (or null) - the racing timer + bar render from it so the
- *  display lags real time and lines up at the finish. */
+ *  for testability. `delayed` is the interpolated { elapsed_ms, completion,
+ *  pb_delta_ms } from the delay buffer (or null) - the racing timer, bar and
+ *  pace delta all render from it so the three move on one display clock (the
+ *  lerp sweeps the delta smoothly between 4Hz server values) and line up at
+ *  the finish. */
 export function viewModel(e, now = Date.now, delayed = null) {
   const t = typeof now === "function" ? now() : now;
   const color = e.color || "#888";
@@ -86,7 +88,7 @@ export function viewModel(e, now = Date.now, delayed = null) {
     resets: race ? (e.resets ?? 0) : null,
     pbStr: race && e.pb_ms != null ? fmtTimeMs(e.pb_ms) : null,
     delta: state === "finished" ? pbDelta(e.final_time, e.pb_ms)
-      : state === "racing" ? liveDelta(e.pb_delta_ms) : null,
+      : state === "racing" ? liveDelta(delayed ? delayed.pb_delta_ms : null) : null,
     bar,
   };
 }

@@ -90,12 +90,21 @@ racing (`screen === 'RACING' && !final_time`) and `completion != null` and
 `offlineEntry` gain the field. Additive — the only presence consumer is the
 Svelte client.
 
-**Card.** `viewModel`: when racing, `delta = liveDelta(e.pb_delta_ms)` —
+**Card.** `viewModel`: when racing, `delta = liveDelta(delayed.pb_delta_ms)` —
 signed seconds at **full timer precision** (`+0.432` / `-1.260`, matching the
 m:ss.SSS timer; user decision 2026-06-12, revised from a one-decimal first
 cut), reusing the existing `slow`/`fast` classes and the existing delta slot
 next to PB (markup unchanged). The finished delta uses the same 3-decimal
 format (was 2-decimal).
+
+**Smoothing** (follow-up, same day): the raw 4 Hz value stepped visibly at
+3-decimal precision, so `pb_delta_ms` rides the same delay buffer as the
+timer/bar: `presence.js` pushes it into each sample and `interpolateAt` lerps
+it in-window — the readout sweeps continuously between server values on the
+30 fps card clock and is time-aligned with the timer beside it. Past the
+newest sample it HOLDS (a delta drifts at the unknown pace difference, not
+1 ms/ms — holding is the on-PB-pace assumption); with `DELAY_MS = 200` against
+~250 ms sample spacing the render target sits in-window most of the time.
 
 **Gates** (delta hidden): no PB, PB run without a usable trail (e.g.
 manual-fill uploads), no course model ("calibrating"), no live
