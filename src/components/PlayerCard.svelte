@@ -83,7 +83,7 @@
             </svg>
           </span>
         {/if}
-        {vm.primary.text}
+        <span class="ttx">{vm.primary.text}</span>
       </div>
     {:else if vm.primary.kind === "activity"}
       <div class="prim act">{vm.primary.text}</div>
@@ -142,20 +142,22 @@
      green = gaining + ahead, gold = best-ever segment (lap mode only). The
      finished exact delta uses the settled sharp pair. */
   .delta { font-weight: 600; transition: color .35s; }
-  .delta.behind-loss { color: #e5484d; }
-  .delta.behind-gain { color: #eb9091; }
-  .delta.ahead-loss  { color: #84d8a6; }
-  .delta.ahead-gain  { color: #30c161; }
-  .delta.gold        { color: #e3b341; }
+  .delta.behind-loss { color: var(--ls-behind); }
+  .delta.behind-gain { color: var(--ls-behind-soft); }
+  .delta.ahead-loss  { color: var(--ls-ahead-soft); }
+  .delta.ahead-gain  { color: var(--ls-ahead); }
+  .delta.gold        { color: var(--ls-gold); }
   .prim.time { font-size: 20px; font-weight: 700; color: var(--tx); line-height: 1; margin-top: 2px;
-               display: flex; align-items: center; gap: 5px; }
+               min-height: 20px; display: flex; align-items: center; gap: 5px; }
+  /* Trim the digits' box to cap..baseline so flex centring is optical, not em-box
+     (Segoe UI's tall ascent paints glyphs ~1.3px below the box centre otherwise). */
+  .prim.time .ttx { text-box: trim-both cap alphabetic; }
   /* Finished: the time takes the verdict colour - green beat the pre-race PB, red didn't. */
-  .prim.time.fin { color: #e5484d; }
-  .prim.time.fin.pb { color: #30c161; }
+  .prim.time.fin { color: var(--ls-behind); }
+  .prim.time.fin.pb { color: var(--ls-ahead); }
   /* State badge beside the time: checkered flag / pause bars / reset arrow.
-     Lifted 1px: flex centres against the 20px em box, but the digits sit high
-     in it (no descenders), so a box-centred icon reads slightly low. */
-  .tag { display: inline-flex; color: var(--tx-dim); flex: 0 0 auto; transform: translateY(-1px); }
+     No nudges: the time text is cap-trimmed (.ttx), so centre IS the digit centre. */
+  .tag { display: inline-flex; color: var(--tx-dim); flex: 0 0 auto; }
   .tag svg { width: 11px; height: 11px; }
   .prim.act { font-size: 11.5px; font-weight: 600; color: var(--tx-mut); margin-top: 4px; }
   .prim.seen { font-size: 10.5px; color: var(--tx-dim); margin-top: 4px; }

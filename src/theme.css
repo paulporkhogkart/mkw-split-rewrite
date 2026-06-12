@@ -31,6 +31,13 @@
   --idle:  #56585e;   /* inactive · no signal · disconnected */
   --close: #c4382a;   /* window-close hover only */
 
+  /* LiveSplit delta conventions (player cards + race rail) */
+  --ls-behind:      #e5484d;   /* losing + behind */
+  --ls-behind-soft: #eb9091;   /* gaining but behind */
+  --ls-ahead-soft:  #84d8a6;   /* losing but ahead */
+  --ls-ahead:       #30c161;   /* gaining + ahead */
+  --ls-gold:        #e3b341;   /* best-ever segment */
+
   /* Typography */
   --ui:   'Segoe UI', system-ui, -apple-system, sans-serif;   /* all chrome */
   --mono: 'Cascadia Code', Consolas, ui-monospace, monospace; /* rare; data uses --ui + tnum */
