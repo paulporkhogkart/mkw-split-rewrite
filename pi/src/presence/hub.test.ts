@@ -76,6 +76,26 @@ describe('PresenceHub', () => {
     expect(got.at(-1).player).toMatchObject({ elapsed_ms: null });
   });
 
+  it('offline entries carry career stats; online ones do not', () => {
+    const d = db();
+    d.exec(`INSERT INTO courses(id,slug,display_name) VALUES(7,'rainbow_road','Rainbow Road');
+            INSERT INTO runs(season_id,player_id,course_id,cc,status,total_time_ms,is_pb,was_pb,provenance,ended_at)
+              VALUES(1,1,7,150,'finished',79880,1,1,'live',datetime('now')),
+                    (1,2,7,150,'finished',81000,1,1,'live',datetime('now')),
+                    (1,1,7,150,'reset',NULL,0,0,'live',datetime('now'));`);
+    const hub = new PresenceHub(d, noCompletion, noPace, noLaps, () => 1000);
+    const got: any[] = [];
+    hub.addSink((m) => got.push(m));
+    const paul = got[0].players.find((p: any) => p.player_id === 1);
+    const luke = got[0].players.find((p: any) => p.player_id === 2);
+    expect(paul.off_stats).toEqual({ firsts: 1, runs_7d: 2, pbs_30d: 1 });   // holds the #1
+    expect(luke.off_stats).toEqual({ firsts: 0, runs_7d: 1, pbs_30d: 1 });
+    hub.update(1, { screen: 'MAIN_MENU' });
+    expect(got.at(-1).player.off_stats).toBeNull();                          // online: not carried
+    hub.setOffline(1);
+    expect(got.at(-1).player.off_stats).toEqual({ firsts: 1, runs_7d: 2, pbs_30d: 1 });
+  });
+
   it('seeds offline entries with updated_at 0 (never seen)', () => {
     const hub = new PresenceHub(db(), noCompletion, noPace, noLaps, () =>1000);
     const got: any[] = [];

@@ -22,6 +22,15 @@
   {#if fig}<div class="fig" style="background-image:url({fig})"></div>{/if}
   <div class="data">
     <div class="nm">{vm.name}</div>
+    {#if !vm.online && vm.stats}
+    <!-- Offline: career stats instead of dead selection rows (the primary line
+         already carries "last seen"). -->
+    <div class="sel">
+      <div class="kv"><span class="kt">FIRSTS</span><span class="v">{vm.stats.firsts}</span></div>
+      <div class="kv"><span class="kt">RUNS · 7D</span><span class="v">{vm.stats.runs_7d}</span></div>
+      <div class="kv"><span class="kt">PBS · 30D</span><span class="v">{vm.stats.pbs_30d}</span></div>
+    </div>
+    {:else if vm.online}
     <div class="sel">
       <div class="kv" class:dim={!vm.char}>
         <span class="k" title="Character">
@@ -46,6 +55,7 @@
         </span><span class="v">{vm.trk || "—"}</span>
       </div>
     </div>
+    {/if}
     <div class="sp"></div>
     {#if vm.resets != null}
       <div class="foot"><span class="rk">RESETS</span><b>{vm.resets}</b></div>
@@ -130,6 +140,9 @@
            justify-content: flex-end; padding-top: 2.5px; }
   .kv .k svg { width: 9px; height: 9px; }
   .kv .v { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Offline stat labels (FIRSTS / RUNS 7D / PBS 30D). */
+  .kv .kt { font-size: 7.5px; letter-spacing: .1em; color: var(--tx-dim); flex: 0 0 auto;
+            min-width: 46px; padding-top: 2px; }
   .kv.dim { color: var(--tx-dim); }
   .sp { flex: 1; }
   .foot { display: flex; align-items: center; gap: 6px; }

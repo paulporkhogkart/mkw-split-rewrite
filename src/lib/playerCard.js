@@ -91,7 +91,8 @@ export function viewModel(e, now = Date.now, delayed = null, opts = {}) {
     const seen = e.updated_at > 0 ? lastSeen(t - e.updated_at) : null;
     return { state: "offline", name: e.name, color, online: false, char: null, kart: null, trk: null,
       primary: { kind: "seen", text: seen ? `last seen ${seen}` : "offline" },
-      resets: null, pbStr: null, delta: null, finPb: false, badge: null, bar: null };
+      resets: null, pbStr: null, delta: null, finPb: false, badge: null, bar: null,
+      stats: e.off_stats ?? null };
   }
   const racing = e.screen === "RACING" && !e.final_time;
   const finished = (e.screen === "RACING" && e.final_time) || e.screen === "POST_TIME_TRIAL";

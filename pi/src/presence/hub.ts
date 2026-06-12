@@ -32,6 +32,7 @@ export interface PresenceEntry {
   has_model: boolean;   // false -> course has no model yet (bar shows "calibrating")
   pb_delta_ms: number | null;   // live ahead(-)/behind(+) vs own PB at the same completion
   lap_delta: { lap: number; delta_ms: number; gained: boolean; gold: boolean } | null;
+  off_stats: { firsts: number; runs_7d: number; pbs_30d: number } | null;   // offline-card stats
 }
 
 /** Live PB pace delta (see presence/pace.ts); the hub only needs the call shape. */
@@ -44,11 +45,12 @@ type LapFn = (playerId: number, course: string | null | undefined,
 
 type Sink = (msg: unknown) => void;
 
-function offlineEntry(player_id: number, name: string, color: string | null, now: number): PresenceEntry {
+function offlineEntry(player_id: number, name: string, color: string | null, now: number,
+                      off_stats: PresenceEntry['off_stats'] = null): PresenceEntry {
   return { player_id, name, color, online: false, screen: null, course: null, character: null, kart: null,
            costume: null, cur_lap: null, tot_lap: null, coins: null, mushrooms: null, resets: null,
            pb_ms: null, completion: null, dividers: [], final_time: null, updated_at: now, elapsed_ms: null,
-           has_model: false, pb_delta_ms: null, lap_delta: null };
+           has_model: false, pb_delta_ms: null, lap_delta: null, off_stats };
 }
 
 /** In-memory live presence, keyed by the active-season roster (seeded offline so every card
@@ -72,7 +74,28 @@ export class PresenceHub {
     const rows = this.db.prepare(
       `SELECT p.id, p.display_name, p.color FROM season_rosters sr JOIN players p ON p.id=sr.player_id WHERE sr.season_id=?`
     ).all(activeSeasonId(this.db)) as { id: number; display_name: string; color: string | null }[];
-    for (const r of rows) if (!this.map.has(r.id)) this.map.set(r.id, offlineEntry(r.id, r.display_name, r.color, 0));
+    for (const r of rows)
+      if (!this.map.has(r.id)) this.map.set(r.id, offlineEntry(r.id, r.display_name, r.color, 0, this.offStats(r.id)));
+  }
+
+  /** Career snapshot for an offline card: current #1 leaderboard spots, attempts in
+   *  the last 7 days, PBs set in the last 30. Computed at seed + on going offline. */
+  private offStats(playerId: number): PresenceEntry['off_stats'] {
+    try {
+      const season = activeSeasonId(this.db);
+      const firsts = (this.db.prepare(
+        `SELECT COUNT(*) AS n FROM (
+           SELECT player_id, RANK() OVER (PARTITION BY course_id ORDER BY total_time_ms ASC, ended_at ASC) AS rk
+           FROM runs WHERE season_id=? AND cc=150 AND is_pb=1 AND status='finished'
+         ) WHERE rk=1 AND player_id=?`).get(season, playerId) as { n: number }).n;
+      const runs_7d = (this.db.prepare(
+        `SELECT COUNT(*) AS n FROM runs WHERE season_id=? AND player_id=? AND provenance='live'
+           AND datetime(ended_at) >= datetime('now','-7 days')`).get(season, playerId) as { n: number }).n;
+      const pbs_30d = (this.db.prepare(
+        `SELECT COUNT(*) AS n FROM runs WHERE season_id=? AND player_id=? AND provenance='live' AND was_pb=1
+           AND datetime(ended_at) >= datetime('now','-30 days')`).get(season, playerId) as { n: number }).n;
+      return { firsts, runs_7d, pbs_30d };
+    } catch { return null; }
   }
 
   snapshot(): { type: 'presence_snapshot'; players: PresenceEntry[] } {
@@ -107,7 +130,7 @@ export class PresenceHub {
       elapsed_ms: frame.elapsed_ms ?? null,
       completion, pb_ms,
       dividers, final_time: frame.final_time ?? null, updated_at: now,
-      has_model: model, pb_delta_ms, lap_delta,
+      has_model: model, pb_delta_ms, lap_delta, off_stats: null,
     };
     this.map.set(playerId, entry);
     this.broadcast({ type: 'presence_update', player: entry });
@@ -135,7 +158,7 @@ export class PresenceHub {
     this.pbLatch.delete(playerId);
     const e = this.map.get(playerId);
     if (!e || !e.online) return;
-    const off = offlineEntry(e.player_id, e.name, e.color, this.now());
+    const off = offlineEntry(e.player_id, e.name, e.color, this.now(), this.offStats(playerId));
     this.map.set(playerId, off);
     this.broadcast({ type: 'presence_update', player: off });
   }

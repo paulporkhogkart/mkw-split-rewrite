@@ -199,4 +199,9 @@ describe("viewModel", () => {
     const never = viewModel({ ...base, online: false, updated_at: 0 }, () => 5000);
     expect(never.primary).toEqual({ kind: "seen", text: "offline" });
   });
+  it("offline cards pass the server career stats through", () => {
+    const stats = { firsts: 3, runs_7d: 41, pbs_30d: 5 };
+    expect(viewModel({ ...base, online: false, updated_at: 1, off_stats: stats }, () => 2).stats).toEqual(stats);
+    expect(viewModel({ ...base, online: false, updated_at: 1 }, () => 2).stats).toBeNull();
+  });
 });
