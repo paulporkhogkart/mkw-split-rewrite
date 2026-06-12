@@ -77,7 +77,7 @@
           {/if}
         </div>
         {#if activeRegionObj.kind === "dark_loading"}
-          <p class="hint">Detects a near-black region plus a bright icon. Drag the main ROI on the feed; the icon ROI uses its default position.</p>
+          <p class="hint">Detects a near-black region; if the region has an icon ROI, a bright colourful item must also be present there. Drag the main ROI on the feed; the icon ROI uses its default position.</p>
         {/if}
       </div>
     {/if}

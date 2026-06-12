@@ -241,15 +241,25 @@ TELLS: list = [
         _tmpl("images/screens/starttimetrial.png", (671, 312, 1267, 359), thresh=199)]]),
     Tell(screen=Screen.START_REPLAY, groups=[[
         _tmpl("images/screens/startreplay.png", (726, 317, 1209, 356), thresh=222)]]),
-    Tell(screen=Screen.RESET, groups=[[
-        Region(kind="dark_loading", roi=(0, 589, 527, 1080),
-               icon_roi=(1700, 920, 1870, 1030))]]),
-    Tell(screen=Screen.GHOST_RESET, groups=[[
-        Region(kind="dark_loading", roi=(0, 589, 527, 1080),
-               icon_roi=(1700, 920, 1870, 1030))]]),
-    Tell(screen=Screen.UNKNOWN_RESET, groups=[[
-        Region(kind="dark_loading", roi=(0, 589, 527, 1080),
-               icon_roi=(1700, 920, 1870, 1030))]]),
+    # RESET family: the icon group plus two icon-less dark groups.  A real
+    # loading screen is near-uniformly dark across the WHOLE frame; dark Switch
+    # system screens carry bright content up top (game thumbnails, the Nintendo
+    # boot logo) that the top-left/top-right groups veto.
+    Tell(screen=Screen.RESET, groups=[
+        [Region(kind="dark_loading", roi=(0, 589, 527, 1080),
+                icon_roi=(1700, 920, 1870, 1030))],
+        [Region(kind="dark_loading", roi=(0, 0, 527, 491))],
+        [Region(kind="dark_loading", roi=(1393, 0, 1920, 491))]]),
+    Tell(screen=Screen.GHOST_RESET, groups=[
+        [Region(kind="dark_loading", roi=(0, 589, 527, 1080),
+                icon_roi=(1700, 920, 1870, 1030))],
+        [Region(kind="dark_loading", roi=(0, 0, 527, 491))],
+        [Region(kind="dark_loading", roi=(1393, 0, 1920, 491))]]),
+    Tell(screen=Screen.UNKNOWN_RESET, groups=[
+        [Region(kind="dark_loading", roi=(0, 589, 527, 1080),
+                icon_roi=(1700, 920, 1870, 1030))],
+        [Region(kind="dark_loading", roi=(0, 0, 527, 491))],
+        [Region(kind="dark_loading", roi=(1393, 0, 1920, 491))]]),
     Tell(screen=Screen.POST_TIME_TRIAL, groups=[[
         _tmpl("images/screens/posttimetrial.png",  (1364, 798, 1458, 825), thresh=190),
         _tmpl("images/screens/posttimetrial2.png", (1209, 664, 1618, 691), thresh=190)]]),
@@ -353,19 +363,29 @@ TELL_ALIAS_GROUPS: Dict[Screen, list] = {
 _DARK_MAX_MEAN: float = 40.0    # ROI brightness ceiling (dev loading ~20, aiden ~1)
 _DARK_MAX_STD:  float = 15.0    # ROI flatness ceiling (dev ~2.3, aiden ~0.3; menus >> this)
 _DARK_ICON_MIN_MAX: int = 150   # a bright mascot must be present (guards vs fade-to-black)
+_DARK_ICON_SAT_MIN: int = 100       # "colourful" icon pixel: HSV saturation floor
+_DARK_ICON_VAL_MIN: int = 100       # "colourful" icon pixel: HSV value floor
+_DARK_ICON_MIN_COLOR_PX: int = 40   # colourful-pixel count floor (real items pulse 88-1600
+                                    # across cards; gray Switch UI / minimap lines are ~0)
 
 
 def _detect_dark_loading(frame: np.ndarray, roi: tuple,
                          icon_roi: Optional[tuple]) -> tuple:
     """Detect a dark loading/reset screen by a crush-invariant signature instead
     of template matching: a near-uniformly dark `roi` (low mean AND low std) plus
-    a bright mascot in `icon_roi`.
+    a bright COLOURFUL mascot in `icon_roi`.
 
     Some capture cards clip the loading screen's faint shadow pattern (values
     ~19-26) to pure black, leaving zero variance for a template to correlate
     against - but "dark and flat" stays dark and flat regardless of black levels,
     and the bright mascot survives too.  The icon check guards against plain
-    fade-to-black (dark, but no icon).  Returns (detected, score).
+    fade-to-black (dark, but no icon).  The mascot is an item from a varying,
+    animating set (mushroom, fire flower, ...), so it can't be template-matched -
+    but every item is saturated colour, while the dark Switch system screens that
+    used to false-positive here (boot logo, user-select glyphs) are pure
+    grayscale in that corner, as are minimap lines on a dark race section.  The
+    chroma gate is skipped for single-channel frames (chroma unmeasurable);
+    production frames are always BGR.  Returns (detected, score).
     """
     x1, y1, x2, y2 = roi
     crop = frame[y1:y2, x1:x2]
@@ -379,9 +399,16 @@ def _detect_dark_loading(frame: np.ndarray, roi: tuple,
         icon = frame[iy1:iy2, ix1:ix2]
         if icon.size == 0:
             return False, 0.0
-        ig = cv2.cvtColor(icon, cv2.COLOR_BGR2GRAY) if len(icon.shape) == 3 else icon
+        is_bgr = len(icon.shape) == 3
+        ig = cv2.cvtColor(icon, cv2.COLOR_BGR2GRAY) if is_bgr else icon
         if int(ig.max()) <= _DARK_ICON_MIN_MAX:
             return False, 0.0
+        if is_bgr:
+            hsv = cv2.cvtColor(icon, cv2.COLOR_BGR2HSV)
+            colorful = int(((hsv[..., 1] >= _DARK_ICON_SAT_MIN) &
+                            (hsv[..., 2] >= _DARK_ICON_VAL_MIN)).sum())
+            if colorful < _DARK_ICON_MIN_COLOR_PX:
+                return False, 0.0
     return True, 1.0
 
 
