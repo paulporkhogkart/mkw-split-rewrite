@@ -144,6 +144,8 @@ describe("viewModel", () => {
     expect(vm.state).toBe("setup");
     expect(vm.primary).toEqual({ kind: "activity", text: "Choosing kart" });
     expect(vm.bar).toBeNull();
+    expect(viewModel({ ...base, screen: "START_TIME_TRIAL" }, () => 2000).primary)
+      .toEqual({ kind: "activity", text: "Starting time trial" });
   });
   it("finished: final time + delta + FIN badge, bar present", () => {
     const vm = viewModel({ ...base, final_time: "1:21.044" }, () => 2000);
