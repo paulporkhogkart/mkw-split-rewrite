@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { viewModel, lastSeen, pbDelta, fmtTimeMs } from "./playerCard.js";
+import { viewModel, lastSeen, pbDelta, liveDelta, fmtTimeMs } from "./playerCard.js";
 
 const base = { player_id: 1, name: "Paul", color: "#a78bfa", online: true, screen: "RACING",
   course: "Rainbow Road", character: "Mario", kart: "Standard", cur_lap: 2, tot_lap: 3,
@@ -28,6 +28,15 @@ describe("pbDelta", () => {
     expect(pbDelta("1:21.044", 79880)).toEqual({ text: "+1.16", cls: "slow" });
     expect(pbDelta("1:18.880", 79880)).toEqual({ text: "-1.00", cls: "fast" });
     expect(pbDelta(null, 79880)).toBeNull();
+  });
+});
+
+describe("liveDelta", () => {
+  it("formats a one-decimal signed pace delta", () => {
+    expect(liveDelta(432)).toEqual({ text: "+0.4", cls: "slow" });
+    expect(liveDelta(-1260)).toEqual({ text: "-1.3", cls: "fast" });
+    expect(liveDelta(0)).toEqual({ text: "+0.0", cls: "slow" });
+    expect(liveDelta(null)).toBeNull();
   });
 });
 
@@ -73,6 +82,14 @@ describe("viewModel", () => {
     const e = { online: true, screen: "RACING", course: "Acorn Heights", tot_lap: null,
       has_model: false, updated_at: 1, name: "P", color: "#888" };
     expect(viewModel(e, () => 2).bar).toEqual({ fill: 0, dividers: [], calibrating: true });
+  });
+  it("racing with a live pace delta: one-decimal readout next to PB; none without one", () => {
+    expect(viewModel({ ...base, pb_delta_ms: -432 }, () => 2000).delta).toEqual({ text: "-0.4", cls: "fast" });
+    expect(viewModel(base, () => 2000).delta).toBeNull();
+  });
+  it("finished: the exact delta wins over any stale live pace delta", () => {
+    const vm = viewModel({ ...base, final_time: "1:21.044", pb_delta_ms: -50 }, () => 2000);
+    expect(vm.delta).toEqual({ text: "+1.16", cls: "slow" });
   });
   it("setup: activity phrase, no race cluster", () => {
     const vm = viewModel({ ...base, screen: "KART_SELECT" }, () => 2000);

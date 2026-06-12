@@ -21,6 +21,15 @@ export function lastSeen(deltaMs) {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+/** Live pace delta ms (server pb_delta_ms, signed) -> { text:"+0.4"|"-1.2", cls } or null.
+ *  One decimal: honest about the estimate's accuracy, and sub-100ms flutter never
+ *  reaches the label. The finished state shows the exact two-decimal delta instead. */
+export function liveDelta(deltaMs) {
+  if (deltaMs == null) return null;
+  const ahead = deltaMs < 0;
+  return { text: `${ahead ? "-" : "+"}${(Math.abs(deltaMs) / 1000).toFixed(1)}`, cls: ahead ? "fast" : "slow" };
+}
+
 /** final time string vs PB ms -> { text:"+1.16"|"-1.00", cls:"slow"|"fast" } or null. */
 export function pbDelta(finalStr, pbMs) {
   if (!finalStr || pbMs == null) return null;
@@ -75,7 +84,8 @@ export function viewModel(e, now = Date.now, delayed = null) {
     char: e.character || null, kart: e.kart || null, trk: e.course || null, primary,
     resets: race ? (e.resets ?? 0) : null,
     pbStr: race && e.pb_ms != null ? fmtTimeMs(e.pb_ms) : null,
-    delta: state === "finished" ? pbDelta(e.final_time, e.pb_ms) : null,
+    delta: state === "finished" ? pbDelta(e.final_time, e.pb_ms)
+      : state === "racing" ? liveDelta(e.pb_delta_ms) : null,
     bar,
   };
 }

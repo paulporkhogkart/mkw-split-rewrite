@@ -29,7 +29,12 @@ export interface PresenceEntry {
   completion: number | null; dividers: number[]; final_time: string | null; updated_at: number;
   elapsed_ms: number | null;
   has_model: boolean;   // false -> course has no model yet (bar shows "calibrating")
+  pb_delta_ms: number | null;   // live ahead(-)/behind(+) vs own PB at the same completion
 }
+
+/** Live PB pace delta (see presence/pace.ts); the hub only needs the call shape. */
+type PaceFn = (playerId: number, course: string | null | undefined,
+               completion: number | null | undefined, elapsedMs: number | null | undefined) => number | null;
 
 type Sink = (msg: unknown) => void;
 
@@ -37,7 +42,7 @@ function offlineEntry(player_id: number, name: string, color: string | null, now
   return { player_id, name, color, online: false, screen: null, course: null, character: null, kart: null,
            costume: null, cur_lap: null, tot_lap: null, coins: null, mushrooms: null, resets: null,
            pb_ms: null, completion: null, dividers: [], final_time: null, updated_at: now, elapsed_ms: null,
-           has_model: false };
+           has_model: false, pb_delta_ms: null };
 }
 
 /** In-memory live presence, keyed by the active-season roster (seeded offline so every card
@@ -47,7 +52,8 @@ export class PresenceHub {
   private map = new Map<number, PresenceEntry>();
   private sinks = new Set<Sink>();
 
-  constructor(private db: DatabaseSync, private completion: LiveCompletion, private now: () => number = Date.now) {
+  constructor(private db: DatabaseSync, private completion: LiveCompletion,
+              private pace: PaceFn = () => null, private now: () => number = Date.now) {
     this.seedRoster();
   }
 
@@ -75,6 +81,9 @@ export class PresenceHub {
     const now = this.now();
     const stale = frame.track_state != null && !FRESH_TRACK.has(frame.track_state);
     const { completion, dividers, model } = this.completion(frame.course, frame.cur_lap, frame.pos, playerId, now, stale, frame.tot_lap);
+    // Live PB pace delta only while actually racing (the finished card shows the exact one).
+    const racing = frame.screen === 'RACING' && !frame.final_time;
+    const pb_delta_ms = racing ? this.pace(playerId, frame.course, completion, frame.elapsed_ms) : null;
 
     const entry: PresenceEntry = {
       player_id: playerId, name: cur.name, color: cur.color, online: true,
@@ -85,7 +94,7 @@ export class PresenceHub {
       elapsed_ms: frame.elapsed_ms ?? null,
       completion, pb_ms: this.pbForCourse(playerId, frame.course),
       dividers, final_time: frame.final_time ?? null, updated_at: now,
-      has_model: model,
+      has_model: model, pb_delta_ms,
     };
     this.map.set(playerId, entry);
     this.broadcast({ type: 'presence_update', player: entry });
