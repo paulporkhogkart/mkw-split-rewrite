@@ -35,9 +35,28 @@ function signedDelta(d) {
   return { text: `${ahead ? "-" : "+"}${(Math.abs(d) / 1000).toFixed(3)}`, cls: ahead ? "fast" : "slow" };
 }
 
-/** Live pace delta ms (server pb_delta_ms, signed) -> signedDelta or null. */
-export function liveDelta(deltaMs) {
-  return deltaMs == null ? null : signedDelta(deltaMs);
+/** Live pace delta ms (server pb_delta_ms, signed) + trend ("gain"|"loss"|null)
+ *  -> { text, cls } in LiveSplit shades: ahead/behind from the sign, light shade
+ *  when the trend opposes it (gaining-but-behind / losing-but-ahead), sharp shade
+ *  otherwise (steady counts as sharp). */
+export function liveDelta(deltaMs, trend) {
+  if (deltaMs == null) return null;
+  const text = signedDelta(deltaMs).text;
+  const cls = deltaMs < 0
+    ? (trend === "loss" ? "ahead-loss" : "ahead-gain")
+    : (trend === "gain" ? "behind-gain" : "behind-loss");
+  return { text, cls };
+}
+
+/** Server lap_delta ({ lap, delta_ms, gained, gold }) -> { text, cls } per the
+ *  LiveSplit conventions; gold (best-ever segment) overrides the shade. */
+export function lapDeltaVm(ld) {
+  if (!ld || ld.delta_ms == null) return null;
+  const text = signedDelta(ld.delta_ms).text;
+  const cls = ld.gold ? "gold"
+    : ld.delta_ms < 0 ? (ld.gained ? "ahead-gain" : "ahead-loss")
+    : (ld.gained ? "behind-gain" : "behind-loss");
+  return { text, cls };
 }
 
 /** final time string vs PB ms -> signedDelta or null. */
@@ -52,8 +71,9 @@ export function pbDelta(finalStr, pbMs) {
  *  pb_delta_ms } from the delay buffer (or null) - the racing timer, bar and
  *  pace delta all render from it so the three move on one display clock (the
  *  lerp sweeps the delta smoothly between 4Hz server values) and line up at
- *  the finish. */
-export function viewModel(e, now = Date.now, delayed = null) {
+ *  the finish. `opts`: { deltaMode: "pace"|"laps", trend } - "laps" renders the
+ *  server's per-lap LiveSplit delta (held between lap lines) instead. */
+export function viewModel(e, now = Date.now, delayed = null, opts = {}) {
   const t = typeof now === "function" ? now() : now;
   const color = e.color || "#888";
   if (!e.online) {
@@ -92,7 +112,9 @@ export function viewModel(e, now = Date.now, delayed = null) {
       : { fill, dividers: Array.isArray(e.dividers) ? e.dividers : [] };
   }
   const delta = state === "finished" ? pbDelta(e.final_time, e.pb_ms)
-    : state === "racing" ? liveDelta(delayed ? delayed.pb_delta_ms : null) : null;
+    : state !== "racing" ? null
+    : opts.deltaMode === "laps" ? lapDeltaVm(e.lap_delta)
+    : liveDelta(delayed ? delayed.pb_delta_ms : null, opts.trend);
   return {
     state, name: e.name, color, online: true,
     char: charName(e.character, e.costume), kart: e.kart || null, trk: e.course || null, primary,

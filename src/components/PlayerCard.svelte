@@ -1,12 +1,15 @@
 <script>
   import { viewModel } from "../lib/playerCard.js";
   import { figureFor } from "../lib/playerFigures.js";
-  import { sampleAt, DELAY_MS } from "../lib/raceTimerBuffer.js";
+  import { sampleAt, deltaTrendAt, DELAY_MS } from "../lib/raceTimerBuffer.js";
+  import { deltaMode } from "../lib/cardSettings.js";
   export let entry;
   export let now = Date.now();            // driven by PlayerPanel (fast while racing)
   // Render the live timer + bar DELAY_MS in the past so the finish lines up.
   $: delayed = entry ? sampleAt(entry.player_id, now - DELAY_MS) : null;
-  $: vm = viewModel(entry, now, delayed);
+  // Pace-mode shade needs the delta's direction at the same delayed clock.
+  $: trend = $deltaMode === "pace" && entry ? deltaTrendAt(entry.player_id, now - DELAY_MS) : null;
+  $: vm = viewModel(entry, now, delayed, { deltaMode: $deltaMode, trend });
   $: fig = figureFor(vm.name, vm.online);
 </script>
 
@@ -77,9 +80,18 @@
   .foot b { font-size: 11px; font-weight: 700; color: var(--tx); }
   .pb { font-size: 9.5px; color: var(--tx-dim); margin-top: 3px; display: flex; gap: 5px; align-items: center; }
   .pb span { font-size: 7.5px; letter-spacing: .1em; }
-  .delta { font-weight: 600; }
+  .delta { font-weight: 600; transition: color .35s; }
+  /* Finished (exact) delta keeps the app's plain ahead/behind pair. */
   .delta.slow { color: var(--warn); }
   .delta.fast { color: var(--ok); }
+  /* Racing deltas follow LiveSplit conventions: sharp red = losing + behind,
+     light red = gaining but behind, light green = losing but ahead, sharp
+     green = gaining + ahead, gold = best-ever segment (lap mode only). */
+  .delta.behind-loss { color: #e5484d; }
+  .delta.behind-gain { color: #eb9091; }
+  .delta.ahead-loss  { color: #84d8a6; }
+  .delta.ahead-gain  { color: #30c161; }
+  .delta.gold        { color: #e3b341; }
   .prim.time { font-size: 20px; font-weight: 700; color: var(--tx); line-height: 1; margin-top: 2px; }
   /* Finished: green when the run beat the pre-race PB, neutral when it didn't. */
   .prim.time.fin { color: #cfe0f2; }

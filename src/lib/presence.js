@@ -6,6 +6,7 @@ import { screen, selection, race, minimap, presence } from "./stores.js";
 import { resets } from "./resets.js";
 import { serverUrl, authToken } from "./syncSettings.js";
 import { pushSample } from "./raceTimerBuffer.js";
+import { parseTime } from "./discordFormat.js";
 
 const THROTTLE_MS = 250;    // ~4 Hz cap on outbound frames
 const HEARTBEAT_MS = 5000;  // idle keep-alive so the server's sweep keeps us online
@@ -13,12 +14,23 @@ const HEARTBEAT_MS = 5000;  // idle keep-alive so the server's sweep keeps us on
 /** Snapshot the live stores into a presence frame. */
 export function frame() {
   const sel = get(selection), r = get(race), mm = get(minimap);
+  // Completed laps' digit-read durations, contiguous from lap 1 (the server's
+  // LiveSplit-style lap delta compares them against the PB run's run_laps).
+  const splits_ms = [];
+  if (r.splits) {
+    for (let i = 1; ; i++) {
+      const ms = parseTime(r.splits[i]);
+      if (ms == null) break;
+      splits_ms.push(ms);
+    }
+  }
   return {
     screen: get(screen),
     course: sel.course, character: sel.char, kart: sel.kart, costume: sel.costume,
     cur_lap: r.curLap, tot_lap: r.totLap, coins: r.coins, mushrooms: r.mushrooms,
     pos: mm && mm.cx != null ? [mm.cx, mm.cy] : null, final_time: r.finishTime, resets: get(resets),
     track_state: mm ? mm.trackState : null, elapsed_ms: r.elapsedMs ?? null,
+    splits_ms: splits_ms.length ? splits_ms : null,
   };
 }
 

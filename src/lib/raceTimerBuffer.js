@@ -63,6 +63,21 @@ export function interpolateAt(samples, target) {
   return { elapsed_ms: newest.elapsed_ms, completion: newest.completion, pb_delta_ms: newest.pb_delta_ms };
 }
 
+/** Direction the pace delta is moving for a player: "gain" (delta falling -
+ *  catching the PB) | "loss" (rising) | null (steady within the deadband or not
+ *  enough buffered history). Compares the buffer ~TREND_WINDOW_MS apart at the
+ *  same delayed clock the card renders, so the colour matches the shown value. */
+const TREND_WINDOW_MS = 800;
+const TREND_DEADBAND_MS = 15;
+export function deltaTrendAt(playerId, target, windowMs = TREND_WINDOW_MS) {
+  const buf = buffers.get(playerId);
+  const cur = interpolateAt(buf, target), past = interpolateAt(buf, target - windowMs);
+  if (!cur || !past || cur.pb_delta_ms == null || past.pb_delta_ms == null) return null;
+  const d = cur.pb_delta_ms - past.pb_delta_ms;
+  if (Math.abs(d) < TREND_DEADBAND_MS) return null;
+  return d < 0 ? "gain" : "loss";
+}
+
 /** interpolateAt over the player's buffer, with a monotonic display floor on
  *  elapsed_ms: a fresh anchor landing slightly behind the extrapolated value
  *  (network jitter) stalls the timer for a beat instead of ticking it

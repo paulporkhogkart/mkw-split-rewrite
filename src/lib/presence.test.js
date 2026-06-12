@@ -14,8 +14,16 @@ describe("presence frame()", () => {
     expect(frame()).toEqual({
       screen: "RACING", course: "Bowsers Castle", character: "Mario", kart: "Std", costume: "Base",
       cur_lap: 2, tot_lap: 3, coins: 7, mushrooms: 1, pos: [12, 34], final_time: null, resets: 4,
-      track_state: "tracking", elapsed_ms: 5000,
+      track_state: "tracking", elapsed_ms: 5000, splits_ms: null,
     });
+  });
+  it("sends the completed laps' durations as a contiguous ms prefix", () => {
+    race.set({ curLap: 3, totLap: 3, coins: 0, mushrooms: 0, finishTime: null, elapsedMs: 110000,
+               splits: { 1: "0:51.294", 2: "0:50.764" } });
+    expect(frame().splits_ms).toEqual([51294, 50764]);
+    race.set({ curLap: 3, totLap: 3, coins: 0, mushrooms: 0, finishTime: null, elapsedMs: 110000,
+               splits: { 2: "0:50.764" } });                  // lap 1 missing -> no prefix
+    expect(frame().splits_ms).toBeNull();
   });
   it("pos is null with no minimap fix", () => {
     minimap.set(null);

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { interpolateAt, pushSample, sampleAt, clearBuffer, EXTRAPOLATE_CAP_MS } from "./raceTimerBuffer.js";
+import { interpolateAt, pushSample, sampleAt, clearBuffer, deltaTrendAt, EXTRAPOLATE_CAP_MS } from "./raceTimerBuffer.js";
 
 const S = [
   { t: 1000, elapsed_ms: 0, completion: 0, pb_delta_ms: 0 },
@@ -25,6 +25,26 @@ describe("interpolateAt", () => {
   it("is null before the oldest sample and for empty", () => {
     expect(interpolateAt(S, 500)).toBeNull();
     expect(interpolateAt([], 2500)).toBeNull();
+  });
+});
+
+describe("deltaTrendAt", () => {
+  beforeEach(() => { clearBuffer("t"); });
+  const push = (t, d) => pushSample("t", { t, elapsed_ms: t, completion: 0.5, pb_delta_ms: d });
+
+  it("reports gain when the delta falls and loss when it rises", () => {
+    push(1000, 500); push(1500, 400); push(2000, 300);     // falling: catching the PB
+    expect(deltaTrendAt("t", 2000)).toBe("gain");
+    clearBuffer("t");
+    push(1000, 300); push(1500, 450); push(2000, 600);     // rising: losing time
+    expect(deltaTrendAt("t", 2000)).toBe("loss");
+  });
+  it("is null when steady (deadband) or without enough history", () => {
+    push(1000, 500); push(1500, 505); push(2000, 498);     // wiggle within 15ms
+    expect(deltaTrendAt("t", 2000)).toBeNull();
+    clearBuffer("t");
+    push(2000, 500);                                       // no past sample to compare
+    expect(deltaTrendAt("t", 2000)).toBeNull();
   });
 });
 

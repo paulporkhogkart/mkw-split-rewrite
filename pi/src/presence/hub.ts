@@ -18,6 +18,7 @@ export interface PresenceFrame {
   pos?: [number, number] | null; final_time?: string | null;
   track_state?: string | null;
   elapsed_ms?: number | null;
+  splits_ms?: number[] | null;   // completed laps' digit-read durations, contiguous from lap 1
 }
 
 /** What the server broadcasts per roster player. */
@@ -30,11 +31,16 @@ export interface PresenceEntry {
   elapsed_ms: number | null;
   has_model: boolean;   // false -> course has no model yet (bar shows "calibrating")
   pb_delta_ms: number | null;   // live ahead(-)/behind(+) vs own PB at the same completion
+  lap_delta: { lap: number; delta_ms: number; gained: boolean; gold: boolean } | null;
 }
 
 /** Live PB pace delta (see presence/pace.ts); the hub only needs the call shape. */
 type PaceFn = (playerId: number, course: string | null | undefined,
                completion: number | null | undefined, elapsedMs: number | null | undefined) => number | null;
+
+/** Per-lap LiveSplit-style delta (see presence/lapDelta.ts); call shape only. */
+type LapFn = (playerId: number, course: string | null | undefined,
+              splitsMs: number[] | null | undefined) => PresenceEntry['lap_delta'];
 
 type Sink = (msg: unknown) => void;
 
@@ -42,7 +48,7 @@ function offlineEntry(player_id: number, name: string, color: string | null, now
   return { player_id, name, color, online: false, screen: null, course: null, character: null, kart: null,
            costume: null, cur_lap: null, tot_lap: null, coins: null, mushrooms: null, resets: null,
            pb_ms: null, completion: null, dividers: [], final_time: null, updated_at: now, elapsed_ms: null,
-           has_model: false, pb_delta_ms: null };
+           has_model: false, pb_delta_ms: null, lap_delta: null };
 }
 
 /** In-memory live presence, keyed by the active-season roster (seeded offline so every card
@@ -57,7 +63,8 @@ export class PresenceHub {
   private pbLatch = new Map<number, { course: string; pb: number | null }>();
 
   constructor(private db: DatabaseSync, private completion: LiveCompletion,
-              private pace: PaceFn = () => null, private now: () => number = Date.now) {
+              private pace: PaceFn = () => null, private laps: LapFn = () => null,
+              private now: () => number = Date.now) {
     this.seedRoster();
   }
 
@@ -88,6 +95,7 @@ export class PresenceHub {
     // Live PB pace delta only while actually racing (the finished card shows the exact one).
     const racing = frame.screen === 'RACING' && !frame.final_time;
     const pb_delta_ms = racing ? this.pace(playerId, frame.course, completion, frame.elapsed_ms) : null;
+    const lap_delta = racing ? this.laps(playerId, frame.course, frame.splits_ms) : null;
     const pb_ms = this.latchedPb(playerId, cur, frame);
 
     const entry: PresenceEntry = {
@@ -99,7 +107,7 @@ export class PresenceHub {
       elapsed_ms: frame.elapsed_ms ?? null,
       completion, pb_ms,
       dividers, final_time: frame.final_time ?? null, updated_at: now,
-      has_model: model, pb_delta_ms,
+      has_model: model, pb_delta_ms, lap_delta,
     };
     this.map.set(playerId, entry);
     this.broadcast({ type: 'presence_update', player: entry });

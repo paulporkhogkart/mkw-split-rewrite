@@ -20,6 +20,7 @@
   import { invoke }        from "@tauri-apps/api/core";
   import { discordEnabled, twitchButtonEnabled, twitchLabel, twitchUrl } from "../lib/discordSettings.js";
   import { serverUrl, authToken } from "../lib/syncSettings.js";
+  import { deltaMode } from "../lib/cardSettings.js";
   import { pushSyncConfig } from "../lib/sync.js";
 
   // ── Sync "Test connection" ────────────────────────────────────────────────────
@@ -260,6 +261,22 @@
         <!-- ── TRAILS step ────────────────────────────────────────────────── -->
         {:else if wizardStep === "trails"}
           <TrailSettings />
+
+          <div class="delta-set">
+            <h2>PB delta</h2>
+            <p>How the ± readout next to PB on the player cards updates during a race.</p>
+            <label class="dm">
+              <input type="radio" name="deltamode" value="pace"
+                checked={$deltaMode === "pace"} on:change={() => deltaMode.set("pace")} />
+              <span><b>Pace (fluid)</b><i>Continuous estimate from track position against your PB run, updated every check.</i></span>
+            </label>
+            <label class="dm">
+              <input type="radio" name="deltamode" value="laps"
+                checked={$deltaMode === "laps"} on:change={() => deltaMode.set("laps")} />
+              <span><b>Lap splits</b><i>Updates only at lap lines from the read lap times. LiveSplit colours: red losing/behind, light red gaining/behind, light green losing/ahead, green gaining/ahead, gold best-ever lap.</i></span>
+            </label>
+          </div>
+
           <div class="cam-nav" style="justify-content:flex-end; max-width:600px; margin:.6rem auto 0;">
             <button class="btn-primary" on:click={onClose}>Done</button>
           </div>
@@ -418,4 +435,13 @@
   .sync-test-msg { font-size: .68rem; line-height: 1.5; margin: 0; }
   .sync-test-ok  { color: var(--ok); }
   .sync-test-err { color: var(--warn); }
+
+  /* PB delta mode (trails tab) */
+  .delta-set { max-width: 600px; margin: 1rem auto 0; padding-top: .8rem; border-top: 1px solid var(--bd); }
+  .delta-set h2 { font-size: .8rem; color: var(--tx); margin: 0 0 .2rem; }
+  .delta-set p { font-size: .7rem; color: var(--tx-dim); margin: 0 0 .55rem; line-height: 1.55; }
+  .dm { display: flex; align-items: flex-start; gap: .5rem; cursor: pointer; padding: .25rem 0; }
+  .dm input[type="radio"] { accent-color: var(--accent); cursor: pointer; margin-top: .15rem; }
+  .dm b { font-size: .72rem; color: var(--tx); font-weight: 600; display: block; }
+  .dm i { font-size: .66rem; color: var(--tx-dim); font-style: normal; line-height: 1.5; display: block; }
 </style>

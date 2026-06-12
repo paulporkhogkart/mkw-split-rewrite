@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { viewModel, lastSeen, pbDelta, liveDelta, fmtTimeMs, charName } from "./playerCard.js";
+import { viewModel, lastSeen, pbDelta, liveDelta, lapDeltaVm, fmtTimeMs, charName } from "./playerCard.js";
 
 const base = { player_id: 1, name: "Paul", color: "#a78bfa", online: true, screen: "RACING",
   course: "Rainbow Road", character: "Mario", kart: "Standard", cur_lap: 2, tot_lap: 3,
@@ -41,11 +41,29 @@ describe("charName", () => {
 });
 
 describe("liveDelta", () => {
-  it("formats a signed pace delta at full timer precision", () => {
-    expect(liveDelta(432)).toEqual({ text: "+0.432", cls: "slow" });
-    expect(liveDelta(-1260)).toEqual({ text: "-1.260", cls: "fast" });
-    expect(liveDelta(0)).toEqual({ text: "+0.000", cls: "slow" });
+  it("maps sign x trend onto the LiveSplit shades (steady = sharp)", () => {
+    expect(liveDelta(432)).toEqual({ text: "+0.432", cls: "behind-loss" });
+    expect(liveDelta(432, "gain")).toEqual({ text: "+0.432", cls: "behind-gain" });
+    expect(liveDelta(-1260)).toEqual({ text: "-1.260", cls: "ahead-gain" });
+    expect(liveDelta(-1260, "loss")).toEqual({ text: "-1.260", cls: "ahead-loss" });
+    expect(liveDelta(0)).toEqual({ text: "+0.000", cls: "behind-loss" });
     expect(liveDelta(null)).toBeNull();
+  });
+});
+
+describe("lapDeltaVm", () => {
+  it("maps the server lap delta onto the LiveSplit shades, gold overriding", () => {
+    expect(lapDeltaVm({ lap: 1, delta_ms: 1000, gained: false, gold: false }))
+      .toEqual({ text: "+1.000", cls: "behind-loss" });
+    expect(lapDeltaVm({ lap: 2, delta_ms: 500, gained: true, gold: false }))
+      .toEqual({ text: "+0.500", cls: "behind-gain" });
+    expect(lapDeltaVm({ lap: 2, delta_ms: -500, gained: false, gold: false }))
+      .toEqual({ text: "-0.500", cls: "ahead-loss" });
+    expect(lapDeltaVm({ lap: 3, delta_ms: -500, gained: true, gold: false }))
+      .toEqual({ text: "-0.500", cls: "ahead-gain" });
+    expect(lapDeltaVm({ lap: 1, delta_ms: -2000, gained: true, gold: true }))
+      .toEqual({ text: "-2.000", cls: "gold" });
+    expect(lapDeltaVm(null)).toBeNull();
   });
 });
 
@@ -98,10 +116,23 @@ describe("viewModel", () => {
   });
   it("racing pace delta reads from the delayed sample (same clock as timer/bar)", () => {
     const delayed = { elapsed_ms: 1234, completion: 0.42, pb_delta_ms: -432 };
-    expect(viewModel(base, () => 2000, delayed).delta).toEqual({ text: "-0.432", cls: "fast" });
+    expect(viewModel(base, () => 2000, delayed).delta).toEqual({ text: "-0.432", cls: "ahead-gain" });
+    expect(viewModel(base, () => 2000, delayed, { trend: "loss" }).delta)
+      .toEqual({ text: "-0.432", cls: "ahead-loss" });
     expect(viewModel(base, () => 2000, { ...delayed, pb_delta_ms: null }).delta).toBeNull();
     // the raw entry field doesn't drive the readout - it rides the buffer
     expect(viewModel({ ...base, pb_delta_ms: -432 }, () => 2000, null).delta).toBeNull();
+  });
+  it("laps mode renders the held per-lap delta instead of the fluid one", () => {
+    const e = { ...base, lap_delta: { lap: 2, delta_ms: -800, gained: true, gold: false } };
+    const delayed = { elapsed_ms: 1234, completion: 0.42, pb_delta_ms: 5000 };
+    expect(viewModel(e, () => 2000, delayed, { deltaMode: "laps" }).delta)
+      .toEqual({ text: "-0.800", cls: "ahead-gain" });
+    expect(viewModel({ ...e, lap_delta: null }, () => 2000, delayed, { deltaMode: "laps" }).delta)
+      .toBeNull();                                            // no lap completed yet
+    // finished state ignores the mode and keeps the exact delta
+    expect(viewModel({ ...e, final_time: "1:21.044" }, () => 2000, null, { deltaMode: "laps" }).delta)
+      .toEqual({ text: "+1.164", cls: "slow" });
   });
   it("finished: the exact delta wins over any stale live pace delta", () => {
     const vm = viewModel({ ...base, final_time: "1:21.044", pb_delta_ms: -50 }, () => 2000);

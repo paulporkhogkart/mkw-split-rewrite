@@ -5,6 +5,7 @@ import { createApp, makeWs } from './api/app';
 import { PresenceHub } from './presence/hub';
 import { makeLiveCompletion } from './presence/completion';
 import { makePaceDelta } from './presence/pace';
+import { makeLapDelta } from './presence/lapDelta';
 import { startWrScraper } from './wr/scheduler';
 
 const DB_PATH = process.env.MKW_DB ?? 'mkw.db';
@@ -15,9 +16,14 @@ applySchema(db);
 const hub = new EventHub();
 const live = makeLiveCompletion(db);
 const pace = makePaceDelta(db);
-const presence = new PresenceHub(db, live, pace);
-// A model rebuild refreshes alignments too, so both live projection and PB pace curves reload.
-const app = createApp(db, hub, (courseId) => { live.invalidate(courseId); pace.invalidateCourse(courseId); });
+const laps = makeLapDelta(db);
+const presence = new PresenceHub(db, live, pace, laps);
+// A model rebuild refreshes alignments too, so live projection, PB pace curves and
+// lap comparisons (PB laps + golds) all reload; the rebuild fires on every finished
+// trailed upload, which keeps the lap golds fresh as runs land.
+const app = createApp(db, hub, (courseId) => {
+  live.invalidate(courseId); pace.invalidateCourse(courseId); laps.invalidateCourse(courseId);
+});
 const { injectWebSocket } = makeWs(app, hub, presence, db);
 const server = serve({ fetch: app.fetch, port: PORT }, (info) => {
   console.log(`[pi] listening on http://127.0.0.1:${info.port}`);
