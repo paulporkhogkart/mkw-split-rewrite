@@ -21,22 +21,23 @@ export function lastSeen(deltaMs) {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-/** Live pace delta ms (server pb_delta_ms, signed) -> { text:"+0.4"|"-1.2", cls } or null.
- *  One decimal: honest about the estimate's accuracy, and sub-100ms flutter never
- *  reaches the label. The finished state shows the exact two-decimal delta instead. */
-export function liveDelta(deltaMs) {
-  if (deltaMs == null) return null;
-  const ahead = deltaMs < 0;
-  return { text: `${ahead ? "-" : "+"}${(Math.abs(deltaMs) / 1000).toFixed(1)}`, cls: ahead ? "fast" : "slow" };
+/** Signed delta ms -> { text:"+0.432"|"-1.260", cls:"slow"|"fast" } - full ms
+ *  precision, matching the m:ss.SSS timer next to it. */
+function signedDelta(d) {
+  const ahead = d < 0;
+  return { text: `${ahead ? "-" : "+"}${(Math.abs(d) / 1000).toFixed(3)}`, cls: ahead ? "fast" : "slow" };
 }
 
-/** final time string vs PB ms -> { text:"+1.16"|"-1.00", cls:"slow"|"fast" } or null. */
+/** Live pace delta ms (server pb_delta_ms, signed) -> signedDelta or null. */
+export function liveDelta(deltaMs) {
+  return deltaMs == null ? null : signedDelta(deltaMs);
+}
+
+/** final time string vs PB ms -> signedDelta or null. */
 export function pbDelta(finalStr, pbMs) {
   if (!finalStr || pbMs == null) return null;
   const f = parseTime(finalStr);
-  if (f == null) return null;
-  const d = f - pbMs, ahead = d < 0;
-  return { text: `${ahead ? "-" : "+"}${(Math.abs(d) / 1000).toFixed(2)}`, cls: ahead ? "fast" : "slow" };
+  return f == null ? null : signedDelta(f - pbMs);
 }
 
 /** A presence entry -> the card view model. `now` is a fn (Date.now) or a number

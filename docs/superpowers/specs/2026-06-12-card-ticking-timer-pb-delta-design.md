@@ -91,10 +91,11 @@ racing (`screen === 'RACING' && !final_time`) and `completion != null` and
 Svelte client.
 
 **Card.** `viewModel`: when racing, `delta = liveDelta(e.pb_delta_ms)` —
-signed **one-decimal** seconds (`+0.4` / `-1.2`), reusing the existing
-`slow`/`fast` classes and the existing delta slot next to PB (markup
-unchanged). One decimal reflects honest accuracy and stops sub-100 ms flutter;
-the finished state keeps the exact two-decimal delta.
+signed seconds at **full timer precision** (`+0.432` / `-1.260`, matching the
+m:ss.SSS timer; user decision 2026-06-12, revised from a one-decimal first
+cut), reusing the existing `slow`/`fast` classes and the existing delta slot
+next to PB (markup unchanged). The finished delta uses the same 3-decimal
+format (was 2-decimal).
 
 **Gates** (delta hidden): no PB, PB run without a usable trail (e.g.
 manual-fill uploads), no course model ("calibrating"), no live
@@ -103,7 +104,7 @@ completion/elapsed, not racing.
 **Accuracy.** Error ≈ completion error ÷ pace, plus glide lag through minimap
 dead zones — expect a few tenths of a second transient, exact at the finish
 (curve endpoints are pinned to real timestamps). Good enough for an up/down
-pace readout; the label's 1-decimal precision matches.
+pace readout.
 
 ## Tests
 
@@ -115,7 +116,7 @@ pace readout; the label's 1-decimal precision matches.
 - `hub.test.ts`: `pb_delta_ms` attached when racing with completion+elapsed;
   null when `final_time` set / not racing; pace receives the broadcast
   completion.
-- `playerCard.test.js`: racing + `pb_delta_ms` → one-decimal delta with
-  correct class; finished delta unchanged; null gates.
+- `playerCard.test.js`: racing + `pb_delta_ms` → full-precision delta with
+  correct class; finished delta same format; null gates.
 
 Suites: root vitest, `pi` vitest, svelte-check. Engine/Rust untouched.
