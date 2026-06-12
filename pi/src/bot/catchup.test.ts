@@ -43,4 +43,22 @@ describe('announceMissedPbs', () => {
     expect(sent).toHaveLength(1);                // only run 11
     expect(state.lastPbRunId).toBe(11);
   });
+
+  it('self-heals a watermark from before a db wipe (watermark > max run id)', () => {
+    const db = db1();                            // max run id = 11
+    const sent: EmbedBuilder[] = [];
+    const saved: number[] = [];
+    const state = { lastPbRunId: 397 };          // pre-wipe watermark; ids restarted at 1
+    const n = announceMissedPbs(db, { send: (e) => sent.push(e), state, persist: (s) => saved.push(s.lastPbRunId) });
+    expect(n).toBe(2);                           // both post-wipe PBs announced
+    expect(state.lastPbRunId).toBe(11);
+    expect(saved[0]).toBe(0);                    // reset persisted before announcing
+  });
+
+  it('does not reset the watermark when it merely equals the max run id', () => {
+    const db = db1();
+    const sent: EmbedBuilder[] = [];
+    announceMissedPbs(db, { send: (e) => sent.push(e), state: { lastPbRunId: 11 }, persist: () => {} });
+    expect(sent).toHaveLength(0);
+  });
 });

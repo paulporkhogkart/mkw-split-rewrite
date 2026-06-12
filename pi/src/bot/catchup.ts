@@ -18,6 +18,14 @@ export interface CatchupCtx {
  *  it never double-announces - the live event becomes a redundant nudge. Returns the count. */
 export function announceMissedPbs(db: DatabaseSync, ctx: CatchupCtx): number {
   const season = activeSeasonId(db);
+  // Watermark ahead of every existing run id = the runs table was wiped/re-seeded
+  // (ids restart at 1) while the bot kept its old state file. Treat everything
+  // currently in the db as unannounced rather than silently skipping new PBs forever.
+  const maxId = (db.prepare('SELECT COALESCE(MAX(id),0) AS m FROM runs').get() as { m: number }).m;
+  if (ctx.state.lastPbRunId > maxId) {
+    ctx.state.lastPbRunId = 0;
+    ctx.persist(ctx.state);
+  }
   const rows = db.prepare(
     `SELECT r.id, r.cc, r.player_id, r.course_id, r.total_time_ms, r.total_time_str,
             p.display_name AS player, c.display_name AS course
