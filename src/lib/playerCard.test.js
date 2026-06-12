@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { viewModel, lastSeen, pbDelta, liveDelta, fmtTimeMs } from "./playerCard.js";
+import { viewModel, lastSeen, pbDelta, liveDelta, fmtTimeMs, charName } from "./playerCard.js";
 
 const base = { player_id: 1, name: "Paul", color: "#a78bfa", online: true, screen: "RACING",
   course: "Rainbow Road", character: "Mario", kart: "Standard", cur_lap: 2, tot_lap: 3,
@@ -31,6 +31,15 @@ describe("pbDelta", () => {
   });
 });
 
+describe("charName", () => {
+  it("puts the costume before the character; Base/none is just the character", () => {
+    expect(charName("Toad", "Burger Bud")).toBe("Burger Bud Toad");
+    expect(charName("Toad", "Base")).toBe("Toad");
+    expect(charName("Toad", null)).toBe("Toad");
+    expect(charName(null, "Burger Bud")).toBeNull();
+  });
+});
+
 describe("liveDelta", () => {
   it("formats a signed pace delta at full timer precision", () => {
     expect(liveDelta(432)).toEqual({ text: "+0.432", cls: "slow" });
@@ -41,12 +50,16 @@ describe("liveDelta", () => {
 });
 
 describe("viewModel", () => {
-  it("racing: time is dashes, race cluster populated", () => {
+  it("racing with no sample yet: timer reads 0:00.000 (never a dash), race cluster populated", () => {
     const vm = viewModel(base, () => 2000);
     expect(vm.state).toBe("racing");
-    expect(vm.primary).toEqual({ kind: "time", text: "—" });
+    expect(vm.primary).toEqual({ kind: "time", text: "0:00.000" });
     expect(vm.resets).toBe(3);
     expect(vm.pbStr).toBe("1:19.880");
+  });
+  it("composes the costume into the character name", () => {
+    expect(viewModel({ ...base, costume: "Burger Bud", character: "Toad" }, () => 2000).char).toBe("Burger Bud Toad");
+    expect(viewModel({ ...base, costume: "Base", character: "Toad" }, () => 2000).char).toBe("Toad");
   });
   it("racing bar fill + timer come from the delayed sample; dividers immediate", () => {
     const e = { online: true, screen: "RACING", course: "Bowsers Castle", cur_lap: 2, tot_lap: 3,
@@ -55,11 +68,11 @@ describe("viewModel", () => {
     expect(vm.bar).toEqual({ fill: 0.42, dividers: [0.31] });   // delayed completion, not e.completion
     expect(vm.primary).toEqual({ kind: "time", text: "0:01.234" });
   });
-  it("racing with no delayed sample yet: timer is a dash, bar fill 0", () => {
+  it("racing with a sample but no clock yet (countdown): 0:00.000, bar fill 0", () => {
     const e = { online: true, screen: "RACING", course: "Bowsers Castle", cur_lap: 1, tot_lap: 3,
       completion: 0.5, dividers: [0.31], updated_at: 1, name: "P", color: "#888" };
-    const vm = viewModel(e, () => 2, null);
-    expect(vm.primary).toEqual({ kind: "time", text: "—" });
+    const vm = viewModel(e, () => 2, { elapsed_ms: null, completion: null });
+    expect(vm.primary).toEqual({ kind: "time", text: "0:00.000" });
     expect(vm.bar).toEqual({ fill: 0, dividers: [0.31] });
   });
   it("has no bar when not racing/finished", () => {
@@ -106,6 +119,12 @@ describe("viewModel", () => {
     expect(vm.primary).toEqual({ kind: "time", text: "1:21.044" });
     expect(vm.delta).toEqual({ text: "+1.164", cls: "slow" });
     expect(vm.bar).not.toBeNull();
+  });
+  it("finPb: green final only when it beat the PB; a first-ever finish counts", () => {
+    expect(viewModel({ ...base, final_time: "1:18.880" }, () => 2000).finPb).toBe(true);   // faster
+    expect(viewModel({ ...base, final_time: "1:21.044" }, () => 2000).finPb).toBe(false);  // slower
+    expect(viewModel({ ...base, final_time: "1:21.044", pb_ms: null }, () => 2000).finPb).toBe(true); // first finish
+    expect(viewModel(base, () => 2000).finPb).toBe(false);                                 // racing: n/a
   });
   it("offline seen: last seen line; never-seen: plain offline", () => {
     const seen = viewModel({ ...base, online: false, updated_at: 1000 }, () => 1000 + 3 * 3600000);

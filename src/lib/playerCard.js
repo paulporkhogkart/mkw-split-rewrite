@@ -4,6 +4,13 @@ import { parseTime } from "./discordFormat.js";
 
 const SETUP = { CHARACTER_SELECT: "Choosing character", KART_SELECT: "Choosing kart", COURSE_SELECT: "Choosing track" };
 
+/** Character display name with the costume leading ("Burger Bud Toad"); a bare
+ *  character ("Base" or no costume detected) is just the character. */
+export function charName(character, costume) {
+  if (!character) return null;
+  return costume && costume !== "Base" ? `${costume} ${character}` : character;
+}
+
 /** ms -> "m:ss.SSS" (always shows minutes), or null. */
 export function fmtTimeMs(ms) {
   if (ms == null || Number.isNaN(ms)) return null;
@@ -53,7 +60,7 @@ export function viewModel(e, now = Date.now, delayed = null) {
     const seen = e.updated_at > 0 ? lastSeen(t - e.updated_at) : null;
     return { state: "offline", name: e.name, color, online: false, char: null, kart: null, trk: null,
       primary: { kind: "seen", text: seen ? `last seen ${seen}` : "offline" },
-      resets: null, pbStr: null, delta: null, bar: null };
+      resets: null, pbStr: null, delta: null, finPb: false, bar: null };
   }
   const racing = e.screen === "RACING" && !e.final_time;
   const finished = (e.screen === "RACING" && e.final_time) || e.screen === "POST_TIME_TRIAL";
@@ -61,8 +68,10 @@ export function viewModel(e, now = Date.now, delayed = null) {
   if (SETUP[e.screen]) { state = "setup"; primary = { kind: "activity", text: SETUP[e.screen] }; }
   else if (racing) {
     state = "racing";
-    const ms = delayed && delayed.elapsed_ms != null ? delayed.elapsed_ms : null;
-    primary = { kind: "time", text: ms != null ? fmtTimeMs(Math.round(ms)) : "—" };
+    // No sample yet / countdown (race_cleared nulls the clock): a timer reads 0:00.000,
+    // never a dash - the race clock IS zero until GO.
+    const ms = delayed && delayed.elapsed_ms != null ? delayed.elapsed_ms : 0;
+    primary = { kind: "time", text: fmtTimeMs(Math.round(ms)) };
   }
   else if (finished) { state = "finished"; primary = { kind: "time", text: e.final_time }; }
   else { state = "menus"; primary = { kind: "activity", text: "In the menus" }; }
@@ -82,13 +91,17 @@ export function viewModel(e, now = Date.now, delayed = null) {
       ? { fill: state === "finished" ? 1 : 0, dividers: evenDividers(e.tot_lap), calibrating: true }
       : { fill, dividers: Array.isArray(e.dividers) ? e.dividers : [] };
   }
+  const delta = state === "finished" ? pbDelta(e.final_time, e.pb_ms)
+    : state === "racing" ? liveDelta(delayed ? delayed.pb_delta_ms : null) : null;
   return {
     state, name: e.name, color, online: true,
-    char: e.character || null, kart: e.kart || null, trk: e.course || null, primary,
+    char: charName(e.character, e.costume), kart: e.kart || null, trk: e.course || null, primary,
     resets: race ? (e.resets ?? 0) : null,
     pbStr: race && e.pb_ms != null ? fmtTimeMs(e.pb_ms) : null,
-    delta: state === "finished" ? pbDelta(e.final_time, e.pb_ms)
-      : state === "racing" ? liveDelta(delayed ? delayed.pb_delta_ms : null) : null,
+    delta,
+    // Finished colour: green when the final beat the (pre-race) PB; a first-ever
+    // finish (no PB to compare) is a PB by definition.
+    finPb: state === "finished" && (delta == null || delta.cls === "fast"),
     bar,
   };
 }

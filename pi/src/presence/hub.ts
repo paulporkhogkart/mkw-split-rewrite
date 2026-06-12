@@ -51,6 +51,10 @@ function offlineEntry(player_id: number, name: string, color: string | null, now
 export class PresenceHub {
   private map = new Map<number, PresenceEntry>();
   private sinks = new Set<Sink>();
+  // pb_ms pinned per player for the duration of a race (RACING/POST_TIME_TRIAL): the
+  // finish upload updates the db PB within ~a second, but the card must keep showing
+  // the delta against the PRE-RACE PB until the next race starts.
+  private pbLatch = new Map<number, { course: string; pb: number | null }>();
 
   constructor(private db: DatabaseSync, private completion: LiveCompletion,
               private pace: PaceFn = () => null, private now: () => number = Date.now) {
@@ -84,6 +88,7 @@ export class PresenceHub {
     // Live PB pace delta only while actually racing (the finished card shows the exact one).
     const racing = frame.screen === 'RACING' && !frame.final_time;
     const pb_delta_ms = racing ? this.pace(playerId, frame.course, completion, frame.elapsed_ms) : null;
+    const pb_ms = this.latchedPb(playerId, cur, frame);
 
     const entry: PresenceEntry = {
       player_id: playerId, name: cur.name, color: cur.color, online: true,
@@ -92,7 +97,7 @@ export class PresenceHub {
       cur_lap: frame.cur_lap ?? null, tot_lap: frame.tot_lap ?? null,
       coins: frame.coins ?? null, mushrooms: frame.mushrooms ?? null, resets: frame.resets ?? null,
       elapsed_ms: frame.elapsed_ms ?? null,
-      completion, pb_ms: this.pbForCourse(playerId, frame.course),
+      completion, pb_ms,
       dividers, final_time: frame.final_time ?? null, updated_at: now,
       has_model: model, pb_delta_ms,
     };
@@ -100,7 +105,26 @@ export class PresenceHub {
     this.broadcast({ type: 'presence_update', player: entry });
   }
 
+  /** pb_ms for the entry: pinned at race entry, held through RACING/POST_TIME_TRIAL
+   *  (so the finished delta reads against the pre-race PB), live everywhere else. */
+  private latchedPb(playerId: number, cur: PresenceEntry, frame: PresenceFrame): number | null {
+    const inRace = frame.screen === 'RACING' || frame.screen === 'POST_TIME_TRIAL';
+    if (!inRace) {
+      this.pbLatch.delete(playerId);
+      return this.pbForCourse(playerId, frame.course);
+    }
+    const wasInRace = cur.online && (cur.screen === 'RACING' || cur.screen === 'POST_TIME_TRIAL');
+    const course = frame.course ?? '';
+    let latch = this.pbLatch.get(playerId);
+    if (!latch || !wasInRace || latch.course !== course) {
+      latch = { course, pb: this.pbForCourse(playerId, frame.course) };
+      this.pbLatch.set(playerId, latch);
+    }
+    return latch.pb;
+  }
+
   setOffline(playerId: number): void {
+    this.pbLatch.delete(playerId);
     const e = this.map.get(playerId);
     if (!e || !e.online) return;
     const off = offlineEntry(e.player_id, e.name, e.color, this.now());

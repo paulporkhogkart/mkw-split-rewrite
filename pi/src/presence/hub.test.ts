@@ -90,6 +90,30 @@ describe('PresenceHub', () => {
     expect(seen).toEqual([true]);
   });
 
+  it('pins pb_ms for the race so the finished delta reads against the pre-race PB', () => {
+    const d = db();
+    d.exec(`INSERT INTO courses(id,slug,display_name) VALUES(7,'rainbow_road','Rainbow Road');
+            INSERT INTO runs(id,season_id,player_id,course_id,cc,status,total_time_ms,is_pb,provenance)
+              VALUES(50,1,1,7,150,'finished',79880,1,'live');`);
+    const hub = new PresenceHub(d, noCompletion, noPace, () => 5000);
+    const got: any[] = [];
+    hub.addSink((m) => got.push(m));
+    hub.update(1, { screen: 'RACING', course: 'Rainbow Road' });
+    expect(got.at(-1).player.pb_ms).toBe(79880);
+    // The finish upload lands a faster PB while the player is still on the result.
+    d.exec(`UPDATE runs SET is_pb=0 WHERE id=50;
+            INSERT INTO runs(id,season_id,player_id,course_id,cc,status,total_time_ms,is_pb,provenance)
+              VALUES(51,1,1,7,150,'finished',78000,1,'live');`);
+    hub.update(1, { screen: 'RACING', course: 'Rainbow Road', final_time: '1:18.000' });
+    expect(got.at(-1).player.pb_ms).toBe(79880);     // held through the finish
+    hub.update(1, { screen: 'POST_TIME_TRIAL', course: 'Rainbow Road' });
+    expect(got.at(-1).player.pb_ms).toBe(79880);     // and the results screen
+    hub.update(1, { screen: 'MAIN_MENU', course: 'Rainbow Road' });
+    expect(got.at(-1).player.pb_ms).toBe(78000);     // off-race: live again
+    hub.update(1, { screen: 'RACING', course: 'Rainbow Road' });
+    expect(got.at(-1).player.pb_ms).toBe(78000);     // the next start picks it up
+  });
+
   it('attaches pb_delta_ms while racing; clears it once finished or off the track', () => {
     const calls: unknown[] = [];
     const pace = (pid: number, course: unknown, completion: unknown, elapsed: unknown) => {
