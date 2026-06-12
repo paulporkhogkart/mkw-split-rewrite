@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { viewModel, lastSeen, pbDelta, liveDelta, lapDeltaVm, fmtTimeMs, charName } from "./playerCard.js";
+import { describe, it, expect, beforeEach } from "vitest";
+import { viewModel, lastSeen, pbDelta, liveDelta, lapDeltaVm, fmtTimeMs, charName, clearHolds } from "./playerCard.js";
 
 const base = { player_id: 1, name: "Paul", color: "#a78bfa", online: true, screen: "RACING",
   course: "Rainbow Road", character: "Mario", kart: "Standard", cur_lap: 2, tot_lap: 3,
@@ -24,9 +24,9 @@ describe("lastSeen", () => {
 });
 
 describe("pbDelta", () => {
-  it("signs the delta vs PB", () => {
-    expect(pbDelta("1:21.044", 79880)).toEqual({ text: "+1.164", cls: "slow" });
-    expect(pbDelta("1:18.880", 79880)).toEqual({ text: "-1.000", cls: "fast" });
+  it("signs the delta vs PB in the sharp LiveSplit shades", () => {
+    expect(pbDelta("1:21.044", 79880)).toEqual({ text: "+1.164", cls: "behind-loss" });
+    expect(pbDelta("1:18.880", 79880)).toEqual({ text: "-1.000", cls: "ahead-gain" });
     expect(pbDelta(null, 79880)).toBeNull();
   });
 });
@@ -68,6 +68,7 @@ describe("lapDeltaVm", () => {
 });
 
 describe("viewModel", () => {
+  beforeEach(() => clearHolds());
   it("racing with no sample yet: timer reads 0:00.000 (never a dash), race cluster populated", () => {
     const vm = viewModel(base, () => 2000);
     expect(vm.state).toBe("racing");
@@ -132,11 +133,11 @@ describe("viewModel", () => {
       .toBeNull();                                            // no lap completed yet
     // finished state ignores the mode and keeps the exact delta
     expect(viewModel({ ...e, final_time: "1:21.044" }, () => 2000, null, { deltaMode: "laps" }).delta)
-      .toEqual({ text: "+1.164", cls: "slow" });
+      .toEqual({ text: "+1.164", cls: "behind-loss" });
   });
   it("finished: the exact delta wins over any stale live pace delta", () => {
     const vm = viewModel({ ...base, final_time: "1:21.044", pb_delta_ms: -50 }, () => 2000);
-    expect(vm.delta).toEqual({ text: "+1.164", cls: "slow" });
+    expect(vm.delta).toEqual({ text: "+1.164", cls: "behind-loss" });
   });
   it("setup: activity phrase, no race cluster", () => {
     const vm = viewModel({ ...base, screen: "KART_SELECT" }, () => 2000);
@@ -144,11 +145,12 @@ describe("viewModel", () => {
     expect(vm.primary).toEqual({ kind: "activity", text: "Choosing kart" });
     expect(vm.bar).toBeNull();
   });
-  it("finished: final time + delta, bar present, no racing-only dot", () => {
+  it("finished: final time + delta + FIN badge, bar present", () => {
     const vm = viewModel({ ...base, final_time: "1:21.044" }, () => 2000);
     expect(vm.state).toBe("finished");
     expect(vm.primary).toEqual({ kind: "time", text: "1:21.044" });
-    expect(vm.delta).toEqual({ text: "+1.164", cls: "slow" });
+    expect(vm.delta).toEqual({ text: "+1.164", cls: "behind-loss" });
+    expect(vm.badge).toBe("fin");
     expect(vm.bar).not.toBeNull();
   });
   it("finPb: green final only when it beat the PB; a first-ever finish counts", () => {
@@ -156,6 +158,36 @@ describe("viewModel", () => {
     expect(viewModel({ ...base, final_time: "1:21.044" }, () => 2000).finPb).toBe(false);  // slower
     expect(viewModel({ ...base, final_time: "1:21.044", pb_ms: null }, () => 2000).finPb).toBe(true); // first finish
     expect(viewModel(base, () => 2000).finPb).toBe(false);                                 // racing: n/a
+  });
+  it("a reset keeps the last readout on screen (no In the menus) until a real menu", () => {
+    const delayed = { elapsed_ms: 51234, completion: 0.4, pb_delta_ms: 800 };
+    const racing = viewModel(base, () => 2000, delayed);            // stashes the readout
+    const held = viewModel({ ...base, screen: "RESET" }, () => 3000, null);
+    expect(held.state).toBe("held");
+    expect(held.primary).toEqual(racing.primary);                   // frozen time persists
+    expect(held.delta).toEqual(racing.delta);
+    expect(held.bar).toEqual(racing.bar);
+    expect(held.badge).toBeNull();                                  // a reset is not a pause
+    expect(viewModel({ ...base, screen: "MAIN_MENU" }, () => 4000).state).toBe("menus");
+    expect(viewModel({ ...base, screen: "RESET" }, () => 5000).state).toBe("menus");  // dropped
+  });
+  it("the pause menu shows the frozen readout with the pause badge", () => {
+    viewModel(base, () => 2000, { elapsed_ms: 51234, completion: 0.4, pb_delta_ms: 800 });
+    const paused = viewModel({ ...base, screen: "RACE_MENU" }, () => 3000);
+    expect(paused.state).toBe("held");
+    expect(paused.badge).toBe("pause");
+    expect(paused.primary).toEqual({ kind: "time", text: "0:51.234" });
+  });
+  it("a finished readout (FIN + verdict colour) persists through the HOME flow", () => {
+    viewModel({ ...base, final_time: "1:18.880" }, () => 2000);     // a PB finish
+    const home = viewModel({ ...base, screen: "HOME", final_time: null }, () => 3000);
+    expect(home.state).toBe("finished");
+    expect(home.badge).toBe("fin");
+    expect(home.primary).toEqual({ kind: "time", text: "1:18.880" });
+    expect(home.finPb).toBe(true);
+  });
+  it("a cold pause/reset with nothing held falls back to the menus", () => {
+    expect(viewModel({ ...base, screen: "RESET" }, () => 2000).state).toBe("menus");
   });
   it("offline seen: last seen line; never-seen: plain offline", () => {
     const seen = viewModel({ ...base, online: false, updated_at: 1000 }, () => 1000 + 3 * 3600000);

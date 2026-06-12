@@ -5,10 +5,14 @@
   import { deltaMode } from "../lib/cardSettings.js";
   export let entry;
   export let now = Date.now();            // driven by PlayerPanel (fast while racing)
+  // Sample the delay buffer only while actually racing: the held/paused states
+  // replay the stashed readout, and sampling through a pause would ratchet the
+  // monotonic floor above the frozen clock.
+  $: isRacing = !!entry && entry.online !== false && entry.screen === "RACING" && !entry.final_time;
   // Render the live timer + bar DELAY_MS in the past so the finish lines up.
-  $: delayed = entry ? sampleAt(entry.player_id, now - DELAY_MS) : null;
+  $: delayed = isRacing ? sampleAt(entry.player_id, now - DELAY_MS) : null;
   // Pace-mode shade needs the delta's direction at the same delayed clock.
-  $: trend = $deltaMode === "pace" && entry ? deltaTrendAt(entry.player_id, now - DELAY_MS) : null;
+  $: trend = isRacing && $deltaMode === "pace" ? deltaTrendAt(entry.player_id, now - DELAY_MS) : null;
   $: vm = viewModel(entry, now, delayed, { deltaMode: $deltaMode, trend });
   $: fig = figureFor(vm.name, vm.online);
 </script>
@@ -31,7 +35,11 @@
       <div class="pb"><span>PB</span>{vm.pbStr}{#if vm.delta}<span class="delta {vm.delta.cls}">{vm.delta.text}</span>{/if}</div>
     {/if}
     {#if vm.primary.kind === "time"}
-      <div class="prim time" class:fin={vm.state === "finished"} class:pb={vm.finPb}>{vm.primary.text}</div>
+      <div class="prim time" class:fin={vm.state === "finished"} class:pb={vm.finPb}>
+        {#if vm.badge === "fin"}<span class="tag fintag">FIN</span>
+        {:else if vm.badge === "pause"}<span class="tag pausetag"><i></i><i></i></span>{/if}
+        {vm.primary.text}
+      </div>
     {:else if vm.primary.kind === "activity"}
       <div class="prim act">{vm.primary.text}</div>
     {:else}
@@ -43,7 +51,7 @@
         {#each vm.bar.dividers as d}<span class="tick" style="left:{d * 100}%"></span>{/each}
         {#if vm.bar.calibrating}
           <span class="callab">calibrating</span>
-        {:else}
+        {:else if vm.state === "racing"}
           <span class="live" style="left:{vm.bar.fill * 100}%"></span>
         {/if}
       </div>
@@ -80,22 +88,26 @@
   .foot b { font-size: 11px; font-weight: 700; color: var(--tx); }
   .pb { font-size: 9.5px; color: var(--tx-dim); margin-top: 3px; display: flex; gap: 5px; align-items: center; }
   .pb span { font-size: 7.5px; letter-spacing: .1em; }
-  .delta { font-weight: 600; transition: color .35s; }
-  /* Finished (exact) delta keeps the app's plain ahead/behind pair. */
-  .delta.slow { color: var(--warn); }
-  .delta.fast { color: var(--ok); }
-  /* Racing deltas follow LiveSplit conventions: sharp red = losing + behind,
+  /* All deltas follow LiveSplit conventions: sharp red = losing + behind,
      light red = gaining but behind, light green = losing but ahead, sharp
-     green = gaining + ahead, gold = best-ever segment (lap mode only). */
+     green = gaining + ahead, gold = best-ever segment (lap mode only). The
+     finished exact delta uses the settled sharp pair. */
+  .delta { font-weight: 600; transition: color .35s; }
   .delta.behind-loss { color: #e5484d; }
   .delta.behind-gain { color: #eb9091; }
   .delta.ahead-loss  { color: #84d8a6; }
   .delta.ahead-gain  { color: #30c161; }
   .delta.gold        { color: #e3b341; }
-  .prim.time { font-size: 20px; font-weight: 700; color: var(--tx); line-height: 1; margin-top: 2px; }
-  /* Finished: green when the run beat the pre-race PB, neutral when it didn't. */
-  .prim.time.fin { color: #cfe0f2; }
-  .prim.time.fin.pb { color: var(--ok); }
+  .prim.time { font-size: 20px; font-weight: 700; color: var(--tx); line-height: 1; margin-top: 2px;
+               display: flex; align-items: center; gap: 5px; }
+  /* Finished: the time takes the verdict colour - green beat the pre-race PB, red didn't. */
+  .prim.time.fin { color: #e5484d; }
+  .prim.time.fin.pb { color: #30c161; }
+  /* Vertical FIN tag / pause bars beside the time. */
+  .tag.fintag { writing-mode: vertical-rl; font-size: 6.5px; font-weight: 700; letter-spacing: .16em;
+                color: var(--tx-dim); line-height: 1; }
+  .tag.pausetag { display: inline-flex; gap: 2.5px; }
+  .tag.pausetag i { width: 2.5px; height: 10px; background: var(--tx-dim); border-radius: .5px; }
   .prim.act { font-size: 11.5px; font-weight: 600; color: var(--tx-mut); margin-top: 4px; }
   .prim.seen { font-size: 10.5px; color: var(--tx-dim); margin-top: 4px; }
   .barwrap { position: relative; margin-top: 7px; }

@@ -1,8 +1,18 @@
-// Pure mapping: a presence entry -> the player-card view model, plus formatters.
-// No Svelte/Tauri imports, so it's unit-testable. See docs/superpowers/specs/2026-06-09-player-panel-design.md.
+// Mapping: a presence entry -> the player-card view model, plus formatters.
+// No Svelte/Tauri imports, so it's unit-testable. The only state is the per-player
+// hold (the last race readout, kept on screen through pause/reset loaders).
+// See docs/superpowers/specs/2026-06-09-player-panel-design.md.
 import { parseTime } from "./discordFormat.js";
 
 const SETUP = { CHARACTER_SELECT: "Choosing character", KART_SELECT: "Choosing kart", COURSE_SELECT: "Choosing track" };
+const PAUSE_SCREENS = new Set(["RACE_MENU", "HOME"]);
+// Screens that sit BETWEEN race contexts (pause menus, reset loaders, mid-race
+// detection blips): the card keeps the last race readout instead of flashing
+// "In the menus". A real menu or the next race drops it.
+const HOLD_SCREENS = new Set(["RACE_MENU", "HOME", "RESET", "GHOST_RESET", "UNKNOWN_RESET", "UNKNOWN_RACE_ACTIVE"]);
+
+const holds = new Map();   // player_id -> last race display payload
+export function clearHolds() { holds.clear(); }
 
 /** Character display name with the costume leading ("Burger Bud Toad"); a bare
  *  character ("Base" or no costume detected) is just the character. */
@@ -28,12 +38,9 @@ export function lastSeen(deltaMs) {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-/** Signed delta ms -> { text:"+0.432"|"-1.260", cls:"slow"|"fast" } - full ms
- *  precision, matching the m:ss.SSS timer next to it. */
-function signedDelta(d) {
-  const ahead = d < 0;
-  return { text: `${ahead ? "-" : "+"}${(Math.abs(d) / 1000).toFixed(3)}`, cls: ahead ? "fast" : "slow" };
-}
+/** Signed delta ms -> "+0.432"|"-1.260" - full ms precision, matching the
+ *  m:ss.SSS timer next to it. */
+const signedText = (d) => `${d < 0 ? "-" : "+"}${(Math.abs(d) / 1000).toFixed(3)}`;
 
 /** Live pace delta ms (server pb_delta_ms, signed) + trend ("gain"|"loss"|null)
  *  -> { text, cls } in LiveSplit shades: ahead/behind from the sign, light shade
@@ -41,29 +48,30 @@ function signedDelta(d) {
  *  otherwise (steady counts as sharp). */
 export function liveDelta(deltaMs, trend) {
   if (deltaMs == null) return null;
-  const text = signedDelta(deltaMs).text;
   const cls = deltaMs < 0
     ? (trend === "loss" ? "ahead-loss" : "ahead-gain")
     : (trend === "gain" ? "behind-gain" : "behind-loss");
-  return { text, cls };
+  return { text: signedText(deltaMs), cls };
 }
 
 /** Server lap_delta ({ lap, delta_ms, gained, gold }) -> { text, cls } per the
  *  LiveSplit conventions; gold (best-ever segment) overrides the shade. */
 export function lapDeltaVm(ld) {
   if (!ld || ld.delta_ms == null) return null;
-  const text = signedDelta(ld.delta_ms).text;
   const cls = ld.gold ? "gold"
     : ld.delta_ms < 0 ? (ld.gained ? "ahead-gain" : "ahead-loss")
     : (ld.gained ? "behind-gain" : "behind-loss");
-  return { text, cls };
+  return { text: signedText(ld.delta_ms), cls };
 }
 
-/** final time string vs PB ms -> signedDelta or null. */
+/** final time string vs PB ms -> { text, cls } in the sharp LiveSplit shades
+ *  (the finish is a settled ahead/behind - no trend), or null. */
 export function pbDelta(finalStr, pbMs) {
   if (!finalStr || pbMs == null) return null;
   const f = parseTime(finalStr);
-  return f == null ? null : signedDelta(f - pbMs);
+  if (f == null) return null;
+  const d = f - pbMs;
+  return { text: signedText(d), cls: d < 0 ? "ahead-gain" : "behind-loss" };
 }
 
 /** A presence entry -> the card view model. `now` is a fn (Date.now) or a number
@@ -77,53 +85,71 @@ export function viewModel(e, now = Date.now, delayed = null, opts = {}) {
   const t = typeof now === "function" ? now() : now;
   const color = e.color || "#888";
   if (!e.online) {
+    holds.delete(e.player_id);
     const seen = e.updated_at > 0 ? lastSeen(t - e.updated_at) : null;
     return { state: "offline", name: e.name, color, online: false, char: null, kart: null, trk: null,
       primary: { kind: "seen", text: seen ? `last seen ${seen}` : "offline" },
-      resets: null, pbStr: null, delta: null, finPb: false, bar: null };
+      resets: null, pbStr: null, delta: null, finPb: false, badge: null, bar: null };
   }
   const racing = e.screen === "RACING" && !e.final_time;
   const finished = (e.screen === "RACING" && e.final_time) || e.screen === "POST_TIME_TRIAL";
-  let state, primary;
-  if (SETUP[e.screen]) { state = "setup"; primary = { kind: "activity", text: SETUP[e.screen] }; }
-  else if (racing) {
-    state = "racing";
+  const ident = { name: e.name, color, online: true,
+    char: charName(e.character, e.costume), kart: e.kart || null, trk: e.course || null };
+
+  if (racing || finished) {
+    const state = racing ? "racing" : "finished";
     // No sample yet / countdown (race_cleared nulls the clock): a timer reads 0:00.000,
     // never a dash - the race clock IS zero until GO.
-    const ms = delayed && delayed.elapsed_ms != null ? delayed.elapsed_ms : 0;
-    primary = { kind: "time", text: fmtTimeMs(Math.round(ms)) };
-  }
-  else if (finished) { state = "finished"; primary = { kind: "time", text: e.final_time }; }
-  else { state = "menus"; primary = { kind: "activity", text: "In the menus" }; }
-  const race = state === "racing" || state === "finished";
-  const clamp01 = (x) => Math.max(0, Math.min(1, x));
-  let fill = 0;
-  if (state === "finished") fill = e.completion == null ? 1 : clamp01(e.completion);
-  else if (state === "racing") fill = delayed && delayed.completion != null ? clamp01(delayed.completion) : 0;
-  // No stored model for this course yet (first finished run builds it): show the
-  // bar shell with evenly-spaced placeholder dividers and a "calibrating" label.
-  // Real dividers sit at measured distance proportions, so these are stand-ins.
-  const evenDividers = (n) =>
-    Number.isInteger(n) && n >= 2 ? Array.from({ length: n - 1 }, (_, i) => (i + 1) / n) : [];
-  let bar = null;
-  if (race) {
-    bar = e.has_model === false
-      ? { fill: state === "finished" ? 1 : 0, dividers: evenDividers(e.tot_lap), calibrating: true }
+    const primary = racing
+      ? { kind: "time", text: fmtTimeMs(Math.round(delayed && delayed.elapsed_ms != null ? delayed.elapsed_ms : 0)) }
+      : { kind: "time", text: e.final_time };
+    const clamp01 = (x) => Math.max(0, Math.min(1, x));
+    const fill = finished ? (e.completion == null ? 1 : clamp01(e.completion))
+      : (delayed && delayed.completion != null ? clamp01(delayed.completion) : 0);
+    // No stored model for this course yet (first finished run builds it): show the
+    // bar shell with evenly-spaced placeholder dividers and a "calibrating" label.
+    // Real dividers sit at measured distance proportions, so these are stand-ins.
+    const evenDividers = (n) =>
+      Number.isInteger(n) && n >= 2 ? Array.from({ length: n - 1 }, (_, i) => (i + 1) / n) : [];
+    const bar = e.has_model === false
+      ? { fill: finished ? 1 : 0, dividers: evenDividers(e.tot_lap), calibrating: true }
       : { fill, dividers: Array.isArray(e.dividers) ? e.dividers : [] };
+    const delta = finished ? pbDelta(e.final_time, e.pb_ms)
+      : opts.deltaMode === "laps" ? lapDeltaVm(e.lap_delta)
+      : liveDelta(delayed ? delayed.pb_delta_ms : null, opts.trend);
+    const vm = {
+      state, ...ident, primary,
+      resets: e.resets ?? 0,
+      pbStr: e.pb_ms != null ? fmtTimeMs(e.pb_ms) : null,
+      delta,
+      // Finished colour: green when the final beat the (pre-race) PB; a first-ever
+      // finish (no PB to compare) is a PB by definition.
+      finPb: finished && (delta == null || delta.cls.startsWith("ahead")),
+      badge: finished ? "fin" : null,
+      bar,
+    };
+    // Remember the readout: pause menus + reset loaders keep showing it.
+    holds.set(e.player_id, { primary, delta, bar, pbStr: vm.pbStr, resets: vm.resets,
+                             finPb: vm.finPb, finished });
+    return vm;
   }
-  const delta = state === "finished" ? pbDelta(e.final_time, e.pb_ms)
-    : state !== "racing" ? null
-    : opts.deltaMode === "laps" ? lapDeltaVm(e.lap_delta)
-    : liveDelta(delayed ? delayed.pb_delta_ms : null, opts.trend);
-  return {
-    state, name: e.name, color, online: true,
-    char: charName(e.character, e.costume), kart: e.kart || null, trk: e.course || null, primary,
-    resets: race ? (e.resets ?? 0) : null,
-    pbStr: race && e.pb_ms != null ? fmtTimeMs(e.pb_ms) : null,
-    delta,
-    // Finished colour: green when the final beat the (pre-race) PB; a first-ever
-    // finish (no PB to compare) is a PB by definition.
-    finPb: state === "finished" && (delta == null || delta.cls === "fast"),
-    bar,
-  };
+
+  // Between race contexts (pause / reset loaders / detection blips): replay the
+  // held readout instead of flashing "In the menus". FIN stays on a finished
+  // readout; the pause screens get the pause badge.
+  const held = holds.get(e.player_id);
+  if (held && HOLD_SCREENS.has(e.screen)) {
+    return { state: held.finished ? "finished" : "held", ...ident,
+      primary: held.primary, resets: held.resets, pbStr: held.pbStr, delta: held.delta,
+      finPb: held.finPb,
+      badge: held.finished ? "fin" : (PAUSE_SCREENS.has(e.screen) ? "pause" : null),
+      bar: held.bar };
+  }
+
+  holds.delete(e.player_id);   // a real menu: the race readout is over
+  const primary = SETUP[e.screen]
+    ? { kind: "activity", text: SETUP[e.screen] }
+    : { kind: "activity", text: "In the menus" };
+  return { state: SETUP[e.screen] ? "setup" : "menus", ...ident, primary,
+    resets: null, pbStr: null, delta: null, finPb: false, badge: null, bar: null };
 }
