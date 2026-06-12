@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+﻿import { describe, it, expect } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { applySchema } from '../db/connect';
 import { makeLapDelta } from './lapDelta';
@@ -39,21 +39,21 @@ describe('makeLapDelta', () => {
     const r = makeLapDelta(seeded())(1, COURSE, [52000, 51500]);
     expect(r!.pb_laps_ms).toEqual([51000, 52000, 53000]);
     expect(r!.deltas).toEqual([
-      { lap: 1, delta_ms: 1000, gained: false, gold: false },
-      { lap: 2, delta_ms: 500, gained: true, gold: false },
+      { lap: 1, delta_ms: 1000, seg_delta_ms: 1000, gained: false, gold: false },
+      { lap: 2, delta_ms: 500, seg_delta_ms: -500, gained: true, gold: false },
     ]);
   });
 
   it('signs the cumulative delta and flags the segment gain per LiveSplit rules', () => {
     const lap = makeLapDelta(seeded());
-    expect(last(lap(1, COURSE, [52000]))).toEqual({ lap: 1, delta_ms: 1000, gained: false, gold: false });
-    expect(last(lap(1, COURSE, [49500, 53000]))).toEqual({ lap: 2, delta_ms: -500, gained: false, gold: false });
-    expect(last(lap(1, COURSE, [51000, 52000, 52500]))).toEqual({ lap: 3, delta_ms: -500, gained: true, gold: false });
+    expect(last(lap(1, COURSE, [52000]))).toEqual({ lap: 1, delta_ms: 1000, seg_delta_ms: 1000, gained: false, gold: false });
+    expect(last(lap(1, COURSE, [49500, 53000]))).toEqual({ lap: 2, delta_ms: -500, seg_delta_ms: 1000, gained: false, gold: false });
+    expect(last(lap(1, COURSE, [51000, 52000, 52500]))).toEqual({ lap: 3, delta_ms: -500, seg_delta_ms: -500, gained: true, gold: false });
   });
 
   it('flags a gold when the lap beats the best-ever finished segment', () => {
     const lap = makeLapDelta(seeded());
-    expect(last(lap(1, COURSE, [49000]))).toEqual({ lap: 1, delta_ms: -2000, gained: true, gold: true });
+    expect(last(lap(1, COURSE, [49000]))).toEqual({ lap: 1, delta_ms: -2000, seg_delta_ms: -2000, gained: true, gold: true });
     expect(last(lap(1, COURSE, [50500])).gold).toBe(false);   // beats the PB lap, not the 50.0 gold
     const d = seeded();
     insertRun(d, 3, 1, [40000], { status: 'reset' });
@@ -82,7 +82,7 @@ describe('makeLapDelta', () => {
     expect(lap(1, COURSE, [51000, 52000, 53000, 99000])!.deltas).toHaveLength(3);
     insertRun(d, 4, 1, [50000, 51000, 52000]);
     d.exec('UPDATE runs SET is_pb=0 WHERE id=2; UPDATE runs SET is_pb=1 WHERE id=4;');
-    expect(last(lap(1, COURSE, [51000]))).toEqual({ lap: 1, delta_ms: 1000, gained: false, gold: false });
+    expect(last(lap(1, COURSE, [51000]))).toEqual({ lap: 1, delta_ms: 1000, seg_delta_ms: 1000, gained: false, gold: false });
     expect(lap(1, COURSE, [])!.pb_laps_ms).toEqual([50000, 51000, 52000]);
   });
 
@@ -93,7 +93,7 @@ describe('makeLapDelta', () => {
     d.exec('UPDATE runs SET is_pb=0 WHERE id=2; UPDATE runs SET is_pb=1 WHERE id=4;');
     const pinned = lap(1, COURSE, [51000], 2);   // hub pins the pre-race PB (run 2)
     expect(pinned!.pb_laps_ms).toEqual([51000, 52000, 53000]);
-    expect(last(pinned)).toEqual({ lap: 1, delta_ms: 0, gained: false, gold: false });
+    expect(last(pinned)).toEqual({ lap: 1, delta_ms: 0, seg_delta_ms: 0, gained: false, gold: false });
     expect(lap(1, COURSE, [51000])!.pb_laps_ms).toEqual([50000, 51000, 52000]);  // unpinned: live PB
   });
 

@@ -9,7 +9,12 @@ import { activeSeasonId, courseIdBySlug } from '../db/seasons';
 import { slugify } from '../db/slug';
 import { pbRunFor } from '../db/pb';
 
-export interface LapDeltaResult { lap: number; delta_ms: number; gained: boolean; gold: boolean; }
+export interface LapDeltaResult {
+  lap: number;
+  delta_ms: number;       // cumulative vs PB at this lap line (the card readout)
+  seg_delta_ms: number;   // this lap alone vs the PB lap (the rail's per-lap column)
+  gained: boolean; gold: boolean;
+}
 /** PB lap durations + one delta row per completed lap (the race rail renders all
  *  rows; the card shows the latest). */
 export interface LapInfo { pb_laps_ms: number[]; deltas: LapDeltaResult[]; }
@@ -72,6 +77,7 @@ export function makeLapDelta(db: DatabaseSync, cc = 150): LapDelta {
       deltas.push({
         lap: i + 1,
         delta_ms: live - ref,
+        seg_delta_ms: splitsMs![i] - entry.pbLaps[i],
         gained: splitsMs![i] < entry.pbLaps[i],
         gold: gold != null && splitsMs![i] < gold,
       });

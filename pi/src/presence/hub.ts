@@ -37,7 +37,7 @@ export interface PresenceEntry {
   off_stats: { firsts: number; runs_7d: number; pbs_30d: number } | null;   // offline-card stats
 }
 
-interface LapD { lap: number; delta_ms: number; gained: boolean; gold: boolean; }
+interface LapD { lap: number; delta_ms: number; seg_delta_ms: number; gained: boolean; gold: boolean; }
 
 /** Live PB pace delta (see presence/pace.ts); the hub only needs the call shape. */
 type PaceFn = (playerId: number, course: string | null | undefined,
@@ -174,6 +174,21 @@ export class PresenceHub {
     const off = offlineEntry(e.player_id, e.name, e.color, this.now(), this.offStats(playerId));
     this.map.set(playerId, off);
     this.broadcast({ type: 'presence_update', player: off });
+  }
+
+  /** Recompute + rebroadcast off_stats for offline entries - a finished upload can
+   *  change ANOTHER player's standing (steal a #1) while they are offline. Wired to
+   *  the run-upload invalidation hook in server.ts. */
+  refreshOffStats(): void {
+    for (const e of this.map.values()) {
+      if (e.online) continue;
+      const next = this.offStats(e.player_id);
+      if (JSON.stringify(next) !== JSON.stringify(e.off_stats)) {
+        const upd = { ...e, off_stats: next };
+        this.map.set(e.player_id, upd);
+        this.broadcast({ type: 'presence_update', player: upd });
+      }
+    }
   }
 
   /** Flip any online entry with no frame in the last `maxAgeMs` to offline (dead-socket guard,

@@ -58,12 +58,17 @@ export function liveDelta(deltaMs, trend) {
 
 /** Server lap_delta ({ lap, delta_ms, gained, gold }) -> { text, cls } per the
  *  LiveSplit conventions; gold (best-ever segment) overrides the shade. */
-export function lapDeltaVm(ld) {
+/** `value: "total"` (default) renders the cumulative delta (the card); `"segment"`
+ *  renders the lap-alone delta (the rail). The shade is the same either way:
+ *  ahead/behind from the cumulative sign, light/sharp from the segment gain. */
+export function lapDeltaVm(ld, value = "total") {
   if (!ld || ld.delta_ms == null) return null;
+  const ms = value === "segment" ? ld.seg_delta_ms : ld.delta_ms;
+  if (ms == null) return null;
   const cls = ld.gold ? "gold"
     : ld.delta_ms < 0 ? (ld.gained ? "ahead-gain" : "ahead-loss")
     : (ld.gained ? "behind-gain" : "behind-loss");
-  return { text: signedText(ld.delta_ms), cls };
+  return { text: signedText(ms), cls };
 }
 
 /** final time string vs PB ms -> { text, cls } in the sharp LiveSplit shades

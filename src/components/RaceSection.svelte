@@ -32,7 +32,7 @@
     {@const splitStr = fmtSplit(splits[n])}
     {@const isActive = n === $race.curLap}
     {@const hasValue = splits[n] != null && splits[n] !== ""}
-    {@const d = lapDs ? lapDeltaVm(lapDs[n - 1]) : null}
+    {@const d = lapDs ? lapDeltaVm(lapDs[n - 1], "segment") : null}
     <div class="row">
       <span class="lbl" class:lbl-dim={!hasValue && !isActive}>Lap {n}</span>
       <span class="pbv">{pbLaps && pbLaps[n - 1] != null ? fmtTimeMs(pbLaps[n - 1]) : ""}</span>

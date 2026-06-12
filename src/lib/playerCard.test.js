@@ -65,6 +65,12 @@ describe("lapDeltaVm", () => {
       .toEqual({ text: "-2.000", cls: "gold" });
     expect(lapDeltaVm(null)).toBeNull();
   });
+  it("segment mode renders the lap-alone delta with the same shade", () => {
+    const ld = { lap: 2, delta_ms: 500, seg_delta_ms: -500, gained: true, gold: false };
+    expect(lapDeltaVm(ld, "segment")).toEqual({ text: "-0.500", cls: "behind-gain" });
+    expect(lapDeltaVm(ld)).toEqual({ text: "+0.500", cls: "behind-gain" });
+    expect(lapDeltaVm({ lap: 1, delta_ms: 100, gained: false, gold: false }, "segment")).toBeNull();
+  });
 });
 
 describe("viewModel", () => {

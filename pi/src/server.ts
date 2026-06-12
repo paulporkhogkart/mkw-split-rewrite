@@ -23,6 +23,7 @@ const presence = new PresenceHub(db, live, pace, laps);
 // trailed upload, which keeps the lap golds fresh as runs land.
 const app = createApp(db, hub, (courseId) => {
   live.invalidate(courseId); pace.invalidateCourse(courseId); laps.invalidateCourse(courseId);
+  presence.refreshOffStats();   // an upload can change offline players' standings
 });
 const { injectWebSocket } = makeWs(app, hub, presence, db);
 const server = serve({ fetch: app.fetch, port: PORT }, (info) => {

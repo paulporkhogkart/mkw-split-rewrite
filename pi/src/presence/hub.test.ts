@@ -96,6 +96,27 @@ describe('PresenceHub', () => {
     expect(got.at(-1).player.off_stats).toEqual({ firsts: 1, runs_7d: 2, pbs_30d: 1 });
   });
 
+  it('refreshOffStats rebroadcasts offline entries whose standings changed', () => {
+    const d = db();
+    d.exec(`INSERT INTO courses(id,slug,display_name) VALUES(7,'rr','RR');
+            INSERT INTO runs(season_id,player_id,course_id,cc,status,total_time_ms,is_pb,was_pb,provenance,ended_at)
+              VALUES(1,1,7,150,'finished',80000,1,1,'live',datetime('now'));`);
+    const hub = new PresenceHub(d, noCompletion, noPace, noLaps, () => 1000);
+    const got: any[] = [];
+    hub.addSink((m) => got.push(m));
+    expect(got[0].players.find((p: any) => p.player_id === 1).off_stats.firsts).toBe(1);
+    // Luke uploads a faster run while Paul is offline: Paul loses the #1.
+    d.exec(`UPDATE runs SET is_pb=0;
+            INSERT INTO runs(season_id,player_id,course_id,cc,status,total_time_ms,is_pb,was_pb,provenance,ended_at)
+              VALUES(1,2,7,150,'finished',79000,1,1,'live',datetime('now'));`);
+    hub.refreshOffStats();
+    const paul = got.filter((m: any) => m.type === 'presence_update' && m.player.player_id === 1);
+    expect(paul.at(-1).player.off_stats.firsts).toBe(0);
+    const n = got.length;
+    hub.refreshOffStats();                       // nothing changed -> no rebroadcast
+    expect(got.length).toBe(n);
+  });
+
   it('seeds offline entries with updated_at 0 (never seen)', () => {
     const hub = new PresenceHub(db(), noCompletion, noPace, noLaps, () =>1000);
     const got: any[] = [];
