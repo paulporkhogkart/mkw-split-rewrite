@@ -20,6 +20,8 @@ describe("presence frame()", () => {
   it("pos is null with no minimap fix", () => {
     minimap.set(null);
     expect(frame().pos).toBeNull();
+    minimap.set({ cx: null, cy: null, radius: 0, trackState: null, roi: null });
+    expect(frame().pos).toBeNull();   // a cleared-but-present store must not send [null,null]
   });
 });
 

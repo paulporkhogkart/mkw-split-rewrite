@@ -17,7 +17,7 @@ export function frame() {
     screen: get(screen),
     course: sel.course, character: sel.char, kart: sel.kart, costume: sel.costume,
     cur_lap: r.curLap, tot_lap: r.totLap, coins: r.coins, mushrooms: r.mushrooms,
-    pos: mm ? [mm.cx, mm.cy] : null, final_time: r.finishTime, resets: get(resets),
+    pos: mm && mm.cx != null ? [mm.cx, mm.cy] : null, final_time: r.finishTime, resets: get(resets),
     track_state: mm ? mm.trackState : null, elapsed_ms: r.elapsedMs ?? null,
   };
 }

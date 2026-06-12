@@ -816,6 +816,14 @@
       case "coin_update": coins = msg.coins; pushLog(`[coins] ${msg.coins}`); break;
       case "mush_update": mushrooms = msg.count; pushLog(`[mush] ${msg.count}`); break;
       case "race_time": elapsedMs = msg.elapsed_ms; break;
+      case "race_cleared":
+        // Engine tore the race down (reset/finish/left racing): drop the live values
+        // so presence doesn't rebroadcast the dead clock/lap/position during the next
+        // countdown. finishTime/splits stay - they render the finished card until the
+        // next race's lap 1 resets them.
+        curLap = null; coins = null; mushrooms = 0; elapsedMs = null;
+        minimapStore.set(null);
+        break;
       case "split_recorded":
         raceSplits = { ...raceSplits, [msg.lap]: msg.time };
         if (msg.is_final) raceFinishTime = msg.time;

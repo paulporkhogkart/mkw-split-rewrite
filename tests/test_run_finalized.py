@@ -162,6 +162,23 @@ def test_run_finalized_includes_run_level_coin_mushroom_totals_even_on_reset():
     assert evt["mushrooms_used"] == 3
 
 
+def test_race_end_emits_race_cleared_after_run_finalized():
+    # Race teardown must TELL the frontend the live values died; silence leaves the
+    # app stores holding the previous attempt's clock/lap/position, and presence
+    # rebroadcasts them during the next countdown (stale timer + stuck progress bar).
+    ipc = _FakeIpc()
+    lc = _lifecycle(ipc, total_time=None, splits={})
+    lc.on_screen_change(Screen.RACING, Screen.RESET)            # quick-restart path
+    types = [l["type"] for l in ipc.lines]
+    assert "race_cleared" in types
+    assert types.index("race_cleared") > types.index("run_finalized")
+
+    ipc2 = _FakeIpc()
+    lc2 = _lifecycle(ipc2, total_time="1:23.456", splits={1: "0:41.000", 2: "1:23.456"})
+    lc2.on_screen_change(Screen.RACING, Screen.POST_TIME_TRIAL)  # finish path clears too
+    assert "race_cleared" in [l["type"] for l in ipc2.lines]
+
+
 def test_reset_with_unknown_identity_still_emits_for_review():
     # The whole point of run-review is to CATCH incomplete runs - including a reset
     # where the engine detected nothing (no course/character/kart). The emit must NOT

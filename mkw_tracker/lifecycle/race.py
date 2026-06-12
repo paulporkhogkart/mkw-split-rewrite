@@ -142,6 +142,9 @@ class RaceLifecycle:
             self._timer.reset()
         self._race_started_at = None
         self._finalized = False
+        if self._ipc is not None:
+            from ..ipc.protocol import emit_race_cleared
+            self._ipc.emit(emit_race_cleared())
         print("  [reset] Race stats cleared")
 
     def finalize_on_finish(self):

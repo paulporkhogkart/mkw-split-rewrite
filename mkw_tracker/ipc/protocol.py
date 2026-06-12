@@ -107,6 +107,14 @@ def emit_race_time(elapsed_ms: Optional[int]) -> str:
     return _emit("race_time", elapsed_ms=elapsed_ms)
 
 
+def emit_race_cleared() -> str:
+    """Race teardown: the live per-race values (race clock, lap, minimap fix) are
+    no longer valid. Emitted from RaceLifecycle._clear_race_state so the frontend
+    drops them instead of holding the previous attempt's last values - otherwise
+    presence rebroadcasts the stale clock/position during the next countdown."""
+    return _emit("race_cleared")
+
+
 def emit_finish(result: Optional[str], total_time: Optional[str],
                 splits: Optional[Dict[int, str]] = None) -> str:
     return _emit("finish", result=result, total_time=total_time,
