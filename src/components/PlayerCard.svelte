@@ -26,7 +26,7 @@
       <div class="kv" class:dim={!vm.char}>
         <span class="k" title="Character">
           <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M8.3 8.8v-.8a1.7 1.7 0 0 0-1.7-1.7H3.4a1.7 1.7 0 0 0-1.7 1.7v.8"/><circle cx="5" cy="3.4" r="1.7"/>
+            <path d="M9.4 8.8v-.8a1.7 1.7 0 0 0-1.7-1.7H4.5a1.7 1.7 0 0 0-1.7 1.7v.8"/><circle cx="6.1" cy="3.4" r="1.7"/>
           </svg>
         </span><span class="v">{vm.char || "—"}</span>
       </div>
@@ -40,9 +40,8 @@
       </div>
       <div class="kv" class:dim={!vm.trk}>
         <span class="k" title="Track">
-          <svg viewBox="0 0 10 10" aria-hidden="true">
-            <path d="M2.2 1.2v7.9" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none"/>
-            <path d="M2.2 1.5l5.9 1.6-5.9 1.6z" fill="currentColor"/>
+          <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M1.5 8.4l2.7-5.2 1.8 3.1 1.3-1.8 2.2 3.9z"/>
           </svg>
         </span><span class="v">{vm.trk || "—"}</span>
       </div>
@@ -125,7 +124,10 @@
   .tt.off .nm { color: var(--tx-mut); }
   .sel { margin-top: 6px; }
   .kv { font-size: 10px; color: var(--tx); display: flex; gap: 6px; line-height: 1.45; }
-  .kv .k { color: var(--tx-dim); width: 10px; flex: 0 0 auto; display: inline-flex; padding-top: 2.5px; }
+  /* Glyph art is drawn flush to its viewBox right edge and the slot right-aligns,
+     so every icon ends the same distance from its value text. */
+  .kv .k { color: var(--tx-dim); width: 10px; flex: 0 0 auto; display: inline-flex;
+           justify-content: flex-end; padding-top: 2.5px; }
   .kv .k svg { width: 9px; height: 9px; }
   .kv .v { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .kv.dim { color: var(--tx-dim); }
@@ -150,8 +152,10 @@
   /* Finished: the time takes the verdict colour - green beat the pre-race PB, red didn't. */
   .prim.time.fin { color: #e5484d; }
   .prim.time.fin.pb { color: #30c161; }
-  /* State badge beside the time: checkered flag / pause bars / reset arrow. */
-  .tag { display: inline-flex; color: var(--tx-dim); flex: 0 0 auto; }
+  /* State badge beside the time: checkered flag / pause bars / reset arrow.
+     Lifted 1px: flex centres against the 20px em box, but the digits sit high
+     in it (no descenders), so a box-centred icon reads slightly low. */
+  .tag { display: inline-flex; color: var(--tx-dim); flex: 0 0 auto; transform: translateY(-1px); }
   .tag svg { width: 11px; height: 11px; }
   .prim.act { font-size: 11.5px; font-weight: 600; color: var(--tx-mut); margin-top: 4px; }
   .prim.seen { font-size: 10.5px; color: var(--tx-dim); margin-top: 4px; }
