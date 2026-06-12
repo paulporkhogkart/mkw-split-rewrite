@@ -54,11 +54,11 @@
   .tt.off { background: var(--well); }
   .spine { flex: 0 0 3px; background: var(--pc); }
   .tt.off .spine { background: var(--idle); }
-  /* Figure box: width derives from height at the player crops' common ~0.62 aspect
-     (84:135, see scripts/gen_player_figures.py), so those figures sit flush against
-     the spine and the data column at any card size; narrower crops centre with small
-     margins and wider ones clip symmetrically. */
-  .fig { flex: 0 0 auto; aspect-ratio: 84 / 135; margin: 11px 0 0 2px; background-repeat: no-repeat;
+  /* Portrait strip: a fixed slim slot the figure is deliberately CROPPED into
+     (bottom-center sliver cut - face stays, sides bleed off). Figures scale with
+     card height, so taller cards crop tighter instead of widening the strip; the
+     data column keeps the rest of the card at every size. */
+  .fig { flex: 0 0 56px; margin: 11px 0 0 2px; background-repeat: no-repeat;
          background-position: bottom center; background-size: auto 100%; }
   .tt.off .fig { filter: grayscale(1) brightness(.6); }
   .data { flex: 1; min-width: 0; padding: 9px 9px 8px 8px;
