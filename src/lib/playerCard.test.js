@@ -211,3 +211,24 @@ describe("viewModel", () => {
     expect(viewModel({ ...base, online: false, updated_at: 1 }, () => 2).stats).toBeNull();
   });
 });
+
+describe("viewModel offline / stale stats", () => {
+  const off = { player_id: 2, name: "Luke", color: "#888", online: false, updated_at: 1000,
+                off_stats: { firsts: 3, runs_7d: 5, pbs_30d: 2 } };
+  it("live-offline (server up, peer offline) keeps all three stats", () => {
+    const vm = viewModel(off, 5000);
+    expect(vm.online).toBe(false);
+    expect(vm.stats).toEqual({ firsts: 3, runs_7d: 5, pbs_30d: 2 });
+  });
+  it("stale shows FIRSTS only", () => {
+    const vm = viewModel(off, 5000, null, { stale: true });
+    expect(vm.stats).toEqual({ firsts: 3 });
+  });
+  it("stale forces the offline view even when the cached entry was online (no off_stats)", () => {
+    const onlineEntry = { ...base, online: true, off_stats: null };
+    const vm = viewModel(onlineEntry, 5000, null, { stale: true });
+    expect(vm.state).toBe("offline");
+    expect(vm.online).toBe(false);
+    expect(vm.stats).toBeNull();
+  });
+});

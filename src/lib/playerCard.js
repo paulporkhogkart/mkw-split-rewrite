@@ -91,13 +91,19 @@ export function pbDelta(finalStr, pbMs) {
 export function viewModel(e, now = Date.now, delayed = null, opts = {}) {
   const t = typeof now === "function" ? now() : now;
   const color = e.color || "#888";
-  if (!e.online) {
+  if (opts.stale || !e.online) {
     holds.delete(e.player_id);
     const seen = e.updated_at > 0 ? lastSeen(t - e.updated_at) : null;
+    // Stale = we lost the server link: show only the non-windowed FIRSTS; the rolling
+    // RUNS·7D / PBS·30D would silently age past their windows. Live-offline (server up,
+    // peer simply offline) keeps the server's fresh full stats.
+    const stats = opts.stale
+      ? (e.off_stats ? { firsts: e.off_stats.firsts } : null)
+      : (e.off_stats ?? null);
     return { state: "offline", name: e.name, color, online: false, char: null, kart: null, trk: null,
       primary: { kind: "seen", text: seen ? `last seen ${seen}` : "offline" },
       resets: null, pbStr: null, delta: null, finPb: false, badge: null, bar: null,
-      stats: e.off_stats ?? null };
+      stats };
   }
   const racing = e.screen === "RACING" && !e.final_time;
   const finished = (e.screen === "RACING" && e.final_time) || e.screen === "POST_TIME_TRIAL";
