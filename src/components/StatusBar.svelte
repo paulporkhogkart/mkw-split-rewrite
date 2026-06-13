@@ -22,12 +22,20 @@
   export let frameW = 1920;
   /** Capture resolution height */
   export let frameH = 1080;
+  /** Whether the season server (presence WS) is currently connected. */
+  export let serverConnected = false;
+  /** Epoch-ms of the last live server frame, or null if never. */
+  export let serverSyncedAt = null;
 
   // Dot colour mirrors App.svelte's original statusDot reactive:
   //   connected && alive  → ok   (green)
   //   connected, no alive → warn (amber)
   //   not connected       → idle (grey)
   $: dotColor = !connected ? C.idle : alive ? C.ok : C.warn;
+  // Independent of the engine dot: green = live link, amber = offline but we have a cached
+  // snapshot, grey = never connected.
+  $: srvColor = serverConnected ? C.ok : serverSyncedAt != null ? C.warn : C.idle;
+  $: srvLabel = serverConnected ? "server" : serverSyncedAt != null ? "server offline" : "no server";
 </script>
 
 <footer class="statusbar">
@@ -50,6 +58,8 @@
     <span class="sb-idle">launching…</span>
     <span class="sb-spacer"></span>
   {/if}
+  <span class="sb-sep">|</span>
+  <span class="sb-srv"><span class="srv-dot" style="background:{srvColor}"></span>{srvLabel}</span>
 </footer>
 
 <style>
@@ -67,4 +77,6 @@
   .sb-warn   { color: var(--warn); }
   .sb-idle   { color: var(--tx-dim); font-style: italic; }
   .sb-spacer { flex: 1; }
+  .sb-srv    { display: inline-flex; align-items: center; gap: 5px; color: var(--tx-mut); }
+  .srv-dot   { width: 7px; height: 7px; border-radius: 50%; flex: none; }
 </style>

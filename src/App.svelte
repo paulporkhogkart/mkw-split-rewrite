@@ -28,7 +28,7 @@
            view as viewStore,
            minimap as minimapStore, sample as sampleStore } from "./lib/stores.js";
   import { pbSplits as pbSplitsStore, pbTotalMs as pbTotalStore, friendsPbs as friendsPbsStore,
-           trailRuns as trailRunsStore, trailLegend as trailLegendStore } from "./lib/stores.js";
+           trailRuns as trailRunsStore, trailLegend as trailLegendStore, serverConnection } from "./lib/stores.js";
   import { get } from "svelte/store";
   import { trailSettings, roster as rosterStore, cacheRoster,
            activeConfig, buildTrailRuns, trailLegendRows } from "./lib/trailSettings.js";
@@ -1770,6 +1770,8 @@
     fps={backendFps}
     frameW={pythonFrameW}
     frameH={pythonFrameH}
+    serverConnected={$serverConnection.connected}
+    serverSyncedAt={$serverConnection.syncedAt}
   />
 
 </div><!-- /app -->
