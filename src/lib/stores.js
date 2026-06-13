@@ -28,3 +28,4 @@ export const trailRuns     = writable([]);   // render-ready ghost trails: [{poi
 export const trailLegend   = writable([]);   // [{name, color, mode, n}] for the active players (overlay legend)
 export const presence      = writable({});   // {player_id: PresenceEntry} live status of roster players (server /v1/presence)
 export const myPlayerId    = writable(null); // this client's roster id (presence snapshot `you`) | null
+export const serverConnection = writable({ connected: false, syncedAt: null }); // season-server link state for the player panel + StatusBar

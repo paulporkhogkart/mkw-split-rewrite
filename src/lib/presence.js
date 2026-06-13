@@ -2,11 +2,38 @@
 // feeds the broadcast into the `presence` store. Mirrors discord.js (store-driven push) +
 // the bot's ws.ts (reconnect). Presence is ephemeral - a dropped frame self-corrects.
 import { get } from "svelte/store";
-import { screen, selection, race, minimap, presence, myPlayerId } from "./stores.js";
+import { screen, selection, race, minimap, presence, myPlayerId, serverConnection } from "./stores.js";
 import { resets } from "./resets.js";
 import { serverUrl, authToken } from "./syncSettings.js";
 import { pushSample } from "./raceTimerBuffer.js";
 import { parseTime } from "./discordFormat.js";
+
+const SNAPSHOT_KEY = "mkw.presence";
+
+// localStorage is absent under Node (tests) and can be present-but-broken under Node's
+// experimental Web Storage; probe like syncSettings.js and fall back to a no-op.
+function safeStorage() {
+  try {
+    if (typeof localStorage !== "undefined" && typeof localStorage.getItem === "function") return localStorage;
+  } catch { /* accessing the experimental global can throw */ }
+  return { getItem: () => null, setItem: () => {} };
+}
+const ls = safeStorage();
+
+/** Persist the presence map + the epoch-ms it was last synced. Storage is injectable for tests. */
+export function writeSnapshot(players, syncedAt, storage = ls) {
+  try { storage.setItem(SNAPSHOT_KEY, JSON.stringify({ players, syncedAt })); } catch { /* quota / serialize */ }
+}
+
+/** Read the persisted snapshot, or null when absent/corrupt. */
+export function readSnapshot(storage = ls) {
+  try {
+    const raw = storage.getItem(SNAPSHOT_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw);
+    return v && typeof v === "object" && v.players ? { players: v.players, syncedAt: v.syncedAt ?? null } : null;
+  } catch { return null; }
+}
 
 const THROTTLE_MS = 250;    // ~4 Hz cap on outbound frames
 const HEARTBEAT_MS = 5000;  // idle keep-alive so the server's sweep keeps us online

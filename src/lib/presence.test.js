@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { screen, selection, race, minimap } from "./stores.js";
 import { resets } from "./resets.js";
 import { serverUrl, authToken } from "./syncSettings.js";
-import { frame, wsUrl } from "./presence.js";
+import { frame, wsUrl, writeSnapshot, readSnapshot } from "./presence.js";
 
 describe("presence frame()", () => {
   it("maps the live stores into a frame", () => {
@@ -44,5 +44,24 @@ describe("presence wsUrl()", () => {
   it("is null when no server is configured", () => {
     serverUrl.set("");
     expect(wsUrl()).toBeNull();
+  });
+});
+
+// A Map-backed fake of the localStorage subset we use (Node has no localStorage).
+function fakeStorage(seed = {}) {
+  const m = new Map(Object.entries(seed));
+  return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)) };
+}
+
+describe("presence snapshot persistence", () => {
+  it("round-trips the players map + syncedAt", () => {
+    const store = fakeStorage();
+    const players = { 1: { player_id: 1, name: "Paul" }, 2: { player_id: 2, name: "Luke" } };
+    writeSnapshot(players, 1717000000000, store);
+    expect(readSnapshot(store)).toEqual({ players, syncedAt: 1717000000000 });
+  });
+  it("returns null when absent or corrupt", () => {
+    expect(readSnapshot(fakeStorage())).toBeNull();
+    expect(readSnapshot(fakeStorage({ "mkw.presence": "not json" }))).toBeNull();
   });
 });
