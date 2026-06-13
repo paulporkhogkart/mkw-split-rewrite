@@ -107,7 +107,7 @@
         <div class="bar"><i style="width:{vm.bar.fill * 100}%"></i></div>
         {#each vm.bar.dividers as d}<span class="tick" style="left:{d * 100}%"></span>{/each}
         {#if vm.bar.calibrating}
-          <span class="callab">calibrating</span>
+          <span class="callab">{vm.bar.calLabel}</span>
         {:else if vm.state === "racing"}
           <span class="live" style="left:{vm.bar.fill * 100}%"></span>
         {/if}

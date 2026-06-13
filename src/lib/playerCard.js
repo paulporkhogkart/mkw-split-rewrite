@@ -126,7 +126,10 @@ export function viewModel(e, now = Date.now, delayed = null, opts = {}) {
     const evenDividers = (n) =>
       Number.isInteger(n) && n >= 2 ? Array.from({ length: n - 1 }, (_, i) => (i + 1) / n) : [];
     const bar = e.has_model === false
-      ? { fill: finished ? 1 : 0, dividers: evenDividers(e.tot_lap), calibrating: true }
+      ? { fill: finished ? 1 : 0, dividers: evenDividers(e.tot_lap), calibrating: true,
+          // The own offline card has no local progress model (see localSelf); say so plainly
+          // instead of "calibrating", which means an online course still building its first model.
+          calLabel: e._localSelf ? "offline" : "calibrating" }
       : { fill, dividers: Array.isArray(e.dividers) ? e.dividers : [] };
     const delta = finished ? pbDelta(e.final_time, e.pb_ms)
       : opts.deltaMode === "laps" ? lapDeltaVm(e.lap_delta)

@@ -108,18 +108,24 @@ describe("viewModel", () => {
     const e = { online: true, screen: "RACING", course: "Acorn Heights", cur_lap: 1, tot_lap: 3,
       completion: null, dividers: [], has_model: false, updated_at: 1, name: "P", color: "#888" };
     const vm = viewModel(e, () => 2, { elapsed_ms: 500, completion: null });
-    expect(vm.bar).toEqual({ fill: 0, dividers: [1 / 3, 2 / 3], calibrating: true });
+    expect(vm.bar).toEqual({ fill: 0, dividers: [1 / 3, 2 / 3], calibrating: true, calLabel: "calibrating" });
   });
   it("finished without a model: full calibrating bar (flips once the upload builds it)", () => {
     const e = { online: true, screen: "RACING", course: "Acorn Heights", tot_lap: 5,
       final_time: "1:21.044", has_model: false, updated_at: 1, name: "P", color: "#888" };
     const vm = viewModel(e, () => 2);
-    expect(vm.bar).toEqual({ fill: 1, dividers: [0.2, 0.4, 0.6, 0.8], calibrating: true });
+    expect(vm.bar).toEqual({ fill: 1, dividers: [0.2, 0.4, 0.6, 0.8], calibrating: true, calLabel: "calibrating" });
   });
   it("calibrating with an unknown lap count: bare bar, no placeholder dividers", () => {
     const e = { online: true, screen: "RACING", course: "Acorn Heights", tot_lap: null,
       has_model: false, updated_at: 1, name: "P", color: "#888" };
-    expect(viewModel(e, () => 2).bar).toEqual({ fill: 0, dividers: [], calibrating: true });
+    expect(viewModel(e, () => 2).bar).toEqual({ fill: 0, dividers: [], calibrating: true, calLabel: "calibrating" });
+  });
+  it("offline self card: the placeholder bar reads 'offline', not 'calibrating'", () => {
+    const e = { online: true, screen: "RACING", course: "Acorn Heights", cur_lap: 1, tot_lap: 3,
+      has_model: false, _localSelf: true, updated_at: 1, name: "P", color: "#888" };
+    expect(viewModel(e, () => 2, { elapsed_ms: 500, completion: null }).bar)
+      .toEqual({ fill: 0, dividers: [1 / 3, 2 / 3], calibrating: true, calLabel: "offline" });
   });
   it("racing pace delta reads from the delayed sample (same clock as timer/bar)", () => {
     const delayed = { elapsed_ms: 1234, completion: 0.42, pb_delta_ms: -432 };
