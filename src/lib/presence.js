@@ -57,6 +57,41 @@ export function markServerDisconnected() {
   serverConnection.update((s) => ({ ...s, connected: false }));
 }
 
+const PERSIST_DEBOUNCE_MS = 1000;
+let persistTimer = 0, persistMap = null, persistAt = 0;
+/** Trailing-debounce a snapshot write so the 4Hz WS doesn't hammer localStorage. */
+function persistSoon(map, syncedAt) {
+  persistMap = map; persistAt = syncedAt;
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => { persistTimer = 0; writeSnapshot(persistMap, persistAt); }, PERSIST_DEBOUNCE_MS);
+}
+
+/** Apply one raw WS frame to the stores: snapshot replaces, update merges; either way feed
+ *  the race-timer buffer (live), mark the link connected, and schedule a persist. `now` is
+ *  injectable for tests. Malformed JSON is ignored. */
+export function handlePresenceMessage(raw, now = Date.now()) {
+  let msg;
+  try { msg = JSON.parse(raw); } catch { return; }
+  if (msg.type === "presence_snapshot") {
+    if (msg.you != null) myPlayerId.set(msg.you);
+    const map = {};
+    for (const p of msg.players) {
+      p._rxAt = now; map[p.player_id] = p;
+      pushSample(p.player_id, { t: now, elapsed_ms: p.elapsed_ms, completion: p.completion, pb_delta_ms: p.pb_delta_ms });
+    }
+    presence.set(map);
+    markServerConnected(now);
+    persistSoon(map, now);
+  } else if (msg.type === "presence_update") {
+    const p = { ...msg.player, _rxAt: now };
+    pushSample(p.player_id, { t: now, elapsed_ms: p.elapsed_ms, completion: p.completion, pb_delta_ms: p.pb_delta_ms });
+    const merged = { ...get(presence), [p.player_id]: p };
+    presence.set(merged);
+    markServerConnected(now);
+    persistSoon(merged, now);
+  }
+}
+
 const THROTTLE_MS = 250;    // ~4 Hz cap on outbound frames
 const HEARTBEAT_MS = 5000;  // idle keep-alive so the server's sweep keeps us online
 
@@ -108,25 +143,9 @@ function connect() {
   if (!url) { setTimeout(connect, 2000); return; }   // not configured yet - retry
   ws = new WebSocket(url);
   ws.addEventListener("open", () => { backoff = 1000; rawSend(); });
-  ws.addEventListener("message", (e) => {
-    try {
-      const msg = JSON.parse(e.data);
-      if (msg.type === "presence_snapshot") {
-        if (msg.you != null) myPlayerId.set(msg.you);   // which entry is this client
-        const map = {}, t = Date.now();
-        for (const p of msg.players) {
-          p._rxAt = t; map[p.player_id] = p;
-          pushSample(p.player_id, { t, elapsed_ms: p.elapsed_ms, completion: p.completion, pb_delta_ms: p.pb_delta_ms });
-        }
-        presence.set(map);
-      } else if (msg.type === "presence_update") {
-        const t = Date.now(), p = { ...msg.player, _rxAt: t };
-        pushSample(p.player_id, { t, elapsed_ms: p.elapsed_ms, completion: p.completion, pb_delta_ms: p.pb_delta_ms });
-        presence.update((m) => ({ ...m, [p.player_id]: p }));
-      }
-    } catch { /* ignore malformed */ }
-  });
+  ws.addEventListener("message", (e) => handlePresenceMessage(e.data));
   ws.addEventListener("close", () => {
+    markServerDisconnected();
     if (closed) return;
     setTimeout(connect, backoff); backoff = Math.min(backoff * 2, 30000);
   });
@@ -135,6 +154,7 @@ function connect() {
 
 export function initPresence() {
   closed = false;
+  hydratePresence();   // paint last-known cards immediately; live frames overwrite on connect
   [screen, selection, race, minimap].forEach((s) => s.subscribe(() => scheduleSend()));
   hb = setInterval(rawSend, HEARTBEAT_MS);
   connect();

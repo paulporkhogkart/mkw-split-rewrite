@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { screen, selection, race, minimap, presence, serverConnection } from "./stores.js";
+import { screen, selection, race, minimap, presence, serverConnection, myPlayerId } from "./stores.js";
 import { resets } from "./resets.js";
 import { serverUrl, authToken } from "./syncSettings.js";
-import { frame, wsUrl, writeSnapshot, readSnapshot, hydratePresence, markServerConnected, markServerDisconnected } from "./presence.js";
+import { frame, wsUrl, writeSnapshot, readSnapshot, hydratePresence, markServerConnected, markServerDisconnected, handlePresenceMessage } from "./presence.js";
 import { sampleAt } from "./raceTimerBuffer.js";
 import { get } from "svelte/store";
 
@@ -93,5 +93,27 @@ describe("presence hydrate + connection transitions", () => {
     expect(get(serverConnection)).toEqual({ connected: true, syncedAt: 5000 });
     markServerDisconnected();
     expect(get(serverConnection)).toEqual({ connected: false, syncedAt: 5000 });
+  });
+});
+
+describe("handlePresenceMessage", () => {
+  it("applies a snapshot: sets presence, you, and marks connected at `now`", () => {
+    presence.set({}); myPlayerId.set(null); serverConnection.set({ connected: false, syncedAt: null });
+    handlePresenceMessage(JSON.stringify({
+      type: "presence_snapshot", you: 1,
+      players: [{ player_id: 1, name: "Paul" }, { player_id: 2, name: "Luke" }],
+    }), 5000);
+    expect(get(myPlayerId)).toBe(1);
+    expect(Object.keys(get(presence)).sort()).toEqual(["1", "2"]);
+    expect(get(serverConnection)).toEqual({ connected: true, syncedAt: 5000 });
+  });
+  it("merges a presence_update into the existing map and marks connected", () => {
+    presence.set({ 1: { player_id: 1, name: "Paul" } });
+    handlePresenceMessage(JSON.stringify({ type: "presence_update", player: { player_id: 2, name: "Luke" } }), 6000);
+    expect(Object.keys(get(presence)).sort()).toEqual(["1", "2"]);
+    expect(get(serverConnection).connected).toBe(true);
+  });
+  it("ignores malformed input without throwing", () => {
+    expect(() => handlePresenceMessage("not json", 1)).not.toThrow();
   });
 });
