@@ -4,8 +4,8 @@
 // See docs/superpowers/specs/2026-06-09-player-panel-design.md.
 import { parseTime } from "./discordFormat.js";
 
-const SETUP = { CHARACTER_SELECT: "Choosing character", KART_SELECT: "Choosing kart", COURSE_SELECT: "Choosing track",
-                START_TIME_TRIAL: "Starting time trial" };
+const SETUP = { CHARACTER_SELECT: "Choosing character…", KART_SELECT: "Choosing kart…", COURSE_SELECT: "Choosing track…",
+                START_TIME_TRIAL: "Starting time trial…" };
 const PAUSE_SCREENS = new Set(["RACE_MENU", "HOME"]);
 const RESET_SCREENS = new Set(["RESET", "GHOST_RESET", "UNKNOWN_RESET"]);
 // Screens that sit BETWEEN race contexts (pause menus, reset loaders, mid-race

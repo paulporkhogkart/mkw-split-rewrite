@@ -49,8 +49,8 @@ def ensure_seasons(conn, legacy, cutover_iso) -> tuple[int, int]:
 # Discord bot for /leaderboard and /nemesis embed edges; tuned for Discord dark mode.
 PLAYER_COLORS = {
     "paul": "#a78bfa",     # violet
-    "adymer": "#fbbf24",   # amber-gold
-    "alex": "#38bdf8",     # sky
+    "adymer": "#2dd4bf",   # teal
+    "alex": "#fbbf24",     # amber-gold (yellow)
     "aliias": "#4ade80",   # green
     "luke": "#f87171",     # red
 }

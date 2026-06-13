@@ -1,0 +1,72 @@
+{
+  "paul": {
+    "online": [
+      "paulPosted.gif",
+      66
+    ],
+    "offline": [
+      "paulPosted.gif",
+      0
+    ],
+    "onpace": [
+      "paulSitDown.gif",
+      63
+    ]
+  },
+  "aliias": {
+    "online": [
+      "aliiasPosted.gif",
+      87
+    ],
+    "offline": [
+      "aliiasBird.gif",
+      0
+    ],
+    "onpace": [
+      "aliiasBird.gif",
+      81
+    ]
+  },
+  "luke": {
+    "online": [
+      "lukePosted.gif",
+      87
+    ],
+    "offline": [
+      "lukeThumbsUp.gif",
+      0
+    ],
+    "onpace": [
+      "lukePoint.gif",
+      93
+    ]
+  },
+  "adymer": {
+    "online": [
+      "adymerPosted.gif",
+      87
+    ],
+    "offline": [
+      "adymerPosted.gif",
+      0
+    ],
+    "onpace": [
+      "adymerChoke.gif",
+      68
+    ]
+  },
+  "alex": {
+    "online": [
+      "adymerPosted.gif",
+      87
+    ],
+    "offline": [
+      "adymerPosted.gif",
+      0
+    ],
+    "onpace": [
+      "adymerChoke.gif",
+      68
+    ]
+  }
+}

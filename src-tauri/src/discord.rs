@@ -1,5 +1,5 @@
 use std::sync::{Mutex, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use discord_rich_presence::{activity, DiscordIpc, DiscordIpcClient};
 
 /// The "Mario Kart World" Discord Application ID (see docs/discord-setup.md).
@@ -39,21 +39,44 @@ struct State {
     client: Option<DiscordIpcClient>,
     connected: bool,
     last_payload: Option<Presence>,
+    last_attempt: Option<Instant>,
 }
 
 static STATE: Mutex<Option<State>> = Mutex::new(None);
 
 fn ensure_state(s: &mut Option<State>) -> &mut State {
     if s.is_none() {
-        *s = Some(State { client: None, connected: false, last_payload: None });
+        *s = Some(State { client: None, connected: false, last_payload: None, last_attempt: None });
     }
     s.as_mut().unwrap()
+}
+
+/// While Discord is closed, don't re-attempt the IPC socket more than once per this
+/// interval. Without it, every presence push fired a fresh failed connect + a DEBUG
+/// log line - up to ~10/s during a race (the live clock ticks the `race` store, which
+/// drives `discord_set_presence`). Presence still appears within this window of Discord
+/// being (re)opened.
+const RECONNECT_BACKOFF: Duration = Duration::from_secs(60);
+
+/// True when we should attempt a connect now: never tried before (or just disconnected,
+/// `last_attempt = None`) retries immediately; otherwise only once the backoff elapses.
+fn may_retry(last_attempt: Option<Instant>, now: Instant, backoff: Duration) -> bool {
+    match last_attempt {
+        None => true,
+        Some(t) => now.duration_since(t) >= backoff,
+    }
 }
 
 fn try_connect(st: &mut State) {
     if st.connected {
         return;
     }
+    // Rate-limit attempts while Discord is closed (see RECONNECT_BACKOFF) so a race
+    // doesn't produce a barrage of failed connects + log lines.
+    if !may_retry(st.last_attempt, Instant::now(), RECONNECT_BACKOFF) {
+        return;
+    }
+    st.last_attempt = Some(Instant::now());
     if st.client.is_none() {
         st.client = Some(DiscordIpcClient::new(DISCORD_APP_ID));
     }
@@ -61,6 +84,8 @@ fn try_connect(st: &mut State) {
         match c.connect() {
             Ok(_) => {
                 st.connected = true;
+                st.last_attempt = None; // reset backoff so a future drop reconnects at once
+                st.last_payload = None; // force the current state to be pushed on (re)connect
                 log::info!("[discord] connected");
             }
             Err(e) => log::debug!("[discord] not connected (Discord closed?): {e}"),
@@ -75,7 +100,8 @@ pub fn discord_set_presence(payload: Presence) {
     launch_ms(); // prime the launch time at the first presence attempt (~app launch)
     try_connect(st);
     if !st.connected {
-        st.last_payload = Some(payload); // retry on the next call
+        // Discord's closed; try_connect backs off. Nothing to push - we re-read the
+        // live state on the next call, and force a fresh push once we (re)connect.
         return;
     }
 
@@ -174,5 +200,24 @@ mod tests {
         let a = Presence { details: Some("Idle".into()), ..Default::default() };
         let b = Presence { details: Some("In the menus".into()), ..Default::default() };
         assert!(changed(Some(&a), &b));
+    }
+
+    #[test]
+    fn may_retry_when_never_attempted() {
+        assert!(may_retry(None, Instant::now(), RECONNECT_BACKOFF));
+    }
+
+    #[test]
+    fn no_retry_within_backoff_window() {
+        let base = Instant::now();
+        assert!(!may_retry(Some(base), base, RECONNECT_BACKOFF));
+        assert!(!may_retry(Some(base), base + Duration::from_secs(1), RECONNECT_BACKOFF));
+    }
+
+    #[test]
+    fn retry_after_backoff_elapses() {
+        let base = Instant::now();
+        assert!(may_retry(Some(base), base + RECONNECT_BACKOFF, RECONNECT_BACKOFF));
+        assert!(may_retry(Some(base), base + RECONNECT_BACKOFF + Duration::from_millis(1), RECONNECT_BACKOFF));
     }
 }

@@ -154,10 +154,10 @@ describe("viewModel", () => {
   it("setup: activity phrase, no race cluster", () => {
     const vm = viewModel({ ...base, screen: "KART_SELECT" }, () => 2000);
     expect(vm.state).toBe("setup");
-    expect(vm.primary).toEqual({ kind: "activity", text: "Choosing kart" });
+    expect(vm.primary).toEqual({ kind: "activity", text: "Choosing kart…" });
     expect(vm.bar).toBeNull();
     expect(viewModel({ ...base, screen: "START_TIME_TRIAL" }, () => 2000).primary)
-      .toEqual({ kind: "activity", text: "Starting time trial" });
+      .toEqual({ kind: "activity", text: "Starting time trial…" });
   });
   it("finished: final time + delta + FIN badge, bar present", () => {
     const vm = viewModel({ ...base, final_time: "1:21.044" }, () => 2000);

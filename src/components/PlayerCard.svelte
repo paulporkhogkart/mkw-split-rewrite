@@ -1,8 +1,10 @@
 <script>
   import { viewModel } from "../lib/playerCard.js";
-  import { figureFor } from "../lib/playerFigures.js";
+  import { figureFor, onpaceFigure } from "../lib/playerFigures.js";
   import { sampleAt, deltaTrendAt, DELAY_MS } from "../lib/raceTimerBuffer.js";
   import { deltaMode } from "../lib/cardSettings.js";
+  import { updateFire } from "../lib/fireState.js";
+  import Fire from "./Fire.svelte";
   export let entry;
   export let now = Date.now();            // driven by PlayerPanel (fast while racing)
   export let stale = false;              // server link is down: render this card offline (FIRSTS only)
@@ -15,11 +17,20 @@
   // Pace-mode shade needs the delta's direction at the same delayed clock.
   $: trend = isRacing && $deltaMode === "pace" ? deltaTrendAt(entry.player_id, now - DELAY_MS) : null;
   $: vm = viewModel(entry, now, delayed, { deltaMode: $deltaMode, trend, stale });
-  $: fig = figureFor(vm.name, vm.online);
+  // On fire swaps to the player's on-pace portrait (falls back to the online figure).
+  $: fig = onFire ? (onpaceFigure(vm.name) || figureFor(vm.name, true)) : figureFor(vm.name, vm.online);
+  // On fire: lit while racing AND on PB pace. Pace mode reads the live (delayed)
+  // pace delta; laps mode reads the last completed lap split. fireState applies
+  // the "consistently ahead" on-window + anti-flicker off-window.
+  $: aheadNow = isRacing && ($deltaMode === "laps"
+      ? !!(entry.lap_delta && entry.lap_delta.delta_ms != null && entry.lap_delta.delta_ms < 0)
+      : !!(delayed && delayed.pb_delta_ms != null && delayed.pb_delta_ms < 0));
+  $: onFire = entry ? updateFire(entry.player_id, { ahead: aheadNow, racing: isRacing, now, mode: $deltaMode }) : false;
 </script>
 
 <div class="tt" class:off={!vm.online} style="--pc:{vm.color}">
   <div class="spine"></div>
+  {#if isRacing}<Fire color={vm.color} active={onFire} />{/if}
   {#if fig}<div class="fig" style="background-image:url({fig})"></div>{/if}
   <div class="data">
     <div class="nm">{vm.name}</div>
@@ -120,17 +131,18 @@
   .tt { --pc: #888; position: relative; height: 100%; min-height: 146px; background: var(--panel);
         overflow: hidden; display: flex; }
   .tt.off { background: var(--well); }
-  .spine { flex: 0 0 3px; background: var(--pc); }
+  .spine { flex: 0 0 3px; background: var(--pc); position: relative; z-index: 4; }
   .tt.off .spine { background: var(--idle); }
   /* Portrait strip: a fixed slim slot the figure is deliberately CROPPED into
      (bottom-center sliver cut - face stays, sides bleed off). Figures scale with
      card height, so taller cards crop tighter instead of widening the strip; the
      data column keeps the rest of the card at every size. */
   .fig { flex: 0 0 56px; margin: 11px 0 0 2px; background-repeat: no-repeat;
-         background-position: bottom center; background-size: auto 100%; }
+         background-position: bottom center; background-size: auto 100%;
+         position: relative; z-index: 2; }
   .tt.off .fig { filter: grayscale(1) brightness(.6); }
   .data { flex: 1; min-width: 0; padding: 9px 9px 8px 8px;
-          display: flex; flex-direction: column; }
+          display: flex; flex-direction: column; position: relative; z-index: 2; }
   .nm { font-size: 12px; font-weight: 700; color: var(--pc); letter-spacing: .05em; text-transform: uppercase;
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tt.off .nm { color: var(--tx-mut); }
