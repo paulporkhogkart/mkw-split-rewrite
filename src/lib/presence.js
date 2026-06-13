@@ -35,6 +35,28 @@ export function readSnapshot(storage = ls) {
   } catch { return null; }
 }
 
+/** Paint last-known cards on launch: load the cached snapshot into `presence` and seed
+ *  serverConnection as disconnected (so cards render stale/offline). Does NOT push race
+ *  samples — a stale snapshot must never feed the live timer buffer. Returns whether a
+ *  cache was found. */
+export function hydratePresence(storage = ls) {
+  const snap = readSnapshot(storage);
+  if (!snap) { serverConnection.set({ connected: false, syncedAt: null }); return false; }
+  presence.set(snap.players);
+  serverConnection.set({ connected: false, syncedAt: snap.syncedAt });
+  return true;
+}
+
+/** A live frame arrived: the link is up as of `syncedAt`. */
+export function markServerConnected(syncedAt) {
+  serverConnection.set({ connected: true, syncedAt });
+}
+
+/** The socket dropped: flip to disconnected but keep `syncedAt` so cards can show "last sync". */
+export function markServerDisconnected() {
+  serverConnection.update((s) => ({ ...s, connected: false }));
+}
+
 const THROTTLE_MS = 250;    // ~4 Hz cap on outbound frames
 const HEARTBEAT_MS = 5000;  // idle keep-alive so the server's sweep keeps us online
 

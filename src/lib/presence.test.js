@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { screen, selection, race, minimap } from "./stores.js";
+import { screen, selection, race, minimap, presence, serverConnection } from "./stores.js";
 import { resets } from "./resets.js";
 import { serverUrl, authToken } from "./syncSettings.js";
-import { frame, wsUrl, writeSnapshot, readSnapshot } from "./presence.js";
+import { frame, wsUrl, writeSnapshot, readSnapshot, hydratePresence, markServerConnected, markServerDisconnected } from "./presence.js";
+import { sampleAt } from "./raceTimerBuffer.js";
+import { get } from "svelte/store";
 
 describe("presence frame()", () => {
   it("maps the live stores into a frame", () => {
@@ -63,5 +65,33 @@ describe("presence snapshot persistence", () => {
   it("returns null when absent or corrupt", () => {
     expect(readSnapshot(fakeStorage())).toBeNull();
     expect(readSnapshot(fakeStorage({ "mkw.presence": "not json" }))).toBeNull();
+  });
+});
+
+describe("presence hydrate + connection transitions", () => {
+  it("hydrates the presence map + serverConnection(connected:false) from cache", () => {
+    const players = { 7: { player_id: 7, name: "Alex", online: true, elapsed_ms: 5000, completion: 0.4 } };
+    const store = fakeStorage({ "mkw.presence": JSON.stringify({ players, syncedAt: 4242 }) });
+    presence.set({}); serverConnection.set({ connected: false, syncedAt: null });
+    expect(hydratePresence(store)).toBe(true);
+    expect(get(presence)).toEqual(players);
+    expect(get(serverConnection)).toEqual({ connected: false, syncedAt: 4242 });
+  });
+  it("does NOT feed the race-timer buffer (no live samples from a stale snapshot)", () => {
+    const players = { 8: { player_id: 8, name: "Luke", elapsed_ms: 9000, completion: 0.9 } };
+    const store = fakeStorage({ "mkw.presence": JSON.stringify({ players, syncedAt: 1 }) });
+    hydratePresence(store);
+    expect(sampleAt(8, Date.now())).toBeNull();
+  });
+  it("leaves defaults when there is no cache", () => {
+    presence.set({}); serverConnection.set({ connected: false, syncedAt: 999 });
+    expect(hydratePresence(fakeStorage())).toBe(false);
+    expect(get(serverConnection)).toEqual({ connected: false, syncedAt: null });
+  });
+  it("marks connected (with syncedAt) and disconnected (keeping syncedAt)", () => {
+    markServerConnected(5000);
+    expect(get(serverConnection)).toEqual({ connected: true, syncedAt: 5000 });
+    markServerDisconnected();
+    expect(get(serverConnection)).toEqual({ connected: false, syncedAt: 5000 });
   });
 });
