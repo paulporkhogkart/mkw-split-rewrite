@@ -5,15 +5,16 @@
   import { deltaMode } from "../lib/cardSettings.js";
   export let entry;
   export let now = Date.now();            // driven by PlayerPanel (fast while racing)
+  export let stale = false;              // server link is down: render this card offline (FIRSTS only)
   // Sample the delay buffer only while actually racing: the held/paused states
   // replay the stashed readout, and sampling through a pause would ratchet the
   // monotonic floor above the frozen clock.
-  $: isRacing = !!entry && entry.online !== false && entry.screen === "RACING" && !entry.final_time;
+  $: isRacing = !stale && !!entry && entry.online !== false && entry.screen === "RACING" && !entry.final_time;
   // Render the live timer + bar DELAY_MS in the past so the finish lines up.
   $: delayed = isRacing ? sampleAt(entry.player_id, now - DELAY_MS) : null;
   // Pace-mode shade needs the delta's direction at the same delayed clock.
   $: trend = isRacing && $deltaMode === "pace" ? deltaTrendAt(entry.player_id, now - DELAY_MS) : null;
-  $: vm = viewModel(entry, now, delayed, { deltaMode: $deltaMode, trend });
+  $: vm = viewModel(entry, now, delayed, { deltaMode: $deltaMode, trend, stale });
   $: fig = figureFor(vm.name, vm.online);
 </script>
 
@@ -23,12 +24,13 @@
   <div class="data">
     <div class="nm">{vm.name}</div>
     {#if !vm.online && vm.stats}
-    <!-- Offline: career stats instead of dead selection rows (the primary line
-         already carries "last seen"). -->
+    <!-- Offline: stable career stats instead of dead selection rows (the primary line
+         already carries "last seen"). Render only the rows present — a stale (no-server)
+         card carries FIRSTS only; a live-offline card carries all three. -->
     <div class="sel">
-      <div class="kv"><span class="kt">FIRSTS</span><span class="v">{vm.stats.firsts}</span></div>
-      <div class="kv"><span class="kt">RUNS · 7D</span><span class="v">{vm.stats.runs_7d}</span></div>
-      <div class="kv"><span class="kt">PBS · 30D</span><span class="v">{vm.stats.pbs_30d}</span></div>
+      {#if vm.stats.firsts != null}<div class="kv"><span class="kt">FIRSTS</span><span class="v">{vm.stats.firsts}</span></div>{/if}
+      {#if vm.stats.runs_7d != null}<div class="kv"><span class="kt">RUNS · 7D</span><span class="v">{vm.stats.runs_7d}</span></div>{/if}
+      {#if vm.stats.pbs_30d != null}<div class="kv"><span class="kt">PBS · 30D</span><span class="v">{vm.stats.pbs_30d}</span></div>{/if}
     </div>
     {:else if vm.online}
     <div class="sel">
