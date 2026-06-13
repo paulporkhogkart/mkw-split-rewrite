@@ -2,8 +2,10 @@
 // feeds the broadcast into the `presence` store. Mirrors discord.js (store-driven push) +
 // the bot's ws.ts (reconnect). Presence is ephemeral - a dropped frame self-corrects.
 import { get } from "svelte/store";
-import { screen, selection, race, minimap, presence, myPlayerId, serverConnection } from "./stores.js";
+import { screen, selection, race, minimap, presence, myPlayerId, serverConnection, pbSplits, pbTotalMs } from "./stores.js";
 import { resets } from "./resets.js";
+import { roster, playerColor } from "./trailSettings.js";
+import { buildSelfEntry } from "./localSelf.js";
 import { serverUrl, authToken } from "./syncSettings.js";
 import { pushSample } from "./raceTimerBuffer.js";
 import { parseTime } from "./discordFormat.js";
@@ -66,6 +68,46 @@ function persistSoon(map, syncedAt) {
   persistTimer = setTimeout(() => { persistTimer = 0; writeSnapshot(persistMap, persistAt); }, PERSIST_DEBOUNCE_MS);
 }
 
+/** Merge one player entry into the presence map + feed the timer buffer. Free of any
+ *  connection/persistence side-effects, so both server frames and the local-self echo use it. */
+function applyPlayerEntry(p, now) {
+  pushSample(p.player_id, { t: now, elapsed_ms: p.elapsed_ms, completion: p.completion, pb_delta_ms: p.pb_delta_ms });
+  const merged = { ...get(presence), [p.player_id]: p };
+  presence.set(merged);
+  return merged;
+}
+
+/** This client's roster id: the live presence `you`, else the cached roster's is_me entry
+ *  (so we know which card is ours offline, before any server snapshot). null if unknown. */
+function meId() {
+  const id = get(myPlayerId);
+  if (id != null) return id;
+  const r = get(roster).find((p) => p.is_me);
+  return r ? r.player_id : null;
+}
+
+/** Identity (name + locked colour) for our own card: prefer the cached roster, else the last
+ *  presence entry. */
+function identityFor(id) {
+  const r = get(roster).find((p) => p.player_id === id);
+  if (r) return { player_id: id, name: r.display_name, color: playerColor(r) };
+  const cur = get(presence)[id];
+  return { player_id: id, name: cur?.name ?? "You", color: cur?.color ?? null };
+}
+
+/** Drive our OWN card + the race rail from the local engine stores + the locally-cached PB,
+ *  while the server is unreachable. No-op if we can't identify ourselves yet. Touches neither
+ *  connection state nor persistence (the cached snapshot keeps the last *server* truth). */
+export function pushLocalSelf(now = Date.now()) {
+  const id = meId();
+  if (id == null) return;
+  applyPlayerEntry(buildSelfEntry({
+    identity: identityFor(id),
+    screen: get(screen), selection: get(selection), race: get(race), minimap: get(minimap),
+    resets: get(resets), pbTotalMs: get(pbTotalMs), pbCum: get(pbSplits), now,
+  }), now);
+}
+
 /** Apply one raw WS frame to the stores: snapshot replaces, update merges; either way feed
  *  the race-timer buffer (live), mark the link connected, and schedule a persist. `now` is
  *  injectable for tests. Malformed JSON is ignored. */
@@ -83,10 +125,7 @@ export function handlePresenceMessage(raw, now = Date.now()) {
     markServerConnected(now);
     persistSoon(map, now);
   } else if (msg.type === "presence_update") {
-    const p = { ...msg.player, _rxAt: now };
-    pushSample(p.player_id, { t: now, elapsed_ms: p.elapsed_ms, completion: p.completion, pb_delta_ms: p.pb_delta_ms });
-    const merged = { ...get(presence), [p.player_id]: p };
-    presence.set(merged);
+    const merged = applyPlayerEntry({ ...msg.player, _rxAt: now }, now);
     markServerConnected(now);
     persistSoon(merged, now);
   }
@@ -146,6 +185,7 @@ function connect() {
   ws.addEventListener("message", (e) => handlePresenceMessage(e.data));
   ws.addEventListener("close", () => {
     markServerDisconnected();
+    pushLocalSelf();   // immediately take our own card live from local state
     if (closed) return;
     setTimeout(connect, backoff); backoff = Math.min(backoff * 2, 30000);
   });
@@ -155,7 +195,11 @@ function connect() {
 export function initPresence() {
   closed = false;
   hydratePresence();   // paint last-known cards immediately; live frames overwrite on connect
-  [screen, selection, race, minimap].forEach((s) => s.subscribe(() => scheduleSend()));
+  // When the server is unreachable, keep OUR OWN card + the race rail live from local engine
+  // state; the four selection/race stores also drive the outbound presence frame.
+  const selfTick = () => { if (!get(serverConnection).connected) pushLocalSelf(); };
+  [screen, selection, race, minimap].forEach((s) => s.subscribe(() => { scheduleSend(); selfTick(); }));
+  [resets, pbSplits, pbTotalMs].forEach((s) => s.subscribe(selfTick));
   hb = setInterval(rawSend, HEARTBEAT_MS);
   connect();
 }

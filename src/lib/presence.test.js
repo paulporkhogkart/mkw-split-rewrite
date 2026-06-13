@@ -1,9 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { screen, selection, race, minimap, presence, serverConnection, myPlayerId } from "./stores.js";
+import { screen, selection, race, minimap, presence, serverConnection, myPlayerId, pbSplits, pbTotalMs } from "./stores.js";
 import { resets } from "./resets.js";
 import { serverUrl, authToken } from "./syncSettings.js";
-import { frame, wsUrl, writeSnapshot, readSnapshot, hydratePresence, markServerConnected, markServerDisconnected, handlePresenceMessage } from "./presence.js";
+import { frame, wsUrl, writeSnapshot, readSnapshot, hydratePresence, markServerConnected, markServerDisconnected, handlePresenceMessage, pushLocalSelf } from "./presence.js";
 import { sampleAt } from "./raceTimerBuffer.js";
+import { roster } from "./trailSettings.js";
 import { get } from "svelte/store";
 
 describe("presence frame()", () => {
@@ -115,5 +116,32 @@ describe("handlePresenceMessage", () => {
   });
   it("ignores malformed input without throwing", () => {
     expect(() => handlePresenceMessage("not json", 1)).not.toThrow();
+  });
+});
+
+describe("pushLocalSelf (offline own-card echo)", () => {
+  it("synthesizes our own entry from local stores + cached PB", () => {
+    presence.set({}); myPlayerId.set(null);
+    roster.set([{ player_id: 1, display_name: "Paul", is_me: true }]);
+    screen.set("RACING");
+    selection.set({ char: "Mario", costume: "Base", kart: "Std", course: "Rainbow Road" });
+    race.set({ curLap: 2, totLap: 3, coins: 7, mushrooms: 1, finishTime: null, elapsedMs: 45000, splits: { 1: "0:35.500" } });
+    minimap.set({ cx: 12, cy: 34, radius: 1, trackState: "tracking", roi: null });
+    resets.set(4);
+    pbTotalMs.set(108000);
+    pbSplits.set({ 1: 36000, 2: 72000, 3: 108000 });
+    pushLocalSelf(5000);
+    const me = get(presence)[1];
+    expect(me._localSelf).toBe(true);
+    expect(me.online).toBe(true);
+    expect(me.elapsed_ms).toBe(45000);
+    expect(me.pb_ms).toBe(108000);
+    expect(me.pb_laps_ms).toEqual([36000, 36000, 36000]);
+    expect(me.name).toBe("Paul");
+  });
+  it("is a no-op when we can't identify ourselves", () => {
+    presence.set({}); myPlayerId.set(null); roster.set([]);
+    pushLocalSelf(1);
+    expect(get(presence)).toEqual({});
   });
 });
