@@ -377,7 +377,6 @@
     display: flex; align-items: center; gap: .45rem;
     font-size: .72rem; color: var(--tx); cursor: pointer;
   }
-  .discord-row input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
   .discord-label { font-size: .7rem; color: var(--tx-dim); margin: .1rem 0 0; }
   .discord-input {
     background: var(--panel); color: var(--tx); border: 1px solid var(--bd);
@@ -398,7 +397,7 @@
   .delta-set h2 { font-size: .8rem; color: var(--tx); margin: 0 0 .2rem; }
   .delta-set p { font-size: .7rem; color: var(--tx-dim); margin: 0 0 .55rem; line-height: 1.55; }
   .dm { display: flex; align-items: flex-start; gap: .5rem; cursor: pointer; padding: .25rem 0; }
-  .dm input[type="radio"] { accent-color: var(--accent); cursor: pointer; margin-top: .15rem; }
+  .dm input[type="radio"] { margin-top: .15rem; }
   .dm b { font-size: .72rem; color: var(--tx); font-weight: 600; display: block; }
   .dm i { font-size: .66rem; color: var(--tx-dim); font-style: normal; line-height: 1.5; display: block; }
 </style>
