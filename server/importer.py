@@ -1,4 +1,6 @@
 """Repeatable, idempotent importer for the legacy kart-off hogkart.db."""
+from __future__ import annotations  # PEP 604 (str | None) annotations on the Pi's Python 3.9
+
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
