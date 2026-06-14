@@ -113,7 +113,16 @@ curl -s http://localhost:8787/health        # {"status":"ok"}
 > dashboard, point the registrar's nameservers at Cloudflare, and wait for **Active**.) The domain
 > and the `cloudflared` tunnel must be in the same Cloudflare account (they are).
 
-On the Pi, route the subdomain through the existing tunnel and add the ingress rule:
+On the Pi, route the subdomain through the existing tunnel and add the ingress rule.
+
+> `tunnel list` / `route dns` need the **account management cert** `~/.cloudflared/cert.pem`, which
+> is separate from the per-tunnel credentials JSON that *runs* your tunnel — so a Pi that only has
+> the credentials file errors with *"Cannot determine default origin certificate path"*. Two fixes:
+> - **Get the cert** (then the commands below work): `cloudflared tunnel login` — it prints a URL;
+>   open it in any browser, pick `thekartoff.com`, and it writes `cert.pem` to the Pi. Headless-ok,
+>   and it doesn't disturb the running tunnel.
+> - **Or skip the CLI route**: add a **Proxied CNAME** `api` → `<TUNNEL-UUID>.cfargotunnel.com` in
+>   the dashboard (the UUID is the `tunnel:` value in `~/.cloudflared/config.yml`).
 
 ```bash
 cloudflared tunnel list                                  # note the tunnel name/UUID
