@@ -81,7 +81,7 @@
       <div class="pb"><span>PB</span>{vm.pbStr}{#if vm.delta}<span class="delta {vm.delta.cls}">{vm.delta.text}</span>{/if}</div>
     {/if}
     {#if vm.primary.kind === "time"}
-      <div class="prim time" class:fin={vm.state === "finished"} class:pb={vm.finPb}>
+      <div class="prim time" class:fin={vm.state === "finished"} class:beatpb={vm.finPb}>
         {#if vm.badge === "fin"}
           <span class="tag" title="Finished">
             <svg viewBox="0 0 12 12" aria-hidden="true">
@@ -183,9 +183,11 @@
   /* Trim the digits' box to cap..baseline so flex centring is optical, not em-box
      (Segoe UI's tall ascent paints glyphs ~1.3px below the box centre otherwise). */
   .prim.time .ttx { text-box: trim-both cap alphabetic; }
-  /* Finished: the time takes the verdict colour - green beat the pre-race PB, red didn't. */
+  /* Finished: the time takes the verdict colour - green beat the pre-race PB, red didn't.
+     NB: the PB-beat class is `beatpb`, NOT `pb` - the `.pb` PB-readout row carries a
+     `.pb span { font-size: 7.5px }` rule that would otherwise shrink the timer's .ttx span. */
   .prim.time.fin { color: var(--ls-behind); }
-  .prim.time.fin.pb { color: var(--ls-ahead); }
+  .prim.time.fin.beatpb { color: var(--ls-ahead); }
   /* State badge beside the time: checkered flag / pause bars / reset arrow.
      No nudges: the time text is cap-trimmed (.ttx), so centre IS the digit centre. */
   .tag { display: inline-flex; color: var(--tx-dim); flex: 0 0 auto; }
