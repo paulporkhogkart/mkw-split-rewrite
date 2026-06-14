@@ -17,24 +17,10 @@
   import DeviceSelectors   from "./DeviceSelectors.svelte";
   import LanguageSelectors from "./LanguageSelectors.svelte";
   import TrailSettings     from "./TrailSettings.svelte";
+  import SyncSettings      from "./SyncSettings.svelte";
   import { invoke }        from "@tauri-apps/api/core";
   import { discordEnabled, twitchButtonEnabled, twitchLabel, twitchUrl } from "../lib/discordSettings.js";
-  import { serverUrl, authToken } from "../lib/syncSettings.js";
   import { deltaMode } from "../lib/cardSettings.js";
-  import { pushSyncConfig } from "../lib/sync.js";
-
-  // ── Sync "Test connection" ────────────────────────────────────────────────────
-  let syncTest = { state: "idle", msg: "" };   // idle | testing | ok | err
-  async function testSyncConnection() {
-    syncTest = { state: "testing", msg: "" };
-    try {
-      await pushSyncConfig();   // ensure the latest URL/token are in the uploader first
-      const msg = await invoke("sync_test_connection");
-      syncTest = { state: "ok", msg };
-    } catch (e) {
-      syncTest = { state: "err", msg: typeof e === "string" ? e : (e?.message ?? String(e)) };
-    }
-  }
 
   // ── Modal open/close ──────────────────────────────────────────────────────────
   export let wizardOpen    = false;
@@ -229,30 +215,7 @@
         <!-- ── SYNC step ──────────────────────────────────────────────────── -->
         {:else if wizardStep === "sync"}
           <div class="step-centred">
-            <h2>Sync</h2>
-            <p>Upload your runs to the competition server so they appear on the leaderboard and broadcast. Get your token from whoever runs the server.</p>
-
-            <div class="discord-fields">
-              <label class="discord-label" for="sync-url">Server URL</label>
-              <input id="sync-url" class="discord-input" type="text" bind:value={$serverUrl}
-                placeholder="https://your-server.example" />
-              <label class="discord-label" for="sync-token">Your token</label>
-              <input id="sync-token" class="discord-input" type="password" bind:value={$authToken}
-                placeholder="paste your token" />
-            </div>
-            <p class="discord-note">Runs queue locally and upload when the server is reachable, so a flaky connection is fine. Leave the URL blank to disable uploading.</p>
-
-            <div class="sync-test">
-              <button class="btn-nav" on:click={testSyncConnection} disabled={syncTest.state === "testing"}>
-                {syncTest.state === "testing" ? "Testing…" : "Test connection"}
-              </button>
-              {#if syncTest.state === "ok"}
-                <p class="sync-test-msg sync-test-ok">{syncTest.msg}</p>
-              {:else if syncTest.state === "err"}
-                <p class="sync-test-msg sync-test-err">{syncTest.msg}</p>
-              {/if}
-            </div>
-
+            <SyncSettings />
             <div class="cam-nav" style="justify-content:flex-end">
               <button class="btn-primary" on:click={onClose}>Done</button>
             </div>
@@ -429,12 +392,6 @@
   .discord-fields { display: flex; flex-direction: column; gap: .35rem; }
   .discord-note { font-size: .66rem; color: var(--tx-dim); margin: .1rem 0 0; line-height: 1.5; }
   .discord-dim { opacity: .45; transition: opacity .15s; }
-
-  /* Sync "Test connection" */
-  .sync-test { display: flex; flex-direction: column; gap: .4rem; margin-top: .2rem; align-items: flex-start; }
-  .sync-test-msg { font-size: .68rem; line-height: 1.5; margin: 0; }
-  .sync-test-ok  { color: var(--ok); }
-  .sync-test-err { color: var(--warn); }
 
   /* PB delta mode (trails tab) */
   .delta-set { max-width: 600px; margin: 1rem auto 0; padding-top: .8rem; border-top: 1px solid var(--bd); }
