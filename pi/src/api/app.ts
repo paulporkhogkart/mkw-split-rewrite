@@ -9,6 +9,7 @@ import { createStatsApp } from './stats';
 import { screenRoutes } from './screen';
 import { presenceHandlers } from './presence';
 import { playerByToken } from '../db/players';
+import { requireTokenAny } from './auth';
 import type { PresenceHub } from '../presence/hub';
 
 export type Env = { Variables: { playerId: number; playerName: string } };
@@ -20,6 +21,12 @@ export function createApp(db: DatabaseSync, hub: EventHub,
                           invalidateModel?: (courseId: number) => void): Hono<Env> {
   const app = new Hono<Env>();
   app.get('/health', (c) => c.json({ status: 'ok' }));
+  // Every HTTP route except /health and the two WebSocket streams needs a token (read or write).
+  // /v1/events stays open: the on-Pi bot subscribes to it over localhost with no token, and it
+  // only carries PB/WR events that are already announced publicly. /v1/presence keeps its own
+  // optional-token (receive-only) model.
+  const OPEN = new Set(['/health', '/v1/events', '/v1/presence']);
+  app.use('*', (c, next) => (OPEN.has(c.req.path) ? next() : requireTokenAny(db)(c, next)));
   app.route('/', runsRoutes(db, hub, invalidateModel));
   app.route('/', readsRoutes(db));
   app.route('/', createStatsApp(db, { porkerPath: process.env.STATS_PORKER_DB ?? 'porker.db' }));

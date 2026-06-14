@@ -29,14 +29,14 @@ describe('screen-intervals ingest + screen_time', () => {
     expect(post.status).toBe(200);
     expect((await post.json()).inserted).toBe(2);
 
-    const v = await app.request('/v1/stats/value?metric=screen_time&screen=MAIN_MENU&period=all_time');
+    const v = await app.request(`/v1/stats/value?metric=screen_time&screen=MAIN_MENU&period=all_time&token=${token}`);
     expect((await v.json()).value).toBe(3000);
 
-    const bd = await app.request('/v1/stats/breakdown?metric=screen_time&group_by=screen&period=all_time');
+    const bd = await app.request(`/v1/stats/breakdown?metric=screen_time&group_by=screen&period=all_time&token=${token}`);
     const rows = (await bd.json()).rows as { key: string; value: number }[];
     expect(Object.fromEntries(rows.map((r) => [r.key, r.value]))).toEqual({ MAIN_MENU: 3000, RACING: 5000 });
 
-    const cat = await (await app.request('/v1/stats/metrics')).json();
+    const cat = await (await app.request(`/v1/stats/metrics?token=${token}`)).json();
     expect(cat.find((m: { id: string }) => m.id === 'screen_time').dimensions).toEqual(['player', 'screen']);
   });
 
@@ -51,9 +51,12 @@ describe('screen-intervals ingest + screen_time', () => {
 });
 
 describe('explorer', () => {
-  it('serves the stat-explorer page at /explorer', async () => {
-    const app = createApp(db(), new EventHub());
-    const res = await app.request('/explorer');
+  it('serves the stat-explorer page at /explorer with a token', async () => {
+    const d = db();
+    const token = mintToken(d, 'Luke');
+    const app = createApp(d, new EventHub());
+    expect((await app.request('/explorer')).status).toBe(401);
+    const res = await app.request(`/explorer?token=${token}`);
     expect(res.status).toBe(200);
     expect(await res.text()).toContain('MKW Broadcast Stats');
   });

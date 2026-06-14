@@ -36,3 +36,15 @@ describe('app skeleton', () => {
     expect(res.status).not.toBe(401);
   });
 });
+
+describe('reads need a token', () => {
+  it('a read 401s with no token, 200s with a header or a ?token= query', async () => {
+    const { app, token } = appWith();
+    expect((await app.request('/v1/seasons')).status).toBe(401);
+    expect((await app.request('/v1/seasons', { headers: { authorization: `Bearer ${token}` } })).status).toBe(200);
+    expect((await app.request(`/v1/seasons?token=${token}`)).status).toBe(200);
+  });
+  it('GET /health stays public', async () => {
+    expect((await appWith().app.request('/health')).status).toBe(200);
+  });
+});
