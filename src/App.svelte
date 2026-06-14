@@ -18,6 +18,7 @@
   import SourceCheck from "./components/SourceCheck.svelte";
   import DeviceSelectors from "./components/DeviceSelectors.svelte";
   import LanguageSelectors from "./components/LanguageSelectors.svelte";
+  import SyncSettings from "./components/SyncSettings.svelte";
   import SettingsModal from "./components/SettingsModal.svelte";
   import RunReviewModal from "./components/RunReviewModal.svelte";
   import PlayerPanel from "./components/PlayerPanel.svelte";
@@ -446,7 +447,7 @@
   // ── Wizard step definitions ───────────────────────────────────────────────────
   // First-run finishes straight into the live app from the camera step - no
   // separate "done" confirmation screen (the running app is its own confirmation).
-  const FIRST_TIME_STEPS = ["language", "camera"];
+  const FIRST_TIME_STEPS = ["language", "camera", "sync"];
   // Post-setup, the ⚙ modal is a slim Settings panel: Language + Camera only.
   // Screen/tell/HUD/template editing now lives in the Edit Screens view.
   const RERUN_STEPS      = ["language", "camera", "discord", "sync", "trails"];
@@ -1676,11 +1677,20 @@
                 <p class="hint">Both feeds must show your capture card output before you can continue.</p>
                 <div class="cam-nav">
                   <button class="btn-nav" on:click={()=>goStep("language")}>Back</button>
-                  <button class="btn-primary" disabled={!bothCamerasOk} on:click={completeSetup}>
-                    Finish setup
+                  <button class="btn-primary" disabled={!bothCamerasOk} on:click={()=>goStep("sync")}>
+                    Continue
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+
+        {:else if wizardStep === "sync"}
+          <div class="step-centred">
+            <SyncSettings />
+            <div class="cam-nav">
+              <button class="btn-nav" on:click={()=>goStep("camera")}>Back</button>
+              <button class="btn-primary" on:click={completeSetup}>Finish setup</button>
             </div>
           </div>
 
