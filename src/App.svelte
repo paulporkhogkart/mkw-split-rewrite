@@ -1658,6 +1658,31 @@
               {trackerConnected}
             />
 
+            <!-- Audio monitor: play back the selected audio device so the user can
+                 confirm it's the right one. Reuses the monitor's .feed-controls
+                 (audio-only — no video-hide toggle here). -->
+            <div class="feed-controls">
+              {#if _hasAudio}
+                <button class="fc-btn" title={feedMuted ? "Unmute" : "Mute"}
+                  on:click={() => feedMuted = !feedMuted}>
+                  {#if feedMuted}
+                    <svg viewBox="0 0 16 16" class="fc-icon"><path d="M8 2v12l-4-3H1V7h3L8 4V2zm4.5 2.5a6 6 0 010 7M11 5.5a4 4 0 010 5"/><line x1="1" y1="1" x2="15" y2="15" stroke-linecap="round"/></svg>
+                  {:else if feedVolume < 0.35}
+                    <svg viewBox="0 0 16 16" class="fc-icon"><path d="M8 2v12l-4-3H1V7h3L8 4V2z"/><path d="M11 6a2.5 2.5 0 010 4"/></svg>
+                  {:else}
+                    <svg viewBox="0 0 16 16" class="fc-icon"><path d="M8 2v12l-4-3H1V7h3L8 4V2z"/><path d="M11 5.5a4 4 0 010 5M13 3.5a7 7 0 010 9"/></svg>
+                  {/if}
+                </button>
+                <input type="range" min="0" max="1" step="0.01"
+                  bind:value={feedVolume}
+                  on:input={() => { if (feedVolume > 0) feedMuted = false; }}
+                  class="fc-slider" title="Volume" />
+                <span class="fc-vol">{Math.round(feedVolume * 100)}%</span>
+              {:else if cameraOk}
+                <span class="fc-no-audio">no audio</span>
+              {/if}
+            </div>
+
             <div class="cam-below">
               <DeviceSelectors
                 {browserDevices}
