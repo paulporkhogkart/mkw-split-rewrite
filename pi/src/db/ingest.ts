@@ -2,6 +2,10 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { AttemptPayload } from './types';
 import { slugify } from './slug';
 
+/** Recordings longer than this (ms) are runaway captures (e.g. a stuck screen), not real
+ *  attempts. Keep the run + laps for the record, but drop the (huge) trail. 11 minutes. */
+export const OVER_LIMIT_MS = 11 * 60 * 1000;
+
 export function timeToMs(t?: string | null): number | null {
   if (!t) return null;
   const m = /^(\d+):(\d{2})\.(\d{3})$/.exec(t.trim());
@@ -41,8 +45,14 @@ export function upsertRun(db: DatabaseSync, p: AttemptPayload, playerId: number,
     );
     for (const lap of p.laps ?? []) lapStmt.run(runId, lap.lap, lap.time_ms, lap.time_str ?? null, lap.coins ?? null, lap.shrooms ?? null);
 
-    const ptStmt = db.prepare('INSERT INTO run_points(run_id, t_ms, cx, cy, score, lap) VALUES (?,?,?,?,?,?)');
-    for (const [t, cx, cy, sc, lap] of p.points ?? []) ptStmt.run(runId, t, cx, cy, sc, lap ?? null);
+    // Runaway guard: a recording past OVER_LIMIT_MS is a stuck capture — keep the run + laps,
+    // but don't store its trail. Boundary inclusive (exactly at the limit is still stored).
+    const pts = p.points ?? [];
+    const maxT = pts.reduce((m, pt) => Math.max(m, pt[0]), 0);
+    if (maxT <= OVER_LIMIT_MS) {
+      const ptStmt = db.prepare('INSERT INTO run_points(run_id, t_ms, cx, cy, score, lap) VALUES (?,?,?,?,?,?)');
+      for (const [t, cx, cy, sc, lap] of pts) ptStmt.run(runId, t, cx, cy, sc, lap ?? null);
+    }
 
     db.exec('COMMIT');
     return runId;

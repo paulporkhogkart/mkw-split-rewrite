@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { openDb, applySchema } from './connect';
-import { upsertRun } from './ingest';
+import { upsertRun, OVER_LIMIT_MS } from './ingest';
 import type { AttemptPayload } from './types';
 
 function base() {
@@ -88,5 +88,27 @@ describe('upsertRun', () => {
     expect(run.coins_gained).toBe(14);   // a reset's coins are no longer lost
     expect(run.coins_lost).toBe(6);
     expect(run.mushrooms_used).toBe(3);
+  });
+
+  it('drops the trail of a runaway >11min recording but keeps run + laps', () => {
+    const db = base();
+    const over = OVER_LIMIT_MS + 5000;
+    const runId = upsertRun(db, {
+      attempt_id: 'long1', course: 'Rainbow Road', status: 'dnf',
+      laps: [{ lap: 1, time_ms: 60000 }],
+      points: [[0, 1, 2, 0.9, 1], [over, 3, 4, 0.9, 1]],
+    } as any, 1, 1);
+    expect((db.prepare('SELECT COUNT(*) c FROM runs WHERE id=?').get(runId) as any).c).toBe(1);
+    expect((db.prepare('SELECT COUNT(*) c FROM run_laps WHERE run_id=?').get(runId) as any).c).toBe(1);
+    expect((db.prepare('SELECT COUNT(*) c FROM run_points WHERE run_id=?').get(runId) as any).c).toBe(0);
+  });
+
+  it('keeps the trail when the recording is within the 11min limit (boundary inclusive)', () => {
+    const db = base();
+    const runId = upsertRun(db, {
+      attempt_id: 'ok1', course: 'Rainbow Road', status: 'finished',
+      points: [[0, 1, 2, 0.9, 1], [OVER_LIMIT_MS, 3, 4, 0.9, 1]],   // exactly at the limit -> kept
+    } as any, 1, 1);
+    expect((db.prepare('SELECT COUNT(*) c FROM run_points WHERE run_id=?').get(runId) as any).c).toBe(2);
   });
 });
