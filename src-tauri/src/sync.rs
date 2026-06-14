@@ -601,14 +601,15 @@ async fn fetch_course_reads(cfg: &Config, course: &str, players: &[PlayerTrailCf
         serde_json::from_str(&txt).map_err(|e| e.to_string())
     }
     let pb = get_json(client.get(format!("{base}/v1/me/pb-splits")).query(&q).bearer_auth(&cfg.token), "pb-splits").await?;
-    let fp = get_json(client.get(format!("{base}/v1/friends-pbs")).query(&q), "friends-pbs").await?;
+    let fp = get_json(client.get(format!("{base}/v1/friends-pbs")).query(&q).bearer_auth(&cfg.token), "friends-pbs").await?;
     let mut trails: Vec<serde_json::Value> = Vec::new();
     for p in players {
         if p.mode == "none" { continue; }
         let n = p.n.to_string();
         let runs = get_json(
             client.get(format!("{base}/v1/players/{}/trails", p.player_id))
-                .query(&[("course", course), ("cc", "150"), ("mode", p.mode.as_str()), ("n", n.as_str())]),
+                .query(&[("course", course), ("cc", "150"), ("mode", p.mode.as_str()), ("n", n.as_str())])
+                .bearer_auth(&cfg.token),
             "player-trails",
         ).await?;
         trails.extend(tag_runs_with_player(p.player_id, &runs));
