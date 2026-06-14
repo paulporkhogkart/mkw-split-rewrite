@@ -2214,7 +2214,7 @@ dependencies = [
 
 [[package]]
 name = "mkw-tracker"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "discord-rich-presence",
  "log",
