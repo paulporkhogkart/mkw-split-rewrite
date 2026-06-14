@@ -1,0 +1,3 @@
+# Everything in deploy/ runs on Linux (the Pi). Force LF so shell shebangs, systemd unit
+# parsing, and sudoers validation never see a stray CRLF, whatever the cloner's git config.
+* text eol=lf
