@@ -18,7 +18,15 @@ function safeStorage() {
 }
 const ls = safeStorage();
 
-export const serverUrl = writable(ls.getItem(URL_KEY) || "");
+// The friend-group competition server (see docs/pi-deploy.md step 8). Pre-filled on
+// first run only: an absent key gets the default, but a deliberately-cleared "" stays
+// blank so "leave the URL blank to disable uploading" keeps working.
+export const DEFAULT_SERVER_URL = "https://api.thekartoff.com";
+export function resolveServerUrl(stored) {
+  return stored === null ? DEFAULT_SERVER_URL : stored;
+}
+
+export const serverUrl = writable(resolveServerUrl(ls.getItem(URL_KEY)));
 export const authToken = writable(ls.getItem(TOKEN_KEY) || "");
 
 serverUrl.subscribe((v) => ls.setItem(URL_KEY, v || ""));
