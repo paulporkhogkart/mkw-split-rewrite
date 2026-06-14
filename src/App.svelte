@@ -1205,7 +1205,7 @@
     }
     // First-time setup: the feed's audio plays only while the camera step is the
     // active tab (so the user can verify the selected audio device). Other steps
-    // keep the stream running but silent. Re-run setup is unaffected — its audio
+    // keep the stream running but silent. Re-run setup is unaffected; its audio
     // comes from the background monitor. _setupAudio() is idempotent and is a
     // no-op until the stream opens, so the first arrival (stream still opening)
     // safely falls through to startCamera()'s tail call, while a re-entry with a
@@ -1660,7 +1660,7 @@
 
             <!-- Audio monitor: play back the selected audio device so the user can
                  confirm it's the right one. Reuses the monitor's .feed-controls
-                 (audio-only — no video-hide toggle here). -->
+                 (audio-only, no video-hide toggle here). -->
             <div class="feed-controls">
               {#if _hasAudio}
                 <button class="fc-btn" title={feedMuted ? "Unmute" : "Mute"}
