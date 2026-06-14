@@ -80,9 +80,8 @@
   .trk h2 { color: var(--tx); font-size: .95rem; font-weight: 600; letter-spacing: .01em; }
   .trk > p { font-size: .76rem; color: var(--tx-mut); line-height: 1.6; margin: 0; }
 
-  .fade { display: flex; align-items: flex-start; gap: .5rem; background: var(--panel-2);
+  .fade { display: flex; align-items: center; gap: .5rem; background: var(--panel-2);
     border: 1px solid var(--bd); border-radius: var(--r); padding: .5rem .6rem; cursor: pointer; }
-  .fade input { margin-top: .15rem; }
   .fade-tx b { font-size: .74rem; font-weight: 600; color: var(--tx); }
   .fade-tx i { display: block; font-style: normal; font-size: .66rem; color: var(--tx-dim); margin-top: .15rem; line-height: 1.5; }
 
