@@ -36,6 +36,7 @@
   import { initDiscordPresence } from "./lib/discord.js";
   import { initPresence } from "./lib/presence.js";
   import { initSync } from "./lib/sync.js";
+  import { serverUrl as serverUrlStore, authToken as authTokenStore } from "./lib/syncSettings.js";
 
   let appWindow = null;
   function winMinimize()       { appWindow?.minimize(); }
@@ -616,6 +617,18 @@
       console[level] = (...args) => { _orig(...args); pushLog(`${prefix} ${_fmt(args)}`); };
     }
   })();
+
+  // Pull the competition roster from the server + cache it. The trail config, colours and
+  // legend all key off it (activeConfig / buildTrailRuns / trailLegendRows), so call this at
+  // startup AND whenever the server URL/token changes - the token entered during first-time
+  // setup then populates the roster automatically, so trails work on the first race without
+  // the user opening the Trails tab. Idempotent; a failed/empty read keeps the cached roster.
+  async function refreshRoster() {
+    try {
+      const list = JSON.parse(await invoke("sync_roster"));
+      if (Array.isArray(list) && list.length) cacheRoster(list);
+    } catch (_) { /* offline / unconfigured: keep the cached roster */ }
+  }
 
   // Pull a course's reads (PB splits + own/friends trails + friends PBs) from the Rust
   // read-back/cache and fan them into the stores. Trails are selected + coloured + faded
@@ -1314,11 +1327,15 @@
     initDiscordPresence();
     initSync();
     initPresence();   // stream this player's live status to the server, mirror the roster's into the `presence` store
-    // Load the roster so trail config can resolve player ids (cached for offline use).
-    try {
-      const list = JSON.parse(await invoke("sync_roster"));
-      if (Array.isArray(list) && list.length) cacheRoster(list);
-    } catch (_) { /* keep the cached roster */ }
+    // Load the roster (trail config + colours need it) now AND whenever the server URL/token
+    // changes - so the token entered during first-time setup populates it automatically,
+    // without the user having to open the Trails tab. Skip the stores' synchronous initial
+    // fire; the explicit refreshRoster() below is the startup fetch.
+    let rosterCfgReady = false, rosterCfgTimer;
+    const refreshRosterSoon = () => { clearTimeout(rosterCfgTimer); rosterCfgTimer = setTimeout(refreshRoster, 400); };
+    [serverUrlStore, authTokenStore].forEach((s) => s.subscribe(() => { if (rosterCfgReady) refreshRosterSoon(); }));
+    rosterCfgReady = true;
+    await refreshRoster();
     // Resurface any runs held for review from a previous session.
     try {
       const pending = JSON.parse(await invoke("sync_list_pending"));
