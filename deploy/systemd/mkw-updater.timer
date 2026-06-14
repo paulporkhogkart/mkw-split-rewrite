@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the MKW updater periodically
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+Unit=mkw-updater.service
+
+[Install]
+WantedBy=timers.target

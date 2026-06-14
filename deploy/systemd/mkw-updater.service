@@ -1,0 +1,9 @@
+[Unit]
+Description=MKW pull-deploy updater (checks GitHub for a newer release tag)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pi
+ExecStart=/home/pi/mkw/deploy/update.sh

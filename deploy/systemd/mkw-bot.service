@@ -1,0 +1,16 @@
+[Unit]
+Description=MKW Discord bot (PB/WR announcements + slash commands)
+After=mkw-server.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/mkw/pi
+EnvironmentFile=/etc/mkw/mkw.env
+ExecStart=/usr/bin/node --no-warnings --import tsx src/bot/index.ts
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
