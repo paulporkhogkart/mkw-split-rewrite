@@ -87,6 +87,24 @@ def test_reset_tell_rejects_bright_top_content():
     assert not detected
 
 
+def test_reset_tell_detects_through_friend_online_popup():
+    """A 'friend came online' toast in the top-left corner must not block a real
+    RESET.  The toast slides in above the mushroom-HUD line (y<134), so the
+    top-left dark group starts at y=134 and never sees it.  Regression: the old
+    full-height (0,0,527,491) group let the toast brighten the strip and suppress
+    the reset."""
+    frame = _img("reset_dev.png").copy()
+    frame[24:118, 36:498] = (208, 208, 208)        # opaque bright toast, above y=134
+
+    # The toast does break the old full-height strip (this was the bug)...
+    old_top_left = Region(kind="dark_loading", roi=(0, 0, 527, 491))
+    assert score_region(frame, old_top_left, 0.9) == 0.0
+
+    # ...but the shipped tell skips that strip, so the reset still detects.
+    detected, score = detect_tell(frame, RESET_TELL)
+    assert detected, f"friend-online popup must not block RESET (score={score})"
+
+
 def test_reset_family_tells_stay_identical():
     fam = {t.screen: t for t in TELLS
            if t.screen in (Screen.RESET, Screen.GHOST_RESET, Screen.UNKNOWN_RESET)}

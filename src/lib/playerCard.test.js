@@ -216,6 +216,23 @@ describe("viewModel", () => {
     expect(viewModel({ ...base, online: false, updated_at: 1, off_stats: stats }, () => 2).stats).toEqual(stats);
     expect(viewModel({ ...base, online: false, updated_at: 1 }, () => 2).stats).toBeNull();
   });
+  it("idle online (yet to select anything) surfaces the same career stats as offline", () => {
+    const stats = { firsts: 3, runs_7d: 41, pbs_30d: 5 };
+    const idle = { player_id: 9, name: "P", color: "#888", online: true, screen: "MAIN_MENU",
+                   updated_at: 1, off_stats: stats };
+    const menus = viewModel(idle, () => 2);
+    expect(menus.state).toBe("menus");
+    expect(menus.stats).toEqual(stats);                       // full three: a live server keeps them fresh
+    // setup screens before a pick are still "yet to select"
+    expect(viewModel({ ...idle, screen: "CHARACTER_SELECT" }, () => 2).stats).toEqual(stats);
+    // no server stats -> nothing (the card falls back to the dash rows)
+    expect(viewModel({ ...idle, off_stats: undefined }, () => 2).stats).toBeNull();
+  });
+  it("a racing/finished card carries no stat block (the live readout owns the rows)", () => {
+    const stats = { firsts: 3, runs_7d: 41, pbs_30d: 5 };
+    expect(viewModel({ ...base, off_stats: stats }, () => 2000).stats).toBeUndefined();
+    expect(viewModel({ ...base, final_time: "1:21.044", off_stats: stats }, () => 2000).stats).toBeUndefined();
+  });
 });
 
 describe("viewModel offline / stale stats", () => {

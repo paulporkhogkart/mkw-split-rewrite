@@ -76,7 +76,7 @@ describe('PresenceHub', () => {
     expect(got.at(-1).player).toMatchObject({ elapsed_ms: null });
   });
 
-  it('offline entries carry career stats; online ones do not', () => {
+  it('career stats ride offline + idle-online entries; a racing card drops them', () => {
     const d = db();
     d.exec(`INSERT INTO courses(id,slug,display_name) VALUES(7,'rainbow_road','Rainbow Road');
             INSERT INTO runs(season_id,player_id,course_id,cc,status,total_time_ms,is_pb,was_pb,provenance,ended_at)
@@ -91,7 +91,12 @@ describe('PresenceHub', () => {
     expect(paul.off_stats).toEqual({ firsts: 1, runs_7d: 2, pbs_30d: 1 });   // holds the #1
     expect(luke.off_stats).toEqual({ firsts: 0, runs_7d: 1, pbs_30d: 1 });
     hub.update(1, { screen: 'MAIN_MENU' });
-    expect(got.at(-1).player.off_stats).toBeNull();                          // online: not carried
+    // Online but idle (no race to show): the pre-selection card carries the same stats.
+    expect(got.at(-1).player.off_stats).toEqual({ firsts: 1, runs_7d: 2, pbs_30d: 1 });
+    hub.update(1, { screen: 'RACING', course: 'Rainbow Road' });
+    expect(got.at(-1).player.off_stats).toBeNull();                          // racing: the live readout replaces them
+    hub.update(1, { screen: 'POST_TIME_TRIAL', course: 'Rainbow Road' });
+    expect(got.at(-1).player.off_stats).toBeNull();                          // results screen too
     hub.setOffline(1);
     expect(got.at(-1).player.off_stats).toEqual({ firsts: 1, runs_7d: 2, pbs_30d: 1 });
   });

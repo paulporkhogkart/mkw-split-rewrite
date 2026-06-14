@@ -63,6 +63,9 @@ function offlineEntry(player_id: number, name: string, color: string | null, now
 export class PresenceHub {
   private map = new Map<number, PresenceEntry>();
   private sinks = new Set<Sink>();
+  // Cached career snapshot per player (offStats). It only changes on a finished
+  // upload (refreshOffStats), so attaching it to idle live frames costs no query.
+  private offStatsCache = new Map<number, PresenceEntry['off_stats']>();
   // The PB (ms + run id) pinned per player for the duration of a race
   // (RACING/POST_TIME_TRIAL): the finish upload updates the db PB within ~a second,
   // but the card delta and the rail's lap comparison must keep reading against the
@@ -80,7 +83,13 @@ export class PresenceHub {
       `SELECT p.id, p.display_name, p.color FROM season_rosters sr JOIN players p ON p.id=sr.player_id WHERE sr.season_id=?`
     ).all(activeSeasonId(this.db)) as { id: number; display_name: string; color: string | null }[];
     for (const r of rows)
-      if (!this.map.has(r.id)) this.map.set(r.id, offlineEntry(r.id, r.display_name, r.color, 0, this.offStats(r.id)));
+      if (!this.map.has(r.id)) this.map.set(r.id, offlineEntry(r.id, r.display_name, r.color, 0, this.cachedOffStats(r.id)));
+  }
+
+  /** offStats with the cache in front (populated at seed, refreshed on upload). */
+  private cachedOffStats(playerId: number): PresenceEntry['off_stats'] {
+    if (!this.offStatsCache.has(playerId)) this.offStatsCache.set(playerId, this.offStats(playerId));
+    return this.offStatsCache.get(playerId) ?? null;
   }
 
   /** Career snapshot for an offline card: current #1 leaderboard spots, attempts in
@@ -142,7 +151,9 @@ export class PresenceHub {
       lap_delta: li && li.deltas.length ? li.deltas[li.deltas.length - 1] : null,
       lap_deltas: li ? li.deltas : null,
       pb_laps_ms: li ? li.pb_laps_ms : null,
-      off_stats: null,
+      // Idle (not in a race): carry the career snapshot so the card can show the
+      // offline-style stats while the player has yet to pick a character/kart/course.
+      off_stats: inRaceCtx ? null : this.cachedOffStats(playerId),
     };
     this.map.set(playerId, entry);
     this.broadcast({ type: 'presence_update', player: entry });
@@ -171,23 +182,24 @@ export class PresenceHub {
     this.pbLatch.delete(playerId);
     const e = this.map.get(playerId);
     if (!e || !e.online) return;
-    const off = offlineEntry(e.player_id, e.name, e.color, this.now(), this.offStats(playerId));
+    const off = offlineEntry(e.player_id, e.name, e.color, this.now(), this.cachedOffStats(playerId));
     this.map.set(playerId, off);
     this.broadcast({ type: 'presence_update', player: off });
   }
 
-  /** Recompute + rebroadcast off_stats for offline entries - a finished upload can
-   *  change ANOTHER player's standing (steal a #1) while they are offline. Wired to
-   *  the run-upload invalidation hook in server.ts. */
+  /** Recompute the cached off_stats for every roster player - a finished upload can
+   *  change ANOTHER player's standing (steal a #1). Offline cards carry the value
+   *  inline so they're rebroadcast on change; idle online cards read the fresh cache
+   *  on their next frame (~4Hz). Wired to the run-upload invalidation hook in server.ts. */
   refreshOffStats(): void {
     for (const e of this.map.values()) {
-      if (e.online) continue;
       const next = this.offStats(e.player_id);
-      if (JSON.stringify(next) !== JSON.stringify(e.off_stats)) {
-        const upd = { ...e, off_stats: next };
-        this.map.set(e.player_id, upd);
-        this.broadcast({ type: 'presence_update', player: upd });
-      }
+      if (JSON.stringify(next) === JSON.stringify(this.offStatsCache.get(e.player_id))) continue;
+      this.offStatsCache.set(e.player_id, next);
+      if (e.online) continue;   // online entries refresh themselves from the cache on the next frame
+      const upd = { ...e, off_stats: next };
+      this.map.set(e.player_id, upd);
+      this.broadcast({ type: 'presence_update', player: upd });
     }
   }
 

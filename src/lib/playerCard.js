@@ -169,6 +169,10 @@ export function viewModel(e, now = Date.now, delayed = null, opts = {}) {
   const primary = SETUP[e.screen]
     ? { kind: "activity", text: SETUP[e.screen] }
     : { kind: "activity", text: "In the menus" };
+  // Idle, with no race to show: expose the same career stats the offline card uses
+  // (server sends off_stats for idle online players). The card renders them only
+  // while nothing is selected yet - a pick swaps back to the char/kart/track rows.
   return { state: SETUP[e.screen] ? "setup" : "menus", ...ident, primary,
-    resets: null, pbStr: null, delta: null, finPb: false, badge: null, bar: null };
+    resets: null, pbStr: null, delta: null, finPb: false, badge: null, bar: null,
+    stats: e.off_stats ?? null };
 }

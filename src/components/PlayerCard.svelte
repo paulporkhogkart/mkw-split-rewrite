@@ -17,6 +17,9 @@
   // Pace-mode shade needs the delta's direction at the same delayed clock.
   $: trend = isRacing && $deltaMode === "pace" ? deltaTrendAt(entry.player_id, now - DELAY_MS) : null;
   $: vm = viewModel(entry, now, delayed, { deltaMode: $deltaMode, trend, stale });
+  // Nothing picked yet: an idle online card shows the offline-style career stats
+  // instead of three empty "—" rows (offline cards always take the stat block).
+  $: hasSel = !!(vm.char || vm.kart || vm.trk);
   // On fire swaps to the player's on-pace portrait (falls back to the online figure).
   $: fig = onFire ? (onpaceFigure(vm.name) || figureFor(vm.name, true)) : figureFor(vm.name, vm.online);
   // On fire: lit while racing AND on PB pace. Pace mode reads the live (delayed)
@@ -34,10 +37,11 @@
   {#if fig}<div class="fig" style="background-image:url({fig})"></div>{/if}
   <div class="data">
     <div class="nm">{vm.name}</div>
-    {#if !vm.online && vm.stats}
-    <!-- Offline: stable career stats instead of dead selection rows (the primary line
-         already carries "last seen"). Render only the rows present — a stale (no-server)
-         card carries FIRSTS only; a live-offline card carries all three. -->
+    {#if vm.stats && (!vm.online || !hasSel)}
+    <!-- Stable career stats instead of dead selection rows: offline cards (the primary
+         line carries "last seen"), and idle online cards that have yet to select anything.
+         Render only the rows present — a stale (no-server) card carries FIRSTS only; a
+         live-offline or idle online card carries all three. -->
     <div class="sel">
       {#if vm.stats.firsts != null}<div class="kv"><span class="kt">FIRSTS</span><span class="v">{vm.stats.firsts}</span></div>{/if}
       {#if vm.stats.runs_7d != null}<div class="kv"><span class="kt">RUNS · 7D</span><span class="v">{vm.stats.runs_7d}</span></div>{/if}

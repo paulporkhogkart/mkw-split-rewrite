@@ -244,21 +244,26 @@ TELLS: list = [
     # RESET family: the icon group plus two icon-less dark groups.  A real
     # loading screen is near-uniformly dark across the WHOLE frame; dark Switch
     # system screens carry bright content up top (game thumbnails, the Nintendo
-    # boot logo) that the top-left/top-right groups veto.
+    # boot logo) that the top-left/top-right groups veto.  The top-left group
+    # starts at y=134 (the MUSHROOM_ROI top edge): a "friend came online" toast
+    # slides in above that line - the same strip the racing mushroom HUD avoids -
+    # so skipping it stops the toast brightening the strip and blocking a real
+    # reset.  The boot logo, whose glyph sits in that skipped strip, is still
+    # vetoed by the icon chroma gate (no colourful loading mascot bottom-right).
     Tell(screen=Screen.RESET, groups=[
         [Region(kind="dark_loading", roi=(0, 589, 527, 1080),
                 icon_roi=(1700, 920, 1870, 1030))],
-        [Region(kind="dark_loading", roi=(0, 0, 527, 491))],
+        [Region(kind="dark_loading", roi=(0, 134, 527, 491))],
         [Region(kind="dark_loading", roi=(1393, 0, 1920, 491))]]),
     Tell(screen=Screen.GHOST_RESET, groups=[
         [Region(kind="dark_loading", roi=(0, 589, 527, 1080),
                 icon_roi=(1700, 920, 1870, 1030))],
-        [Region(kind="dark_loading", roi=(0, 0, 527, 491))],
+        [Region(kind="dark_loading", roi=(0, 134, 527, 491))],
         [Region(kind="dark_loading", roi=(1393, 0, 1920, 491))]]),
     Tell(screen=Screen.UNKNOWN_RESET, groups=[
         [Region(kind="dark_loading", roi=(0, 589, 527, 1080),
                 icon_roi=(1700, 920, 1870, 1030))],
-        [Region(kind="dark_loading", roi=(0, 0, 527, 491))],
+        [Region(kind="dark_loading", roi=(0, 134, 527, 491))],
         [Region(kind="dark_loading", roi=(1393, 0, 1920, 491))]]),
     Tell(screen=Screen.POST_TIME_TRIAL, groups=[[
         _tmpl("images/screens/posttimetrial.png",  (1364, 798, 1458, 825), thresh=190),
