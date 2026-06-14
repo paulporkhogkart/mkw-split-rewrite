@@ -107,10 +107,13 @@ curl -s http://localhost:8787/health        # {"status":"ok"}
 
 ## 7. Cloudflare domain + tunnel route
 
-1. Cloudflare dashboard → **Add a site** → `thekartoff.com` → Free → copy the two nameservers.
-2. At your registrar, set the domain's nameservers to those two. Wait for the site to go
-   **Active** (minutes–hours).
-3. On the Pi, route the subdomain through the existing tunnel and add the ingress rule:
+> **thekartoff.com is registered through Cloudflare Registrar**, so it's already an active zone on
+> Cloudflare's nameservers — skip "add a site", the nameserver change, and the propagation wait;
+> go straight to the tunnel route. (Bought elsewhere? You'd first add it as a site in the
+> dashboard, point the registrar's nameservers at Cloudflare, and wait for **Active**.) The domain
+> and the `cloudflared` tunnel must be in the same Cloudflare account (they are).
+
+On the Pi, route the subdomain through the existing tunnel and add the ingress rule:
 
 ```bash
 cloudflared tunnel list                                  # note the tunnel name/UUID
