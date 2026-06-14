@@ -35,7 +35,9 @@ git push origin v0.3.0
 ```bash
 ssh pi@192.168.1.21
 curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
-sudo apt-get install -y nodejs git python3
+sudo apt-get install -y nodejs git python3 sqlite3
+# (sqlite3 is just the CLI for the .tables sanity check in Step 4; the import + server use
+#  Python's built-in sqlite3 module + Node's node:sqlite, so it isn't load-bearing.)
 node -v                                   # v24.x
 node -e "require('node:sqlite')" && echo "node:sqlite OK"   # must print OK, no flag needed
 ```
