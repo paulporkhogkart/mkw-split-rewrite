@@ -38,7 +38,7 @@ Python bot.
 |---|---|
 | Deploy trigger | **Pull-based**: Pi polls GitHub release tags on a systemd timer (CGNAT-proof, mirrors the Tauri updater) |
 | Trigger granularity | **Tag-based** (`v[0-9]*.[0-9]*.[0-9]*`), matching `release.yml` + the desktop updater. Tracking `origin/main` HEAD instead is a one-line `update.sh` change. |
-| Exposure | **Token for read *and* write** (header `Authorization: Bearer` OR `?token=`). More private than Cloudflare Access, no SSO friction. Only `/health` stays open. |
+| Exposure | **Token for read *and* write** (header `Authorization: Bearer` OR `?token=`). More private than Cloudflare Access, no SSO friction. `/health` + the two WS streams (`/v1/events`, `/v1/presence`) stay open (see Component 6). |
 | Domain | **`api.thekartoff.com`** → server; bare `thekartoff.com` reserved for the future website. |
 | Pi state | **Greenfield**: new stack never ran here; deploy fresh and retire the legacy `mkpb` bot. |
 
@@ -141,11 +141,15 @@ Generalize auth and apply it everywhere except `/health`.
 - **New middleware** `requireTokenAny(db)` (extends `pi/src/api/auth.ts`): accept the token from
   `Authorization: Bearer <t>` **or** `?token=<t>` (browsers/WS can't set headers), set
   `playerId`/`playerName`, else 401.
-- **Apply to**: all `readsRoutes`, the stats app (`createStatsApp`), `screenRoutes`, the
-  `/v1/events` WS (read `?token=` in the upgrade; reject tokenless), `/v1/presence` (already
-  reads `?token=` — now *require* it), and `/explorer`. `/health` stays open (tunnel + updater
-  healthcheck). Routes that currently sniff the bearer optionally for `is_me`
-  (`/v1/trails`, `/v1/roster`) simplify to the now-guaranteed authed player.
+- **Apply to**: one `app.use('*', …)` in `createApp` (after `/health`) gates every HTTP route
+  it mounts — `readsRoutes`, the stats app, `screenRoutes`, the run-writes, and `/explorer`.
+  An `OPEN` set exempts `/health` (tunnel + updater healthcheck) **and the two WS streams**:
+  `/v1/events` stays open because the on-Pi **bot** subscribes to it over localhost with no
+  token, and it only carries PB/WR events already announced publicly to Discord; `/v1/presence`
+  keeps its existing optional-token (receive-only) model. (Gating the WS streams is a clean
+  later follow-up if desired; it isn't the body-fat privacy concern.) `readsRoutes` is left
+  unchanged — its existing optional-bearer `is_me` logic still works for the header tokens the
+  desktop sends; the gate only adds the requirement.
 - **Desktop read calls that must add the token** (audited — gating reads breaks these
   otherwise): in `src-tauri/src/sync.rs::fetch_course_reads`, add `.bearer_auth(&cfg.token)` to
   `/v1/friends-pbs` and `/v1/players/{id}/trails` (today only `/v1/me/pb-splits` carries it).
@@ -153,8 +157,11 @@ Generalize auth and apply it everywhere except `/health`.
 - **Browser reads**: `pi/stat-explorer.html` reads its own `?token=` and attaches it to its
   `/v1/stats` fetches; the guide opens `https://api.thekartoff.com/explorer?token=<t>`.
 - **Unaffected**: the Discord bot (reads the DB file, not HTTP) and the WR scraper (in-process).
-- **Tests**: server read routes return 401 without a token and 200 with either a header or
-  `?token=`; presence/events reject tokenless.
+- **Tests**: a new `requireTokenAny` unit test (header / `?token=` / none→401 / bad→401); read
+  routes (`reads.test.ts`, the stats reads + `/explorer` in `screen.test.ts`, a case in
+  `app.test.ts`) updated to 401 without a token and 200 with a header or `?token=`. The
+  `/v1/events` WS test (`ws.test.ts`) and the direct-`createStatsApp` tests (`stats.test.ts`)
+  stay unchanged (both bypass the gate).
 
 > Future: when the public website (sub-project C) is built, it chooses its own read tier (a
 > dedicated server/service token, or a public read carve-out). Out of scope here.
