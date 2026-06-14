@@ -157,15 +157,20 @@ export function frame() {
   };
 }
 
-/** ws(s)://<server>/v1/presence?token=<token>, or null when no server is configured. */
+/** ws(s)://<server>/v1/presence?token=<token>, or null when the URL or token is missing.
+ *  The desktop must send its token so the server attributes frames to this player: a
+ *  token-less /v1/presence socket is receive-only, so we'd connect (green dot) yet stay
+ *  "offline" AND suppress the local-self echo. No token yet -> no socket, and the
+ *  local-self echo keeps our own card live until one is set. */
 export function wsUrl() {
   const base = get(serverUrl).trim().replace(/\/+$/, "");
-  if (!base) return null;
   const token = get(authToken).trim();
-  return `${base.replace(/^http/, "ws")}/v1/presence${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+  if (!base || !token) return null;
+  return `${base.replace(/^http/, "ws")}/v1/presence?token=${encodeURIComponent(token)}`;
 }
 
 let ws = null, closed = false, backoff = 1000, pending = false, hb = 0;
+let openUrl = null, reconnectTimer = 0, cfgTimer = 0;
 
 function rawSend() {
   if (ws && ws.readyState === WebSocket.OPEN) { try { ws.send(JSON.stringify(frame())); } catch { /* drop */ } }
@@ -178,8 +183,10 @@ function scheduleSend() {
 
 function connect() {
   if (closed) return;
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = 0; }
   const url = wsUrl();
-  if (!url) { setTimeout(connect, 2000); return; }   // not configured yet - retry
+  openUrl = url;   // what this socket targets, so reconcile() can detect a token/url edit
+  if (!url) { reconnectTimer = setTimeout(connect, 2000); return; }   // no server/token yet - retry
   ws = new WebSocket(url);
   ws.addEventListener("open", () => { backoff = 1000; rawSend(); });
   ws.addEventListener("message", (e) => handlePresenceMessage(e.data));
@@ -187,9 +194,22 @@ function connect() {
     markServerDisconnected();
     pushLocalSelf();   // immediately take our own card live from local state
     if (closed) return;
-    setTimeout(connect, backoff); backoff = Math.min(backoff * 2, 30000);
+    reconnectTimer = setTimeout(connect, backoff); backoff = Math.min(backoff * 2, 30000);
   });
   ws.addEventListener("error", () => { try { ws.close(); } catch { /* ignore */ } });
+}
+
+/** The server URL or token changed (token entered during first-time setup, or edited later
+ *  in Settings): if the live socket no longer targets the desired url, drop it and reconnect
+ *  with the new config instead of staying on a stale/token-less socket until the next launch.
+ *  Mirrors sync.js re-pushing its config on change. */
+function reconcile() {
+  if (closed || wsUrl() === openUrl) return;
+  if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+    try { ws.close(); } catch { /* ignore */ }   // close handler reconnects with the fresh url
+  } else {
+    connect();   // idle in the retry loop: reconnect now instead of waiting out the timer
+  }
 }
 
 export function initPresence() {
@@ -200,7 +220,18 @@ export function initPresence() {
   const selfTick = () => { if (!get(serverConnection).connected) pushLocalSelf(); };
   [screen, selection, race, minimap].forEach((s) => s.subscribe(() => { scheduleSend(); selfTick(); }));
   [resets, pbSplits, pbTotalMs].forEach((s) => s.subscribe(selfTick));
+  // Reconnect when the server URL or token changes so the token entered during first-time
+  // setup (or edited later in Settings) re-authenticates the socket. Debounced so typing
+  // the token doesn't thrash the connection.
+  const reconcileSoon = () => { if (cfgTimer) clearTimeout(cfgTimer); cfgTimer = setTimeout(reconcile, 300); };
+  [serverUrl, authToken].forEach((s) => s.subscribe(reconcileSoon));
   hb = setInterval(rawSend, HEARTBEAT_MS);
   connect();
 }
-export function stopPresence() { closed = true; clearInterval(hb); try { ws?.close(); } catch { /* ignore */ } }
+export function stopPresence() {
+  closed = true;
+  clearInterval(hb);
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = 0; }
+  if (cfgTimer) { clearTimeout(cfgTimer); cfgTimer = 0; }
+  try { ws?.close(); } catch { /* ignore */ }
+}

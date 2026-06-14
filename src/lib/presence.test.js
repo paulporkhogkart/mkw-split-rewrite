@@ -48,6 +48,16 @@ describe("presence wsUrl()", () => {
     serverUrl.set("");
     expect(wsUrl()).toBeNull();
   });
+  it("is null when a server is set but the token is blank (desktop must authenticate to be attributed)", () => {
+    serverUrl.set("https://srv.example.com");
+    authToken.set("");
+    expect(wsUrl()).toBeNull();
+  });
+  it("re-includes the token once it is set (the first-time-setup / Settings flow)", () => {
+    serverUrl.set("https://srv.example.com");
+    authToken.set("tok123");
+    expect(wsUrl()).toBe("wss://srv.example.com/v1/presence?token=tok123");
+  });
 });
 
 // A Map-backed fake of the localStorage subset we use (Node has no localStorage).
