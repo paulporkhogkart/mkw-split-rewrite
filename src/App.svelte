@@ -1203,6 +1203,17 @@
       // only restart it if it stopped.
       if (setupComplete && cameraStatus==="idle") startCamera(selectedBrowserDeviceId||undefined);
     }
+    // First-time setup: the feed's audio plays only while the camera step is the
+    // active tab (so the user can verify the selected audio device). Other steps
+    // keep the stream running but silent. Re-run setup is unaffected — its audio
+    // comes from the background monitor. _setupAudio() is idempotent and is a
+    // no-op until the stream opens, so the first arrival (stream still opening)
+    // safely falls through to startCamera()'s tail call, while a re-entry with a
+    // live stream reconnects here.
+    if (!setupComplete) {
+      if (step==="camera") _setupAudio();
+      else                 _teardownAudio();
+    }
   }
 
   function captureAsset() {
