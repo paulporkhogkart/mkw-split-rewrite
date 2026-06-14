@@ -78,7 +78,7 @@
   <p><b>Shapes</b> — total · breakdown (ranked rows) · over-time (buckets) · correlation (n, r, slope).</p>
   <p><b>When</b> — today · this week (Mon start) · this month · all-time · range — in any timezone (default Melbourne).</p>
   <p><b>Per / filter by</b> — race: player·course·character·kart·costume·cc · sequential/completion: player·course·cc · body: player · screen: player·screen.</p>
-  <p><b>Notes</b> — reads need no login. Body &amp; correlation need <code>porker.db</code>. Time-per-screen reads 0 until the desktop app forwards intervals. Live registry: <code>/v1/stats/metrics</code>.</p>
+  <p><b>Notes</b> — reads need a token; open <code>/explorer?token=YOUR_TOKEN</code>. Body &amp; correlation need <code>porker.db</code>. Time-per-screen reads 0 until the desktop app forwards intervals. Live registry: <code>/v1/stats/metrics</code>.</p>
 </section>
 
 <script>
@@ -215,12 +215,16 @@ function applyPreset(q) {
   updateUrl(); run();
 }
 
+// ── auth: same-origin reads carry the token from ?token= in the page URL ──
+const TOKEN = new URLSearchParams(location.search).get('token') || '';
+const authFetch = (u, o = {}) => fetch(u, TOKEN ? { ...o, headers: { ...(o.headers || {}), authorization: 'Bearer ' + TOKEN } } : o);
+
 // ── catalogue load + builder ──────────────────────────────────
 async function load() {
   try {
     const [, metrics] = await Promise.all([
       fetch('/health').then(r => r.ok ? r.json() : Promise.reject()),
-      fetch('/v1/stats/metrics').then(r => r.json()),
+      authFetch('/v1/stats/metrics').then(r => r.json()),
     ]);
     META = metrics;
     $('status').textContent = `Server OK · ${META.length} stats available. Click a ready-made one, or build your own.`;
@@ -280,7 +284,7 @@ function updateUrl() { $('title').textContent = titleFor() || '—'; $('url').te
 async function run() {
   $('result').textContent = 'Fetching…';
   try {
-    const r = await fetch(buildUrl());
+    const r = await authFetch(buildUrl());
     const txt = await r.text();
     let body; try { body = JSON.stringify(JSON.parse(txt), null, 2); } catch { body = txt; }
     $('result').textContent = `HTTP ${r.status}\n\n${body}`;
