@@ -427,7 +427,11 @@
   function _setupAudio() {
     _teardownAudio();
     if (!videoStream) return;
-    if (!setupComplete) return;
+    // Audio is allowed in the monitor (setupComplete) and on the first-time setup
+    // camera step, so the user can verify the selected audio device. It stays
+    // silent on the other setup steps (language / sync).
+    const onSetupCamStep = appView === "setup" && wizardStep === "camera";
+    if (!setupComplete && !onSetupCamStep) return;
     _hasAudio = videoStream.getAudioTracks().length > 0;
     if (!_hasAudio) return;
     _audioCtx = new AudioContext();
