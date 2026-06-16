@@ -761,6 +761,22 @@ class ScreenDetector:
         self._propagate_tree(screen)
         return self._tell_to_dict(screen, fresh)
 
+    def set_nosignal_region(self, preset_name: str) -> Optional[dict]:
+        """Point the NO_SIGNAL tell's single region at a preset's template + ROI
+        and reload it.  In-memory only - the caller decides whether to persist."""
+        preset = NO_SIGNAL_PRESETS.get(preset_name)
+        if preset is None:
+            return None
+        tell = self._tells_by_screen.get(Screen.NO_SIGNAL)
+        if tell is None or not tell.groups or not tell.groups[0]:
+            return None
+        region = tell.groups[0][0]
+        region.image_path = preset["image_path"]
+        region.roi = tuple(preset["roi"])
+        region.template = None
+        tell.load(self._switch2_language)
+        return self._tell_to_dict(Screen.NO_SIGNAL, tell)
+
     def _propagate_tree(self, screen: Screen) -> None:
         """Deep-copy the canonical screen's groups onto its alias screens."""
         tell = self._tells_by_screen.get(screen)

@@ -54,3 +54,19 @@ def test_nosignal_tell_rejects_reset_and_racing():
     for name in ("reset_dev.png", "racing_dark_section.png"):
         detected, score = detect_tell(_img(name), tell)
         assert not detected, f"{name} must NOT detect as NO_SIGNAL (score={score})"
+
+
+def test_set_nosignal_region_swaps_to_ugreen_and_matches():
+    d = ScreenDetector()
+    res = d.set_nosignal_region("ugreen")
+    assert res is not None
+    region = d._tells_by_screen[Screen.NO_SIGNAL].groups[0][0]
+    assert region.roi == NO_SIGNAL_PRESETS["ugreen"]["roi"]
+    assert region.image_path.endswith("nosignal_ugreen.png")
+    detected, score = detect_tell(_img("nosignal_ugreen_frame.png"),
+                                  d._tells_by_screen[Screen.NO_SIGNAL])
+    assert detected, f"UGREEN no-signal should detect after swap (score={score})"
+
+
+def test_set_nosignal_region_unknown_preset_returns_none():
+    assert ScreenDetector().set_nosignal_region("bogus") is None
