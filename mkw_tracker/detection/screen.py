@@ -111,6 +111,41 @@ class Screen(Enum):
     GALLERY              = auto()
     SINGLEPLAYER_MENU    = auto()
     TIME_TRIALS          = auto()
+    NO_SIGNAL            = auto()
+
+
+# ---------------------------------------------------------------------------
+# NO_SIGNAL presets + device-name auto-selection
+# ---------------------------------------------------------------------------
+# The capture card's "no signal" graphic is a static, card-specific screen.  We
+# template-match its centered text/logo.  Two presets ship; the active one is
+# auto-picked from the selected video device's name unless the user hand-edits
+# the tell.  ROIs are the single source of truth, shared with
+# scripts/gen_nosignal_templates.py (which crops the references at exactly these
+# boxes).  If the gen script's bright-pixel gate fails, nudge the ROI here.
+NO_SIGNAL_PRESETS = {
+    "elgato": {"image_path": "images/screens/nosignal_elgato.png",
+               "roi": (640, 470, 1280, 740)},
+    "ugreen": {"image_path": "images/screens/nosignal_ugreen.png",
+               "roi": (600, 350, 1320, 560)},
+}
+
+# Case-insensitive substring -> preset.  Device names confirmed by the user:
+# "Elgato 4K X", "UGREEN 25773".  First match wins.
+NO_SIGNAL_DEVICE_HINTS = {
+    "elgato": ["elgato"],
+    "ugreen": ["ugreen"],
+}
+
+
+def auto_nosignal_preset(device_name: str) -> Optional[str]:
+    """Return the preset key whose hint substring is in *device_name* (case-
+    insensitive), or None if no brand matches."""
+    name = (device_name or "").lower()
+    for preset, hints in NO_SIGNAL_DEVICE_HINTS.items():
+        if any(h in name for h in hints):
+            return preset
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -346,6 +381,7 @@ GRAPH_NODE_SHOTS: Dict[Screen, str] = {
     Screen.RESET:         "reset.png",
     Screen.GHOST_RESET:   "reset.png",
     Screen.UNKNOWN_RESET: "reset.png",
+    Screen.NO_SIGNAL:     "nosignal.png",
 }
 
 
