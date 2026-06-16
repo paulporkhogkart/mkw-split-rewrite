@@ -127,7 +127,7 @@ NO_SIGNAL_PRESETS = {
     "elgato": {"image_path": "images/screens/nosignal_elgato.png",
                "roi": (640, 470, 1280, 740)},
     "ugreen": {"image_path": "images/screens/nosignal_ugreen.png",
-               "roi": (600, 350, 1320, 560)},
+               "roi": (750, 460, 1170, 640)},
 }
 
 # Case-insensitive substring -> preset.  Device names confirmed by the user:
