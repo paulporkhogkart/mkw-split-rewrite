@@ -125,6 +125,37 @@
   }
   const discard = () => dispatch("discard", { attempt_id: run.attempt_id });
 
+  // ── Draggable: grab the header to move the dialog aside, so it can't cover the
+  // feed / info you're reading to fill the form. Handlers live on the dialog (which
+  // carries role="dialog", so no a11y noise), but a drag only STARTS from the header -
+  // the body inputs stay fully clickable. Resets to centre when the popup reopens.
+  let dragX = 0, dragY = 0, dragging = false;
+  let _sx = 0, _sy = 0, _bx = 0, _by = 0;
+  function startDrag(e) {
+    if (e.button !== 0 || !(e.target instanceof Element) || !e.target.closest(".rv-head")) return;
+    dragging = true;
+    _sx = e.clientX; _sy = e.clientY; _bx = dragX; _by = dragY;
+    dialogEl?.setPointerCapture?.(e.pointerId);
+  }
+  function onDrag(e) {
+    if (!dragging) return;
+    let nx = _bx + (e.clientX - _sx);
+    let ny = _by + (e.clientY - _sy);
+    if (dialogEl) {                                   // keep >=48px on screen so it can't be lost
+      const r = dialogEl.getBoundingClientRect();
+      const limX = Math.max(0, (window.innerWidth  + r.width)  / 2 - 48);
+      const limY = Math.max(0, (window.innerHeight + r.height) / 2 - 48);
+      nx = Math.max(-limX, Math.min(limX, nx));
+      ny = Math.max(-limY, Math.min(limY, ny));
+    }
+    dragX = nx; dragY = ny;
+  }
+  function endDrag(e) {
+    if (!dragging) return;
+    dragging = false;
+    try { dialogEl?.releasePointerCapture?.(e.pointerId); } catch (_) { /* wasn't captured */ }
+  }
+
   onMount(async () => {
     if (playSound) { try { await new Audio(snd).play(); } catch (_) { /* autoplay blocked */ } }
     await tick();
@@ -141,6 +172,11 @@
     aria-modal="true"
     aria-labelledby="rv-title"
     in:scale={{ duration: 170, start: 0.97, opacity: 0, easing: quintOut }}
+    style={dragX || dragY ? `transform: translate(${dragX}px, ${dragY}px)` : ""}
+    on:pointerdown={startDrag}
+    on:pointermove={onDrag}
+    on:pointerup={endDrag}
+    on:pointercancel={endDrag}
   >
     <header class="rv-head">
       <div class="rv-head-l">
@@ -265,6 +301,7 @@
     display: flex; align-items: center; justify-content: space-between; gap: .75rem;
     padding: .6rem .85rem;
     border-bottom: 1px solid var(--bd-soft);
+    cursor: move; user-select: none; touch-action: none;   /* drag handle */
   }
   .rv-head-l { display: flex; align-items: center; gap: .45rem; min-width: 0; }
   .rv-head-title { font-size: .82rem; font-weight: 600; color: var(--tx); letter-spacing: .01em; }
