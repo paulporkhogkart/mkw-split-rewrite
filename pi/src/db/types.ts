@@ -9,6 +9,7 @@ export type AttemptPayload = {
   started_at?: string | null; ended_at?: string | null; total_time?: string | null;
   coins_gained?: number | null; coins_lost?: number | null; mushrooms_used?: number | null;
   laps?: Lap[]; points?: Point[];
+  source?: string | null;     // 'ghost' when re-derived from an in-game ghost replay
 };
 export type RunResult = { is_pb: boolean; rank: number | null; gap_to_leader_ms: number | null; gap_to_wr_ms: number | null };
 export type ServerEvent =

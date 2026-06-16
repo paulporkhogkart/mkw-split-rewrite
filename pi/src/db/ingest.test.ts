@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { openDb, applySchema } from './connect';
-import { upsertRun, OVER_LIMIT_MS } from './ingest';
+import { upsertRun, OVER_LIMIT_MS, findGhostMatch, enrichRunFromGhost } from './ingest';
 import type { AttemptPayload } from './types';
 
 function base() {
@@ -110,5 +110,52 @@ describe('upsertRun', () => {
       points: [[0, 1, 2, 0.9, 1], [OVER_LIMIT_MS, 3, 4, 0.9, 1]],   // exactly at the limit -> kept
     } as any, 1, 1);
     expect((db.prepare('SELECT COUNT(*) c FROM run_points WHERE run_id=?').get(runId) as any).c).toBe(2);
+  });
+});
+
+describe('ghost dedup + enrich', () => {
+  it('findGhostMatch matches a finished run by exact total_time_ms', () => {
+    const db = base();
+    // a carryover-style finished run, no laps/points/identity
+    db.exec("INSERT INTO runs(id,attempt_id,season_id,player_id,course_id,cc,status,provenance,total_time_ms) " +
+            "VALUES (50,'cv',1,1,1,150,'finished','carryover',100000)");
+    expect(findGhostMatch(db, 1, 1, 1, 150, 100000)).toBe(50);
+    expect(findGhostMatch(db, 1, 1, 1, 150, 100001)).toBeNull();   // off by 1ms
+    expect(findGhostMatch(db, 1, 2, 1, 150, 100000)).toBeNull();   // other player
+  });
+
+  it('enrichRunFromGhost gap-fills identity + adds laps/points + marks source', () => {
+    const db = base();
+    db.exec("INSERT INTO runs(id,attempt_id,season_id,player_id,course_id,cc,status,provenance,total_time_ms) " +
+            "VALUES (50,'cv',1,1,1,150,'finished','carryover',100000)");
+    const res = enrichRunFromGhost(db, 50, {
+      attempt_id: 'g1', course: 'Rainbow Road', status: 'finished', total_time: '1:40.000',
+      character: 'Mario', kart: 'K', costume: 'Base', total_laps: 1,
+      laps: [{ lap: 1, time_ms: 100000, time_str: '1:40.000', coins: 3, shrooms: 1 }],
+      points: [[0, 1, 2, 1, 1]], source: 'ghost',
+    } as any);
+    const run = db.prepare('SELECT character, kart, costume, source FROM runs WHERE id=50').get() as any;
+    expect(run.character).toBe('Mario');
+    expect(run.source).toBe('ghost');
+    expect((db.prepare('SELECT COUNT(*) c FROM run_laps WHERE run_id=50').get() as any).c).toBe(1);
+    expect((db.prepare('SELECT COUNT(*) c FROM run_points WHERE run_id=50').get() as any).c).toBe(1);
+    expect(res.trailAdded).toBe(true);
+  });
+
+  it('enrich never overwrites existing identity or existing laps', () => {
+    const db = base();
+    db.exec("INSERT INTO runs(id,attempt_id,season_id,player_id,course_id,cc,status,provenance,total_time_ms,character) " +
+            "VALUES (60,'lv',1,1,1,150,'finished','live',100000,'Peach')");
+    db.exec("INSERT INTO run_laps(run_id,lap_index,lap_time_ms,lap_time_str,coins,shrooms) VALUES (60,1,100000,'1:40.000',9,9)");
+    const res = enrichRunFromGhost(db, 60, {
+      attempt_id: 'g2', course: 'Rainbow Road', status: 'finished', character: 'Mario',
+      total_laps: 1, laps: [{ lap: 1, time_ms: 100000, time_str: '1:40.000', coins: 1, shrooms: 1 }],
+      points: [[0, 1, 2, 1, 1]], source: 'ghost',
+    } as any);
+    const run = db.prepare('SELECT character FROM runs WHERE id=60').get() as any;
+    expect(run.character).toBe('Peach');                       // not overwritten
+    const lap = db.prepare('SELECT coins FROM run_laps WHERE run_id=60 AND lap_index=1').get() as any;
+    expect(lap.coins).toBe(9);                                 // existing laps kept
+    expect(res.trailAdded).toBe(true);                         // had no points -> trail added
   });
 });
