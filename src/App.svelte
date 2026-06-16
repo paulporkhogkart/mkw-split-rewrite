@@ -28,7 +28,8 @@
            race as raceStore, logs as logsStore,
            tells as tellsStore, rois as roisStore,
            view as viewStore,
-           minimap as minimapStore, sample as sampleStore } from "./lib/stores.js";
+           minimap as minimapStore, sample as sampleStore,
+           nosignalMode } from "./lib/stores.js";
   import { pbSplits as pbSplitsStore, pbTotalMs as pbTotalStore, friendsPbs as friendsPbsStore,
            trailRuns as trailRunsStore, trailLegend as trailLegendStore, serverConnection } from "./lib/stores.js";
   import { get } from "svelte/store";
@@ -261,7 +262,8 @@
   }
   function resetDetection() {
     if (!selectedNode) return;
-    send({ type:"reset_tell", screen:selectedNode });
+    if (selectedNode === "NO_SIGNAL") send({ type:"reset_nosignal_auto" });
+    else send({ type:"reset_tell", screen:selectedNode });
     activeRegion = { group: 0, region: 0 };
     detResetPending = false;
   }
@@ -353,6 +355,7 @@
       resetPending: detResetPending,
       currentScore,
       screenName:   selectedNode ?? "",
+      nosignalMode: $nosignalMode,
     },
     inspector: {
       liveCrop:  liveCropImg,
@@ -541,7 +544,7 @@
     "CHARACTER_SELECT","KART_SELECT","COURSE_SELECT",
     "START_TIME_TRIAL","START_REPLAY",
     "RACING","RACE_MENU","REPLAY_MENU","REPLAY_RACE_AGAINST",
-    "RESET","POST_TIME_TRIAL","GALLERY",
+    "RESET","POST_TIME_TRIAL","GALLERY","NO_SIGNAL",
   ];
   const SCREEN_LABELS = {
     TITLE:"Title Screen",HOME:"Home / Profile Select",MAIN_MENU:"Main Menu",
@@ -553,6 +556,7 @@
     REPLAY_MENU:"Ghost Replay Menu",REPLAY_RACE_AGAINST:"Race Against Ghost",
     RESET:"Reset / Retry Screen",GHOST_RESET:"Ghost Reset Screen",
     POST_TIME_TRIAL:"Post-Race Results",GALLERY:"Gallery Browser",UNKNOWN:"Unknown",
+    NO_SIGNAL:"No Signal (Capture Card)",
   };
   const SCREEN_HINTS = {
     TITLE:"The startup title/logo screen.",
@@ -575,6 +579,7 @@
     GHOST_RESET:"The ghost race reset screen.",
     POST_TIME_TRIAL:"The results screen displayed after finishing a time trial.",
     GALLERY:"The replay gallery / save data browser.",
+    NO_SIGNAL:"Your capture card's 'no signal' screen. Auto-selected from your device; entering it clears selections and discards the active run.",
   };
   const SELECTION_ROIS = [
     { key:"char_name",   label:"Character Name",  hint:"Character name text, bottom-right panel on character select screen." },
@@ -756,6 +761,9 @@
       case "tells_list":
         tells = msg.tells ?? [];
         syncThreshToScreen();
+        break;
+      case "nosignal_mode":
+        nosignalMode.set({ auto: !!msg.auto, brand: msg.brand ?? null });
         break;
       case "rois_list":
         rois = msg.rois ?? {};

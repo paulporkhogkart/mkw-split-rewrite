@@ -16,6 +16,7 @@ export const minimap    = writable(null);                 // { cx, cy, radius, t
 export const sample     = writable(null);                 // raw base64 PNG (no data-URI prefix) of the locked icon template | null
 export const devices    = writable({ video: [], audio: [], selectedVideo: "", selectedAudio: "" });
 export const tells      = writable([]);                   // detection tell trees (list_tells)
+export const nosignalMode  = writable({ auto: true, brand: null }); // NO_SIGNAL editor badge state
 export const rois       = writable({});                   // selection/HUD config ROIs (list_rois)
 export const logs       = writable([]);                   // event log lines
 export const view       = writable("monitor");            // "monitor" | "edit" | "settings"
