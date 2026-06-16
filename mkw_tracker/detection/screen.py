@@ -335,6 +335,9 @@ TELLS: list = [
         _tmpl("images/screens/singleplayer.png", (110, 562, 183, 628), thresh=187)]]),
     Tell(screen=Screen.TIME_TRIALS, groups=[[
         _tmpl("images/screens/timetrials.png", (110, 562, 183, 628), thresh=204)]]),
+    Tell(screen=Screen.NO_SIGNAL, match_threshold=0.6, groups=[[
+        _tmpl(NO_SIGNAL_PRESETS["elgato"]["image_path"],
+              NO_SIGNAL_PRESETS["elgato"]["roi"])]]),
 ]
 
 

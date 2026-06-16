@@ -35,3 +35,22 @@ def test_auto_nosignal_preset_matches_brand_substring():
     assert auto_nosignal_preset("elgato 4k x") == "elgato"     # case-insensitive
     assert auto_nosignal_preset("Some USB Capture") is None
     assert auto_nosignal_preset("") is None
+
+
+def _nosignal_tell():
+    """A detector instance loads every tell's template; return the NO_SIGNAL tell
+    with its (Elgato-default) template populated."""
+    d = ScreenDetector()
+    return d._tells_by_screen[Screen.NO_SIGNAL]
+
+
+def test_nosignal_tell_matches_elgato_frame():
+    detected, score = detect_tell(_img("nosignal_elgato_frame.png"), _nosignal_tell())
+    assert detected, f"Elgato no-signal should detect (score={score})"
+
+
+def test_nosignal_tell_rejects_reset_and_racing():
+    tell = _nosignal_tell()
+    for name in ("reset_dev.png", "racing_dark_section.png"):
+        detected, score = detect_tell(_img(name), tell)
+        assert not detected, f"{name} must NOT detect as NO_SIGNAL (score={score})"
