@@ -29,6 +29,7 @@ export function startPresence(apiBase, {
     ws.addEventListener("close", () => {
       markServerDisconnected();
       if (closed) return;
+      if (timer) clearTimeoutImpl(timer);
       timer = setTimeoutImpl(connect, backoff);
       backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
     });
