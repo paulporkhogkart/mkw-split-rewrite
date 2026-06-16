@@ -2,6 +2,7 @@
   import { createEventDispatcher } from "svelte";
   import { C } from "../lib/palette.js";
   import { scoreColor, fmtScore } from "../lib/format.js";
+  import { nosignalBadgeLabel } from "../lib/nosignal.js";
 
   /** Boolean tree for the edited screen: groups (ANDed) of regions (ORed). */
   export let groups = [];
@@ -13,6 +14,8 @@
   export let currentScore = null;
   /** Screen name - shown in the reset-confirm message. */
   export let screenName = "";
+  /** NO_SIGNAL mode bundle: { auto, brand }. */
+  export let nosignalMode = { auto: true, brand: null };
 
   const dispatch = createEventDispatcher();
 
@@ -31,6 +34,9 @@
 </script>
 
 <div class="det">
+  {#if screenName === "NO_SIGNAL"}
+    <div class="ns-badge">{nosignalBadgeLabel(nosignalMode)}</div>
+  {/if}
   {#if groups && groups.length > 0}
     <p class="det-cap">Detected when every group matches</p>
 
@@ -91,7 +97,7 @@
           <button type="button" class="reset-no"  on:click={() => dispatch("cancelReset")}>Cancel</button>
         </div>
       {:else}
-        <button type="button" class="reset-btn" on:click={() => dispatch("requestReset")}>Reset to defaults</button>
+        <button type="button" class="reset-btn" on:click={() => dispatch("requestReset")}>{screenName === "NO_SIGNAL" ? "Revert to auto" : "Reset to defaults"}</button>
       {/if}
     </div>
   {:else}
@@ -101,6 +107,13 @@
 
 <style>
   .det { display: flex; flex-direction: column; gap: 7px; }
+
+  .ns-badge {
+    font-size: .64rem; color: var(--tx-mut);
+    padding: .2rem .4rem; margin-bottom: .4rem;
+    border: 1px solid var(--bd); border-radius: var(--r);
+    background: var(--panel-2); text-align: center;
+  }
 
   .det-cap { font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--tx-mut); margin: 0; }
 
