@@ -6,7 +6,8 @@ import type { AttemptPayload } from '../db/types';
 import { requireToken } from './auth';
 import { activeSeasonId, courseIdBySlug } from '../db/seasons';
 import { slugify } from '../db/slug';
-import { upsertRun } from '../db/ingest';
+import { upsertRun, findGhostMatch, enrichRunFromGhost, timeToMs } from '../db/ingest';
+import { recordGhostImport } from '../db/ghostImport';
 import { recomputeIsPb, recomputeWasPb } from '../db/pb';
 import { courseLeaderboard, currentWr } from '../db/reads';
 import { rebuildCourseModel } from '../db/courseModels';
@@ -24,6 +25,25 @@ export function runsRoutes(db: DatabaseSync, hub: EventHub,
     const seasonId = activeSeasonId(db);
     const courseId = courseIdBySlug(db, slugify(p.course));
     if (courseId === null) return c.json({ error: `unknown course: ${p.course}` }, 400);
+
+    // Ghost import: dedup by player+course+exact total time. A match (e.g. a Season-0
+    // carryover) is enriched in place and NOT announced; no match becomes a new run.
+    if (p.source === 'ghost' && p.status === 'finished') {
+      const totalMs = timeToMs(p.total_time);
+      const matchId = findGhostMatch(db, seasonId, playerId, courseId, cc, totalMs);
+      if (matchId !== null) {
+        const { trailAdded } = enrichRunFromGhost(db, matchId, p);
+        recordGhostImport(db, { runId: matchId, playerId, courseId, cc, totalMs, action: 'enriched' });
+        if (trailAdded) {
+          try {
+            const built = rebuildCourseModel(db, courseId, cc);
+            if (built) invalidateModel?.(courseId);
+          } catch (e) { console.error('[course-model] ghost-enrich rebuild failed:', e); }
+        }
+        console.log(`[ghost-import] enriched run ${matchId} (${playerName}, ${slugify(p.course)}, ${p.total_time})`);
+        return c.json({ deduped: true, is_pb: false, rank: null, gap_to_leader_ms: null, gap_to_wr_ms: null });
+      }
+    }
 
     const prevLeader = courseLeaderboard(db, seasonId, courseId, cc)[0] ?? null;
     const prevMine = db.prepare(
@@ -73,6 +93,13 @@ export function runsRoutes(db: DatabaseSync, hub: EventHub,
       hub.publish({ type: 'lead_change', course: p.course, cc, new_leader: playerName, prev_leader: prevLeader.display_name, total_time: p.total_time });
     if (wr && mine && mine.total_time_ms < wr.record_ms && p.total_time)
       hub.publish({ type: 'wr_beaten', player: playerName, course: p.course, cc, total_time: p.total_time, wr_time: wr.record_str });
+
+    if (p.source === 'ghost') {
+      const newRun = db.prepare("SELECT id FROM runs WHERE attempt_id=?").get(p.attempt_id) as { id: number } | undefined;
+      recordGhostImport(db, { runId: newRun ? newRun.id : null, playerId, courseId, cc,
+        totalMs: timeToMs(p.total_time), action: 'new' });
+      console.log(`[ghost-import] new run (${playerName}, ${slugify(p.course)}, ${p.total_time})`);
+    }
 
     return c.json(result);
   });

@@ -26,6 +26,37 @@ function post(app: any, token: string, body: unknown) {
   });
 }
 
+describe('ghost import', () => {
+  it('enriches a carryover match and does NOT announce a PB', async () => {
+    const { app, db, token, events } = ctx();
+    db.exec("INSERT INTO runs(id,attempt_id,season_id,player_id,course_id,cc,status,provenance,total_time_ms,total_time_str,is_pb) " +
+            "VALUES (70,'cv',1,1,1,150,'finished','carryover',100000,'1:40.000',1)");
+    const before = events.length;
+    const res = await post(app, token, { attempt_id: 'g1', course: 'Rainbow Road', status: 'finished',
+      total_time: '1:40.000', source: 'ghost', character: 'Mario', total_laps: 1,
+      laps: [{ lap: 1, time_ms: 100000, time_str: '1:40.000', coins: 3, shrooms: 1 }],
+      points: [[0, 1, 2, 1, 1]] });
+    const body = await res.json();
+    expect(body.deduped).toBe(true);
+    expect(events.slice(before).some(e => e.type === 'pb_achieved')).toBe(false);
+    expect((db.prepare("SELECT character FROM runs WHERE id=70").get() as any).character).toBeTruthy();
+    expect((db.prepare("SELECT COUNT(*) c FROM runs WHERE provenance='live'").get() as any).c).toBe(0);  // no new row
+    expect((db.prepare("SELECT action FROM ghost_imports").get() as any).action).toBe('enriched');
+  });
+
+  it('inserts + announces when no match exists', async () => {
+    const { app, db, token, events } = ctx();
+    const before = events.length;
+    const res = await post(app, token, { attempt_id: 'g2', course: 'Rainbow Road', status: 'finished',
+      total_time: '1:30.000', source: 'ghost', character: 'Mario', kart: 'K', total_laps: 1, laps: [], points: [] });
+    const body = await res.json();
+    expect(body.is_pb).toBe(true);
+    expect(events.slice(before).some(e => e.type === 'pb_achieved')).toBe(true);
+    expect((db.prepare("SELECT source FROM runs WHERE attempt_id='g2'").get() as any).source).toBe('ghost');
+    expect((db.prepare("SELECT action FROM ghost_imports").get() as any).action).toBe('new');
+  });
+});
+
 describe('POST /v1/runs', () => {
   it('ingests a finished run, marks PB, returns result, emits events', async () => {
     const { app, token, db, events } = ctx();
