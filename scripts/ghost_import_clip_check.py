@@ -62,16 +62,24 @@ def main(clip: str) -> int:
 
     cap = VideoFileSource(clip, loop=False, target_fps=0)
     import numpy as np, cv2
+    # The trackers throttle on wall-clock time.perf_counter() (selection 10Hz, timer
+    # resync, finish scan). Processing the clip unpaced at max speed would starve those
+    # throttles of scans on brief screens (e.g. COURSE_SELECT) and never commit a course.
+    # Drive a frame-based monotonic clock so the throttles see video time at full speed.
+    import time as _time
+    _clk = [0.0]
+    _time.perf_counter = lambda: _clk[0]
     while True:
         ok, frame = cap.read()
         if not ok or frame is None:
             break
+        _clk[0] += 1.0 / 60.0                          # advance one 60fps frame
         if frame.shape[1] != 1920 or frame.shape[0] != 1080:
             frame = cv2.resize(frame, (1920, 1080), interpolation=cv2.INTER_LINEAR)
         lc.current_frame = frame
-        screen, _ = detector.update(frame)
+        screen, perf = detector.update(frame)
         eff = lc.effective_screen(screen)
-        tracker.update(frame, screen, 0.0)
+        tracker.update(frame, screen, perf.current_score)   # real screen score gates selection
         if ts.total_time is None:
             ls, li = laps.update(frame, eff)
             coins.update(frame, eff); mush.update(frame, eff)
