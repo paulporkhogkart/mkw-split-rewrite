@@ -5,7 +5,8 @@
 import { parseTime } from "./discordFormat.js";
 
 const SETUP = { CHARACTER_SELECT: "Choosing character…", KART_SELECT: "Choosing kart…", COURSE_SELECT: "Choosing track…",
-                START_TIME_TRIAL: "Starting time trial…" };
+                START_TIME_TRIAL: "Starting time trial…",
+                GHOST: "Watching a ghost…", START_REPLAY: "Watching a ghost…", REPLAY_MENU: "Watching a ghost…" };
 const PAUSE_SCREENS = new Set(["RACE_MENU", "HOME"]);
 const RESET_SCREENS = new Set(["RESET", "GHOST_RESET", "UNKNOWN_RESET"]);
 // Screens that sit BETWEEN race contexts (pause menus, reset loaders, mid-race

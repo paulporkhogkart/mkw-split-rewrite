@@ -235,6 +235,13 @@ describe("viewModel", () => {
   });
 });
 
+describe("ghost activity label", () => {
+  it("labels ghost screens as Watching a ghost", () => {
+    const vm = viewModel({ player_id: 99, name: "Paul", online: true, screen: "GHOST", updated_at: 1000 }, () => 2000);
+    expect(vm.primary).toEqual({ kind: "activity", text: "Watching a ghost…" });
+  });
+});
+
 describe("viewModel offline / stale stats", () => {
   const off = { player_id: 2, name: "Luke", color: "#888", online: false, updated_at: 1000,
                 off_stats: { firsts: 3, runs_7d: 5, pbs_30d: 2 } };
