@@ -9,7 +9,12 @@ Runs the real engine over the clip with ghost import armed and asserts:
 Usage:  python scripts/ghost_import_clip_check.py [path-to-clip]
 """
 import json
+import os
 import sys
+
+# Allow running directly (`python scripts/ghost_import_clip_check.py`): put the repo
+# root on sys.path so `mkw_tracker` imports without an editable install.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from mkw_tracker.config.settings import get_settings
 from mkw_tracker.database.migrations import apply_migrations
@@ -84,14 +89,21 @@ def main(clip: str) -> int:
 
     finals = [json.loads(e) for e in events if '"run_finalized"' in e]
     ghosts = [r for r in finals if r.get("source") == "ghost"]
-    print(f"run_finalized total={len(finals)}  ghost={len(ghosts)}")
-    for r in ghosts:
-        print(f"  ghost: course={r.get('course')!r} total={r.get('total_time')!r} "
+    non_ghost = [r for r in finals if r.get("source") != "ghost"]
+    states = [json.loads(e) for e in events if '"ghost_import_state"' in e]
+    print(f"run_finalized total={len(finals)}  ghost={len(ghosts)}  non_ghost={len(non_ghost)}")
+    for r in finals:
+        print(f"  {'GHOST' if r.get('source') == 'ghost' else 'run  '}: "
+              f"status={r.get('status')!r} course={r.get('course')!r} total={r.get('total_time')!r} "
               f"char={r.get('character')!r} points={len(r.get('points', []))}")
+    print(f"ghost_import_state events: {[(s.get('armed'), s.get('recording')) for s in states]}")
     ok = (len(ghosts) == 1
           and ghosts[0].get("course") == "Choco Mountain"
           and ghosts[0].get("total_time") is not None
-          and ghosts[0].get("character") is None)
+          and ghosts[0].get("character") is None
+          and len(non_ghost) >= 1                       # the real race in the middle
+          and (states[-1] == {"type": "ghost_import_state", "armed": False, "recording": False}
+               if states else False))                   # auto-disarmed at the end
     print("PASS" if ok else "FAIL")
     return 0 if ok else 1
 

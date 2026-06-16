@@ -87,7 +87,7 @@ def test_ghost_abort_discards_and_stays_armed_without_emitting_run():
     lc.on_screen_change(Screen.GHOST_RESET, Screen.GHOST)          # start
     lc.on_screen_change(Screen.GHOST, Screen.REPLAY_MENU)          # abort before finish
     assert lc._ghost.state == GhostState.ARMED
-    assert not any('"type": "run_finalized"' in e for e in ipc.events)
+    assert not any(json.loads(e).get("type") == "run_finalized" for e in ipc.events)
 
 
 def test_validate_resume_discards_provisional_capture():
@@ -115,3 +115,15 @@ def test_ghost_finalize_tags_source_nulls_identity_keeps_course_and_disarms():
     assert not lc.ghost_armed                                      # auto-disarmed
     states = [json.loads(e) for e in ipc.events if '"ghost_import_state"' in e]
     assert states[-1] == {"type": "ghost_import_state", "armed": False, "recording": False}
+
+
+def test_arming_mid_ghost_does_not_record_until_a_fresh_start():
+    # Spec: arming while already watching a ghost must NOT record - there was no
+    # fresh into-GHOST transition to catch the start; wait for the next one.
+    lc = _make()
+    lc.arm_ghost()
+    lc.on_screen_change(Screen.GHOST, Screen.REPLAY_MENU)          # leaving, never entered
+    assert not lc.ghost_recording
+    assert lc._ghost.state == GhostState.ARMED
+    lc.on_screen_change(Screen.GHOST_RESET, Screen.GHOST)          # a genuine fresh start
+    assert lc.ghost_recording
