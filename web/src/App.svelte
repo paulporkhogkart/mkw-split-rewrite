@@ -1,5 +1,6 @@
 <script>
   import { presence } from "../../src/lib/stores.js";
+  import CardWall from "./CardWall.svelte";
   $: vals = Object.values($presence);
   $: online = vals.filter((p) => p.online).length;
   $: racing = vals.filter((p) => p.online && p.screen === "RACING" && !p.final_time).length;
@@ -9,7 +10,7 @@
   <div class="brand"><span class="a">the</span><span class="b">kartoff</span></div>
   <div class="live"><span class="dot"></span><b>{online}</b>&nbsp;online&nbsp;·&nbsp;<b>{racing}</b>&nbsp;racing</div>
 </header>
-<main></main>
+<main><CardWall /></main>
 
 <style>
   .top{position:sticky;top:0;z-index:10;display:flex;align-items:center;justify-content:space-between;
