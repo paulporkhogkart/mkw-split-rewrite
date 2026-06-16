@@ -6,7 +6,7 @@
 
 ## Goal
 
-Stand up `thekartoff.com` showing the **live player-card wall** — the same timing-tower cards from the pbenguin desktop app (`PlayerCard`/`PlayerPanel`), live and connected to the season server, behaving exactly as they do in-app. This is the whole of v1; the broader site (leaderboards, course pages, etc.) comes later as separate increments. The cards page **is** the landing page for now.
+Stand up `thekartoff.com` showing the **live player-card wall** — the same timing-tower cards from the pbenguin desktop app (`PlayerCard`), live and connected to the season server, behaving exactly as they do in-app. This is the whole of v1; the broader site (leaderboards, course pages, etc.) comes later as separate increments. The cards page **is** the landing page for now.
 
 ## Decisions (locked during brainstorming)
 
@@ -41,12 +41,10 @@ web/
 
 Verified Tauri-free (a repo-wide grep shows only `sync.js`, `discord.js`, `ipc.js` import Tauri — none are in the card render path):
 
-- Components: `PlayerPanel.svelte`, `PlayerCard.svelte`, `Fire.svelte`
-- Logic/lib: `playerCard.js` (view-model), `playerFigures.js` (portrait URLs via `import.meta.glob`), `raceTimerBuffer.js`, `fireState.js`, `cardSettings.js`, `playerPanel.js`, `discordFormat.js`
+- Components: `PlayerCard.svelte`, `Fire.svelte` (PlayerCard's transitive deps). NOT `PlayerPanel.svelte` — its grid stretches cards to fill width (desktop behavior); the web uses its own `web/src/CardWall.svelte` (the approved wall layout) which renders `PlayerCard`.
+- Logic/lib: `playerCard.js` (view-model), `playerFigures.js` (portrait URLs via `import.meta.glob`), `raceTimerBuffer.js`, `fireState.js`, `cardSettings.js`, `discordFormat.js`
 - State: `stores.js` (reuses the `presence`, `serverConnection`, `myPlayerId` writables)
-- Connection helper: `handlePresenceMessage` from `presence.js` (pure read-path: parses `presence_snapshot` / `presence_update`, updates the `presence` store, feeds `raceTimerBuffer`, marks the link connected)
-- `serverUrl` store from `syncSettings.js` (set once at boot to the API origin so `PlayerPanel` renders normally)
-- `theme.css` (design tokens)
+- Connection helper: `handlePresenceMessage` from `presence.js` (pure read-path: parses `presence_snapshot` / `presence_update`, updates the `presence` store, feeds `raceTimerBuffer`, marks the link connected)- `theme.css` (design tokens)
 
 Reusing the real modules means the site tracks any future card tuning automatically — no fork, no copy.
 
@@ -61,11 +59,11 @@ web/src/presenceClient.js  (WebSocket, auto-reconnect w/ backoff)
         ▼
 shared stores: presence{}, serverConnection, raceTimerBuffer
         ▼
-PlayerPanel.svelte → PlayerCard.svelte  (one shared clock; fast while racing)
+CardWall.svelte → PlayerCard.svelte  (one shared clock; fast while racing)
 ```
 
 - `presenceClient.js` opens `wss://api.thekartoff.com/v1/presence` with **no token** (receive-only), and on each message calls the shared `handlePresenceMessage`. On close it marks `serverConnection` disconnected and reconnects with capped exponential backoff. It only receives — it never sends frames, so there is no local-self echo and no outbound throttle (those are desktop-only concerns).
-- At boot, `main.js` sets the `serverUrl` store to `https://api.thekartoff.com` so `PlayerPanel`'s `configured` check passes and cards render live.
+- At boot, `main.js` reads the API origin (`VITE_API_BASE`, default `https://api.thekartoff.com`) and starts the read-only presence client against it.
 - **Never-empty wall:** the server's `PresenceHub` seeds every roster player offline at startup, so the snapshot always contains all 5 players. Offline players render as grey "last seen" cards. No empty-state needed for the roster (the existing `emptyState` only shows if the snapshot is genuinely empty, e.g. before the first frame).
 - When the link drops, all cards render `stale` (offline styling) until the snapshot returns — same as the desktop app with `_localSelf` absent.
 
