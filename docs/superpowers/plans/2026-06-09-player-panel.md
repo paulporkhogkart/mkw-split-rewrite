@@ -442,7 +442,7 @@ Expected: "Requirement already satisfied" or a successful install.
 ```bash
 mkdir -p assets/player_gifs src/assets/players
 cp temp/360/paulPosted.gif temp/360/aliiasPosted.gif temp/360/aliiasBird.gif \
-   temp/360/lukePosted.gif temp/360/lukeThumbsUp.gif temp/360/adymerPosted.gif assets/player_gifs/
+   temp/360/lukePosted.gif temp/360/lukeThumbsUp.gif temp/360/gubPosted.gif assets/player_gifs/
 ls assets/player_gifs/
 ```
 Expected: the six gifs listed.
@@ -471,13 +471,13 @@ from PIL import Image
 SRC = os.path.join(os.path.dirname(__file__), "..", "assets", "player_gifs")
 OUT = os.path.join(os.path.dirname(__file__), "..", "src", "assets", "players")
 
-# player (lowercased) -> (online_gif, offline_gif). Alex has no art -> borrows Adymer's.
+# player (lowercased) -> (online_gif, offline_gif). Alex has no art -> borrows Gub's.
 MAP = {
     "paul":   ("paulPosted.gif",   "paulPosted.gif"),
     "aliias": ("aliiasPosted.gif", "aliiasBird.gif"),
     "luke":   ("lukePosted.gif",   "lukeThumbsUp.gif"),
-    "adymer": ("adymerPosted.gif", "adymerPosted.gif"),
-    "alex":   ("adymerPosted.gif", "adymerPosted.gif"),
+    "gub": ("gubPosted.gif", "gubPosted.gif"),
+    "alex":   ("gubPosted.gif", "gubPosted.gif"),
 }
 
 def frame(path, end, h=260):

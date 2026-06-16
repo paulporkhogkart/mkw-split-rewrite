@@ -153,7 +153,7 @@ Reads + writes need a token. Mint one per player (players exist after the import
 ```bash
 cd /home/pi/mkw/pi
 MKW_DB=/home/pi/mkw-data/mkw.db npm run mint-token -- Paul     # prints the token once
-# repeat for Adymer / Alex / Aliias / Luke
+# repeat for Gub / Alex / Aliias / Luke
 ```
 
 In each person's desktop app **Settings → Server**: set the server URL to

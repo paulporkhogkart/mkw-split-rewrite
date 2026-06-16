@@ -88,7 +88,7 @@ Configured (not hardcoded in queries), in `pi/src/stats/body.ts` or a small conf
 | porker table | kart player | player_id |
 |---|---|---|
 | `Measurements` | Paul | 1 |
-| `AddymerMeasurements` | Adymer | 2 |
+| `AddymerMeasurements` | Gub | 2 |
 | `AlexMeasurements` | Alex | 4 |
 | `EunoraMeasurements` | Luke | 3 |
 | `BraydenMeasurements` | Aliias | 5 |

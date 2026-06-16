@@ -755,7 +755,7 @@ import { toEpochSeconds } from './period';
 /** porker table → kart-player display name. Blu/Cbri excluded (non-participants). */
 export const PORKER_MAP: { table: string; player: string }[] = [
   { table: 'Measurements', player: 'Paul' },
-  { table: 'AddymerMeasurements', player: 'Adymer' },
+  { table: 'AddymerMeasurements', player: 'Gub' },
   { table: 'AlexMeasurements', player: 'Alex' },
   { table: 'EunoraMeasurements', player: 'Luke' },
   { table: 'BraydenMeasurements', player: 'Aliias' },

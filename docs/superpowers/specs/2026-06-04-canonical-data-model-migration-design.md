@@ -29,7 +29,7 @@ Measured from the copied `legacy/mkwpb2/kart-off/data/hogkart.db` (peewee / SQLi
 
 | Legacy table | Rows | Notes |
 |---|---|---|
-| `players` | 5 | Paul, Adymer, Luke, Alex, Aliias |
+| `players` | 5 | Paul, Gub, Luke, Alex, Aliias |
 | `tracks` | 30 | MKW course names |
 | `personal_bests` | 205 | append-only history; current PB = latest `achieved_at_utc`. **Only** `record` / `record_ms` / `achieved_at_utc` populated — character, vehicle, and every lap/coins/shroom column are empty |
 | `world_records` | 473 | external WR progression; `holder`, `character`, `vehicle`, `video_url` all populated; 62 distinct holders incl. non-ASCII names; lap columns empty |
@@ -184,7 +184,7 @@ Steps (single transaction):
 
 The importer prints a report and asserts, against today's snapshot:
 
-- 5 players (Paul, Adymer, Luke, Alex, Aliias)
+- 5 players (Paul, Gub, Luke, Alex, Aliias)
 - 30 courses, **0 unmapped** legacy tracks (incl. Wario Shipyard → Wario's Galleon)
 - 205 S0 `runs` (`legacy_import`, finished)
 - 473 `world_records`

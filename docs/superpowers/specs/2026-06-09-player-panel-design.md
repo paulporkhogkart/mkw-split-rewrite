@@ -16,7 +16,7 @@ picked, and how their current race is going — consistent across racing / setup
   `{ [player_id]: PresenceEntry }`, broadcast from the server `/v1/presence` WS. `PresenceEntry`
   (`pi/src/presence/hub.ts`) carries: `player_id, name, color, online, screen, course, character,
   kart, costume, cur_lap, tot_lap, coins, mushrooms, completion (0..1), final_time, updated_at`.
-  The roster is the active season's `season_rosters` (5 players: Paul, Aliias, Alex, Luke, Adymer).
+  The roster is the active season's `season_rosters` (5 players: Paul, Aliias, Alex, Luke, Gub).
 - **Theme:** Neutral-Graphite tokens (`src/theme.css`), tabular figures, `palette.js`. Player
   colours come from `players.color` (seeded by `server/importer.py:PLAYER_COLORS`).
 
@@ -119,8 +119,8 @@ composited, or late frames ghost).
   | Paul | `paulPosted` | `paulPosted` |
   | Aliias | `aliiasPosted` | `aliiasBird` |
   | Luke | `lukePosted` | `lukeThumbsUp` |
-  | Adymer | `adymerPosted` | `adymerPosted` |
-  | Alex | `adymerPosted` (borrowed) | `adymerPosted` (borrowed) |
+  | Gub | `gubPosted` | `gubPosted` |
+  | Alex | `gubPosted` (borrowed) | `gubPosted` (borrowed) |
 
   A player with no mapping → a neutral silhouette placeholder.
 - The Svelte card imports the generated PNGs (vite bundles them), keyed by player name (lowercased).
@@ -161,5 +161,5 @@ composited, or late frames ghost).
 
 - **Real in-game timer** (engine reads the on-screen clock) — until then the racing time shows `—`.
 - Displaying coins/mushrooms/costume.
-- Alex's own figure art (borrows Adymer's for now).
+- Alex's own figure art (borrows Gub's for now).
 - Online-first / rank sorting (roster order for v1).

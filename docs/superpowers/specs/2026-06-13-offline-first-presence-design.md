@@ -97,12 +97,12 @@ the empty state). The header doubles as the long-missing panel title **and** the
 ```
 ONLINE          ┌─ PLAYERS ··········································· ● Live ─┐
                 │ ┌──────┐┌──────┐┌──────┐┌──────┐┌──────┐                  │
-                │ │ PAUL ││ ALEX ││ LUKE ││ALIIAS││ADYMER│  (live cards)    │
+                │ │ PAUL ││ ALEX ││ LUKE ││ALIIAS││GUB│  (live cards)    │
                 │ └──────┘└──────┘└──────┘└──────┘└──────┘                  │
 
 OFFLINE         ┌─ PLAYERS ················· ○ Offline · last sync 4m ago ─┐
 (cached)        │ ┌──────┐┌──────┐┌──────┐┌──────┐┌──────┐                  │
-                │ │ paul ││ alex ││ luke ││aliias││adymer│  (dimmed cards)  │
+                │ │ paul ││ alex ││ luke ││aliias││gub│  (dimmed cards)  │
                 │ └──────┘└──────┘└──────┘└──────┘└──────┘                  │
 
 EMPTY           ┌─ PLAYERS ······························· ○ Not connected ─┐
