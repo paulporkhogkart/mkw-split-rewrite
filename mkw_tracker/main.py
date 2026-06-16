@@ -58,7 +58,7 @@ from .ipc.protocol import (parse_inbound, emit_ready, emit_screen_change, emit_s
                             emit_calibration_result, emit_calib_capture,
                             emit_minimap_update, minimap_update_payload,
                             emit_minimap_sample, emit_screen_thumbs,
-                            emit_option_lists)
+                            emit_option_lists, emit_nosignal_mode)
 from .utils.camera import build_camera_source
 from .utils.normalize import Normalizer
 
@@ -453,6 +453,8 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
         if res is not None:
             _persist_tell_tree(settings, sn, detector)
             ipc.emit(emit_tells_list(detector.get_tells_config()))
+            if sn == "NO_SIGNAL":
+                ipc.emit(emit_nosignal_mode(auto=False, brand=None))
 
     elif t in ("add_region", "remove_region", "add_group", "remove_group"):
         sn = msg.get("screen", "")
@@ -467,6 +469,8 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
         if res is not None:
             _persist_tell_tree(settings, sn, detector)
             ipc.emit(emit_tells_list(detector.get_tells_config()))
+            if sn == "NO_SIGNAL":
+                ipc.emit(emit_nosignal_mode(auto=False, brand=None))
 
     elif t == "reset_tell":
         sn = msg.get("screen", "")
@@ -482,6 +486,13 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
                 pass
             ipc.emit(emit_tells_list(detector.get_tells_config()))
 
+    elif t == "reset_nosignal_auto":
+        # "Revert to auto": drop the manual override and re-derive from the device.
+        delete_configs_like("tell_tree_NO_SIGNAL")
+        detector.reset_tell("NO_SIGNAL")
+        _apply_nosignal_auto(settings, detector, ipc)
+        ipc.emit(emit_tells_list(detector.get_tells_config()))
+
     elif t == "capture_region_template":
         frame = current_frame[0]
         if frame is not None:
@@ -491,6 +502,8 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
             if res:
                 _persist_tell_tree(settings, msg.get("screen", ""), detector)
                 ipc.emit(emit_template_saved(**res))
+                if msg.get("screen", "") == "NO_SIGNAL":
+                    ipc.emit(emit_nosignal_mode(auto=False, brand=None))
             else:
                 ipc.emit(emit_error(f"Failed to capture region for {msg.get('screen')!r}"))
 
@@ -696,6 +709,20 @@ def _persist_tell_tree(settings, screen_name: str, detector) -> None:
         settings.update(f"tell_tree_{sn}", blob)
 
 
+def _apply_nosignal_auto(settings, detector, ipc) -> None:
+    """Auto-pick the NO_SIGNAL template from the capture-card device name, unless
+    the user has hand-edited the tell (a persisted tell_tree_NO_SIGNAL override is
+    manual mode).  In-memory only - never persisted, so it re-derives each launch.
+    Emits nosignal_mode for the editor badge."""
+    from .detection.screen import auto_nosignal_preset
+    if _get_config_direct("tell_tree_NO_SIGNAL"):
+        ipc.emit(emit_nosignal_mode(auto=False, brand=None))
+        return
+    preset = auto_nosignal_preset(settings.get("camera_device", "") or "")
+    detector.set_nosignal_region(preset or "elgato")
+    ipc.emit(emit_nosignal_mode(auto=True, brand=preset))
+
+
 def _apply_calibration_result(settings, detector, ipc, result: dict,
                                reset_tell_overrides: bool) -> None:
     """Persist a solver result, hot-reload the normalizer, optionally wipe
@@ -892,6 +919,7 @@ def run(args):
         switch2_language=switch2_language,
     ))
     ipc.emit(emit_option_lists(**tracker.option_lists()))
+    _apply_nosignal_auto(settings, detector, ipc)
     print("Screen detector running. Press 'q' to quit.\n")
 
     # ── Per-loop state ───────────────────────────────────────────────────────
@@ -962,6 +990,7 @@ def run(args):
                         cap = None
                         ipc.emit(emit_camera_status(ok=False, error=str(_e)))
                     _cap_ref[0] = cap
+                    _apply_nosignal_auto(settings, detector, ipc)
                     cam_paused[0] = False
                     ipc.emit(emit_camera_resumed())
                 else:
@@ -1028,6 +1057,7 @@ def run(args):
                     ipc.emit(emit_camera_status(ok=False, error=str(_e)))
                     print(f"[Camera] open_camera failed: {_e}")
                 _cap_ref[0] = cap
+                _apply_nosignal_auto(settings, detector, ipc)
             else:
                 _handle_ipc_command(msg, ipc, detector, settings,
                                      minimap, lifecycle, show_debug, cap,
