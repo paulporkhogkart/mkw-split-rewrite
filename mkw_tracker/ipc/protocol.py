@@ -121,6 +121,13 @@ def emit_ghost_import_state(armed: bool, recording: bool) -> str:
     return _emit("ghost_import_state", armed=bool(armed), recording=bool(recording))
 
 
+def emit_nosignal_mode(auto: bool, brand: Optional[str] = None) -> str:
+    """NO_SIGNAL detection mode for the editor badge.  auto=True -> the template
+    is picked from the capture-card device name (brand = matched preset key, or
+    None = Elgato default / no match).  auto=False -> user hand-edited (manual)."""
+    return _emit("nosignal_mode", auto=auto, brand=brand)
+
+
 def emit_finish(result: Optional[str], total_time: Optional[str],
                 splits: Optional[Dict[int, str]] = None) -> str:
     return _emit("finish", result=result, total_time=total_time,
