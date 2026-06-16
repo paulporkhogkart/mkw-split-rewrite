@@ -72,7 +72,8 @@
     on:keydown|self={(e) => { if (e.key === 'Escape' && setupComplete) onClose(); }}
     role="dialog" aria-modal="true"
     tabindex="-1">
-    <div class="wiz-dialog" class:wiz-dialog-narrow={wizardStep === "language" || wizardStep === "discord" || wizardStep === "sync"}>
+    <div class="wiz-dialog" class:wiz-dialog-narrow={wizardStep === "language" || wizardStep === "discord" || wizardStep === "sync"}
+      class:wiz-dialog-mid={wizardStep === "trails"}>
 
       <!-- Wizard tab bar -->
       <nav class="wiz-tabs">
@@ -267,6 +268,9 @@
     transition: max-width .2s ease;
   }
   .wiz-dialog-narrow { max-width: 480px; }
+  /* Trails content is capped at 600px; size the dialog to it (+ wiz-body padding)
+     so the tab doesn't float in the full 960px width with big empty side margins. */
+  .wiz-dialog-mid { max-width: 640px; }
 
   .wiz-tabs {
     display: flex; flex-shrink: 0; background: var(--panel);
