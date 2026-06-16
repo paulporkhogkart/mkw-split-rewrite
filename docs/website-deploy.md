@@ -103,6 +103,15 @@ routing both. Not required.
 - `https://www.thekartoff.com` loads the same.
 - `sudo reboot`; after it returns, `systemctl is-active mkw-web` -> `active`.
 
+**If a card shows the old name (or a blank portrait) instead of `Gub`:** the display name
+lives in the **server** DB — the app and the site both read it from the presence stream, and
+`mkw-server` caches the roster in memory at startup. Run this one-time rename on the Pi and
+restart so it re-seeds:
+```bash
+sqlite3 /home/pi/mkw-data/mkw.db "UPDATE players SET display_name='Gub' WHERE display_name='Adymer' COLLATE NOCASE;"
+sudo systemctl restart mkw-server mkw-bot
+```
+
 ## 5. Steady-state updating
 Same as the server: `git tag vX.Y.Z && git push origin vX.Y.Z`. Within ~2 min the Pi checks
 out the tag, runs `npm --prefix web install` + `npm --prefix web run build`, and restarts
