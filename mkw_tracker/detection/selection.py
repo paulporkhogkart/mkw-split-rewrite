@@ -416,6 +416,18 @@ class SelectionTracker:
         return False
 
     # ------------------------------------------------------------------
+    def reset(self):
+        """Clear all selections to the cold-start state (NO_SIGNAL teardown)."""
+        self.state = SelectionState()
+        self._relevant_costumes = {}
+        self._costume_loss_streak = 0
+        self._char_scores = {}
+        self._kart_scores = {}
+        self._course_scores = {}
+        self._costume_scores = {}
+        if self.on_selection_change:
+            self.on_selection_change(self.state)
+
     def reload_language(self, switch2_language: str):
         """Hot-reload all template directories for a new Switch 2 language."""
         lang = switch2_language or ""
