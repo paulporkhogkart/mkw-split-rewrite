@@ -30,27 +30,72 @@ systemctl status mkw-web --no-pager
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8788    # 200
 ```
 
-## 3. Cloudflare tunnel route (Pi)
-Route the apex + www through the existing tunnel:
+## 3. Point thekartoff.com + www at the tunnel (Pi)
+
+`api.thekartoff.com` already works, so the tunnel, its credentials, and the running
+`cloudflared` service are all in place — you're just adding two more hostnames to the
+**same** tunnel. Two parts per hostname: **(A)** a DNS record so Cloudflare's edge sends the
+traffic into the tunnel, and **(B)** an ingress rule so the tunnel forwards it to the local
+site on `:8788`.
+
+Find the tunnel name/UUID `api` already uses:
+```bash
+cloudflared tunnel list
+grep -E 'tunnel:|credentials' ~/.cloudflared/config.yml   # the UUID is the `tunnel:` value
+```
+
+### A. DNS records (apex + www -> the tunnel)
+Use whichever method you used for `api`:
+
+**CLI** (needs the account cert `~/.cloudflared/cert.pem`):
 ```bash
 cloudflared tunnel route dns <TUNNEL> thekartoff.com
 cloudflared tunnel route dns <TUNNEL> www.thekartoff.com
+```
+If it errors *"Cannot determine default origin certificate path"*, run `cloudflared tunnel
+login` once (prints a URL — open it, pick `thekartoff.com`; it writes `cert.pem` and does
+**not** disturb the running tunnel), then re-run the two commands.
+
+**Dashboard** (no cert): Cloudflare -> `thekartoff.com` -> **DNS -> Add record**, twice, each
+**Proxied** (orange cloud). `<TUNNEL-UUID>` is the `tunnel:` value from above:
+```
+Type=CNAME  Name=@     Target=<TUNNEL-UUID>.cfargotunnel.com
+Type=CNAME  Name=www   Target=<TUNNEL-UUID>.cfargotunnel.com
+```
+(`@` is the apex/root; Cloudflare flattens the apex CNAME automatically.)
+
+### B. Ingress rule (tunnel -> local site on :8788)
+Add the two hostnames **above** the catch-all `404`, alongside the existing `api` rule:
+```bash
 nano ~/.cloudflared/config.yml
 ```
-Add, **above** the catch-all `- service: http_status:404`:
 ```yaml
+ingress:
+  - hostname: api.thekartoff.com
+    service: http://localhost:8787        # already there
   - hostname: thekartoff.com
     service: http://localhost:8788
   - hostname: www.thekartoff.com
     service: http://localhost:8788
+  - service: http_status:404              # catch-all MUST stay last
 ```
-(If `route dns` errors about the management cert, use the dashboard proxied-CNAME method from
-`docs/pi-deploy.md` §7 — point `thekartoff.com` + `www` at `<TUNNEL-UUID>.cfargotunnel.com`.)
+First match wins, so order matters; the bare `http_status:404` line stays at the bottom.
+(Dashboard-managed tunnel with no `config.yml`? Add the two **Public Hostnames** under the
+tunnel in the Zero Trust dashboard instead, both -> `http://localhost:8788`.)
+
+Validate + reload (restart re-reads the config; `api` blips for ~a second, then both are up):
 ```bash
 cloudflared tunnel ingress validate
 sudo systemctl restart cloudflared
-curl -s -o /dev/null -w "%{http_code}\n" https://thekartoff.com   # 200
+curl -s -o /dev/null -w "%{http_code}\n" https://thekartoff.com       # 200
+curl -s -o /dev/null -w "%{http_code}\n" https://www.thekartoff.com   # 200
 ```
+First request after a fresh DNS record can take a minute. **502** = `mkw-web` isn't up or the
+ingress port is wrong; **404 from Cloudflare** = the hostname isn't matching an ingress rule.
+
+*Optional — one canonical host:* serving both is fine (the SPA is origin-agnostic). To force
+e.g. `www` -> apex, add a Cloudflare **Redirect Rule** (Rules -> Redirect Rules) rather than
+routing both. Not required.
 
 ## 4. Verify
 - `https://thekartoff.com` loads the five cards (offline until someone opens the app).
