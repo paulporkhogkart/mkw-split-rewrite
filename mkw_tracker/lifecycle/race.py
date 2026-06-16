@@ -81,6 +81,20 @@ class RaceLifecycle:
             from ..ipc.protocol import emit_screen_change
             self._ipc.emit(emit_screen_change(old.name, new.name))
 
+        # ── Signal lost: app-restart-style teardown ─────────────────────────
+        # Discard any active run WITHOUT finalizing (no run_finalized -> not
+        # queued for review), clear selections, and drop any ghost capture.
+        # Early return so none of the finalize paths below can run.
+        if new == Screen.NO_SIGNAL:
+            self._paused_from_racing = False
+            self._resuming_race      = False
+            if self._ghost.armed or self._ghost.recording:
+                self._ghost.disarm()
+                self._emit_ghost_state()
+            self._clear_race_state()
+            self._selection.reset()
+            return
+
         # ── From RACING ─────────────────────────────────────────────────────
         if old == Screen.RACING:
             if new in _PAUSE_SCREENS:
