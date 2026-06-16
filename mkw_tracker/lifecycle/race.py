@@ -11,6 +11,7 @@ from ..race.timestamp import TimestampTracker
 from ..race.finish import FinishStillDetector
 from ..race.mushrooms import MushroomTracker
 from ..database.replay_repo import get_minimap_roi, get_minimap_seed, get_minimap_threshold
+from .ghost import GhostImport
 
 
 _PAUSE_SCREENS = {Screen.RACE_MENU, Screen.HOME}
@@ -68,6 +69,9 @@ class RaceLifecycle:
         # The most recent full frame (set externally each loop iteration)
         self.current_frame = None
 
+        # One-shot "import the next ghost" state machine (see lifecycle/ghost.py).
+        self._ghost = GhostImport()
+
     # ── Public callback ──────────────────────────────────────────────────────
 
     def on_screen_change(self, old: Screen, new: Screen):
@@ -115,6 +119,58 @@ class RaceLifecycle:
         # ── RESET from non-racing contexts ───────────────────────────────────
         if new == Screen.RESET and old not in ({Screen.RACING} | _PAUSE_SCREENS):
             self._clear_race_state()
+
+        # ── Ghost import: GHOST treated as a private RACING while recording ──
+        if new == Screen.GHOST and old != Screen.GHOST:
+            if self._ghost.on_ghost_enter(old):
+                self._start_race(old)          # provisional; validated over next frames
+                self._emit_ghost_state()
+        elif old == Screen.GHOST and new != Screen.GHOST:
+            if self._ghost.on_ghost_leave():   # was recording -> aborted before finish
+                self._clear_race_state()       # discard, stay armed, no run emitted
+                self._emit_ghost_state()
+            elif self._finalized:              # a finished ghost left the screen
+                self._clear_race_state()       # clear the lingering finished state
+
+    # ── Ghost import surface (driven by main loop + IPC) ─────────────────────
+
+    @property
+    def ghost_armed(self) -> bool:
+        return self._ghost.armed
+
+    @property
+    def ghost_recording(self) -> bool:
+        return self._ghost.recording
+
+    def arm_ghost(self) -> None:
+        self._ghost.arm()
+        self._emit_ghost_state()
+
+    def disarm_ghost(self) -> None:
+        if self._ghost.recording:
+            self._clear_race_state()          # drop any in-progress capture
+        self._ghost.disarm()
+        self._emit_ghost_state()
+
+    def effective_screen(self, real: "Screen") -> "Screen":
+        """GHOST -> RACING only while a ghost is being recorded; else unchanged.
+        Real RACING is always RACING regardless of arm state."""
+        if real == Screen.GHOST and self._ghost.recording:
+            return Screen.RACING
+        return real
+
+    def validate_ghost_start(self, race_elapsed_ms) -> None:
+        """Per-frame restart-vs-resume check while recording. On a resume the
+        provisional capture is discarded and we re-arm."""
+        res = self._ghost.validate(race_elapsed_ms)
+        if res is False:
+            self._clear_race_state()
+            self._emit_ghost_state()
+
+    def _emit_ghost_state(self) -> None:
+        if self._ipc is not None:
+            from ..ipc.protocol import emit_ghost_import_state
+            self._ipc.emit(emit_ghost_import_state(self._ghost.armed, self._ghost.recording))
 
     # ── Private helpers ─────────────────────────────────────────────────────
 
@@ -164,10 +220,13 @@ class RaceLifecycle:
         """
         if self._finalized:
             return
+        is_ghost  = self._ghost.recording
         sel       = self._selection.state
         course    = sel.course
-        character = sel.character
-        costume   = sel.costume
+        # A ghost replays the *recorded* loadout, not the live one we detected, so
+        # null identity to force manual entry. Course is reliable (Course Select).
+        character = None if is_ghost else sel.character
+        costume   = None if is_ghost else sel.costume
 
         best_total_time: Optional[str] = None
         if completed:
@@ -175,7 +234,7 @@ class RaceLifecycle:
             # flags that the timer froze (it carries no time of its own).
             best_total_time = self._ts.total_time
 
-        if completed and best_total_time and not self._minimap._calibrated:
+        if completed and best_total_time and not is_ghost and not self._minimap._calibrated:
             new_threshold = self._minimap.calibrate_from_race()
             if course and character:
                 from ..database.replay_repo import set_minimap_threshold
@@ -206,9 +265,10 @@ class RaceLifecycle:
             self._ipc.emit(emit_run_finalized({
                 "attempt_id": uuid.uuid4().hex,
                 "course":     course,
+                "source":     "ghost" if is_ghost else None,
                 "status":     "finished" if completed else "reset",
                 "character":  character,
-                "kart":       sel.kart,
+                "kart":       None if is_ghost else sel.kart,
                 "costume":    costume,
                 "total_laps": self._laps.state.total_laps,
                 "started_at": self._race_started_at,
@@ -222,6 +282,9 @@ class RaceLifecycle:
             }))
 
         self._finalized = True
+        if is_ghost:
+            self._ghost.disarm()
+            self._emit_ghost_state()
 
     def _start_race(self, old: Screen):
         from datetime import datetime, timezone
@@ -253,7 +316,7 @@ class RaceLifecycle:
             seed = get_minimap_seed(course)
             if seed:
                 stored_conf: Optional[float] = None
-                if character:
+                if character and not self._ghost.recording:
                     stored_conf = get_minimap_threshold(course, character, costume or "")
                     if stored_conf is not None:
                         print(f"  [ThresholdStore] Using stored thr={stored_conf:.3f} "
