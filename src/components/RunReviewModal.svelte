@@ -27,6 +27,7 @@
   export let queueIndex = 0;            // 0-based position in the review queue
   export let queueCount = 1;            // total runs awaiting review
   export let playSound = true;
+  export let isGhost = false;      // ghost-imported run: needs an extra submit confirm
   // Live PB lookup: (course) => Promise<bestMs|null>. Asked whenever the chosen course
   // changes, so a run whose course wasn't auto-detected can still be recognised as a
   // PB once you pick it. Defaults to "no record on file" when not supplied.
@@ -38,11 +39,13 @@
   let course, character, kart, costume, totalTime, laps;
   let loadedId = null;
   let confirmingDiscard = false;     // two-step Discard: first click asks "are you sure?"
+  let confirmingSubmit = false;    // two-step submit for ghost imports
   let dialogEl, firstInvalidEl;
 
   $: if (run && run.attempt_id !== loadedId) {
     loadedId  = run.attempt_id;
     confirmingDiscard = false;       // reset the prompt when the queue advances
+    confirmingSubmit = false;
     liveBest = undefined; pbQueryKey = null;   // re-evaluate PB for the new run
     course    = run.course    ?? "";
     character = run.character ?? "";
@@ -109,6 +112,7 @@
 
   function submit() {
     if (!canSubmit) return;
+    if (isGhost && !confirmingSubmit) { confirmingSubmit = true; return; }
     dispatch("submit", {
       attempt_id: run.attempt_id,
       course, character, kart, costume,
@@ -142,6 +146,7 @@
       <div class="rv-head-l">
         <h2 id="rv-title" class="rv-head-title">Run needs review</h2>
         {#if isPbLive}<span class="rv-pb" title="This run is a new personal best">PB</span>{/if}
+        {#if isGhost}<span class="rv-pb" title="Imported from an in-game ghost">GHOST</span>{/if}
       </div>
       {#if queueCount > 1}
         <span class="rv-queue" title="Runs awaiting review">{queueIndex + 1}<span class="rv-queue-sep">/</span>{queueCount}</span>
@@ -224,8 +229,16 @@
       {:else}
         <button class="rv-btn rv-btn-ghost" on:click={() => (confirmingDiscard = true)}>Discard run</button>
         <div class="rv-foot-right">
-          <span class="rv-hint">{canSubmit ? "Ready to submit" : "Fill the flagged fields to submit"}</span>
-          <button class="rv-btn rv-btn-primary" on:click={submit} disabled={!canSubmit}>Submit</button>
+          <span class="rv-hint">
+            {confirmingSubmit ? "Submit this as one of your runs?"
+              : canSubmit ? "Ready to submit" : "Fill the flagged fields to submit"}
+          </span>
+          {#if confirmingSubmit}
+            <button class="rv-btn rv-btn-ghost" on:click={() => (confirmingSubmit = false)}>Cancel</button>
+          {/if}
+          <button class="rv-btn rv-btn-primary" on:click={submit} disabled={!canSubmit}>
+            {confirmingSubmit ? "Yes, submit" : "Submit"}
+          </button>
         </div>
       {/if}
     </footer>
