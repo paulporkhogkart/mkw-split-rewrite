@@ -66,7 +66,8 @@ CREATE TABLE IF NOT EXISTS run_points (
     t_ms     INTEGER NOT NULL,
     cx       REAL NOT NULL,
     cy       REAL NOT NULL,
-    score    REAL NOT NULL DEFAULT 1.0
+    score    REAL NOT NULL DEFAULT 1.0,
+    lap      INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS ghost_imports (

@@ -39,6 +39,7 @@ describe('ghost import', () => {
     const body = await res.json();
     expect(body.deduped).toBe(true);
     expect(events.slice(before).some(e => e.type === 'pb_achieved')).toBe(false);
+    expect(events.slice(before).some(e => e.type === 'run_finished')).toBe(false);
     expect((db.prepare("SELECT character FROM runs WHERE id=70").get() as any).character).toBeTruthy();
     expect((db.prepare("SELECT COUNT(*) c FROM runs WHERE provenance='live'").get() as any).c).toBe(0);  // no new row
     expect((db.prepare("SELECT action FROM ghost_imports").get() as any).action).toBe('enriched');

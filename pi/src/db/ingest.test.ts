@@ -158,4 +158,18 @@ describe('ghost dedup + enrich', () => {
     expect(lap.coins).toBe(9);                                 // existing laps kept
     expect(res.trailAdded).toBe(true);                         // had no points -> trail added
   });
+
+  it('enrich keeps an existing trail (does not re-add points)', () => {
+    const db = base();
+    db.exec("INSERT INTO runs(id,attempt_id,season_id,player_id,course_id,cc,status,provenance,total_time_ms) " +
+            "VALUES (61,'lp',1,1,1,150,'finished','live',100000)");
+    db.exec("INSERT INTO run_points(run_id,t_ms,cx,cy,score,lap) VALUES (61,0,5,5,1,1)");
+    const res = enrichRunFromGhost(db, 61, {
+      attempt_id: 'g3', course: 'Rainbow Road', status: 'finished',
+      points: [[0, 9, 9, 1, 1], [16, 8, 8, 1, 1]], source: 'ghost',
+    } as any);
+    expect(res.trailAdded).toBe(false);                        // already had a trail
+    expect((db.prepare('SELECT COUNT(*) c FROM run_points WHERE run_id=61').get() as any).c).toBe(1);
+    expect((db.prepare('SELECT cx FROM run_points WHERE run_id=61').get() as any).cx).toBe(5);  // original intact
+  });
 });
