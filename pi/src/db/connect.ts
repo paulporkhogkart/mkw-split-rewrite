@@ -37,6 +37,16 @@ export function applySchema(db: DatabaseSync): void {
   try { db.exec('ALTER TABLE runs ADD COLUMN mushrooms_used INTEGER'); } catch { /* present */ }
   // Additive: per-point HUD lap (1-based). Null for legacy rows; builder falls back to time.
   try { db.exec('ALTER TABLE run_points ADD COLUMN lap INTEGER'); } catch { /* present */ }
+  // Additive: ghost-import source mark (nullable; 'ghost' when ghost-sourced).
+  try { db.exec('ALTER TABLE runs ADD COLUMN source TEXT'); } catch { /* present */ }
+  // Additive: ghost import audit log (no-op once present).
+  db.exec(`CREATE TABLE IF NOT EXISTS ghost_imports (
+    id INTEGER PRIMARY KEY, run_id INTEGER REFERENCES runs(id),
+    player_id INTEGER NOT NULL REFERENCES players(id),
+    course_id INTEGER NOT NULL REFERENCES courses(id),
+    cc INTEGER NOT NULL, total_time_ms INTEGER,
+    action TEXT NOT NULL CHECK (action IN ('enriched','new')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')))`);
   // Idempotent: at most one current WR per (course,cc). Created here (not in schema.sql)
   // so the column is guaranteed present for both fresh and migrated DBs.
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_wr_current ON world_records(course_id, cc) WHERE is_current=1');

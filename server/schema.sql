@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS runs (
     coins_lost     INTEGER,
     mushrooms_used INTEGER,
     is_pb          INTEGER NOT NULL DEFAULT 0,
+    source         TEXT,
     created_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -66,6 +67,17 @@ CREATE TABLE IF NOT EXISTS run_points (
     cx       REAL NOT NULL,
     cy       REAL NOT NULL,
     score    REAL NOT NULL DEFAULT 1.0
+);
+
+CREATE TABLE IF NOT EXISTS ghost_imports (
+    id            INTEGER PRIMARY KEY,
+    run_id        INTEGER REFERENCES runs(id),
+    player_id     INTEGER NOT NULL REFERENCES players(id),
+    course_id     INTEGER NOT NULL REFERENCES courses(id),
+    cc            INTEGER NOT NULL,
+    total_time_ms INTEGER,
+    action        TEXT NOT NULL CHECK (action IN ('enriched','new')),
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS course_models (
