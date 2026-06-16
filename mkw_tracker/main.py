@@ -1205,7 +1205,9 @@ def run(args):
         # ── IPC on-change events ─────────────────────────────────────────────
         sel_key = (selection.character, selection.costume,
                    selection.kart, selection.course)
-        if sel_key != _prev_sel and any(sel_key):
+        # `any(_prev_sel)` also emits the all-null clear (e.g. SelectionTracker.reset
+        # on NO_SIGNAL) so cleared selections reach the UI and _prev_sel stays in sync.
+        if sel_key != _prev_sel and (any(sel_key) or any(_prev_sel)):
             ipc.emit(emit_selection_update(
                 *sel_key,
                 char_conf=selection.character_conf,
