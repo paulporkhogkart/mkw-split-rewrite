@@ -573,6 +573,9 @@ class ScreenDetector:
 
     # ------------------------------------------------------------------
     def _candidate_screens(self) -> Set[Screen]:
+        # Signal restored: from NO_SIGNAL re-detect from scratch, like UNKNOWN.
+        if self.current_screen == Screen.NO_SIGNAL:
+            return set(self.transitions.get(Screen.UNKNOWN, set()))
         if self.current_screen == Screen.HOME:
             base = self.transitions.get(Screen.HOME, set()).copy()
             if self._pre_home_screen is None:
@@ -583,8 +586,11 @@ class ScreenDetector:
                 # reachable from the last known state is a valid landing point.
                 base.add(self._pre_home_screen)
                 base |= self.transitions.get(self._pre_home_screen, set())
-            return base
-        return self.transitions.get(self.current_screen, set())
+        else:
+            # set() copies so adding NO_SIGNAL never mutates the shared TRANSITIONS.
+            base = set(self.transitions.get(self.current_screen, set()))
+        base.add(Screen.NO_SIGNAL)   # always a candidate (only scanned on a confirm-miss)
+        return base
 
     # ------------------------------------------------------------------
     def update(self, frame: np.ndarray) -> tuple:

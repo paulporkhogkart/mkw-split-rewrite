@@ -70,3 +70,17 @@ def test_set_nosignal_region_swaps_to_ugreen_and_matches():
 
 def test_set_nosignal_region_unknown_preset_returns_none():
     assert ScreenDetector().set_nosignal_region("bogus") is None
+
+
+def test_nosignal_is_universal_candidate_without_mutating_transitions():
+    d = ScreenDetector()
+    d.current_screen = Screen.RACING
+    assert Screen.NO_SIGNAL in d._candidate_screens()
+    # The shared TRANSITIONS table must not be polluted by the augmentation.
+    assert Screen.NO_SIGNAL not in TRANSITIONS[Screen.RACING]
+
+
+def test_from_nosignal_rescans_unknown_set():
+    d = ScreenDetector()
+    d.current_screen = Screen.NO_SIGNAL
+    assert d._candidate_screens() == set(TRANSITIONS[Screen.UNKNOWN])
