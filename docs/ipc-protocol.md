@@ -22,6 +22,7 @@ Messages are newline-delimited JSON on stdio (Python sidecar ↔ Tauri frontend)
 | `test_region` / `get_region_images` | `screen`, `group`, `region` | Score / fetch stored template + live crop; emits `template_score` / `template_images` |
 | `reset_tell` | `screen` | Restore one screen's tell (and aliases) to defaults; drops `tell_tree_*`; emits `tells_list` |
 | `reset_roi` | `key` (e.g. `char_name_roi`) | Restore one selection/HUD ROI to its packaged default; emits `rois_list` |
+| `reset_nosignal_auto` | — | Revert NO_SIGNAL tell to auto mode (see below) |
 | `capture_asset_template` / `get_asset_template` | `category`, `item_name` | Capture / preview a per-item reference image (characters/costumes/karts/courses/mushrooms) |
 | `get_replay_paths` | `course` | Emit `replay_paths` event with all stored trail paths for that course |
 | `get_minimap_sample` | `course` | Emit `minimap_sample` event with the best available displayable icon image for that course's seed; `png_b64` will be `null` if no live template is cached |
@@ -34,6 +35,11 @@ Messages are newline-delimited JSON on stdio (Python sidecar ↔ Tauri frontend)
 | `clear_calib_frames` | — | Empty the slot cache; emits one `calib_capture` event per slot (1..7) with `captured=false` |
 | `calibrate_now` | `reset_tell_overrides` (bool) | Legacy single-shot path: solve using the current frame and whichever single shipped reference is available.  Wizard uses `capture_calib_frame` + `solve_calibration` instead |
 | `reset_calibration` | — | Restore all `calib_*` keys to defaults; emits `calibration_result` |
+
+### `reset_nosignal_auto`
+Revert the NO_SIGNAL screen tell to auto mode: drops any persisted
+`tell_tree_NO_SIGNAL` override and re-derives the active preset template from
+the configured `camera_device` name. No fields.
 
 ## Python → Tauri (events)
 
@@ -54,6 +60,13 @@ Messages are newline-delimited JSON on stdio (Python sidecar ↔ Tauri frontend)
 | `calibration_result` | `ok`, `error`, `is_echo`, `gain_r`/`gain_g`/`gain_b`, `offset_r`/`offset_g`/`offset_b`, `gamma`, `fit_quality` (RMSE 0–255, lower is better; <10 great, 10–20 ok, >20 poor). `is_echo=true` for `get_calibration` replies; `false` for fresh auto-fit results |
 | `calib_capture` | `slot` (1 or 2), `captured` (bool), `error` (empty unless capture failed) |
 | `error` | `message` |
+| `nosignal_mode` | NO_SIGNAL detection mode (see below) |
+
+### `nosignal_mode`
+NO_SIGNAL detection mode for the editor badge.
+`{ "type": "nosignal_mode", "auto": bool, "brand": "elgato" | "ugreen" | null }`
+`auto=true` -> template auto-picked from the device name (`brand` = matched preset,
+or `null` for the Elgato default). `auto=false` -> user hand-edited (manual).
 
 ## Example Exchange
 
