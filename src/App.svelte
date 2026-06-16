@@ -926,7 +926,10 @@
       .catch(() => {});
     // For a just-finished run (not a resurfaced one), correct the engine's live
     // selection state so a retry inherits the values the user just confirmed.
-    if (entry?.live) {
+    // Skip ghost imports: a ghost's identity is from a past replay and may differ
+    // from what's actually selected in-game (which may not be detected yet), so
+    // writing it would clobber the real live selection.
+    if (entry?.live && entry.run?.source !== "ghost") {
       send({ type: "set_selection", course: filled.course, character: filled.character,
              kart: filled.kart, costume: filled.costume });
     }
