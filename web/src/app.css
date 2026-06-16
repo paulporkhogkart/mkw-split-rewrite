@@ -1,0 +1,5 @@
+/* Website overrides for the desktop globals in src/theme.css, which assume a fixed
+   100vh Tauri window. The site is a normal scrolling page. */
+html, body { overflow: auto; height: auto; }
+#app { height: auto; min-height: 100vh; }
+body { background: var(--bg); }
