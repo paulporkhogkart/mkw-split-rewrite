@@ -22,7 +22,10 @@ export const GRAPH_H = 316;
 // (Reset/Ghost Reset/Reset(?)) in col 7. Lone nodes (Unknown, Post-TT) are
 // vertically centred (y=112).
 export const GRAPH_NODES = [
-  // col 0 - unknown (lone, far left)
+  // col 0 - "no game state" (lone, far left): no signal (top) + unknown.
+  // NO_SIGNAL has no flow edges - it's a universal candidate (reachable from any
+  // screen on a feed drop), so drawing edges to it would clutter the whole graph.
+  { id:"NO_SIGNAL",          x:0,    y:0,   label:"No Signal"   },
   { id:"UNKNOWN",            x:0,    y:112, label:"Unknown"     },
   // col 1 - entry / Switch-overlay cluster
   { id:"TITLE",              x:152,  y:0,   label:"Title"       },
