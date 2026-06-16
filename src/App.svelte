@@ -21,6 +21,7 @@
   import SyncSettings from "./components/SyncSettings.svelte";
   import SettingsModal from "./components/SettingsModal.svelte";
   import RunReviewModal from "./components/RunReviewModal.svelte";
+  import GhostImportWarning from "./components/GhostImportWarning.svelte";
   import PlayerPanel from "./components/PlayerPanel.svelte";
   import { screen as screenStore, liveScore as liveScoreStore,
            candidates as candidatesStore, selection as selectionStore,
@@ -92,6 +93,9 @@
   // dequeues. Fed live by run_needs_review and on launch by sync_list_pending.
   let reviewQueue = [];
   $: reviewHead = reviewQueue[0] ?? null;
+  let ghostArmed = false;          // mirrors the engine ghost_import_state
+  let ghostRecording = false;
+  let ghostWarnOpen = false;       // arm-confirm modal visibility
   // Canonical dropdown options from the engine option_lists event.
   let optionLists = { courses: [], characters: [], karts: [], costumes: [], costumesByCharacter: {} };
 
@@ -854,6 +858,10 @@
       case "pb_achieved":
         pushLog(`[pb] ${msg.course}  ${msg.time}`);
         break;
+      case "ghost_import_state":
+        ghostArmed = !!msg.armed;
+        ghostRecording = !!msg.recording;
+        break;
       case "run_needs_review":
         pushLog(`[review] ${msg.run?.course ?? "?"} ${msg.run?.status ?? ""} - missing: ${(msg.missing ?? []).join(", ") || "none"}`);
         // Replace any existing entry for this attempt (idempotent), else append.
@@ -888,6 +896,13 @@
       }
     }
   }
+
+  // ── Ghost import handlers ───────────────────────────────────────────────────
+  function onGhostButton() {
+    if (ghostArmed) { send({ type: "set_ghost_import", enabled: false }); }
+    else { ghostWarnOpen = true; }
+  }
+  function ghostEnable() { send({ type: "set_ghost_import", enabled: true }); ghostWarnOpen = false; }
 
   // ── Run review actions ──────────────────────────────────────────────────────
   function _dequeue(attemptId) {
@@ -1478,6 +1493,14 @@
     <!-- Settings button: view- and wizard-state-conditional logic stays here -->
     <svelte:fragment slot="settings">
       {#if appView === "main"}
+        {#if !wizardOpen}
+          <button class="btn-hdr btn-ghost-import" class:armed={ghostArmed}
+                  on:click={onGhostButton}
+                  title={ghostArmed ? "Armed: the next ghost will be imported (click to cancel)" : "Import a PB from an in-game ghost"}>
+            {#if ghostArmed}<span class="gi-dot"></span>{/if}
+            {ghostRecording ? "Importing ghost…" : ghostArmed ? "Ghost import armed" : "Import PB from ghost"}
+          </button>
+        {/if}
         {#if wizardOpen}
           <button class="btn-hdr btn-close-wiz" on:click={closeWizard}>✕ Close Settings</button>
         {:else}
@@ -1887,6 +1910,7 @@
   <RunReviewModal
     run={reviewHead.run}
     isPb={reviewHead.isPb}
+    isGhost={reviewHead.run?.source === "ghost"}
     pbBest={pbBestLookup}
     options={optionLists}
     queueIndex={0}
@@ -1894,6 +1918,10 @@
     on:submit={onReviewSubmit}
     on:discard={onReviewDiscard}
   />
+{/if}
+
+{#if ghostWarnOpen}
+  <GhostImportWarning on:enable={ghostEnable} on:cancel={() => (ghostWarnOpen = false)} />
 {/if}
 
 <!-- ═══════════════════════════════════════════════════════════════════════════ -->
@@ -1924,6 +1952,14 @@
   .btn-setup:hover { background: var(--raised); }
   .btn-close-wiz   { color: var(--tx-dim); border: 1px solid var(--bd); }
   .btn-close-wiz:hover { color: var(--tx-mut); background: var(--bd); }
+  .btn-ghost-import { color: var(--tx-mut); border: 1px solid var(--bd);
+    display: inline-flex; align-items: center; gap: 5px; }
+  .btn-ghost-import:hover { background: var(--raised); color: var(--tx); }
+  .btn-ghost-import.armed { background: var(--accent-bg); border-color: var(--accent); color: var(--tx); }
+  .gi-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
+    box-shadow: 0 0 0 0 var(--accent); animation: gi-pulse 1.6s infinite; }
+  @keyframes gi-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 70%, transparent); }
+    70% { box-shadow: 0 0 0 5px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
 
   /* ── Status bar styles live in src/components/StatusBar.svelte ───── */
   /* (Screen-graph strip + per-screen editor now live in EditMode.svelte and its
