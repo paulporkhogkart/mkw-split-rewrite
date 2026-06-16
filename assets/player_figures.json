@@ -41,31 +41,31 @@
       93
     ]
   },
-  "adymer": {
+  "gub": {
     "online": [
-      "adymerPosted.gif",
+      "gubPosted.gif",
       87
     ],
     "offline": [
-      "adymerPosted.gif",
+      "gubPosted.gif",
       0
     ],
     "onpace": [
-      "adymerChoke.gif",
+      "gubChoke.gif",
       68
     ]
   },
   "alex": {
     "online": [
-      "adymerPosted.gif",
+      "gubPosted.gif",
       87
     ],
     "offline": [
-      "adymerPosted.gif",
+      "gubPosted.gif",
       0
     ],
     "onpace": [
-      "adymerChoke.gif",
+      "gubChoke.gif",
       68
     ]
   }

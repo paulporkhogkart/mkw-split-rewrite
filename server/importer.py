@@ -51,21 +51,28 @@ def ensure_seasons(conn, legacy, cutover_iso) -> tuple[int, int]:
 # Discord bot for /leaderboard and /nemesis embed edges; tuned for Discord dark mode.
 PLAYER_COLORS = {
     "paul": "#a78bfa",     # violet
-    "adymer": "#2dd4bf",   # teal
+    "gub": "#2dd4bf",      # teal
     "alex": "#fbbf24",     # amber-gold (yellow)
     "aliias": "#4ade80",   # green
     "luke": "#f87171",     # red
 }
 
 
+# Legacy hogkart names now displayed under a different name (privacy rename), keyed
+# lower-case -> canonical display name. Applied at import so a re-import maps the old
+# name onto the existing renamed player instead of recreating it / splitting history.
+LEGACY_NAME_ALIASES = {"adymer": "Gub"}
+
+
 def map_players(conn, legacy, s0_id, s1_id) -> dict[int, int]:
     """Map legacy player ids -> server player ids (case-insensitive), seeding rosters + colours."""
     mapping: dict[int, int] = {}
     for row in legacy.execute("SELECT id, name FROM players"):
-        color = PLAYER_COLORS.get(row["name"].lower())
+        name = LEGACY_NAME_ALIASES.get(row["name"].lower(), row["name"])
+        color = PLAYER_COLORS.get(name.lower())
         existing = conn.execute(
             "SELECT id FROM players WHERE display_name = ? COLLATE NOCASE",
-            (row["name"],)).fetchone()
+            (name,)).fetchone()
         if existing:
             pid = existing["id"]
             if color is not None:
@@ -73,7 +80,7 @@ def map_players(conn, legacy, s0_id, s1_id) -> dict[int, int]:
         else:
             pid = conn.execute(
                 "INSERT INTO players(display_name, color) VALUES (?, ?)",
-                (row["name"], color)).lastrowid
+                (name, color)).lastrowid
         for sid in (s0_id, s1_id):
             conn.execute(
                 "INSERT OR IGNORE INTO season_rosters(season_id, player_id) VALUES (?,?)",

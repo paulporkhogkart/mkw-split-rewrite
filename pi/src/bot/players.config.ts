@@ -1,5 +1,5 @@
 export const ID_TO_NAME: Record<string, string> = {
-  '477788220982296576': 'Adymer',
+  '477788220982296576': 'Gub',
   '1213316126948335636': 'Paul',
   '201561251963207681': 'Alex',
   '267421165625147392': 'Aliias',
@@ -20,7 +20,7 @@ export const THUMBNAIL_GIFS: Record<string, string[]> = {
   Aliias: ['https://i.imgur.com/lfS1SkJ.gif', 'https://i.imgur.com/l5eJXfl.gif', 'https://i.imgur.com/eiHaLw6.gif', 'https://i.imgur.com/KV8VW7x.gif'],
   Alex: ['https://i.imgur.com/0ZUvDVI.gif', 'https://i.imgur.com/OIPESbG.gif'],
   Luke: ['https://i.imgur.com/PcksQkq.gif', 'https://i.imgur.com/YadWWyh.gif', 'https://i.imgur.com/dK3KtfE.gif', 'https://i.imgur.com/SYlI3Tg.gif'],
-  Adymer: ['https://i.imgur.com/3u7SCNw.gif', 'https://i.imgur.com/nARULQI.gif'],
+  Gub: ['https://i.imgur.com/3u7SCNw.gif', 'https://i.imgur.com/nARULQI.gif'],
 };
 
 /** Random GIF for a player, or null when none is configured (legacy KeyError fix). */

@@ -39,7 +39,7 @@ const PLAYER_COLORS = {
   alex:   "#3d7cc2",   // blue
   luke:   "#cf5b4e",   // red
   aliias: "#5aa86a",   // green
-  adymer: "#d98a3e",   // orange
+  gub:    "#d98a3e",   // orange
 };
 
 /** A player's locked trail colour: their assigned colour if listed, else a stable per-id
