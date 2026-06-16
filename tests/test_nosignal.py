@@ -84,3 +84,20 @@ def test_from_nosignal_rescans_unknown_set():
     d = ScreenDetector()
     d.current_screen = Screen.NO_SIGNAL
     assert d._candidate_screens() == set(TRANSITIONS[Screen.UNKNOWN])
+
+
+def test_nosignal_template_loads_under_switch_language():
+    # Regression: screen-tell image paths get a <lang> subdir injected at load
+    # (images/screens/foo.png -> images/screens/en_uk/foo.png), but the no-signal
+    # graphic is card-specific (language-agnostic) and lives outside that tree, so
+    # it must still load when a Switch language is set (production passes one).
+    d = ScreenDetector(switch2_language="en_uk")
+    region = d._tells_by_screen[Screen.NO_SIGNAL].groups[0][0]
+    assert region.template is not None, "NO_SIGNAL (elgato) template failed to load under en_uk"
+    detected, score = detect_tell(_img("nosignal_elgato_frame.png"),
+                                  d._tells_by_screen[Screen.NO_SIGNAL])
+    assert detected, f"should detect under en_uk (score={score})"
+    # UGREEN preset (auto-select can pick it) must also load under a language.
+    d.set_nosignal_region("ugreen")
+    assert d._tells_by_screen[Screen.NO_SIGNAL].groups[0][0].template is not None, \
+        "NO_SIGNAL (ugreen) template failed to load under en_uk"

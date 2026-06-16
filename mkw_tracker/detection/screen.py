@@ -123,10 +123,14 @@ class Screen(Enum):
 # the tell.  ROIs are the single source of truth, shared with
 # scripts/gen_nosignal_templates.py (which crops the references at exactly these
 # boxes).  If the gen script's bright-pixel gate fails, nudge the ROI here.
+# Templates live OUTSIDE images/screens/ on purpose: that tree is language-
+# versioned (Tell.load injects images/screens/<lang>/ via _inject_language), but
+# the no-signal graphic is card-specific, not game-language-specific - so these
+# paths bypass language injection and load the same file for every Switch language.
 NO_SIGNAL_PRESETS = {
-    "elgato": {"image_path": "images/screens/nosignal_elgato.png",
+    "elgato": {"image_path": "images/nosignal/nosignal_elgato.png",
                "roi": (640, 470, 1280, 740)},
-    "ugreen": {"image_path": "images/screens/nosignal_ugreen.png",
+    "ugreen": {"image_path": "images/nosignal/nosignal_ugreen.png",
                "roi": (750, 460, 1170, 640)},
 }
 

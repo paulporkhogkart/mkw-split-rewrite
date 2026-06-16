@@ -37,7 +37,7 @@ def _load_1080p(path):
 
 
 def main():
-    os.makedirs(os.path.join(ROOT, "images", "screens"), exist_ok=True)
+    os.makedirs(os.path.join(ROOT, "images", "nosignal"), exist_ok=True)
     os.makedirs(os.path.join(ROOT, "screenshots", "en_uk"), exist_ok=True)
     os.makedirs(os.path.join(ROOT, "tests", "fixtures"), exist_ok=True)
 
