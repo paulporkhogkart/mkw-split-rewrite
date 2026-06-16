@@ -115,6 +115,12 @@ def emit_race_cleared() -> str:
     return _emit("race_cleared")
 
 
+def emit_ghost_import_state(armed: bool, recording: bool) -> str:
+    """Ghost-import arm/recording state, so the title-bar button reflects engine
+    truth (armed on/off; recording == a ghost is actively being captured)."""
+    return _emit("ghost_import_state", armed=bool(armed), recording=bool(recording))
+
+
 def emit_finish(result: Optional[str], total_time: Optional[str],
                 splits: Optional[Dict[int, str]] = None) -> str:
     return _emit("finish", result=result, total_time=total_time,

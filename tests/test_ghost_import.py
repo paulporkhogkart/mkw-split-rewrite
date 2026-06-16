@@ -2,6 +2,17 @@ from mkw_tracker.lifecycle.ghost import GhostImport, GhostState
 from mkw_tracker.detection.screen import Screen
 
 
+# ── Task 2: emit_ghost_import_state ────────────────────────────────────────
+
+import json
+from mkw_tracker.ipc.protocol import emit_ghost_import_state
+
+
+def test_emit_ghost_import_state_shape():
+    msg = json.loads(emit_ghost_import_state(True, False))
+    assert msg == {"type": "ghost_import_state", "armed": True, "recording": False}
+
+
 def test_starts_idle_disarmed():
     g = GhostImport()
     assert g.state == GhostState.IDLE
