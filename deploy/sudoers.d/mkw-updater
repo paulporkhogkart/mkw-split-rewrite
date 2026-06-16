@@ -1,2 +1,2 @@
 # Let the unprivileged deploy user restart only the MKW units, no password.
-pi ALL=(root) NOPASSWD: /usr/bin/systemctl restart mkw-server mkw-bot, /usr/bin/systemctl restart mkw-server, /usr/bin/systemctl restart mkw-bot, /usr/bin/systemctl start mkw-server, /usr/bin/systemctl start mkw-bot
+pi ALL=(root) NOPASSWD: /usr/bin/systemctl restart mkw-server mkw-bot mkw-web, /usr/bin/systemctl restart mkw-server mkw-bot, /usr/bin/systemctl restart mkw-server, /usr/bin/systemctl restart mkw-bot, /usr/bin/systemctl restart mkw-web, /usr/bin/systemctl start mkw-server, /usr/bin/systemctl start mkw-bot, /usr/bin/systemctl start mkw-web

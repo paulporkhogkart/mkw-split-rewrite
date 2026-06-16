@@ -26,11 +26,12 @@ install -m 0440 -o root -g root "$REPO/deploy/sudoers.d/mkw-updater" /etc/sudoer
 install -m 0644 \
   "$REPO/deploy/systemd/mkw-server.service" \
   "$REPO/deploy/systemd/mkw-bot.service" \
+  "$REPO/deploy/systemd/mkw-web.service" \
   "$REPO/deploy/systemd/mkw-updater.service" \
   "$REPO/deploy/systemd/mkw-updater.timer" \
   /etc/systemd/system/
 
 systemctl daemon-reload
-systemctl enable --now mkw-server.service mkw-bot.service mkw-updater.timer
+systemctl enable --now mkw-server.service mkw-bot.service mkw-web.service mkw-updater.timer
 echo "installed + started."
 echo "check: systemctl status mkw-server mkw-bot; systemctl list-timers mkw-updater.timer"

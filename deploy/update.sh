@@ -28,6 +28,8 @@ if [ "$latest" = "$current" ]; then echo "already up to date ($current)"; exit 0
 echo "deploying $latest (was ${current:-none})"
 git checkout -q --force "tags/$latest"
 npm --prefix "$REPO/pi" install --no-audit --no-fund
-sudo systemctl restart mkw-server mkw-bot
+npm --prefix "$REPO/web" install --no-audit --no-fund
+npm --prefix "$REPO/web" run build
+sudo systemctl restart mkw-server mkw-bot mkw-web
 echo "$latest" > "$MARKER"
 echo "deployed $latest"
