@@ -181,6 +181,12 @@ def _handle_ipc_command(msg: dict, ipc: IpcServer, detector, settings,
                     setattr(tracker.state, field, msg[field])
                     setattr(tracker.state, f"{field}_conf", 1.0)
 
+    elif t == "set_ghost_import":
+        if bool(msg.get("enabled", False)):
+            lifecycle.arm_ghost()
+        else:
+            lifecycle.disarm_ghost()
+
     elif t == "force_screen":
         screen_name = msg.get("screen", "")
         try:
@@ -1046,23 +1052,26 @@ def run(args):
 
         # ── Update all trackers ──────────────────────────────────────────────
         screen, perf  = detector.update(frame)
+        eff_screen    = lifecycle.effective_screen(screen)
         selection     = tracker.update(frame, screen, perf.current_score)
 
         _race_complete = ts.total_time is not None
 
         if not _race_complete:
-            lap_state, lap_inc = laps.update(frame, screen)
-            coin_state         = coins.update(frame, screen)
-            mush_state         = mush.update(frame, screen)
+            lap_state, lap_inc = laps.update(frame, eff_screen)
+            coin_state         = coins.update(frame, eff_screen)
+            mush_state         = mush.update(frame, eff_screen)
             lapstats.update(mush_state.count)
             lapstats.update_coins(coin_state.coins)
-            mm_state           = minimap.update(frame, screen)
-            race_elapsed = timer.update(frame, screen)
-            if screen == Screen.RACING:
+            mm_state           = minimap.update(frame, eff_screen)
+            race_elapsed = timer.update(frame, eff_screen)
+            # Restart-vs-resume validation for a provisional ghost capture.
+            lifecycle.validate_ghost_start(race_elapsed)
+            if eff_screen == Screen.RACING:
                 # Trail points ride the race clock (t=0 == GO); pre-anchor
                 # points are buffered + back-stamped inside the recorder.
                 mm_rec.update(mm_state, lap_state.current_lap, race_elapsed)
-            if race_elapsed is not None:
+            if race_elapsed is not None and screen == Screen.RACING:
                 _now_rt = time.perf_counter()
                 if _now_rt - _last_rt_emit >= 0.1:       # ~10 Hz cap on outbound
                     _last_rt_emit = _now_rt
@@ -1079,7 +1088,7 @@ def run(args):
         _on_final_lap = (lap_state.current_lap is not None
                          and lap_state.total_laps
                          and lap_state.current_lap == lap_state.total_laps)
-        finish_just_detected  = (finish.update(frame, screen, bool(_on_final_lap),
+        finish_just_detected  = (finish.update(frame, eff_screen, bool(_on_final_lap),
                                                lap_inc=lap_inc,
                                                estimate_ms=race_elapsed)
                                  and ts.total_time is None)
@@ -1088,7 +1097,7 @@ def run(args):
             lapstats.record_lap(lap_state.current_lap, coin_state.coins)
 
         # ── Calibrate on finish detection ────────────────────────────────────
-        if finish_just_detected and not minimap._calibrated:
+        if finish_just_detected and not minimap._calibrated and screen == Screen.RACING:
             sel = selection
             new_thr = minimap.calibrate_from_race()
             if sel.course and sel.character:
@@ -1097,7 +1106,7 @@ def run(args):
                                       sel.costume or "", new_thr)
 
         # ── Calibrate on final lap crossing ──────────────────────────────────
-        if lap_inc and not minimap._calibrated:
+        if lap_inc and not minimap._calibrated and screen == Screen.RACING:
             total_laps = lap_state.total_laps or 0
             if lap_state.current_lap == total_laps and total_laps > 0:
                 sel     = selection
@@ -1115,7 +1124,7 @@ def run(args):
                 else lap_state.current_lap
             )
             ts_state = ts.update(
-                frame, screen,
+                frame, eff_screen,
                 capture_now=lap_inc or finish_just_detected,
                 lap_number=_ts_lap,
                 is_finish=finish_just_detected,
@@ -1135,7 +1144,7 @@ def run(args):
         # ts.splits is populated incrementally as burst scans complete.
         # Emit each new entry as soon as it appears so the UI updates in real time.
         for lap, split_time in ts.splits.items():
-            if lap not in _emitted_splits:
+            if lap not in _emitted_splits and screen == Screen.RACING:
                 is_final = (ts.total_time is not None and lap == max(ts.splits))
                 ipc.emit(emit_split_recorded(lap, split_time, is_final=is_final))
                 _emitted_splits[lap] = split_time
@@ -1177,17 +1186,17 @@ def run(args):
             _prev_sel = sel_key
 
         lap_key = (lap_state.current_lap, lap_state.total_laps)
-        if lap_key != _prev_lap and any(lap_key):
+        if lap_key != _prev_lap and any(lap_key) and screen == Screen.RACING:
             completed_lap = (lap_state.current_lap or 0) - 1
             split = ts.splits.get(completed_lap) if lap_inc else None
             ipc.emit(emit_lap_update(lap_state.current_lap, lap_state.total_laps, split))
             _prev_lap = lap_key
 
-        if coin_state.coins != _prev_coins and coin_state.coins is not None:
+        if coin_state.coins != _prev_coins and coin_state.coins is not None and screen == Screen.RACING:
             ipc.emit(emit_coin_update(coin_state.coins))
             _prev_coins = coin_state.coins
 
-        if mush_state.count != _prev_mush:
+        if mush_state.count != _prev_mush and screen == Screen.RACING:
             ipc.emit(emit_mush_update(mush_state.count))
             _prev_mush = mush_state.count
 
@@ -1223,7 +1232,7 @@ def run(args):
         # Arm the deferred finish emit when finish is first detected.
         # The timestamp burst starts on this same frame, so total_time / splits
         # won't be ready yet  - defer until ts.total_time is populated.
-        if finish_just_detected and not _prev_finish and not _want_finish_emit:
+        if finish_just_detected and not _prev_finish and not _want_finish_emit and screen == Screen.RACING:
             _want_finish_emit = True
             _finish_result    = None   # no position overlay (finish-ROI disabled)
             _finish_wait      = 0
