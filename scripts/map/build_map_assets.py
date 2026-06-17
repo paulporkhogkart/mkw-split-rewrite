@@ -20,6 +20,8 @@ DISPLAY_W = 1100          # CSS width the map renders at
 BASE_W = DISPLAY_W * 2    # 2x export for retina crispness
 RR_CENTER = (0.500, 0.734)
 RR_WIDTH = 0.089          # normalized width of the Rainbow Road sprite
+CROP_PAD = 10             # extra px around each detected box before upscaling the locator crop
+MATCH_SLACK = 70          # template-match search-window slack (px) around the predicted hires position
 
 
 def load_canonical():
@@ -58,6 +60,8 @@ def orb_transform(a, b):
     src = np.float32([ka[z.queryIdx].pt for z in mm]).reshape(-1, 1, 2)
     dst = np.float32([kb[z.trainIdx].pt for z in mm]).reshape(-1, 1, 2)
     M, _ = cv2.estimateAffinePartial2D(src, dst, method=cv2.RANSAC, ransacReprojThreshold=5.0)
+    if M is None:
+        raise RuntimeError("ORB alignment failed - not enough feature matches between inner and hires map")
     return M
 
 
@@ -84,18 +88,16 @@ def main():
 
     courses = []  # {sprite(BGRA), hit[x,y,w,h], spr[x,y,w,h]} in normalized base coords
     for (x, y, w, h) in detect_boxes(stages):
-        PAD = 10
-        px0, py0 = max(0, x - PAD), max(0, y - PAD)
-        px1, py1 = min(Ws, x + w + PAD), min(Hs, y + h + PAD)
+        px0, py0 = max(0, x - CROP_PAD), max(0, y - CROP_PAD)
+        px1, py1 = min(Ws, x + w + CROP_PAD), min(Hs, y + h + CROP_PAD)
         crop = stages[py0:py1, px0:px1]
         mask = smoothstep_alpha(crop)
         tw, th = round((px1 - px0) * scale), round((py1 - py0) * scale)
         tmpl = cv2.resize(crop, (tw, th), interpolation=cv2.INTER_AREA)
         tmask = cv2.resize(mask, (tw, th), interpolation=cv2.INTER_AREA)
         pcx, pcy = to_hi((px0 + px1) / 2, (py0 + py1) / 2)
-        S = 70
-        rx0, ry0 = max(0, int(pcx - tw / 2 - S)), max(0, int(pcy - th / 2 - S))
-        rx1, ry1 = min(Wh, int(pcx + tw / 2 + S)), min(Hh, int(pcy + th / 2 + S))
+        rx0, ry0 = max(0, int(pcx - tw / 2 - MATCH_SLACK)), max(0, int(pcy - th / 2 - MATCH_SLACK))
+        rx1, ry1 = min(Wh, int(pcx + tw / 2 + MATCH_SLACK)), min(Hh, int(pcy + th / 2 + MATCH_SLACK))
         res = cv2.matchTemplate(hires[ry0:ry1, rx0:rx1], tmpl, cv2.TM_CCOEFF_NORMED, mask=tmask)
         res[~np.isfinite(res)] = 0
         _, _, _, loc = cv2.minMaxLoc(res)
@@ -113,6 +115,7 @@ def main():
     rrw = round(RR_WIDTH * Wh); rrh = round(rrw * rr.shape[0] / rr.shape[1])
     cx, cy, wn = *RR_CENTER, RR_WIDTH
     hn = wn * (Wh / Hh) * (rr.shape[0] / rr.shape[1])
+    # hit rect is ~42% of the sprite, nudged up (0.21/0.24) so it sits on the medal, not the clouds
     courses.append({"sprite": cv2.resize(rr, (rrw, rrh), interpolation=cv2.INTER_AREA),
                     "hit": [cx - wn * 0.21, cy - hn * 0.24, wn * 0.42, hn * 0.42],
                     "spr": [cx - wn / 2, cy - hn / 2, wn, hn]})
@@ -122,6 +125,8 @@ def main():
     for c in courses:
         ccx, ccy = c["hit"][0] + c["hit"][2] / 2, c["hit"][1] + c["hit"][3] / 2
         slug = min(labels, key=lambda L: (L["cx"] - ccx) ** 2 + (L["cy"] - ccy) ** 2)["slug"]
+        if any(e["slug"] == slug for e in manifest["courses"]):
+            raise RuntimeError(f"two detected boxes both map to label '{slug}'")
         cv2.imwrite(str(OUT / "sprites" / f"{slug}.png"), c["sprite"])
         manifest["courses"].append({
             "slug": slug, "name": canon[slug],
@@ -134,7 +139,7 @@ def main():
     (OUT / "manifest.json").write_text(json.dumps(manifest, indent=1))
 
     slugs = [c["slug"] for c in manifest["courses"]]
-    assert len(slugs) == 30 and len(set(slugs)) == 30 and set(slugs) == set(canon), \
+    assert len(slugs) == len(canon) and len(set(slugs)) == len(canon) and set(slugs) == set(canon), \
         f"slug mismatch: {set(slugs) ^ set(canon)}"
     print(f"built {len(slugs)} courses -> {OUT}")
 

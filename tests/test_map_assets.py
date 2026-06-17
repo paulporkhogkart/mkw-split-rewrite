@@ -16,10 +16,11 @@ def _manifest():
 
 
 def test_manifest_is_30_unique_canonical_courses():
+    canon = _canon()
     slugs = [c["slug"] for c in _manifest()["courses"]]
-    assert len(slugs) == 30
-    assert len(set(slugs)) == 30
-    assert set(slugs) == set(_canon())
+    assert len(slugs) == len(canon)
+    assert len(set(slugs)) == len(canon)
+    assert set(slugs) == set(canon)
 
 
 def test_every_course_has_a_sprite_and_sane_rects():
