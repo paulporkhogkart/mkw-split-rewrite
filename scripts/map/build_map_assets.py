@@ -42,6 +42,16 @@ def load_avif(path):
     return cv2.cvtColor(np.array(Image.open(path).convert("RGBA")), cv2.COLOR_RGBA2BGRA)
 
 
+def harden_matte(a, lo=110, hi=180):
+    """Square off the artist's soft alpha. Each icon sits on a little island whose alpha fades
+    gently into the map; cut from the hi-res map that semi-transparent fringe carries faint
+    terrain that visibly slides when the sprite lifts on hover. Push the fade to 0 and the
+    icon + its solid base to 255 - dark interior detail is already at full alpha, so it is kept -
+    leaving a narrow anti-aliased edge."""
+    t = np.clip((a.astype(np.float32) - lo) / (hi - lo), 0, 1)
+    return (t * t * (3 - 2 * t) * 255).astype(np.uint8)
+
+
 def detect_boxes(alpha):
     """Icon bounding boxes = connected components of the stage layer's real alpha."""
     H, W = alpha.shape
@@ -108,7 +118,8 @@ def main():
         tlx, tly = rx0 + loc[0], ry0 + loc[1]
         icon_mask[tly:min(Hh, tly + th), tlx:min(Wh, tlx + tw)] = 255
         sprite = cv2.cvtColor(hires[tly:tly + th, tlx:tlx + tw], cv2.COLOR_BGR2BGRA)
-        sprite[:, :, 3] = tmask[:sprite.shape[0], :sprite.shape[1]]   # real alpha = the matte
+        amatte = harden_matte(tmask)                                  # drop the soft island-fade fringe
+        sprite[:, :, 3] = amatte[:sprite.shape[0], :sprite.shape[1]]
         bcx, bcy = to_hi(x + w / 2, y + h / 2)
         hcx, hcy = bcx + (tlx + tw / 2 - pcx), bcy + (tly + th / 2 - pcy)
         cw, ch = w * scale, h * scale
