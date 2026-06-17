@@ -43,6 +43,25 @@ def load_avif(path):
     return cv2.cvtColor(np.array(Image.open(path).convert("RGBA")), cv2.COLOR_RGBA2BGRA)
 
 
+def bleed_edge_rgb(sprite, solid=60, iters=14):
+    """The stages AVIF crushes RGB toward black under low alpha, so the icon's semi-transparent
+    soft edge composites as a dark halo on light terrain. Bleed the opaque icon's colours
+    outward into that fringe (alpha is untouched) so the edge blends to the icon's own colour
+    instead of black."""
+    rgb = sprite[:, :, :3].copy()
+    mask = (sprite[:, :, 3] > solid).astype(np.uint8)
+    k = np.ones((3, 3), np.uint8)
+    for _ in range(iters):
+        grown = cv2.dilate(mask, k)
+        new = (grown > 0) & (mask == 0)
+        blurred = cv2.blur(rgb, (3, 3))
+        rgb[new] = blurred[new]
+        mask = grown
+    out = sprite.copy()
+    out[:, :, :3] = rgb
+    return out
+
+
 def detect_boxes(alpha):
     """Icon bounding boxes = connected components of the stage layer's real alpha."""
     H, W = alpha.shape
@@ -121,8 +140,10 @@ def main():
         # terrain baked behind it) - so lifting it on hover never drags any terrain. Its rect is
         # recorded in hi-res space (spr, below) and the frontend scales it onto the base.
         sprite = stages[py0:py1, px0:px1].copy()
-        # The AVIF alpha is lossy: its "transparent" background sits at a faint non-zero alpha
-        # over black RGB, which reads as a dark rectangle on light terrain. Floor it to zero.
+        # The stages AVIF crushes RGB toward black under low alpha, so the soft edge would
+        # composite as a dark halo - bleed the opaque colours into the fringe, then zero the
+        # faint alpha pedestal (which would otherwise read as a dark rectangle on light terrain).
+        sprite = bleed_edge_rgb(sprite)
         sprite[:, :, 3][sprite[:, :, 3] < ALPHA_FLOOR] = 0
         cw, ch = w * scale, h * scale
         courses.append({"slug": lab["slug"], "sprite": sprite,
