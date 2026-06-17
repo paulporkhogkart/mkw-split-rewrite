@@ -2,14 +2,21 @@
 """Build the World Map web assets from the committed source art (deterministic).
 
 Outputs web/public/map/{base.jpg, sprites/<slug>.png, manifest.json}.
-Requires ffmpeg on PATH to decode the AVIF source layers. Only needed to *regenerate*
-assets; building the website itself does not need ffmpeg.
 
+The AVIF source layers (named .webp) carry a real alpha channel - the artist's own icon
+cut-out, which correctly keeps dark icon detail (e.g. Airship Fortress's black bullet bill).
+We decode that alpha with libavif (pillow-avif-plugin) and use it directly as each sprite's
+matte. That is a build-time-only dependency for regenerating assets; building the website
+itself needs none of this.
+
+  pip install pillow-avif-plugin
   python scripts/map/build_map_assets.py
 """
-import importlib.util, json, subprocess, tempfile
+import importlib.util, json
 from pathlib import Path
 import cv2, numpy as np
+from PIL import Image
+import pillow_avif  # noqa: F401  - registers the AVIF decoder (incl. alpha) on PIL
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = Path(__file__).resolve().parent / "sources"
@@ -30,36 +37,15 @@ def load_canonical():
     return dict(mod.CANONICAL_COURSES)
 
 
-def decode_avif(src, dst):
-    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), str(dst)], check=True)
+def load_avif(path):
+    """Decode an AVIF (named .webp here) to a cv2 BGRA array, preserving the real alpha."""
+    return cv2.cvtColor(np.array(Image.open(path).convert("RGBA")), cv2.COLOR_RGBA2BGRA)
 
 
-def smoothstep_alpha(crop, lo=16.0, hi=64.0):
-    b = crop.max(axis=2).astype(np.float32)
-    a = np.clip((b - lo) / (hi - lo), 0, 1)
-    return (a * a * (3 - 2 * a) * 255).astype(np.uint8)
-
-
-def icon_matte(crop):
-    """Opaque silhouette of the icon for the visible sprite alpha. A pure brightness key drops
-    dark *icon* detail (e.g. Airship Fortress's black bullet bill) along with the black stages
-    background. Instead: take a brightness core, then flood-fill the exterior black from the
-    corners (the CROP_PAD border guarantees the corners are background) - everything not reached,
-    including enclosed dark parts, is the icon. Soft 1px edge for anti-aliasing."""
-    core = (crop.max(axis=2) > 30).astype(np.uint8) * 255
-    core = cv2.morphologyEx(core, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
-    ff = core.copy(); h, w = core.shape; m = np.zeros((h + 2, w + 2), np.uint8)
-    for sx, sy in [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]:
-        if ff[sy, sx] == 0:
-            cv2.floodFill(ff, m, (sx, sy), 255)
-    sil = cv2.bitwise_or(core, cv2.bitwise_not(ff))
-    sil = cv2.morphologyEx(sil, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)))
-    return np.clip(cv2.GaussianBlur(sil.astype(np.float32), (0, 0), 1.2), 0, 255).astype(np.uint8)
-
-
-def detect_boxes(stages):
-    H, W = stages.shape[:2]
-    m = (stages.max(axis=2) > 50).astype(np.uint8)
+def detect_boxes(alpha):
+    """Icon bounding boxes = connected components of the stage layer's real alpha."""
+    H, W = alpha.shape
+    m = (alpha > 40).astype(np.uint8)
     m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (17, 17)))
     n, _, st, _ = cv2.connectedComponentsWithStats(m, 8)
     boxes = [(int(x), int(y), int(w), int(h)) for i in range(1, n)
@@ -88,14 +74,13 @@ def main():
     canon = load_canonical()
     labels = json.loads(LABELS.read_text())
 
-    with tempfile.TemporaryDirectory() as td:
-        inner_p, stages_p = Path(td) / "inner.png", Path(td) / "stages.png"
-        decode_avif(SRC / "MarioKartWorld_World_Map_Inner.webp", inner_p)
-        decode_avif(SRC / "MarioKartWorld_World_Map_Stages.webp", stages_p)
-        inner, stages = cv2.imread(str(inner_p)), cv2.imread(str(stages_p))
+    stages = load_avif(SRC / "MarioKartWorld_World_Map_Stages.webp")  # BGRA, real alpha
+    stages_bgr, stages_a = stages[:, :, :3], stages[:, :, 3]
+    inner = load_avif(SRC / "MarioKartWorld_World_Map_Inner.webp")[:, :, :3]
     hires = cv2.imread(str(SRC / "highresmap.jpeg"))
     rr = cv2.imread(str(SRC / "MKWorld_Icon_Rainbow_Road.webp"), cv2.IMREAD_UNCHANGED)
-    Hs, Ws = stages.shape[:2]; Hh, Wh = hires.shape[:2]
+    Hs, Ws = stages_a.shape
+    Hh, Wh = hires.shape[:2]
 
     M = orb_transform(inner, hires)
     scale = float(np.hypot(M[0, 0], M[0, 1]))
@@ -105,25 +90,25 @@ def main():
 
     courses = []  # {sprite(BGRA), hit[x,y,w,h], spr[x,y,w,h]} in normalized base coords
     icon_mask = np.zeros((Hh, Wh), np.uint8)  # baked-icon footprints to erase from the base
-    for (x, y, w, h) in detect_boxes(stages):
+    for (x, y, w, h) in detect_boxes(stages_a):
         px0, py0 = max(0, x - CROP_PAD), max(0, y - CROP_PAD)
         px1, py1 = min(Ws, x + w + CROP_PAD), min(Hs, y + h + CROP_PAD)
-        crop = stages[py0:py1, px0:px1]
-        mask = smoothstep_alpha(crop)
+        crop = stages_bgr[py0:py1, px0:px1]
+        matte = stages_a[py0:py1, px0:px1]                      # the artist's real alpha
         tw, th = round((px1 - px0) * scale), round((py1 - py0) * scale)
         tmpl = cv2.resize(crop, (tw, th), interpolation=cv2.INTER_AREA)
-        tmask = cv2.resize(mask, (tw, th), interpolation=cv2.INTER_AREA)
+        tmask = cv2.resize(matte, (tw, th), interpolation=cv2.INTER_AREA)
         pcx, pcy = to_hi((px0 + px1) / 2, (py0 + py1) / 2)
-        rx0, ry0 = max(0, int(pcx - tw / 2 - MATCH_SLACK)), max(0, int(pcy - th / 2 - MATCH_SLACK))
-        rx1, ry1 = min(Wh, int(pcx + tw / 2 + MATCH_SLACK)), min(Hh, int(pcy + th / 2 + MATCH_SLACK))
+        S = MATCH_SLACK
+        rx0, ry0 = max(0, int(pcx - tw / 2 - S)), max(0, int(pcy - th / 2 - S))
+        rx1, ry1 = min(Wh, int(pcx + tw / 2 + S)), min(Hh, int(pcy + th / 2 + S))
         res = cv2.matchTemplate(hires[ry0:ry1, rx0:rx1], tmpl, cv2.TM_CCOEFF_NORMED, mask=tmask)
         res[~np.isfinite(res)] = 0
         _, _, _, loc = cv2.minMaxLoc(res)
         tlx, tly = rx0 + loc[0], ry0 + loc[1]
         icon_mask[tly:min(Hh, tly + th), tlx:min(Wh, tlx + tw)] = 255
         sprite = cv2.cvtColor(hires[tly:tly + th, tlx:tlx + tw], cv2.COLOR_BGR2BGRA)
-        amatte = cv2.resize(icon_matte(crop), (tw, th), interpolation=cv2.INTER_AREA)
-        sprite[:, :, 3] = amatte[:sprite.shape[0], :sprite.shape[1]]
+        sprite[:, :, 3] = tmask[:sprite.shape[0], :sprite.shape[1]]   # real alpha = the matte
         bcx, bcy = to_hi(x + w / 2, y + h / 2)
         hcx, hcy = bcx + (tlx + tw / 2 - pcx), bcy + (tly + th / 2 - pcy)
         cw, ch = w * scale, h * scale
@@ -170,6 +155,7 @@ def main():
                                   (int(round(xs.mean())), int(round(ys.mean()))), cv2.NORMAL_CLONE)
     base = cv2.resize(clean, (BASE_W, manifest["base"]["h"]), interpolation=cv2.INTER_AREA)
     cv2.imwrite(str(OUT / "base.jpg"), base, [cv2.IMWRITE_JPEG_QUALITY, 88])
+
     manifest["courses"].sort(key=lambda c: c["slug"])
     (OUT / "manifest.json").write_text(json.dumps(manifest, indent=1))
 
