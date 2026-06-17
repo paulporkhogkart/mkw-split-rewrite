@@ -29,8 +29,6 @@
         <div class="icons">
           {#each manifest.courses as c (c.slug)}
             <div class="hit" data-slug={c.slug} title={c.name} style={hitStyle(c.hit)}>
-              <img class="shadow" src={spriteUrl(c.slug)} alt="" aria-hidden="true"
-                   draggable="false" style={spriteStyle(c.hit, c.spr)} />
               <img class="spr" src={spriteUrl(c.slug)} alt={c.name}
                    draggable="false" style={spriteStyle(c.hit, c.spr)} />
             </div>
@@ -57,33 +55,20 @@
     border-radius: var(--r); box-shadow: inset 0 0 60px 10px rgba(0,0,0,.45);
   }
   .stage { position: relative; width: 100%; }
-  /* calm at rest: the whole map sits muted so SP2's territory colour can lead */
-  .base { display: block; width: 100%; height: auto; filter: saturate(.82) brightness(.9); }
+  .base { display: block; width: 100%; height: auto; }
   .territory, .popups { position: absolute; inset: 0; pointer-events: none; }
   .icons { position: absolute; inset: 0; }
   .hit { position: absolute; cursor: pointer; }
-  .spr, .shadow {
+  .spr {
     position: absolute; pointer-events: none; will-change: transform;
-    transition: transform .16s ease, filter .16s ease, opacity .16s ease;
-  }
-  .spr { transform-origin: 50% 70%; filter: saturate(.78) brightness(.86); }
-  /* Cast shadow: a sharp, dark copy of the icon silhouette dropped straight down to darken the
-     terrain beneath (no blur) - matches the baked island shadows on the hi-res map. */
-  .shadow {
-    transform: translateY(8%);
-    filter: brightness(0);
-    opacity: .5;
+    transform-origin: 50% 70%;
+    transition: transform .16s ease, filter .16s ease;
   }
   .hit:hover { z-index: 50; }
-  /* grow-dominant lift: the enlarged sprite always covers its own footprint */
+  /* On hover the course lifts off its shadow (the shadow is baked into the base map). */
   .hit:hover .spr {
-    transform: scale(1.18) translateY(-4%);
-    filter: brightness(1.08) saturate(1.05);
-  }
-  /* as the icon rises, its shadow slides further down and grows (object lifting off) */
-  .hit:hover .shadow {
-    transform: translateY(15%) scale(1.06);
-    opacity: .45;
+    transform: scale(1.1) translateY(-8%);
+    filter: brightness(1.05) saturate(1.04);
   }
   .msg { padding: 4rem; text-align: center; color: var(--tx-dim); }
   @media (max-width: 560px) { .map-view { padding: 8px; } }
