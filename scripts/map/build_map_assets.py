@@ -42,12 +42,13 @@ def load_avif(path):
     return cv2.cvtColor(np.array(Image.open(path).convert("RGBA")), cv2.COLOR_RGBA2BGRA)
 
 
-def harden_matte(a, lo=110, hi=180):
+def harden_matte(a, lo=30, hi=70):
     """Square off the artist's soft alpha. Each icon sits on a little island whose alpha fades
-    gently into the map; cut from the hi-res map that semi-transparent fringe carries faint
-    terrain that visibly slides when the sprite lifts on hover. Push the fade to 0 and the
-    icon + its solid base to 255 - dark interior detail is already at full alpha, so it is kept -
-    leaving a narrow anti-aliased edge."""
+    gently into the map; left semi-transparent, that fringe carries faint terrain that slides
+    when the sprite lifts on hover. Binarising fixes the slide by making the island OPAQUE (it
+    lifts solidly, nothing shows through). The threshold is kept low so the island's full base /
+    bottom rim is retained (a high threshold clipped it and made icons look flat) - only the
+    faint outer glow (below ~lo) is dropped; dark interior detail is already at full alpha."""
     t = np.clip((a.astype(np.float32) - lo) / (hi - lo), 0, 1)
     return (t * t * (3 - 2 * t) * 255).astype(np.uint8)
 
