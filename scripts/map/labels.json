@@ -1,0 +1,152 @@
+[
+ {
+  "slug": "acorn_heights",
+  "cx": 0.49649,
+  "cy": 0.08851
+ },
+ {
+  "slug": "boo_cinema",
+  "cx": 0.6252,
+  "cy": 0.15553
+ },
+ {
+  "slug": "bowsers_castle",
+  "cx": 0.28341,
+  "cy": 0.17106
+ },
+ {
+  "slug": "dry_bones_burnout",
+  "cx": 0.39091,
+  "cy": 0.16617
+ },
+ {
+  "slug": "mario_circuit",
+  "cx": 0.50478,
+  "cy": 0.26511
+ },
+ {
+  "slug": "starview_peak",
+  "cx": 0.71818,
+  "cy": 0.22957
+ },
+ {
+  "slug": "airship_fortress",
+  "cx": 0.17321,
+  "cy": 0.31277
+ },
+ {
+  "slug": "toads_factory",
+  "cx": 0.39713,
+  "cy": 0.34702
+ },
+ {
+  "slug": "dandelion_depths",
+  "cx": 0.61085,
+  "cy": 0.3666
+ },
+ {
+  "slug": "sky_high_sundae",
+  "cx": 0.82121,
+  "cy": 0.34426
+ },
+ {
+  "slug": "wario_stadium",
+  "cx": 0.27751,
+  "cy": 0.43
+ },
+ {
+  "slug": "moo_moo_meadows",
+  "cx": 0.50048,
+  "cy": 0.42
+ },
+ {
+  "slug": "dk_pass",
+  "cx": 0.71547,
+  "cy": 0.43532
+ },
+ {
+  "slug": "shy_guy_bazaar",
+  "cx": 0.15662,
+  "cy": 0.51128
+ },
+ {
+  "slug": "choco_mountain",
+  "cx": 0.38612,
+  "cy": 0.52426
+ },
+ {
+  "slug": "cheep_cheep_falls",
+  "cx": 0.61898,
+  "cy": 0.53106
+ },
+ {
+  "slug": "peach_stadium",
+  "cx": 0.49984,
+  "cy": 0.58043
+ },
+ {
+  "slug": "warios_galleon",
+  "cx": 0.8319,
+  "cy": 0.55021
+ },
+ {
+  "slug": "mario_bros_circuit",
+  "cx": 0.2496,
+  "cy": 0.61319
+ },
+ {
+  "slug": "salty_salty_speedway",
+  "cx": 0.72057,
+  "cy": 0.62574
+ },
+ {
+  "slug": "faraway_oasis",
+  "cx": 0.61356,
+  "cy": 0.70745
+ },
+ {
+  "slug": "peach_beach",
+  "cx": 0.82568,
+  "cy": 0.71447
+ },
+ {
+  "slug": "desert_hills",
+  "cx": 0.14769,
+  "cy": 0.72234
+ },
+ {
+  "slug": "crown_city",
+  "cx": 0.38931,
+  "cy": 0.73255
+ },
+ {
+  "slug": "whistlestop_summit",
+  "cx": 0.25678,
+  "cy": 0.83106
+ },
+ {
+  "slug": "dk_spaceport",
+  "cx": 0.40032,
+  "cy": 0.8766
+ },
+ {
+  "slug": "koopa_troopa_beach",
+  "cx": 0.49713,
+  "cy": 0.84468
+ },
+ {
+  "slug": "great_block_ruins",
+  "cx": 0.74753,
+  "cy": 0.83957
+ },
+ {
+  "slug": "dino_dino_jungle",
+  "cx": 0.6362,
+  "cy": 0.90404
+ },
+ {
+  "slug": "rainbow_road",
+  "cx": 0.5,
+  "cy": 0.73123
+ }
+]
