@@ -40,6 +40,23 @@ def smoothstep_alpha(crop, lo=16.0, hi=64.0):
     return (a * a * (3 - 2 * a) * 255).astype(np.uint8)
 
 
+def icon_matte(crop):
+    """Opaque silhouette of the icon for the visible sprite alpha. A pure brightness key drops
+    dark *icon* detail (e.g. Airship Fortress's black bullet bill) along with the black stages
+    background. Instead: take a brightness core, then flood-fill the exterior black from the
+    corners (the CROP_PAD border guarantees the corners are background) - everything not reached,
+    including enclosed dark parts, is the icon. Soft 1px edge for anti-aliasing."""
+    core = (crop.max(axis=2) > 30).astype(np.uint8) * 255
+    core = cv2.morphologyEx(core, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
+    ff = core.copy(); h, w = core.shape; m = np.zeros((h + 2, w + 2), np.uint8)
+    for sx, sy in [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]:
+        if ff[sy, sx] == 0:
+            cv2.floodFill(ff, m, (sx, sy), 255)
+    sil = cv2.bitwise_or(core, cv2.bitwise_not(ff))
+    sil = cv2.morphologyEx(sil, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)))
+    return np.clip(cv2.GaussianBlur(sil.astype(np.float32), (0, 0), 1.2), 0, 255).astype(np.uint8)
+
+
 def detect_boxes(stages):
     H, W = stages.shape[:2]
     m = (stages.max(axis=2) > 50).astype(np.uint8)
@@ -105,7 +122,8 @@ def main():
         tlx, tly = rx0 + loc[0], ry0 + loc[1]
         icon_mask[tly:min(Hh, tly + th), tlx:min(Wh, tlx + tw)] = 255
         sprite = cv2.cvtColor(hires[tly:tly + th, tlx:tlx + tw], cv2.COLOR_BGR2BGRA)
-        sprite[:, :, 3] = tmask[:sprite.shape[0], :sprite.shape[1]]
+        amatte = cv2.resize(icon_matte(crop), (tw, th), interpolation=cv2.INTER_AREA)
+        sprite[:, :, 3] = amatte[:sprite.shape[0], :sprite.shape[1]]
         bcx, bcy = to_hi(x + w / 2, y + h / 2)
         hcx, hcy = bcx + (tlx + tw / 2 - pcx), bcy + (tly + th / 2 - pcy)
         cw, ch = w * scale, h * scale
