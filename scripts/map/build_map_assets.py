@@ -37,7 +37,7 @@ OUT = ROOT / "web" / "public" / "map"
 DISPLAY_W = 1100
 BASE_W = DISPLAY_W * 2          # 2x export for retina crispness
 RR_CENTER = (0.500, 0.734)     # hand-placed in the hi-res frame; transformed to the inner frame below
-RR_WIDTH = 0.092               # Rainbow Road sprite width, as a fraction of the hi-res map width
+RR_WIDTH = 0.089               # Rainbow Road sprite width (hand-set), as a fraction of hi-res width
 ISO_DILATE = 6                 # px: grow each icon's blob a touch so cleaning keeps its full edge
 ALPHA_LO, ALPHA_HI = 120, 185  # drop the near-black halo (alpha < LO), keep the body (alpha >= HI)
 
@@ -87,6 +87,21 @@ def clean(bgra):
     out = np.dstack([rgb, a])
     x0, y0, x1, y1 = alpha_bbox(a)
     return out[y0:y1, x0:x1], x0, y0
+
+
+def grade(src, ref, src_icons, ref_icons):
+    """Reinhard colour transfer (Lab) so the flat `src` (inner) takes on `ref`'s (hi-res sample's)
+    grade. Icon areas are excluded from the statistics so the icons baked into `ref` don't skew the
+    terrain colour match."""
+    s = cv2.cvtColor(src, cv2.COLOR_BGR2LAB).astype(np.float32)
+    r = cv2.cvtColor(ref, cv2.COLOR_BGR2LAB).astype(np.float32)
+    st = ~src_icons.astype(bool); rt = ~ref_icons.astype(bool)
+    out = s.copy()
+    for c in range(3):
+        sm, ss = s[:, :, c][st].mean(), s[:, :, c][st].std() + 1e-6
+        rm, rs = r[:, :, c][rt].mean(), r[:, :, c][rt].std() + 1e-6
+        out[:, :, c] = (s[:, :, c] - sm) * float(np.clip(rs / ss, 0.5, 1.8)) + rm
+    return cv2.cvtColor(np.clip(out, 0, 255).astype(np.uint8), cv2.COLOR_LAB2BGR)
 
 
 def orb_transform(a, b):
@@ -147,9 +162,15 @@ def main():
     rcx, rcy = hi_to_inner(RR_CENTER[0] * Wh, RR_CENTER[1] * Hh)
     placed.append(("rainbow_road", rr, int(round(rcx - rw / 2)), int(round(rcy - rh / 2))))
 
-    # emit base (pure inner) + sprites + manifest (everything normalized to the inner/stages frame).
+    # grade the inner base to the hi-res sample's look (terrain only; baked icons masked out).
+    ek = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (41, 41))
+    icon_inner = cv2.dilate((sa > 40).astype(np.uint8), ek)
+    icon_hi = cv2.dilate((cv2.warpAffine(sa, M, (Wh, Hh)) > 40).astype(np.uint8), ek)
+    graded = grade(inner, hires, icon_inner, icon_hi)
+
+    # emit base + sprites + manifest (everything normalized to the inner/stages frame).
     bh_out = round(Hs * BASE_W / Ws)
-    cv2.imwrite(str(OUT / "base.jpg"), cv2.resize(inner, (BASE_W, bh_out), interpolation=cv2.INTER_AREA),
+    cv2.imwrite(str(OUT / "base.jpg"), cv2.resize(graded, (BASE_W, bh_out), interpolation=cv2.INTER_AREA),
                 [cv2.IMWRITE_JPEG_QUALITY, 88])
     manifest = {"base": {"w": BASE_W, "h": bh_out}, "courses": []}
     for slug, bgra, gx0, gy0 in placed:

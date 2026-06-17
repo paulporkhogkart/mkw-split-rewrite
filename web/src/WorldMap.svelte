@@ -57,7 +57,8 @@
     border-radius: var(--r); box-shadow: inset 0 0 60px 10px rgba(0,0,0,.45);
   }
   .stage { position: relative; width: 100%; }
-  .base { display: block; width: 100%; height: auto; }
+  /* Calm at rest: the whole map sits muted so the hovered course (and SP2's territory) leads. */
+  .base { display: block; width: 100%; height: auto; filter: saturate(.82) brightness(.9); }
   .territory, .popups { position: absolute; inset: 0; pointer-events: none; }
   .icons { position: absolute; inset: 0; }
   .hit { position: absolute; cursor: pointer; }
@@ -65,7 +66,8 @@
     position: absolute; pointer-events: none; will-change: transform;
     transition: transform .18s ease, filter .18s ease, opacity .18s ease;
   }
-  .spr { transform-origin: 50% 90%; }
+  /* Icons are muted at rest too; hovering one brings it to full vivid colour (living-icon hover). */
+  .spr { transform-origin: 50% 90%; filter: saturate(.78) brightness(.86); }
   /* The shadow is a live black silhouette of the course, sitting just below it. */
   .shadow {
     transform-origin: 50% 100%;
@@ -76,8 +78,8 @@
   .hit:hover { z-index: 50; }
   /* On hover the course rises and its shadow drops + spreads + fades, so it reads as lifting. */
   .hit:hover .spr {
-    transform: translateY(-12%) scale(1.11);
-    filter: brightness(1.05) saturate(1.04);
+    transform: translateY(-12%) scale(1.13);
+    filter: brightness(1.1) saturate(1.08);
   }
   .hit:hover .shadow {
     transform: translateY(11%) scale(1.06);
