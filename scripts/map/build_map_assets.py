@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """Build the World Map web assets.
 
-This mirrors exactly what you get by opening the two source layers in a browser and laying the
-transparent STAGES webp over the stage-less INNER webp: a perfect combined map. We keep them as the
-two layers they are instead of flattening:
+This mirrors what you get by laying the transparent STAGES webp over the stage-less INNER webp -
+a perfect combined map - but keeps them as two layers so the icons can react to hover:
 
 Base   : the INNER layer (the map with NO course icons). Nothing is baked on top, so on hover there
-         is no icon underneath to ghost through. We bake one sharp straight-down drop shadow per
-         course into it (inner has none of its own).
-Sprites: each course icon is cut from the STAGES layer - which is icons-only on full transparency.
-         So a sprite contains the icon and its own glow and NOTHING of the background, and on hover
-         only the icon grows (not a patch of terrain). inner and stages are pixel-aligned (identical
-         dimensions), so a sprite drops back onto its exact spot with no alignment math.
+         is no icon to ghost through and no shadow frozen into the art. The frontend draws each
+         icon's drop shadow as a live layer that moves when the icon lifts.
+Sprites: each course icon, cut from the icons-only STAGES layer, then CLEANED: the stages alpha
+         carries a wide near-black halo (alpha 1-128 with RGB ~0) that composites as a dark
+         island-shaped haze over the map. We drop that halo (keep the alpha 128+ body) and bleed the
+         body's edge colour outward so nothing black is left to fringe when the browser scales it.
 
-Rainbow Road is the lone exception (not present on either layer): a tightened official icon over one
-baked shadow. The hi-res map is used only at build time, to carry the hand-placed course labels
-(authored against it) into the inner frame for slug assignment.
+inner and stages are pixel-aligned (identical dimensions), so a sprite drops onto its exact spot
+with no alignment math. Rainbow Road is the lone exception (on neither layer): a cleaned official
+icon. The hi-res map is used only at build time to carry the hand-placed labels into the inner
+frame for slug assignment.
 Requires libavif (pillow-avif-plugin) to decode the AVIF source layers; build-time only.
 
   pip install pillow-avif-plugin
@@ -38,10 +38,8 @@ DISPLAY_W = 1100
 BASE_W = DISPLAY_W * 2          # 2x export for retina crispness
 RR_CENTER = (0.500, 0.734)     # hand-placed in the hi-res frame; transformed to the inner frame below
 RR_WIDTH = 0.092               # Rainbow Road sprite width, as a fraction of the hi-res map width
-GLOW_DILATE = 18               # px (native): grow each icon's body mask to recapture its soft glow
-SHADOW_DY = 0.05               # baked shadow offset, straight down, as a fraction of icon height
-SHADOW_DARK = 0.45             # how much the baked shadow darkens the terrain (0..1)
-SHADOW_LO, SHADOW_HI = 110, 165  # solidify the icon alpha into a sharp (not glow-soft) shadow shape
+ISO_DILATE = 6                 # px: grow each icon's blob a touch so cleaning keeps its full edge
+ALPHA_LO, ALPHA_HI = 120, 185  # drop the near-black halo (alpha < LO), keep the body (alpha >= HI)
 
 
 def load_canonical():
@@ -65,26 +63,30 @@ def solidify(a, lo, hi):
     return (t * t * (3 - 2 * t) * 255).astype(np.uint8)
 
 
-def tighten(bgra):
-    """Strip the wide low-alpha glow plate from an official icon (keep the solid body + a few px of
-    its real edge). Used only for Rainbow Road, which has no map-layer twin."""
-    a = bgra[:, :, 3]
-    keep = cv2.dilate((a > 120).astype(np.uint8),
-                      cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
-    out = bgra.copy(); out[:, :, 3] = (a * keep)
-    return out
+def alpha_bleed(bgr, a, iters=90):
+    """Flood the opaque body's colour outward into the transparent area, so no black RGB remains to
+    fringe when the image is scaled."""
+    out = bgr.astype(np.float32).copy()
+    known = a > 180
+    K = known.astype(np.float32); Csum = out * K[:, :, None]
+    for _ in range(iters):
+        if known.all():
+            break
+        Kd = cv2.blur(K, (3, 3)); Cd = cv2.blur(Csum, (3, 3))
+        cand = (Kd > 1e-6) & (~known)
+        out[cand] = Cd[cand] / Kd[cand][:, None]
+        known = known | cand
+        K = known.astype(np.float32); Csum = out * K[:, :, None]
+    return out.astype(np.uint8)
 
 
-def bake_shadow(base, alpha, gx0, gy0, dy, dark):
-    """Darken the base under a sprite's silhouette, offset straight down - a sharp baked shadow."""
-    h, w = alpha.shape
-    oy = gy0 + int(round(dy * h))
-    x0, y0 = max(0, gx0), max(0, oy)
-    x1, y1 = min(base.shape[1], gx0 + w), min(base.shape[0], oy + h)
-    if x1 <= x0 or y1 <= y0:
-        return
-    asub = (alpha[y0 - oy:y1 - oy, x0 - gx0:x1 - gx0].astype(np.float32) / 255.0 * dark)[:, :, None]
-    base[y0:y1, x0:x1] = (base[y0:y1, x0:x1] * (1 - asub)).astype(np.uint8)
+def clean(bgra):
+    """Strip an icon's near-black low-alpha halo and bleed its edge colour, leaving just the body."""
+    a = solidify(bgra[:, :, 3], ALPHA_LO, ALPHA_HI)
+    rgb = alpha_bleed(bgra[:, :, :3], bgra[:, :, 3])
+    out = np.dstack([rgb, a])
+    x0, y0, x1, y1 = alpha_bbox(a)
+    return out[y0:y1, x0:x1], x0, y0
 
 
 def orb_transform(a, b):
@@ -111,8 +113,8 @@ def main():
     hires = cv2.imread(str(SRC / "highresmap.jpeg"))
     Hs, Ws = sa.shape; Hh, Wh = hires.shape[:2]
 
-    # The labels were hand-placed against the hi-res map. Carry them into the inner/stages frame
-    # (inner and stages share one frame) so we can name each detected icon. ORB only, build-time.
+    # The labels were hand-placed against the hi-res map. Carry them into the inner/stages frame so
+    # we can name each detected icon (ORB only, build-time).
     M = orb_transform(inner, hires); scale = float(np.hypot(M[0, 0], M[0, 1]))
     Minv = cv2.invertAffineTransform(M)
     def hi_to_inner(hx, hy):
@@ -124,7 +126,6 @@ def main():
                          cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (17, 17)))
     n, lbl, st, cent = cv2.connectedComponentsWithStats(m, 8)
 
-    base = inner.copy()
     placed = []   # (slug, sprite_bgra, gx0, gy0)  - gx0,gy0 = top-left in inner/stages px
     for i in range(1, n):
         x, y, w, h, area = st[i]
@@ -132,27 +133,23 @@ def main():
             continue
         cx, cy = cent[i]
         slug = min(lab_inner, key=lambda L: (L[1] - cx) ** 2 + (L[2] - cy) ** 2)[0]
-        # this icon's alpha = its blob grown to recapture its soft glow, masking off neighbours.
-        maski = cv2.dilate((lbl == i).astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (GLOW_DILATE, GLOW_DILATE)))
-        spa = sa * maski
-        ax0, ay0, ax1, ay1 = alpha_bbox(spa)
-        sprite = np.dstack([srgb, spa])[ay0:ay1, ax0:ax1]
-        bake_shadow(base, solidify(sprite[:, :, 3], SHADOW_LO, SHADOW_HI), ax0, ay0, SHADOW_DY, SHADOW_DARK)
-        placed.append((slug, sprite, ax0, ay0))
+        maski = cv2.dilate((lbl == i).astype(np.uint8),
+                           cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ISO_DILATE, ISO_DILATE)))
+        ax0, ay0, ax1, ay1 = alpha_bbox(sa * maski)
+        sprite, dx, dy = clean(np.dstack([srgb, sa * maski])[ay0:ay1, ax0:ax1])
+        placed.append((slug, sprite, ax0 + dx, ay0 + dy))
 
-    # Rainbow Road: not on either layer. Tighten the official icon (glow plate stripped) + a shadow.
-    rr = tighten(cv2.imread(str(ICONS / "rainbow_road.png"), cv2.IMREAD_UNCHANGED))
-    rax0, ray0, rax1, ray1 = alpha_bbox(rr[:, :, 3]); rr = rr[ray0:ray1, rax0:rax1]
+    # Rainbow Road: not on either layer. A cleaned official icon at its hand-placed spot.
+    rr = cv2.imread(str(ICONS / "rainbow_road.png"), cv2.IMREAD_UNCHANGED)
+    rr, _, _ = clean(rr)
     rw = RR_WIDTH * Wh / scale; rh = rw * rr.shape[0] / rr.shape[1]   # hi-res width -> inner px
     rr = cv2.resize(rr, (int(round(rw)), int(round(rh))))
     rcx, rcy = hi_to_inner(RR_CENTER[0] * Wh, RR_CENTER[1] * Hh)
-    rgx0, rgy0 = int(round(rcx - rw / 2)), int(round(rcy - rh / 2))
-    bake_shadow(base, rr[:, :, 3], rgx0, rgy0, SHADOW_DY, SHADOW_DARK)
-    placed.append(("rainbow_road", rr, rgx0, rgy0))
+    placed.append(("rainbow_road", rr, int(round(rcx - rw / 2)), int(round(rcy - rh / 2))))
 
-    # emit base + sprites + manifest (everything normalized to the inner/stages frame).
+    # emit base (pure inner) + sprites + manifest (everything normalized to the inner/stages frame).
     bh_out = round(Hs * BASE_W / Ws)
-    cv2.imwrite(str(OUT / "base.jpg"), cv2.resize(base, (BASE_W, bh_out), interpolation=cv2.INTER_AREA),
+    cv2.imwrite(str(OUT / "base.jpg"), cv2.resize(inner, (BASE_W, bh_out), interpolation=cv2.INTER_AREA),
                 [cv2.IMWRITE_JPEG_QUALITY, 88])
     manifest = {"base": {"w": BASE_W, "h": bh_out}, "courses": []}
     for slug, bgra, gx0, gy0 in placed:

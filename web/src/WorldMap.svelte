@@ -29,6 +29,8 @@
         <div class="icons">
           {#each manifest.courses as c (c.slug)}
             <div class="hit" data-slug={c.slug} title={c.name} style={hitStyle(c.hit)}>
+              <img class="shadow" src={spriteUrl(c.slug)} alt="" aria-hidden="true"
+                   draggable="false" style={spriteStyle(c.hit, c.spr)} />
               <img class="spr" src={spriteUrl(c.slug)} alt={c.name}
                    draggable="false" style={spriteStyle(c.hit, c.spr)} />
             </div>
@@ -59,16 +61,27 @@
   .territory, .popups { position: absolute; inset: 0; pointer-events: none; }
   .icons { position: absolute; inset: 0; }
   .hit { position: absolute; cursor: pointer; }
-  .spr {
+  .spr, .shadow {
     position: absolute; pointer-events: none; will-change: transform;
-    transform-origin: 50% 70%;
-    transition: transform .16s ease, filter .16s ease;
+    transition: transform .18s ease, filter .18s ease, opacity .18s ease;
+  }
+  .spr { transform-origin: 50% 90%; }
+  /* The shadow is a live black silhouette of the course, sitting just below it. */
+  .shadow {
+    transform-origin: 50% 100%;
+    filter: brightness(0);
+    opacity: .42;
+    transform: translateY(7%);
   }
   .hit:hover { z-index: 50; }
-  /* On hover the course lifts off its shadow (the shadow is baked into the base map). */
+  /* On hover the course rises and its shadow drops + spreads + fades, so it reads as lifting. */
   .hit:hover .spr {
-    transform: scale(1.1) translateY(-8%);
+    transform: translateY(-12%) scale(1.11);
     filter: brightness(1.05) saturate(1.04);
+  }
+  .hit:hover .shadow {
+    transform: translateY(11%) scale(1.06);
+    opacity: .30;
   }
   .msg { padding: 4rem; text-align: center; color: var(--tx-dim); }
   @media (max-width: 560px) { .map-view { padding: 8px; } }
