@@ -42,17 +42,6 @@ def load_avif(path):
     return cv2.cvtColor(np.array(Image.open(path).convert("RGBA")), cv2.COLOR_RGBA2BGRA)
 
 
-def harden_matte(a, lo=30, hi=70):
-    """Square off the artist's soft alpha. Each icon sits on a little island whose alpha fades
-    gently into the map; left semi-transparent, that fringe carries faint terrain that slides
-    when the sprite lifts on hover. Binarising fixes the slide by making the island OPAQUE (it
-    lifts solidly, nothing shows through). The threshold is kept low so the island's full base /
-    bottom rim is retained (a high threshold clipped it and made icons look flat) - only the
-    faint outer glow (below ~lo) is dropped; dark interior detail is already at full alpha."""
-    t = np.clip((a.astype(np.float32) - lo) / (hi - lo), 0, 1)
-    return (t * t * (3 - 2 * t) * 255).astype(np.uint8)
-
-
 def detect_boxes(alpha):
     """Icon bounding boxes = connected components of the stage layer's real alpha."""
     H, W = alpha.shape
@@ -127,8 +116,10 @@ def main():
         tlx = int(round(min(max(mcx - tw / 2, 0), Wh - tw)))
         tly = int(round(min(max(mcy - th / 2, 0), Hh - th)))
         icon_mask[tly:tly + th, tlx:tlx + tw] = 255
-        sprite = cv2.cvtColor(hires[tly:tly + th, tlx:tlx + tw], cv2.COLOR_BGR2BGRA)
-        sprite[:, :, 3] = harden_matte(tmask)[:sprite.shape[0], :sprite.shape[1]]
+        # The sprite IS the stages layer's own clean transparent icon (icon art only, with no
+        # terrain baked behind it) - so lifting it on hover never drags any terrain. Its rect is
+        # recorded in hi-res space (spr, below) and the frontend scales it onto the base.
+        sprite = stages[py0:py1, px0:px1].copy()
         cw, ch = w * scale, h * scale
         courses.append({"slug": lab["slug"], "sprite": sprite,
                         "hit": [(mcx - cw / 2) / Wh, (mcy - ch / 2) / Hh, cw / Wh, ch / Hh],
