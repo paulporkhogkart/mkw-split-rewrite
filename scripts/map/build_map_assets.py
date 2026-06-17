@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """Build the World Map web assets.
 
-Base  : the hi-res map with the baked course icons removed (seamless-clone of the warped
-        stage-less `inner` terrain) and a sharp drop-shadow baked back under each course.
-Sprites: the official transparent icon PNGs (scripts/map/icons/<slug>.png), placed on their
-        spots. On hover the frontend lifts each sprite off its baked shadow.
+Base   : the ORIGINAL hi-res map, untouched - it already has all 29 course icons baked in with
+         their sharp in-game drop-shadows. (Rainbow Road isn't on the art, so we bake one shadow
+         for it.)
+Sprites: each course icon is CUT STRAIGHT FROM THE HI-RES MAP at its located spot, matted with the
+         island silhouette from the stages layer. So a sprite is pixel-identical to its baked twin
+         underneath - at rest it's invisible, and on hover the frontend lifts it off the baked
+         shadow. Rainbow Road is the one exception: a tightened copy of the official icon.
 
-Why this shape: the icons are CLEAN transparent PNGs (no crushed edges), and the shadow is baked
-INTO the base (not a CSS layer), so nothing composites a dark ring around the soft icon edges.
+Why cut from the map (not the official wiki icons): the wiki/stages icons carry a wide low-alpha
+glow plate with near-black RGB, which composites as a faint dark SQUARE over the map. A map-cut
+sprite's faint matte edge is terrain-coloured instead, so it disappears against its own twin.
 Requires libavif (pillow-avif-plugin) to decode the AVIF source layers; build-time only.
 
   pip install pillow-avif-plugin
@@ -33,8 +37,9 @@ RR_WIDTH = 0.092               # Rainbow Road sprite width (normalized) - not on
 CROP_PAD = 10
 MATCH_SLACK = 70
 SNAP_GATE = 30                # px: reject a local match that drifts this far from the labeled centre
-SHADOW_DARK = 0.5             # how much the baked shadow darkens the terrain (0..1)
-SHADOW_DY = 0.06             # baked shadow offset straight down, as a fraction of icon height
+MATTE_LO, MATTE_HI = 40, 85   # solidify the island matte: drop the faintest glow, keep the full edge
+RR_SHADOW_DY = 0.06           # Rainbow Road's baked shadow offset, straight down (frac of icon height)
+RR_SHADOW_DARK = 0.5          # how much that shadow darkens the terrain (0..1)
 
 
 def load_canonical():
@@ -52,15 +57,33 @@ def alpha_bbox(bgra):
     return xs.min(), ys.min(), xs.max() + 1, ys.max() + 1
 
 
-def detect_boxes(alpha):
-    H, W = alpha.shape
-    m = (alpha > 40).astype(np.uint8)
-    m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (17, 17)))
-    n, _, st, _ = cv2.connectedComponentsWithStats(m, 8)
-    boxes = [(int(x), int(y), int(w), int(h)) for i in range(1, n)
-             for x, y, w, h, a in [st[i]] if a >= 3000 and w < W * 0.55 and h < H * 0.55]
-    boxes.sort(key=lambda b: (round((b[1] + b[3] / 2) / 120), b[0]))
-    return boxes
+def solidify(a, lo, hi):
+    """Smoothstep an alpha channel: <lo -> 0, >hi -> 255, smooth between. Trims the faint glow
+    tail without hard-clipping the natural anti-aliased edge."""
+    t = np.clip((a.astype(np.float32) - lo) / (hi - lo), 0, 1)
+    return (t * t * (3 - 2 * t) * 255).astype(np.uint8)
+
+
+def tighten(bgra):
+    """Strip the wide low-alpha glow plate from an official icon (keep the solid body + a few px of
+    its real anti-aliased edge). Used only for Rainbow Road, which has no map-cut twin."""
+    a = bgra[:, :, 3]
+    keep = cv2.dilate((a > 120).astype(np.uint8),
+                      cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
+    out = bgra.copy(); out[:, :, 3] = (a * keep)
+    return out
+
+
+def bake_shadow(base, alpha, gx0, gy0, dy, dark):
+    """Darken the base under a sprite's silhouette, offset straight down - a sharp baked shadow."""
+    h, w = alpha.shape
+    oy = gy0 + int(round(dy * h))
+    x0, y0 = max(0, gx0), max(0, oy)
+    x1, y1 = min(base.shape[1], gx0 + w), min(base.shape[0], oy + h)
+    if x1 <= x0 or y1 <= y0:
+        return
+    asub = (alpha[y0 - oy:y1 - oy, x0 - gx0:x1 - gx0].astype(np.float32) / 255.0 * dark)[:, :, None]
+    base[y0:y1, x0:x1] = (base[y0:y1, x0:x1] * (1 - asub)).astype(np.uint8)
 
 
 def orb_transform(a, b):
@@ -81,8 +104,6 @@ def main():
     (OUT / "sprites").mkdir(parents=True, exist_ok=True)
     canon = load_canonical()
     labels = json.loads(LABELS.read_text())
-    sprites = {p.stem: load_avif(p) if p.suffix == ".webp" else cv2.imread(str(p), cv2.IMREAD_UNCHANGED)
-               for p in ICONS.glob("*.png")}
 
     stages = load_avif(SRC / "MarioKartWorld_World_Map_Stages.webp"); sa = stages[:, :, 3]; sbgr = stages[:, :, :3]
     inner = load_avif(SRC / "MarioKartWorld_World_Map_Inner.webp")[:, :, :3]
@@ -92,9 +113,9 @@ def main():
     def to_hi(x, y):
         p = M @ np.array([x, y, 1.0]); return float(p[0]), float(p[1])
 
-    # 1) locate each baked course: snapped centre (cx,cy) + on-map size (ow,oh), in hi-res px.
-    placed = []      # (slug, cx, cy, ow, oh)
-    icon_mask = np.zeros((Hh, Wh), np.uint8)   # baked-icon footprints to erase from the base
+    # 1) locate each baked course and CUT its sprite from the hi-res map at that spot.
+    #    placed: (slug, sprite_bgra, gx0, gy0) where (gx0,gy0) is the sprite's top-left in hi-res px.
+    placed = []
     for (x, y, w, h) in detect_boxes(sa):
         px0, py0 = max(0, x - CROP_PAD), max(0, y - CROP_PAD)
         px1, py1 = min(Ws, x + w + CROP_PAD), min(Hs, y + h + CROP_PAD)
@@ -112,55 +133,37 @@ def main():
         lcx, lcy = lab["cx"] * Wh, lab["cy"] * Hh
         if (mcx - lcx) ** 2 + (mcy - lcy) ** 2 > SNAP_GATE ** 2:   # match drifted -> trust the label
             mcx, mcy = lcx, lcy
-        # erase the baked icon (the stages footprint at this spot) from the base
-        bx0, by0 = int(mcx - tw / 2), int(mcy - th / 2)
-        sub = icon_mask[max(0, by0):by0 + th, max(0, bx0):bx0 + tw]
-        sub[:] = np.maximum(sub, (tmask[:sub.shape[0], :sub.shape[1]] > 24).astype(np.uint8) * 255)
-        # on-map icon size = the baked core box (w,h scaled), fitted to the clean PNG's aspect
-        wiki = sprites[lab["slug"]]; ax0, ay0, ax1, ay1 = alpha_bbox(wiki); bw, bh = ax1 - ax0, ay1 - ay0
-        cw, ch = w * scale, h * scale
-        s = ch / bh
-        placed.append((lab["slug"], mcx, mcy, bw * s, bh * s))
+        # cut RGB straight from the hi-res map (so it equals its baked twin) + the solidified matte.
+        gx0 = int(round(min(max(mcx - tw / 2, 0), Wh - tw)))
+        gy0 = int(round(min(max(mcy - th / 2, 0), Hh - th)))
+        rgb = hires[gy0:gy0 + th, gx0:gx0 + tw]
+        alpha = solidify(tmask[:rgb.shape[0], :rgb.shape[1]], MATTE_LO, MATTE_HI)
+        placed.append((lab["slug"], np.dstack([rgb, alpha]), gx0, gy0))
 
-    # Rainbow Road: not baked into the map; placed at its locked rect (no footprint to clean).
-    wiki = sprites["rainbow_road"]; ax0, ay0, ax1, ay1 = alpha_bbox(wiki); bw, bh = ax1 - ax0, ay1 - ay0
-    rw = RR_WIDTH * Wh
-    placed.append(("rainbow_road", RR_CENTER[0] * Wh, RR_CENTER[1] * Hh, rw, rw * bh / bw))
-
-    # 2) clean the baked icons out of the base (seamless-clone the warped inner terrain).
-    icon_mask = cv2.dilate(icon_mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (13, 13)))
-    warped = cv2.warpAffine(inner, M, (Wh, Hh))
+    # 2) base = the original hi-res map, untouched (its baked icons + sharp shadows are kept).
     base = hires.copy()
-    n, lbl = cv2.connectedComponents(icon_mask)
-    for i in range(1, n):
-        comp = (lbl == i).astype(np.uint8) * 255
-        ys, xs = comp.nonzero()
-        if len(xs) < 30:
-            continue
-        base = cv2.seamlessClone(warped, base, comp, (int(round(xs.mean())), int(round(ys.mean()))), cv2.NORMAL_CLONE)
 
-    # 3) bake a sharp drop-shadow under each course (the clean icon silhouette, darkened, dropped).
-    basef = base.astype(np.float32)
-    for slug, cx, cy, ow, oh in placed:
-        wiki = sprites[slug]; ax0, ay0, ax1, ay1 = alpha_bbox(wiki)
-        ow_i, oh_i = max(1, int(round(ow))), max(1, int(round(oh)))
-        sil = cv2.resize(wiki[ay0:ay1, ax0:ax1, 3], (ow_i, oh_i)).astype(np.float32) / 255.0 * SHADOW_DARK
-        ox, oy = int(round(cx - ow_i / 2)), int(round(cy - oh_i / 2 + SHADOW_DY * oh_i))
-        x0, y0 = max(0, ox), max(0, oy); x1, y1 = min(Wh, ox + ow_i), min(Hh, oy + oh_i)
-        if x1 <= x0 or y1 <= y0:
-            continue
-        a = sil[y0 - oy:y1 - oy, x0 - ox:x1 - ox][:, :, None]
-        basef[y0:y1, x0:x1] *= (1 - a)
-    base = basef.astype(np.uint8)
+    # 3) Rainbow Road: not on the map. Use a tightened official icon (glow plate stripped so it
+    #    doesn't square), and bake it a matching straight-down shadow into the base.
+    rr = tighten(load_avif(ICONS / "rainbow_road.png") if (ICONS / "rainbow_road.png").suffix == ".webp"
+                 else cv2.imread(str(ICONS / "rainbow_road.png"), cv2.IMREAD_UNCHANGED))
+    rax0, ray0, rax1, ray1 = alpha_bbox(rr); rr = rr[ray0:ray1, rax0:rax1]
+    rw = RR_WIDTH * Wh; rh = rw * rr.shape[0] / rr.shape[1]
+    rr = cv2.resize(rr, (int(round(rw)), int(round(rh))))
+    rgx0 = int(round(RR_CENTER[0] * Wh - rw / 2)); rgy0 = int(round(RR_CENTER[1] * Hh - rh / 2))
+    bake_shadow(base, rr[:, :, 3], rgx0, rgy0, RR_SHADOW_DY, RR_SHADOW_DARK)
+    placed.append(("rainbow_road", rr, rgx0, rgy0))
 
     # 4) emit base + sprites + manifest
     bh_out = round(Hh * BASE_W / Wh)
     cv2.imwrite(str(OUT / "base.jpg"), cv2.resize(base, (BASE_W, bh_out), interpolation=cv2.INTER_AREA),
                 [cv2.IMWRITE_JPEG_QUALITY, 88])
     manifest = {"base": {"w": BASE_W, "h": bh_out}, "courses": []}
-    for slug, cx, cy, ow, oh in placed:
-        wiki = sprites[slug]; ax0, ay0, ax1, ay1 = alpha_bbox(wiki)
-        cv2.imwrite(str(OUT / "sprites" / f"{slug}.png"), wiki[ay0:ay1, ax0:ax1])
+    for slug, bgra, gx0, gy0 in placed:
+        ax0, ay0, ax1, ay1 = alpha_bbox(bgra)
+        cv2.imwrite(str(OUT / "sprites" / f"{slug}.png"), bgra[ay0:ay1, ax0:ax1])
+        cx, cy = gx0 + (ax0 + ax1) / 2, gy0 + (ay0 + ay1) / 2
+        ow, oh = ax1 - ax0, ay1 - ay0
         spr = {"x": (cx - ow / 2) / Wh, "y": (cy - oh / 2) / Hh, "w": ow / Wh, "h": oh / Hh}
         hit = {"x": (cx - ow * 0.30) / Wh, "y": (cy - oh * 0.22) / Hh, "w": ow * 0.60 / Wh, "h": oh * 0.60 / Hh}
         manifest["courses"].append({"slug": slug, "name": canon[slug],
@@ -171,6 +174,17 @@ def main():
     slugs = [c["slug"] for c in manifest["courses"]]
     assert len(slugs) == len(canon) == len(set(slugs)) and set(slugs) == set(canon), "slug mismatch"
     print(f"built {len(slugs)} courses -> {OUT}")
+
+
+def detect_boxes(alpha):
+    H, W = alpha.shape
+    m = (alpha > 40).astype(np.uint8)
+    m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (17, 17)))
+    n, _, st, _ = cv2.connectedComponentsWithStats(m, 8)
+    boxes = [(int(x), int(y), int(w), int(h)) for i in range(1, n)
+             for x, y, w, h, a in [st[i]] if a >= 3000 and w < W * 0.55 and h < H * 0.55]
+    boxes.sort(key=lambda b: (round((b[1] + b[3] / 2) / 120), b[0]))
+    return boxes
 
 
 if __name__ == "__main__":
