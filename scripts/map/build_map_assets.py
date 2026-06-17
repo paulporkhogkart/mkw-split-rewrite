@@ -180,6 +180,10 @@ def main():
     water = cv2.morphologyEx(water, cv2.MORPH_OPEN, np.ones((9, 9), np.uint8))
     water = cv2.morphologyEx(water, cv2.MORPH_CLOSE, np.ones((31, 31), np.uint8))
     water = cv2.bitwise_and(water, (warped.sum(2) > 24).astype(np.uint8) * 255)   # only where warp covers
+    # Keep the hi-res ocean OUT of every course footprint: the inner layer is stage-less, so an
+    # icon's spot is often water there - without this the hi-res sample's baked icon shows through.
+    keepout = cv2.dilate((sa > 16).astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (81, 81)))
+    water[keepout > 0] = 0
     wf = (cv2.GaussianBlur(water.astype(np.float32), (0, 0), 10) / 255.0)[:, :, None]
     base = (graded * (1 - wf) + warped * wf).astype(np.uint8)
 
