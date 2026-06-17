@@ -29,6 +29,8 @@
         <div class="icons">
           {#each manifest.courses as c (c.slug)}
             <div class="hit" data-slug={c.slug} title={c.name} style={hitStyle(c.hit)}>
+              <img class="shadow" src={spriteUrl(c.slug)} alt="" aria-hidden="true"
+                   draggable="false" style={spriteStyle(c.hit, c.spr)} />
               <img class="spr" src={spriteUrl(c.slug)} alt={c.name}
                    draggable="false" style={spriteStyle(c.hit, c.spr)} />
             </div>
@@ -60,16 +62,30 @@
   .territory, .popups { position: absolute; inset: 0; pointer-events: none; }
   .icons { position: absolute; inset: 0; }
   .hit { position: absolute; cursor: pointer; }
-  .spr {
-    position: absolute; pointer-events: none; transform-origin: 50% 70%;
-    filter: saturate(.78) brightness(.86);
-    transition: transform .15s ease, filter .15s ease; will-change: transform;
+  .spr, .shadow {
+    position: absolute; pointer-events: none; will-change: transform;
+    transition: transform .16s ease, filter .16s ease, opacity .16s ease;
+  }
+  .spr { transform-origin: 50% 70%; filter: saturate(.78) brightness(.86); }
+  /* Cast shadow: a blackened, vertically-squashed, blurred copy of the icon anchored at its
+     base - matches the soft island shadows baked into the hi-res map. */
+  .shadow {
+    transform-origin: 50% 92%;
+    transform: translateY(7%) scaleY(.55);
+    filter: brightness(0) blur(3px);
+    opacity: .5;
   }
   .hit:hover { z-index: 50; }
   /* grow-dominant lift: the enlarged sprite always covers its own footprint */
   .hit:hover .spr {
     transform: scale(1.18) translateY(-4%);
-    filter: drop-shadow(0 7px 9px rgba(0,0,0,.6)) brightness(1.08) saturate(1.05);
+    filter: brightness(1.08) saturate(1.05);
+  }
+  /* as the icon rises, its shadow drops away, spreads and softens (an object lifting off) */
+  .hit:hover .shadow {
+    transform: translateY(20%) scale(1.13) scaleY(.6);
+    filter: brightness(0) blur(7px);
+    opacity: .34;
   }
   .msg { padding: 4rem; text-align: center; color: var(--tx-dim); }
   @media (max-width: 560px) { .map-view { padding: 8px; } }
