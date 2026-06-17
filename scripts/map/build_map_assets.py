@@ -87,6 +87,7 @@ def main():
         p = M @ np.array([x, y, 1.0]); return float(p[0]), float(p[1])
 
     courses = []  # {sprite(BGRA), hit[x,y,w,h], spr[x,y,w,h]} in normalized base coords
+    icon_mask = np.zeros((Hh, Wh), np.uint8)  # baked-icon footprints to erase from the base
     for (x, y, w, h) in detect_boxes(stages):
         px0, py0 = max(0, x - CROP_PAD), max(0, y - CROP_PAD)
         px1, py1 = min(Ws, x + w + CROP_PAD), min(Hs, y + h + CROP_PAD)
@@ -102,6 +103,7 @@ def main():
         res[~np.isfinite(res)] = 0
         _, _, _, loc = cv2.minMaxLoc(res)
         tlx, tly = rx0 + loc[0], ry0 + loc[1]
+        icon_mask[tly:min(Hh, tly + th), tlx:min(Wh, tlx + tw)] = 255
         sprite = cv2.cvtColor(hires[tly:tly + th, tlx:tlx + tw], cv2.COLOR_BGR2BGRA)
         sprite[:, :, 3] = tmask[:sprite.shape[0], :sprite.shape[1]]
         bcx, bcy = to_hi(x + w / 2, y + h / 2)
@@ -133,7 +135,22 @@ def main():
             "hit": {k: round(v, 5) for k, v in zip("xywh", c["hit"])},
             "spr": {k: round(v, 5) for k, v in zip("xywh", c["spr"])}})
 
-    base = cv2.resize(hires, (BASE_W, manifest["base"]["h"]), interpolation=cv2.INTER_AREA)
+    # Erase the baked-in icons so a lifted sprite never reveals a ghost beneath it. We have
+    # ground truth for what's under each icon: the stage-less `inner` map. Warp it into the
+    # hi-res frame and seamless-clone (Poisson) that terrain into each icon footprint - it
+    # adopts the surrounding hi-res colours at the seam, so the fill matches the look.
+    icon_mask = cv2.dilate(icon_mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (13, 13)))
+    warped_inner = cv2.warpAffine(inner, M, (Wh, Hh))
+    clean = hires.copy()
+    n_comp, lbl = cv2.connectedComponents(icon_mask)
+    for i in range(1, n_comp):
+        comp = (lbl == i).astype(np.uint8) * 255
+        ys, xs = comp.nonzero()
+        if len(xs) < 30:
+            continue
+        clean = cv2.seamlessClone(warped_inner, clean, comp,
+                                  (int(round(xs.mean())), int(round(ys.mean()))), cv2.NORMAL_CLONE)
+    base = cv2.resize(clean, (BASE_W, manifest["base"]["h"]), interpolation=cv2.INTER_AREA)
     cv2.imwrite(str(OUT / "base.jpg"), base, [cv2.IMWRITE_JPEG_QUALITY, 88])
     manifest["courses"].sort(key=lambda c: c["slug"])
     (OUT / "manifest.json").write_text(json.dumps(manifest, indent=1))
