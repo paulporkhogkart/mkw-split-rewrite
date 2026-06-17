@@ -67,10 +67,10 @@
     transition: transform .16s ease, filter .16s ease, opacity .16s ease;
   }
   .spr { transform-origin: 50% 70%; filter: saturate(.78) brightness(.86); }
-  /* Cast shadow: a sharp, dark, down-right-offset copy of the icon silhouette that darkens the
+  /* Cast shadow: a sharp, dark copy of the icon silhouette dropped straight down to darken the
      terrain beneath (no blur) - matches the baked island shadows on the hi-res map. */
   .shadow {
-    transform: translate(3%, 8%);
+    transform: translateY(8%);
     filter: brightness(0);
     opacity: .5;
   }
@@ -80,9 +80,9 @@
     transform: scale(1.18) translateY(-4%);
     filter: brightness(1.08) saturate(1.05);
   }
-  /* as the icon rises, its shadow slides further down-right and grows (object lifting off) */
+  /* as the icon rises, its shadow slides further down and grows (object lifting off) */
   .hit:hover .shadow {
-    transform: translate(6%, 15%) scale(1.06);
+    transform: translateY(15%) scale(1.06);
     opacity: .45;
   }
   .msg { padding: 4rem; text-align: center; color: var(--tx-dim); }
