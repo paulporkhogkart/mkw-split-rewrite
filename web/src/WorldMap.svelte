@@ -67,12 +67,11 @@
     transition: transform .16s ease, filter .16s ease, opacity .16s ease;
   }
   .spr { transform-origin: 50% 70%; filter: saturate(.78) brightness(.86); }
-  /* Cast shadow: a blackened, vertically-squashed, blurred copy of the icon anchored at its
-     base - matches the soft island shadows baked into the hi-res map. */
+  /* Cast shadow: a sharp, dark, down-right-offset copy of the icon silhouette that darkens the
+     terrain beneath (no blur) - matches the baked island shadows on the hi-res map. */
   .shadow {
-    transform-origin: 50% 92%;
-    transform: translateY(7%) scaleY(.55);
-    filter: brightness(0) blur(3px);
+    transform: translate(3%, 8%);
+    filter: brightness(0);
     opacity: .5;
   }
   .hit:hover { z-index: 50; }
@@ -81,11 +80,10 @@
     transform: scale(1.18) translateY(-4%);
     filter: brightness(1.08) saturate(1.05);
   }
-  /* as the icon rises, its shadow drops away, spreads and softens (an object lifting off) */
+  /* as the icon rises, its shadow slides further down-right and grows (object lifting off) */
   .hit:hover .shadow {
-    transform: translateY(20%) scale(1.13) scaleY(.6);
-    filter: brightness(0) blur(7px);
-    opacity: .34;
+    transform: translate(6%, 15%) scale(1.06);
+    opacity: .45;
   }
   .msg { padding: 4rem; text-align: center; color: var(--tx-dim); }
   @media (max-width: 560px) { .map-view { padding: 8px; } }
