@@ -29,6 +29,7 @@ RR_CENTER = (0.500, 0.734)
 RR_WIDTH = 0.089          # normalized width of the Rainbow Road sprite
 CROP_PAD = 10             # extra px around each detected box before upscaling the locator crop
 MATCH_SLACK = 70          # template-match search-window slack (px) around the predicted hires position
+ALPHA_FLOOR = 20          # zero the AVIF alpha's faint background pedestal (else a black square shows on light terrain)
 
 
 def load_canonical():
@@ -120,6 +121,9 @@ def main():
         # terrain baked behind it) - so lifting it on hover never drags any terrain. Its rect is
         # recorded in hi-res space (spr, below) and the frontend scales it onto the base.
         sprite = stages[py0:py1, px0:px1].copy()
+        # The AVIF alpha is lossy: its "transparent" background sits at a faint non-zero alpha
+        # over black RGB, which reads as a dark rectangle on light terrain. Floor it to zero.
+        sprite[:, :, 3][sprite[:, :, 3] < ALPHA_FLOOR] = 0
         cw, ch = w * scale, h * scale
         courses.append({"slug": lab["slug"], "sprite": sprite,
                         "hit": [(mcx - cw / 2) / Wh, (mcy - ch / 2) / Hh, cw / Wh, ch / Hh],
