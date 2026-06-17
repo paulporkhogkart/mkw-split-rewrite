@@ -29,7 +29,8 @@ RR_CENTER = (0.500, 0.734)
 RR_WIDTH = 0.089          # normalized width of the Rainbow Road sprite
 CROP_PAD = 10             # extra px around each detected box before upscaling the locator crop
 MATCH_SLACK = 70          # template-match search-window slack (px) around the predicted hires position
-ALPHA_FLOOR = 20          # zero the AVIF alpha's faint background pedestal (else a black square shows on light terrain)
+MATTE_LO = 40             # alpha below this -> fully transparent (drop the icon's faint outer glow)
+MATTE_HI = 70             # alpha above this -> fully opaque (island occludes its own shadow; thin AA between)
 
 
 def load_canonical():
@@ -43,23 +44,13 @@ def load_avif(path):
     return cv2.cvtColor(np.array(Image.open(path).convert("RGBA")), cv2.COLOR_RGBA2BGRA)
 
 
-def bleed_edge_rgb(sprite, solid=60, iters=14):
-    """The stages AVIF crushes RGB toward black under low alpha, so the icon's semi-transparent
-    soft edge composites as a dark halo on light terrain. Bleed the opaque icon's colours
-    outward into that fringe (alpha is untouched) so the edge blends to the icon's own colour
-    instead of black."""
-    rgb = sprite[:, :, :3].copy()
-    mask = (sprite[:, :, 3] > solid).astype(np.uint8)
-    k = np.ones((3, 3), np.uint8)
-    for _ in range(iters):
-        grown = cv2.dilate(mask, k)
-        new = (grown > 0) & (mask == 0)
-        blurred = cv2.blur(rgb, (3, 3))
-        rgb[new] = blurred[new]
-        mask = grown
-    out = sprite.copy()
-    out[:, :, :3] = rgb
-    return out
+def solidify_alpha(a, lo=MATTE_LO, hi=MATTE_HI):
+    """Make the island opaque (smoothstep lo->hi) so it occludes its own cast shadow instead of
+    letting the black shadow show through a soft semi-transparent edge as a dark halo. The full
+    island incl. its base/rim (well above hi) is kept; only the faint outer glow (below lo) is
+    dropped, with a thin anti-aliased edge between."""
+    t = np.clip((a.astype(np.float32) - lo) / (hi - lo), 0, 1)
+    return (t * t * (3 - 2 * t) * 255).astype(np.uint8)
 
 
 def detect_boxes(alpha):
@@ -139,12 +130,12 @@ def main():
         # The sprite IS the stages layer's own clean transparent icon (icon art only, with no
         # terrain baked behind it) - so lifting it on hover never drags any terrain. Its rect is
         # recorded in hi-res space (spr, below) and the frontend scales it onto the base.
-        sprite = stages[py0:py1, px0:px1].copy()
-        # The stages AVIF crushes RGB toward black under low alpha, so the soft edge would
-        # composite as a dark halo - bleed the opaque colours into the fringe, then zero the
-        # faint alpha pedestal (which would otherwise read as a dark rectangle on light terrain).
-        sprite = bleed_edge_rgb(sprite)
-        sprite[:, :, 3][sprite[:, :, 3] < ALPHA_FLOOR] = 0
+        # The icon's RGB comes from the hi-res map (clean, crisp edges that match the base); the
+        # stages cutout supplies only the shape, solidified so the island is OPAQUE. An opaque
+        # island occludes its own cast shadow (no dark halo), and because the colour is the
+        # hi-res art there's no dark edge outline (the stages RGB is crushed toward black).
+        sprite = cv2.cvtColor(hires[tly:tly + th, tlx:tlx + tw], cv2.COLOR_BGR2BGRA)
+        sprite[:, :, 3] = solidify_alpha(tmask)[:sprite.shape[0], :sprite.shape[1]]
         cw, ch = w * scale, h * scale
         courses.append({"slug": lab["slug"], "sprite": sprite,
                         "hit": [(mcx - cw / 2) / Wh, (mcy - ch / 2) / Hh, cw / Wh, ch / Hh],
