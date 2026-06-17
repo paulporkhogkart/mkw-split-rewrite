@@ -36,8 +36,8 @@ OUT = ROOT / "web" / "public" / "map"
 
 DISPLAY_W = 1100
 BASE_W = DISPLAY_W * 2          # 2x export for retina crispness
-RR_CENTER = (0.500, 0.734)     # hand-placed in the hi-res frame; transformed to the inner frame below
-RR_WIDTH = 0.089               # Rainbow Road sprite width (hand-set), as a fraction of hi-res width
+RR_CENTER = (0.501, 0.706)     # Rainbow Road centre, direct in the inner/stages frame (on neither layer)
+RR_WIDTH = 0.078               # Rainbow Road sprite width, as a fraction of the inner map width
 ISO_DILATE = 6                 # px: grow each icon's blob a touch so cleaning keeps its full edge
 ALPHA_LO, ALPHA_HI = 120, 185  # drop the near-black halo (alpha < LO), keep the body (alpha >= HI)
 
@@ -130,7 +130,7 @@ def main():
 
     # The labels were hand-placed against the hi-res map. Carry them into the inner/stages frame so
     # we can name each detected icon (ORB only, build-time).
-    M = orb_transform(inner, hires); scale = float(np.hypot(M[0, 0], M[0, 1]))
+    M = orb_transform(inner, hires)
     Minv = cv2.invertAffineTransform(M)
     def hi_to_inner(hx, hy):
         p = Minv @ np.array([hx, hy, 1.0]); return float(p[0]), float(p[1])
@@ -154,13 +154,16 @@ def main():
         sprite, dx, dy = clean(np.dstack([srgb, sa * maski])[ay0:ay1, ax0:ax1])
         placed.append((slug, sprite, ax0 + dx, ay0 + dy))
 
-    # Rainbow Road: not on either layer. A cleaned official icon at its hand-placed spot.
+    # Rainbow Road: on neither layer, placed directly at its inner-frame spot. It's delicate
+    # (clouds/glow), so clean it gently - bleed the black halo away but keep the soft cloud detail;
+    # the island clean() hardens it into a different-looking blob.
     rr = cv2.imread(str(ICONS / "rainbow_road.png"), cv2.IMREAD_UNCHANGED)
-    rr, _, _ = clean(rr)
-    rw = RR_WIDTH * Wh / scale; rh = rw * rr.shape[0] / rr.shape[1]   # hi-res width -> inner px
+    rr = np.dstack([alpha_bleed(rr[:, :, :3], rr[:, :, 3]), solidify(rr[:, :, 3], 70, 150)])
+    rx0, ry0, rx1, ry1 = alpha_bbox(rr[:, :, 3]); rr = rr[ry0:ry1, rx0:rx1]
+    rw = RR_WIDTH * Ws; rh = rw * rr.shape[0] / rr.shape[1]
     rr = cv2.resize(rr, (int(round(rw)), int(round(rh))))
-    rcx, rcy = hi_to_inner(RR_CENTER[0] * Wh, RR_CENTER[1] * Hh)
-    placed.append(("rainbow_road", rr, int(round(rcx - rw / 2)), int(round(rcy - rh / 2))))
+    placed.append(("rainbow_road", rr,
+                   int(round(RR_CENTER[0] * Ws - rw / 2)), int(round(RR_CENTER[1] * Hs - rh / 2))))
 
     # grade the inner base to the hi-res sample's look (terrain only; baked icons masked out).
     ek = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (41, 41))
@@ -168,9 +171,21 @@ def main():
     icon_hi = cv2.dilate((cv2.warpAffine(sa, M, (Wh, Hh)) > 40).astype(np.uint8), ek)
     graded = grade(inner, hires, icon_inner, icon_hi)
 
+    # the inner ocean is flat; bring in the hi-res sample's ocean texture. Warp hires into the inner
+    # frame and composite it over the water only, feathered at the coastline (both already carry the
+    # hi-res grade, so the palette matches and the land stays the approved graded inner).
+    warped = cv2.warpAffine(hires, Minv, (Ws, Hs))
+    b, g_, r = inner[:, :, 0].astype(int), inner[:, :, 1].astype(int), inner[:, :, 2].astype(int)
+    water = ((b > r + 12) & (b > g_) & (b > 70)).astype(np.uint8) * 255
+    water = cv2.morphologyEx(water, cv2.MORPH_OPEN, np.ones((9, 9), np.uint8))
+    water = cv2.morphologyEx(water, cv2.MORPH_CLOSE, np.ones((31, 31), np.uint8))
+    water = cv2.bitwise_and(water, (warped.sum(2) > 24).astype(np.uint8) * 255)   # only where warp covers
+    wf = (cv2.GaussianBlur(water.astype(np.float32), (0, 0), 10) / 255.0)[:, :, None]
+    base = (graded * (1 - wf) + warped * wf).astype(np.uint8)
+
     # emit base + sprites + manifest (everything normalized to the inner/stages frame).
     bh_out = round(Hs * BASE_W / Ws)
-    cv2.imwrite(str(OUT / "base.jpg"), cv2.resize(graded, (BASE_W, bh_out), interpolation=cv2.INTER_AREA),
+    cv2.imwrite(str(OUT / "base.jpg"), cv2.resize(base, (BASE_W, bh_out), interpolation=cv2.INTER_AREA),
                 [cv2.IMWRITE_JPEG_QUALITY, 88])
     manifest = {"base": {"w": BASE_W, "h": bh_out}, "courses": []}
     for slug, bgra, gx0, gy0 in placed:
