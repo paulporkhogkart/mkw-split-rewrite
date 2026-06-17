@@ -187,16 +187,23 @@ def main():
     wf = (cv2.GaussianBlur(water.astype(np.float32), (0, 0), 10) / 255.0)[:, :, None]
     base = (graded * (1 - wf) + warped * wf).astype(np.uint8)
 
-    # emit base + sprites + manifest (everything normalized to the inner/stages frame).
-    bh_out = round(Hs * BASE_W / Ws)
+    # crop to where the hi-res warp actually reaches: outside it (top/bottom strips, since hires is a
+    # wider aspect than inner) the flat 'old' inner ocean shows. Crop the base + shift all coords.
+    cov = warped.sum(2) > 24
+    rows = np.where(cov.mean(1) > 0.92)[0]; cols = np.where(cov.mean(0) > 0.92)[0]
+    cy0, cy1, cx0, cx1 = int(rows.min()), int(rows.max()) + 1, int(cols.min()), int(cols.max()) + 1
+    base = base[cy0:cy1, cx0:cx1]; Hc, Wc = base.shape[:2]
+
+    # emit base + sprites + manifest (everything normalized to the cropped frame).
+    bh_out = round(Hc * BASE_W / Wc)
     cv2.imwrite(str(OUT / "base.jpg"), cv2.resize(base, (BASE_W, bh_out), interpolation=cv2.INTER_AREA),
                 [cv2.IMWRITE_JPEG_QUALITY, 88])
     manifest = {"base": {"w": BASE_W, "h": bh_out}, "courses": []}
     for slug, bgra, gx0, gy0 in placed:
         cv2.imwrite(str(OUT / "sprites" / f"{slug}.png"), bgra)
-        oh, ow = bgra.shape[:2]; cx, cy = gx0 + ow / 2, gy0 + oh / 2
-        spr = {"x": gx0 / Ws, "y": gy0 / Hs, "w": ow / Ws, "h": oh / Hs}
-        hit = {"x": (cx - ow * 0.30) / Ws, "y": (cy - oh * 0.22) / Hs, "w": ow * 0.60 / Ws, "h": oh * 0.60 / Hs}
+        oh, ow = bgra.shape[:2]; gx, gy = gx0 - cx0, gy0 - cy0; cx, cy = gx + ow / 2, gy + oh / 2
+        spr = {"x": gx / Wc, "y": gy / Hc, "w": ow / Wc, "h": oh / Hc}
+        hit = {"x": (cx - ow * 0.30) / Wc, "y": (cy - oh * 0.22) / Hc, "w": ow * 0.60 / Wc, "h": oh * 0.60 / Hc}
         manifest["courses"].append({"slug": slug, "name": canon[slug],
                                     "hit": {k: round(v, 5) for k, v in hit.items()},
                                     "spr": {k: round(v, 5) for k, v in spr.items()}})
