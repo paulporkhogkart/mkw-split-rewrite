@@ -98,33 +98,39 @@ def main():
     def to_hi(x, y):
         p = M @ np.array([x, y, 1.0]); return float(p[0]), float(p[1])
 
-    courses = []  # {sprite(BGRA), hit[x,y,w,h], spr[x,y,w,h]} in normalized base coords
+    courses = []  # {slug, sprite(BGRA), hit[x,y,w,h], spr[x,y,w,h]} in normalized base coords
     icon_mask = np.zeros((Hh, Wh), np.uint8)  # baked-icon footprints to erase from the base
+    SNAP_GATE = 30  # px: reject a local match that drifts this far from the known-good labeled centre
     for (x, y, w, h) in detect_boxes(stages_a):
         px0, py0 = max(0, x - CROP_PAD), max(0, y - CROP_PAD)
         px1, py1 = min(Ws, x + w + CROP_PAD), min(Hs, y + h + CROP_PAD)
         crop = stages_bgr[py0:py1, px0:px1]
-        matte = stages_a[py0:py1, px0:px1]                      # the artist's real alpha
         tw, th = round((px1 - px0) * scale), round((py1 - py0) * scale)
         tmpl = cv2.resize(crop, (tw, th), interpolation=cv2.INTER_AREA)
-        tmask = cv2.resize(matte, (tw, th), interpolation=cv2.INTER_AREA)
-        pcx, pcy = to_hi((px0 + px1) / 2, (py0 + py1) / 2)
+        tmask = cv2.resize(stages_a[py0:py1, px0:px1], (tw, th), interpolation=cv2.INTER_AREA)
+        pcx, pcy = to_hi((px0 + px1) / 2, (py0 + py1) / 2)        # ORB-predicted crop centre (global, robust)
         S = MATCH_SLACK
         rx0, ry0 = max(0, int(pcx - tw / 2 - S)), max(0, int(pcy - th / 2 - S))
         rx1, ry1 = min(Wh, int(pcx + tw / 2 + S)), min(Hh, int(pcy + th / 2 + S))
         res = cv2.matchTemplate(hires[ry0:ry1, rx0:rx1], tmpl, cv2.TM_CCOEFF_NORMED, mask=tmask)
         res[~np.isfinite(res)] = 0
         _, _, _, loc = cv2.minMaxLoc(res)
-        tlx, tly = rx0 + loc[0], ry0 + loc[1]
-        icon_mask[tly:min(Hh, tly + th), tlx:min(Wh, tlx + tw)] = 255
+        mcx, mcy = rx0 + loc[0] + tw / 2, ry0 + loc[1] + th / 2   # matched centre
+        # Identify the course from the robust global prediction, then sanity-gate the local match:
+        # on featureless snow/sand the match can drift far, so if it strays from this course's
+        # known-good labeled centre, trust the label instead.
+        lab = min(labels, key=lambda L: (L["cx"] - pcx / Wh) ** 2 + (L["cy"] - pcy / Hh) ** 2)
+        lcx, lcy = lab["cx"] * Wh, lab["cy"] * Hh
+        if (mcx - lcx) ** 2 + (mcy - lcy) ** 2 > SNAP_GATE ** 2:
+            mcx, mcy = lcx, lcy
+        tlx = int(round(min(max(mcx - tw / 2, 0), Wh - tw)))
+        tly = int(round(min(max(mcy - th / 2, 0), Hh - th)))
+        icon_mask[tly:tly + th, tlx:tlx + tw] = 255
         sprite = cv2.cvtColor(hires[tly:tly + th, tlx:tlx + tw], cv2.COLOR_BGR2BGRA)
-        amatte = harden_matte(tmask)                                  # drop the soft island-fade fringe
-        sprite[:, :, 3] = amatte[:sprite.shape[0], :sprite.shape[1]]
-        bcx, bcy = to_hi(x + w / 2, y + h / 2)
-        hcx, hcy = bcx + (tlx + tw / 2 - pcx), bcy + (tly + th / 2 - pcy)
+        sprite[:, :, 3] = harden_matte(tmask)[:sprite.shape[0], :sprite.shape[1]]
         cw, ch = w * scale, h * scale
-        courses.append({"sprite": sprite,
-                        "hit": [(hcx - cw / 2) / Wh, (hcy - ch / 2) / Hh, cw / Wh, ch / Hh],
+        courses.append({"slug": lab["slug"], "sprite": sprite,
+                        "hit": [(mcx - cw / 2) / Wh, (mcy - ch / 2) / Hh, cw / Wh, ch / Hh],
                         "spr": [tlx / Wh, tly / Hh, tw / Wh, th / Hh]})
 
     # Rainbow Road: not on the base art; placed from the supplied icon at the locked rect.
@@ -132,20 +138,17 @@ def main():
     cx, cy, wn = *RR_CENTER, RR_WIDTH
     hn = wn * (Wh / Hh) * (rr.shape[0] / rr.shape[1])
     # hit rect is ~42% of the sprite, nudged up (0.21/0.24) so it sits on the medal, not the clouds
-    courses.append({"sprite": cv2.resize(rr, (rrw, rrh), interpolation=cv2.INTER_AREA),
+    courses.append({"slug": "rainbow_road", "sprite": cv2.resize(rr, (rrw, rrh), interpolation=cv2.INTER_AREA),
                     "hit": [cx - wn * 0.21, cy - hn * 0.24, wn * 0.42, hn * 0.42],
                     "spr": [cx - wn / 2, cy - hn / 2, wn, hn]})
 
-    # Assign each course its slug by the nearest labeled center.
     manifest = {"base": {"w": BASE_W, "h": round(Hh * BASE_W / Wh)}, "courses": []}
     for c in courses:
-        ccx, ccy = c["hit"][0] + c["hit"][2] / 2, c["hit"][1] + c["hit"][3] / 2
-        slug = min(labels, key=lambda L: (L["cx"] - ccx) ** 2 + (L["cy"] - ccy) ** 2)["slug"]
-        if any(e["slug"] == slug for e in manifest["courses"]):
-            raise RuntimeError(f"two detected boxes both map to label '{slug}'")
-        cv2.imwrite(str(OUT / "sprites" / f"{slug}.png"), c["sprite"])
+        if any(e["slug"] == c["slug"] for e in manifest["courses"]):
+            raise RuntimeError(f"two detected boxes both map to label '{c['slug']}'")
+        cv2.imwrite(str(OUT / "sprites" / f"{c['slug']}.png"), c["sprite"])
         manifest["courses"].append({
-            "slug": slug, "name": canon[slug],
+            "slug": c["slug"], "name": canon[c["slug"]],
             "hit": {k: round(v, 5) for k, v in zip("xywh", c["hit"])},
             "spr": {k: round(v, 5) for k, v in zip("xywh", c["spr"])}})
 
