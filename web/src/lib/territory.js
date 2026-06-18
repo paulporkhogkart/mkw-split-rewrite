@@ -101,7 +101,7 @@ export function prepareOwners(manifestCourses, territoryRows) {
   const idxOf = {}, ownerRgb = [], centers = [], ownerOf = [];
   for (const c of manifestCourses) {
     const color = colorBySlug[c.slug];
-    if (!color) continue;                                  // unclaimed -> not a seed
+    if (!color || !/^#[0-9a-f]{6}$/i.test(color)) continue; // unclaimed or malformed colour -> not a seed
     if (!(color in idxOf)) { idxOf[color] = ownerRgb.length; ownerRgb.push(hexRgb(color)); }
     centers.push([c.hit.x + c.hit.w / 2, c.hit.y + c.hit.h / 2]);
     ownerOf.push(idxOf[color]);

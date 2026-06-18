@@ -91,6 +91,18 @@ describe("prepareOwners", () => {
     expect(r.ownerOf).toEqual([0,0]);
     expect(r.centers).toEqual([[0.1,0.5],[0.9,0.5]]);
   });
+
+  it("drops courses whose colour is malformed (treats as unclaimed)", () => {
+    const rows = [
+      { slug:"a", color:"#ff0000" },
+      { slug:"b", color:"notacolor" },  // malformed -> dropped
+      { slug:"c", color:"#abc" },       // 3-digit hex, unsupported -> dropped
+    ];
+    const r = prepareOwners(courses, rows);
+    expect(r.ownerRgb).toEqual([[255,0,0]]);
+    expect(r.ownerOf).toEqual([0]);
+    expect(r.centers).toEqual([[0.1,0.5]]);
+  });
 });
 
 describe("buildTerritory", () => {
