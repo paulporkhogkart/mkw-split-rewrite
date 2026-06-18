@@ -43,6 +43,17 @@ export async function fetchColorById(apiBase, { fetchImpl = fetch } = {}) {
   return map;
 }
 
+/** Warm the browser cache with every roster player's popup GIFs (posted + fire), so the
+ *  first hover doesn't wait on a multi-MB download. Browser-only; fire-and-forget. */
+export async function preloadPlayerGifs(apiBase, { fetchImpl = fetch } = {}) {
+  if (typeof Image === "undefined") return;
+  const roster = (await j(fetchImpl, `${apiBase}/v1/roster`)) || [];
+  for (const p of roster) {
+    const base = gifBase(p.display_name);
+    for (const url of [`${base}.gif`, `${base}__fire.gif`]) { const im = new Image(); im.src = url; }
+  }
+}
+
 const viewCache = new Map();
 
 /** Fetch + assemble a course's view-model (cached per slug for the session). */

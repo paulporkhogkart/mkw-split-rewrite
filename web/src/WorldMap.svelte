@@ -2,14 +2,14 @@
   import { onMount, onDestroy, tick } from "svelte";
   import { baseUrl, manifestUrl, spriteUrl, hitStyle, spriteStyle } from "./lib/map.js";
   import CoursePopup from "./CoursePopup.svelte";
-  import { fetchCourseView } from "./lib/courseData.js";
+  import { fetchCourseView, preloadPlayerGifs } from "./lib/courseData.js";
   import { API_BASE } from "./lib/api.js";
 
   let manifest = null;
   let error = false;
 
   // Hover popup (glance tooltip: open on icon enter, close on icon leave).
-  let view = null, shown = false, popupEl, stageEl, popupStyle = "", closeTimer = 0, activeHit = null, token = 0;
+  let view = null, shown = false, popupEl, stageEl, popupStyle = "", closeTimer = 0, activeHit = null, token = 0, openId = 0;
 
   async function openCourse(course, hitEl) {
     clearTimeout(closeTimer);
@@ -18,9 +18,8 @@
     const v = await fetchCourseView(API_BASE, course).catch(() => null);
     if (!v || my !== token) return;                 // fetch failed, or a newer hover superseded us
     view = v;
+    openId += 1;                                    // recreates the figure GIF -> replays from frame 1
     await tick();                                   // CoursePopup renders -> measurable
-    const fig = popupEl && popupEl.querySelector("img.fig");
-    if (fig && fig.src) { const s = fig.src; fig.src = ""; fig.src = s; }   // re-arm the play-once GIF
     place(hitEl);
     requestAnimationFrame(() => (shown = true));    // class drives the fade/scale-in
   }
@@ -60,6 +59,7 @@
       console.error("world map: manifest load failed", e);
       error = true;
     }
+    preloadPlayerGifs(API_BASE).catch(() => {});   // warm the GIF cache so hovers don't wait on a load
   });
 </script>
 
@@ -88,7 +88,7 @@
         </div>
         <div class="popups">
           <div class="popup" class:show={shown} bind:this={popupEl} style={popupStyle} aria-hidden={!shown}>
-            <CoursePopup {view} />
+            <CoursePopup {view} {openId} />
           </div>
         </div>
       </div>
