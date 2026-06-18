@@ -20,6 +20,7 @@
       ]);
       const W = cov.width, H = cov.height;
       const worker = new Worker(new URL("./lib/territoryWorker.js", import.meta.url), { type: "module" });
+      worker.onerror = (ev) => console.error("territory worker error", ev.message || ev);
       worker.onmessage = (e) => {
         const dw = 1100, dh = Math.round((dw * H) / W);
         terrCanvas.width = dw; terrCanvas.height = dh;
@@ -83,6 +84,7 @@
       const r = await fetch(manifestUrl(), { cache: "no-store" });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       manifest = await r.json();
+      await tick();            // let Svelte mount the .territory canvas (bind terrCanvas) before drawing
       renderTerritory();
     } catch (e) {
       console.error("world map: manifest load failed", e);
