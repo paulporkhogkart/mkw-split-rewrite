@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { boxBlur, nearestOwner, gooeyPartition, borderDistance } from "./territory.js";
+import { boxBlur, nearestOwner, gooeyPartition, borderDistance, LENS, hexRgb, paintLens } from "./territory.js";
 
 describe("boxBlur", () => {
   it("averages a 3x3 neighbourhood", () => {
@@ -40,5 +40,35 @@ describe("borderDistance", () => {
     const dB = borderDistance(sm, W, H);
     expect(dB[1*W+1]).toBe(0);             // corner land pixel touches ocean -> coast
     expect(dB[2*W+2]).toBeGreaterThan(0);  // interior centre grows inward
+  });
+});
+
+describe("LENS constants", () => {
+  it("are the locked values", () => {
+    expect(LENS).toMatchObject({ DIM:0.40, tint:0.40, rimBright:0.74, rimWidthF:0.0020, haloF:0.0093, borderLeanF:0.0293, gooeyF:0.014 });
+  });
+});
+
+describe("paintLens", () => {
+  // 5x1 strip: pixels 0..3 land (owner 0), pixel 4 ocean.
+  const W=5,H=1, terr=new Uint8ClampedArray(W*H*4).fill(200);
+  const base = {
+    W, H, terr, ownerRgb: [[0,128,255]],
+    ownerSm: Int16Array.from([0,0,0,0,-1]),
+    dB:      Float32Array.from([0,3,6,9,0]),     // pixel 0 = rim, deepens inward
+    near:    Int16Array.from([0,0,0,0,0]),
+    coastCov:Float32Array.from([1,1,1,1,0]),     // ocean (px4) fully transparent
+    px: { rimW: 2.8, halo: 14, borderLean: 44 },
+  };
+  it("is transparent over ocean and opaque on the island", () => {
+    const out = paintLens(base);
+    expect(out[4*4+3]).toBe(0);     // ocean alpha
+    expect(out[0*4+3]).toBe(255);   // land alpha
+  });
+  it("paints a brighter rim than the interior", () => {
+    const out = paintLens(base);
+    const rimLum = out[0]+out[1]+out[2];        // pixel 0 (dB=0)
+    const inLum  = out[3*4]+out[3*4+1]+out[3*4+2]; // pixel 3 (deep)
+    expect(rimLum).toBeGreaterThan(inLum);
   });
 });

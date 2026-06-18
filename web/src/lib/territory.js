@@ -67,3 +67,31 @@ export function borderDistance(ownerSm, W, H) {
   }
   return dB;
 }
+
+const smooth = (e0, e1, x) => { const t = clamp((x - e0) / (e1 - e0), 0, 1); return t * t * (3 - 2 * t); };
+const mix = (a, b, t) => [a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t, a[2] + (b[2]-a[2])*t];
+
+export const LENS = { DIM:0.40, tint:0.40, rimBright:0.74, rimWidthF:0.0020, haloF:0.0093, borderLeanF:0.0293, gooeyF:0.014, lightF:0.55 };
+
+export const hexRgb = (h) => { h = h.replace("#",""); return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16)]; };
+export const ownerLightOf = (rgb) => mix(rgb, [255,255,255], LENS.lightF);
+
+export function paintLens(o) {
+  const { W, H, terr, ownerSm, dB, coastCov, near, ownerRgb, px } = o;
+  const out = new Uint8ClampedArray(W * H * 4);
+  const light = ownerRgb.map(ownerLightOf);
+  for (let p = 0; p < W * H; p++) {
+    const cov = coastCov[p]; if (cov <= 0.004) continue;
+    let oi = ownerSm[p], dist;
+    if (oi < 0) { oi = near[p]; if (oi < 0) continue; dist = 0; } else dist = dB[p];   // ocean feather borrows nearest owner at the rim
+    const O = ownerRgb[oi], Ol = light[oi], q = p * 4;
+    const Dd = [terr[q] * LENS.DIM, terr[q + 1] * LENS.DIM, terr[q + 2] * LENS.DIM];   // dimmed terrain (texture survives)
+    const inward = smooth(0, px.borderLean, dist);
+    const tint = clamp(LENS.tint * (0.55 + 0.9 * (1 - inward)), 0, 0.9);               // subtle inside, leans into the border
+    let col = mix(Dd, O, tint);
+    const core = smooth(px.rimW, 0, dist), halo = smooth(px.halo, px.rimW, dist);
+    col = mix(col, Ol, clamp(core * LENS.rimBright + halo * 0.22, 0, 1));              // bright owner rim + soft halo
+    out[q] = col[0]; out[q + 1] = col[1]; out[q + 2] = col[2]; out[q + 3] = cov * 255;
+  }
+  return out;
+}
