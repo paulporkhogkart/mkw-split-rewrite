@@ -1,5 +1,5 @@
 <script>
-  import { onMount, tick } from "svelte";
+  import { onMount, onDestroy, tick } from "svelte";
   import { baseUrl, manifestUrl, spriteUrl, hitStyle, spriteStyle } from "./lib/map.js";
   import CoursePopup from "./CoursePopup.svelte";
   import { fetchCourseView } from "./lib/courseData.js";
@@ -9,10 +9,11 @@
   let error = false;
 
   // Hover popup (glance tooltip: open on icon enter, close on icon leave).
-  let view = null, shown = false, popupEl, stageEl, popupStyle = "", closeTimer = 0;
+  let view = null, shown = false, popupEl, stageEl, popupStyle = "", closeTimer = 0, activeHit = null;
 
   async function openCourse(course, hitEl) {
     clearTimeout(closeTimer);
+    activeHit = hitEl;
     const v = await fetchCourseView(API_BASE, course).catch(() => null);
     if (!v) return;
     view = v;
@@ -27,14 +28,24 @@
     const fr = stageEl.getBoundingClientRect(), hr = hitEl.getBoundingClientRect();
     const cx = hr.left - fr.left + hr.width / 2, cy = hr.top - fr.top + hr.height / 2;
     const pw = popupEl.offsetWidth, ph = popupEl.offsetHeight, off = Math.max(hr.width, hr.height) * 0.55 + 8;
-    const right = cx < fr.width * 0.5, below = cy < fr.height * 0.42;
+    // Project from the icon: pick the side the popup actually fits on; if neither fits,
+    // the side with more room (then clamp). Avoids slamming centre courses to the edge.
+    const fitsRight = cx + off + pw + 6 <= fr.width, fitsLeft = cx - off - pw - 6 >= 0;
+    const right = fitsRight || (!fitsLeft && fr.width - cx >= cx);
+    const fitsBelow = cy + off + ph + 6 <= fr.height, fitsAbove = cy - off - ph - 6 >= 0;
+    const below = fitsBelow || (!fitsAbove && fr.height - cy >= cy);
     let left = right ? cx + off : cx - off - pw, top = below ? cy + off : cy - off - ph;
     left = Math.max(6, Math.min(left, fr.width - pw - 6));
     top = Math.max(6, Math.min(top, fr.height - ph - 6));
     popupStyle = `left:${left}px;top:${top}px;transform-origin:${right ? "left" : "right"} ${below ? "top" : "bottom"}`;
   }
 
+  // Touch: a tap outside the open course's icon dismisses the popup.
+  function onDocPointerDown(e) { if (shown && activeHit && !activeHit.contains(e.target)) shown = false; }
+  onDestroy(() => { if (typeof document !== "undefined") document.removeEventListener("pointerdown", onDocPointerDown); });
+
   onMount(async () => {
+    if (typeof document !== "undefined") document.addEventListener("pointerdown", onDocPointerDown);
     try {
       const r = await fetch(manifestUrl(), { cache: "no-store" });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
