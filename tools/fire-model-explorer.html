@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>SP3 Fire Model Explorer</title>
+<!--
+  thekartoff SP3 "on fire" model explorer (territory map hover popup).
+  LOCKED MODEL: a course is on fire while  lead >= E0 * e^(offWR / K)
+  with lead and bar measured in % of WR.  Locked defaults: E0 = 0.2%, K = 4.
+  Stateless (computed live from leaderboard + WR); same "dominance" metric feeds SP2 territory strength.
+
+  Open this file directly in a browser. Drag the sliders to re-evaluate / re-tune.
+  To refresh the embedded PB snapshot from the live DB:  python tools/fire-model-explorer-regen.py
+  (it rewrites the data between the FIRE_DATA markers below.)
+-->
+<style>
+  body{background:#0b0c0e;margin:0;padding:24px;font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;color:#c7ccd2}
+  .wrap{max-width:1040px;margin:0 auto}
+  h2{color:#e8eaed;font-size:18px;margin:0 0 4px} .subtitle{color:#8a8f98;font-size:13px;margin:0 0 10px}
+  .locked{display:inline-block;font-size:11px;color:#f5b62c;border:1px solid #5a4a1e;background:#1a160c;border-radius:4px;padding:3px 8px;margin-bottom:12px}
+  code{font-family:ui-monospace,Menlo,monospace}
+  .knobs { display:flex; gap:22px; flex-wrap:wrap; margin-bottom:14px; font-size:11.5px; }
+  .knob { display:flex; flex-direction:column; gap:3px; min-width:240px; }
+  .knob label { color:#8a8f98; } .knob b { color:#f5b62c; } .knob input { width:100%; accent-color:#3d7cc2; }
+  .chartrow { display:flex; gap:10px; align-items:stretch; }
+  .yax { width:62px; display:flex; flex-direction:column; justify-content:space-between; text-align:right; font-size:10px; color:#7a818b; padding:1px 0; line-height:1.2; }
+  .yax b { color:#cfd3d8; font-weight:600; }
+  #scene { position:relative; flex:1 1 auto; min-width:0; height:440px; }
+  #chart { position:absolute; left:0; top:0; right:172px; bottom:0; border:1px solid #23262b; border-radius:5px; overflow:hidden; }
+  #heat { position:absolute; inset:0; display:grid; grid-template-columns:repeat(24,1fr); grid-template-rows:repeat(20,1fr); }
+  #svg { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+  .dot { position:absolute; width:9px; height:9px; border-radius:50%; transform:translate(-50%,-50%); border:1.5px solid #0b0c0e; box-shadow:0 0 0 1px #000; z-index:4; }
+  .dot.fire { box-shadow:0 0 0 2px #fff, 0 0 11px 3px #f5912c; z-index:6; }
+  .lab { position:absolute; transform:translateY(-50%); font-size:9.5px; white-space:nowrap; color:#aeb4bc; z-index:5; }
+  .lab.fire { color:#ffce8a; font-weight:600; } .lab .d { color:#6f7782; font-variant-numeric:tabular-nums; }
+  .xax { display:flex; justify-content:space-between; font-size:10px; color:#7a818b; margin-top:5px; padding:0 174px 0 2px; }
+  .xtitle { text-align:center; font-size:10.5px; color:#8a8f98; margin-top:2px; padding-right:172px; }
+  #floorread { margin-top:12px; font-size:12px; color:#cdd3da; background:#0e1014; border:1px solid #23262b; border-radius:5px; padding:8px 11px; }
+  #floorread b { color:#f5b62c; } #floorread .mono { font-family:ui-monospace,Menlo,monospace; }
+  #fire { margin-top:13px; font-size:12px; line-height:1.7; }
+  #fire .hd { color:#f7a13a; font-weight:600; margin-bottom:4px; }
+  #fire .frow b { color:#fff; } #fire .frow .mono { font-family:ui-monospace,Menlo,monospace; font-variant-numeric:tabular-nums; } #fire .frow .out { color:#f7a13a; }
+</style></head>
+<body><div class="wrap">
+  <h2>SP3 "on fire" model explorer</h2>
+  <div class="subtitle">A course burns while its leader's margin clears the exponential bar <b>fireBar(off) = E₀ · e^(off/K)</b> (lead &amp; bar in % of WR). Near the WR the bar is on the floor (near-untouchable); off the WR it climbs exponentially. Snapshot of Season 1 / 150cc PBs.</div>
+  <div class="locked">LOCKED: E₀ = 0.2% · K = 4 — drag to re-tune if it proves unsuitable</div>
+
+  <div id="fw">
+    <div class="knobs">
+      <div class="knob"><label>floor E₀ — min lead at WR pace: <b id="ve">0.20</b>% of WR</label><input id="se" type="range" min="0.05" max="1.0" step="0.05" value="0.2"></div>
+      <div class="knob"><label>steepness K — lower = bar climbs faster off WR: <b id="vk">4.0</b></label><input id="sk" type="range" min="3" max="10" step="0.5" value="4"></div>
+    </div>
+    <div class="chartrow">
+      <div class="yax"><div><b>≈ WR pace</b></div><div>off the WR ↓</div><div><b>20% off</b></div></div>
+      <div id="scene"><div id="chart"><div id="heat"></div></div><svg id="svg"></svg></div>
+    </div>
+    <div class="xax"><span>0%</span><span>2%</span><span>4%</span><span>6%</span><span>8%</span></div>
+    <div class="xtitle">lead over #2, as % of WR  →</div>
+    <div id="floorread"></div>
+    <div id="fire"></div>
+  </div>
+</div>
+
+<script>
+/*FIRE_DATA_START*/var C=[{"course": "Acorn Heights", "leader": "Gub", "color": "#2dd4bf", "t1": 124723, "t2": 124794, "wr": 116986}, {"course": "Airship Fortress", "leader": "Gub", "color": "#2dd4bf", "t1": 124375, "t2": 125040, "wr": 114025}, {"course": "Boo Cinema", "leader": "Gub", "color": "#2dd4bf", "t1": 130376, "t2": 131542, "wr": 123756}, {"course": "Bowser’s Castle", "leader": "Paul", "color": "#a78bfa", "t1": 151846, "t2": 155063, "wr": 129887}, {"course": "Cheep Cheep Falls", "leader": "Gub", "color": "#2dd4bf", "t1": 134456, "t2": 134781, "wr": 113881}, {"course": "Choco Mountain", "leader": "Paul", "color": "#a78bfa", "t1": 134981, "t2": 135757, "wr": 120996}, {"course": "Crown City", "leader": "Gub", "color": "#2dd4bf", "t1": 135808, "t2": 136187, "wr": 123410}, {"course": "DK Pass", "leader": "Paul", "color": "#a78bfa", "t1": 137602, "t2": 138071, "wr": 117865}, {"course": "DK Spaceport", "leader": "Gub", "color": "#2dd4bf", "t1": 96484, "t2": 96620, "wr": 88623}, {"course": "Dandelion Depths", "leader": "Gub", "color": "#2dd4bf", "t1": 149666, "t2": 150295, "wr": 137789}, {"course": "Desert Hills", "leader": "Gub", "color": "#2dd4bf", "t1": 100932, "t2": 101721, "wr": 90773}, {"course": "Dino Dino Jungle", "leader": "Gub", "color": "#2dd4bf", "t1": 115331, "t2": 115783, "wr": 104272}, {"course": "Dry Bones Burnout", "leader": "Gub", "color": "#2dd4bf", "t1": 137594, "t2": 137770, "wr": 125593}, {"course": "Faraway Oasis", "leader": "Gub", "color": "#2dd4bf", "t1": 128596, "t2": 128759, "wr": 114764}, {"course": "Great ? Block Ruins", "leader": "Gub", "color": "#2dd4bf", "t1": 131865, "t2": 132158, "wr": 121902}, {"course": "Koopa Troopa Beach", "leader": "Paul", "color": "#a78bfa", "t1": 90953, "t2": 91025, "wr": 86477}, {"course": "Mario Bros. Circuit", "leader": "Gub", "color": "#2dd4bf", "t1": 110579, "t2": 114914, "wr": 107414}, {"course": "Mario Circuit", "leader": "Gub", "color": "#2dd4bf", "t1": 68807, "t2": 69093, "wr": 62934}, {"course": "Moo Moo Meadows", "leader": "Gub", "color": "#2dd4bf", "t1": 129371, "t2": 129581, "wr": 113309}, {"course": "Peach Beach", "leader": "Gub", "color": "#2dd4bf", "t1": 104887, "t2": 104917, "wr": 100139}, {"course": "Peach Stadium", "leader": "Gub", "color": "#2dd4bf", "t1": 143777, "t2": 146815, "wr": 133998}, {"course": "Rainbow Road", "leader": "Gub", "color": "#2dd4bf", "t1": 256426, "t2": 256822, "wr": 233693}, {"course": "Salty Salty Speedway", "leader": "Paul", "color": "#a78bfa", "t1": 125337, "t2": 131168, "wr": 114534}, {"course": "Shy Guy Bazaar", "leader": "Paul", "color": "#a78bfa", "t1": 121079, "t2": 123247, "wr": 110479}, {"course": "Sky-High Sundae", "leader": "Gub", "color": "#2dd4bf", "t1": 117538, "t2": 117829, "wr": 112758}, {"course": "Starview Peak", "leader": "Gub", "color": "#2dd4bf", "t1": 145211, "t2": 148016, "wr": 130946}, {"course": "Toad’s Factory", "leader": "Gub", "color": "#2dd4bf", "t1": 119968, "t2": 120721, "wr": 111172}, {"course": "Wario Stadium", "leader": "Gub", "color": "#2dd4bf", "t1": 136421, "t2": 138235, "wr": 119882}, {"course": "Wario’s Galleon", "leader": "Gub", "color": "#2dd4bf", "t1": 158079, "t2": 159362, "wr": 136100}, {"course": "Whistlestop Summit", "leader": "Gub", "color": "#2dd4bf", "t1": 123132, "t2": 123896, "wr": 103723}];/*FIRE_DATA_END*/
+(function(){
+  var LEADX=8.0, OFFY=20.0, GUT=172, H=440, cols=24, rows=20;
+  function clamp(x){return Math.max(0,Math.min(1,x));}
+  function lerp(a,b,t){return a+(b-a)*t;}
+  var stops=[[0,[20,22,26]],[0.25,[64,22,16]],[0.45,[150,52,20]],[0.65,[222,110,30]],[0.85,[245,182,44]],[1,[253,230,162]]];
+  function col(d){d=clamp(d);for(var i=1;i<stops.length;i++){if(d<=stops[i][0]){var d0=stops[i-1][0],c0=stops[i-1][1],d1=stops[i][0],c1=stops[i][1],t=(d-d0)/(d1-d0);return 'rgb('+Math.round(lerp(c0[0],c1[0],t))+','+Math.round(lerp(c0[1],c1[1],t))+','+Math.round(lerp(c0[2],c1[2],t))+')';}}return 'rgb(253,230,162)';}
+  function fmt(ms){var s=ms/1000,m=Math.floor(s/60),r=s-m*60;return m+':'+(r<10?'0':'')+r.toFixed(3);}
+  var el=function(id){return document.getElementById(id);};
+  var se=el('se'),sk=el('sk'),ve=el('ve'),vk=el('vk'),heat=el('heat'),scene=el('scene'),svg=el('svg'),fire=el('fire'),floorread=el('floorread');
+
+  function recompute(){
+    var E0=parseFloat(se.value), K=parseFloat(sk.value);
+    ve.textContent=E0.toFixed(2); vk.textContent=K.toFixed(1);
+    var bar=function(off){return E0*Math.exp(off/K);};
+    var h='';
+    for(var r=0;r<rows;r++){var off=OFFY*(r+0.5)/rows;var b=bar(off);for(var c2=0;c2<cols;c2++){var lead=LEADX*(c2+0.5)/cols;
+      if(lead>=b){var inten=0.35+0.65*Math.exp(-off/K);h+='<div style="background:'+col(inten)+'"></div>';}
+      else h+='<div style="background:#15171b;opacity:.5"></div>';}}
+    heat.innerHTML=h;
+    var sw=scene.clientWidth||720, cw=sw-GUT;
+    var data=C.map(function(c){var lead=(c.t2-c.t1)/c.wr*100,off=(c.t1-c.wr)/c.wr*100,b=bar(off);
+      return {c:c,lead:lead,off:off,fire:lead>=b,bar:b,x:clamp(lead/LEADX)*cw,y:clamp(off/OFFY)*H};});
+    var labs=data.slice().sort(function(a,b){return a.y-b.y;}),minG=14,last=-1e9;
+    labs.forEach(function(s){s.ly=Math.max(s.y,last+minG);last=s.ly;});
+    var over=last-(H-6); if(over>0) labs.forEach(function(s){s.ly-=over;});
+    scene.querySelectorAll('.dot,.lab').forEach(function(n){n.remove();});
+    var pts=[]; for(var o=0;o<=OFFY;o+=0.4){var bx=clamp(bar(o)/LEADX,0,1)*cw, by=(o/OFFY)*H; pts.push(bx+','+by); if(bar(o)>LEADX)break;}
+    var lines='<polyline points="'+pts.join(' ')+'" fill="none" stroke="#f5b62c" stroke-width="2" opacity="0.9"/>';
+    data.forEach(function(s){
+      var dot=document.createElement('div'); dot.className='dot'+(s.fire?' fire':'');
+      dot.style.left=s.x+'px'; dot.style.top=s.y+'px'; dot.style.background=s.c.color;
+      dot.title=s.c.course+' — '+s.c.leader+', lead +'+((s.c.t2-s.c.t1)/1000).toFixed(2)+'s ('+s.lead.toFixed(2)+'% WR), '+s.off.toFixed(1)+'% off WR'+(s.fire?'  ON FIRE':'');
+      scene.appendChild(dot);
+    });
+    labs.forEach(function(s){
+      var lab=document.createElement('div'); lab.className='lab'+(s.fire?' fire':'');
+      lab.style.left=(cw+10)+'px'; lab.style.top=s.ly+'px';
+      lab.innerHTML=s.c.course+' <span class="d">'+s.off.toFixed(1)+'% off</span>';
+      scene.appendChild(lab);
+      lines+='<line x1="'+s.x+'" y1="'+s.y+'" x2="'+(cw+6)+'" y2="'+s.ly+'" stroke="'+(s.fire?'#7a4a1e':'#26292f')+'" stroke-width="1"/>';
+    });
+    svg.setAttribute('viewBox','0 0 '+sw+' '+H); svg.innerHTML=lines;
+    var fsf=function(wr){return (E0/100*wr/1000).toFixed(2);};
+    floorread.innerHTML='At WR pace, a rival must get within <b>'+E0.toFixed(2)+'% of WR</b> to snuff — '
+      +'<span class="mono">'+fsf(62934)+'s</span> short (Mario Circuit), <span class="mono">'+fsf(107414)+'s</span> mid (Mario Bros.), <span class="mono">'+fsf(233693)+'s</span> long (Rainbow Road).';
+    var firing=data.filter(function(s){return s.fire;}).sort(function(a,b){return a.off-b.off;});
+    var html='<div class="hd">'+firing.length+' on fire — sorted by closeness to WR:</div>';
+    if(!firing.length) html+='<div class="frow" style="color:#7a818b">Nothing lit.</div>';
+    firing.forEach(function(s){
+      var snuffS=s.bar/100*s.c.wr/1000, rival=s.c.t1+s.bar/100*s.c.wr, curLead=(s.c.t2-s.c.t1)/1000;
+      html+='<div class="frow">🔥 <b>'+s.c.course+'</b> — '+s.c.leader+' <span class="mono">'+fmt(s.c.t1)+'</span> ('+s.off.toFixed(1)+'% off), leads <span class="mono">'+curLead.toFixed(2)+'s</span>. Snuffed only if a rival is within <span class="mono out">'+snuffS.toFixed(2)+'s</span> (under <span class="mono out">'+fmt(rival)+'</span>).</div>';
+    });
+    fire.innerHTML=html;
+  }
+  se.oninput=sk.oninput=recompute;
+  window.addEventListener('resize',recompute);
+  recompute();
+})();
+</script>
+</body></html>
