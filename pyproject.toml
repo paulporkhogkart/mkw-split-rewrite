@@ -4,7 +4,7 @@ build-backend = "setuptools.backends.legacy:build"
 
 [project]
 name = "mkw-tracker"
-version = "1.1.2"
+version = "1.2.0"
 requires-python = ">=3.10"
 dependencies = [
     "opencv-python>=4.8",
