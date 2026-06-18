@@ -17,10 +17,9 @@ function appWith() {
 const auth = (token: string) => ({ headers: { authorization: `Bearer ${token}` } });
 
 describe('reads require a token', () => {
-  it('GET /v1/leaderboard 401s without one, returns rows with one', async () => {
-    const { app, token } = appWith();
-    expect((await app.request('/v1/leaderboard?course=Rainbow%20Road&cc=150')).status).toBe(401);
-    const res = await app.request('/v1/leaderboard?course=Rainbow%20Road&cc=150', auth(token));
+  it('GET /v1/leaderboard is public (no token) and returns rows', async () => {
+    const { app } = appWith();
+    const res = await app.request('/v1/leaderboard?course=Rainbow%20Road&cc=150');
     expect(res.status).toBe(200);
     expect((await res.json())[0].display_name).toBe('Paul');
   });
@@ -87,15 +86,19 @@ describe('GET /v1/trails (token; is_me for the owner)', () => {
   });
 });
 
-describe('GET /v1/roster (token)', () => {
-  it('401 without a token; lists the season roster; is_me flags the holder', async () => {
+describe('GET /v1/roster (public; is_me with a token)', () => {
+  it('is public and lists the season roster; a token flags is_me', async () => {
     const db = openDb(':memory:'); applySchema(db);
     db.exec("INSERT INTO seasons(id,name,is_active) VALUES (1,'Season 1',1)");
     db.exec("INSERT INTO players(id,display_name) VALUES (1,'Paul'),(2,'Luke')");
     db.exec("INSERT INTO season_rosters(season_id,player_id) VALUES (1,1),(1,2)");
     const app = createApp(db, new EventHub());
     const token = mintToken(db, 'Paul');
-    expect((await app.request('/v1/roster')).status).toBe(401);
+    const open = await app.request('/v1/roster');
+    expect(open.status).toBe(200);
+    const list = await open.json();
+    expect(list.map((r: any) => r.display_name).sort()).toEqual(['Luke', 'Paul']);
+    expect(list.every((r: any) => r.is_me === false)).toBe(true);
     const mine = await (await app.request('/v1/roster', auth(token))).json();
     expect(mine.find((r: any) => r.display_name === 'Paul').is_me).toBe(true);
     expect(mine.find((r: any) => r.display_name === 'Luke').is_me).toBe(false);

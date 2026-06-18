@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { cors } from 'hono/cors';
 import type { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -25,7 +26,14 @@ export function createApp(db: DatabaseSync, hub: EventHub,
   // /v1/events stays open: the on-Pi bot subscribes to it over localhost with no token, and it
   // only carries PB/WR events that are already announced publicly. /v1/presence keeps its own
   // optional-token (receive-only) model.
-  const OPEN = new Set(['/health', '/v1/events', '/v1/presence']);
+  // The public website fetches these reads cross-origin. They serve already-public data (same
+  // category as the open /v1/presence stream), so they skip the token gate and get permissive
+  // CORS (incl. preflight). Everything else (writes, stats, screen, other reads) stays gated.
+  const PUBLIC_READS = ['/v1/leaderboard', '/v1/world-records', '/v1/roster'];
+  const readCors = cors({ origin: '*', allowMethods: ['GET'] });
+  for (const p of PUBLIC_READS) app.use(p, readCors);
+
+  const OPEN = new Set(['/health', '/v1/events', '/v1/presence', ...PUBLIC_READS]);
   app.use('*', (c, next) => (OPEN.has(c.req.path) ? next() : requireTokenAny(db)(c, next)));
   app.route('/', runsRoutes(db, hub, invalidateModel));
   app.route('/', readsRoutes(db));

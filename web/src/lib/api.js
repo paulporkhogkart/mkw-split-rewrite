@@ -1,4 +1,7 @@
-// The season server origin. Override for local dev via VITE_API_BASE (e.g. http://localhost:8787).
+// The season server origin. In dev (vite) it defaults to the local season server
+// (`npm --prefix pi run dev` on :8787); a production build uses api.thekartoff.com.
+// Override either with VITE_API_BASE.
+const env = (typeof import.meta !== "undefined" && import.meta.env) || {};
 export const API_BASE =
-  (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_API_BASE) ||
-  "https://api.thekartoff.com";
+  env.VITE_API_BASE ||
+  (env.DEV ? "http://localhost:8787" : "https://api.thekartoff.com");

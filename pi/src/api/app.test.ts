@@ -48,3 +48,19 @@ describe('reads need a token', () => {
     expect((await appWith().app.request('/health')).status).toBe(200);
   });
 });
+
+describe('public website reads (open + CORS)', () => {
+  it('leaderboard / world-records / roster are open without a token and send CORS', async () => {
+    const { app } = appWith();
+    for (const path of ['/v1/leaderboard?course=rainbow_road&cc=150', '/v1/world-records?course=rainbow_road&cc=150', '/v1/roster']) {
+      const res = await app.request(path, { headers: { origin: 'http://localhost:1430' } });
+      expect(res.status).not.toBe(401);
+      expect(res.headers.get('access-control-allow-origin')).toBe('*');
+    }
+  });
+  it('leaves the other reads + writes token-gated', async () => {
+    const { app } = appWith();
+    expect((await app.request('/v1/seasons')).status).toBe(401);
+    expect((await app.request('/v1/runs', { method: 'POST', body: '{}', headers: { 'content-type': 'application/json' } })).status).toBe(401);
+  });
+});
