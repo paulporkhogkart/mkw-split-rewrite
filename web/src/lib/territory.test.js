@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { boxBlur, nearestOwner, gooeyPartition, borderDistance, LENS, hexRgb, paintLens } from "./territory.js";
+import { boxBlur, nearestOwner, gooeyPartition, borderDistance, LENS, hexRgb, paintLens, prepareOwners, buildTerritory } from "./territory.js";
 
 describe("boxBlur", () => {
   it("averages a 3x3 neighbourhood", () => {
@@ -70,5 +70,44 @@ describe("paintLens", () => {
     const rimLum = out[0]+out[1]+out[2];        // pixel 0 (dB=0)
     const inLum  = out[3*4]+out[3*4+1]+out[3*4+2]; // pixel 3 (deep)
     expect(rimLum).toBeGreaterThan(inLum);
+  });
+});
+
+const courses = [
+  { slug:"a", hit:{x:0.1,y:0.5,w:0.0,h:0.0} },
+  { slug:"b", hit:{x:0.9,y:0.5,w:0.0,h:0.0} },
+  { slug:"c", hit:{x:0.5,y:0.5,w:0.0,h:0.0} },
+];
+
+describe("prepareOwners", () => {
+  it("keeps claimed courses only, dedupes colours, computes centres", () => {
+    const rows = [
+      { slug:"a", color:"#ff0000" },
+      { slug:"b", color:"#ff0000" },   // same colour -> same owner index
+      { slug:"c", color:null },        // unclaimed -> dropped (not a seed)
+    ];
+    const r = prepareOwners(courses, rows);
+    expect(r.ownerRgb).toEqual([[255,0,0]]);
+    expect(r.ownerOf).toEqual([0,0]);
+    expect(r.centers).toEqual([[0.1,0.5],[0.9,0.5]]);
+  });
+});
+
+describe("buildTerritory", () => {
+  it("paints owner colour on land, transparent off land", () => {
+    const W=8,H=1, coverage=new Uint8Array(W*H).fill(255); coverage[7]=0;  // px7 ocean
+    const terr=new Uint8ClampedArray(W*H*4).fill(180);
+    const rows=[{slug:"a",color:"#ff0000"},{slug:"b",color:"#0000ff"},{slug:"c",color:null}];
+    const rgba=buildTerritory({ coverage, W, H, terr, manifestCourses:courses, territoryRows:rows });
+    expect(rgba[0*4+3]).toBe(255);   // land painted
+    expect(rgba[7*4+3]).toBe(0);     // ocean transparent
+    // left half leans red, right half leans blue (owner tint visible)
+    expect(rgba[0*4]).toBeGreaterThan(rgba[0*4+2]);
+    expect(rgba[6*4+2]).toBeGreaterThan(rgba[6*4]);
+  });
+  it("returns a fully transparent layer when nothing is claimed", () => {
+    const W=4,H=1, coverage=new Uint8Array(W*H).fill(255), terr=new Uint8ClampedArray(W*H*4);
+    const rgba=buildTerritory({ coverage, W, H, terr, manifestCourses:courses, territoryRows:[{slug:"a",color:null}] });
+    expect(Array.from(rgba).every(v=>v===0)).toBe(true);
   });
 });
