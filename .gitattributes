@@ -1,3 +1,7 @@
 captures/**/*.png filter=lfs diff=lfs merge=lfs -text
 assets/player_gifs/*.gif filter=lfs diff=lfs merge=lfs -text
-web/public/players/*.gif filter=lfs diff=lfs merge=lfs -text
+# web/public/players/*.gif are deployed web assets the Pi needs at `vite build` time, but the
+# Pi deploy does a plain `git checkout` with no `git lfs pull` (and no git-lfs installed), so
+# LFS-tracking them shipped 132-byte pointer stubs to the live site. Keep them as ordinary
+# committed binaries (like web/public/map/*) so the existing checkout-and-build deploy works.
+web/public/players/*.gif binary
