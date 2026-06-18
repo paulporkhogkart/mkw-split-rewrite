@@ -33,4 +33,12 @@ describe("borderDistance", () => {
     expect(dB[4*W+4]).toBe(0);          // last col of owner 0 = boundary
     expect(dB[4*W+2]).toBeGreaterThan(1); // interior pixel, away from both frame and seam
   });
+
+  it("seeds the coast: land touching off-land (-1) is 0, interior grows inward", () => {
+    const W=5,H=5; const sm=new Int16Array(W*H).fill(-1);
+    for (let y=1;y<=3;y++) for (let x=1;x<=3;x++) sm[y*W+x]=0;  // 3x3 land island of owner 0
+    const dB = borderDistance(sm, W, H);
+    expect(dB[1*W+1]).toBe(0);             // corner land pixel touches ocean -> coast
+    expect(dB[2*W+2]).toBeGreaterThan(0);  // interior centre grows inward
+  });
 });

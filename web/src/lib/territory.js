@@ -35,6 +35,8 @@ export function nearestOwner(W, H, centersPx, ownerOf) {
 export function gooeyPartition(near, land, W, H, nOwners, radius) {
   const ownerSm = new Int16Array(W * H).fill(-1);
   const best = new Float32Array(W * H), mask = new Float32Array(W * H);
+  // Caller contract: nOwners must equal max(ownerOf)+1, else a land pixel whose
+  // owner index >= nOwners would stay -1 (a gap). buildTerritory guarantees this.
   for (let o = 0; o < nOwners; o++) {
     mask.fill(0);
     for (let p = 0; p < mask.length; p++) if (land[p] && near[p] === o) mask[p] = 1;
