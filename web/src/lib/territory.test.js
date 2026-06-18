@@ -45,7 +45,7 @@ describe("borderDistance", () => {
 
 describe("LENS constants", () => {
   it("are the locked values", () => {
-    expect(LENS).toMatchObject({ DIM:0.40, tint:0.40, rimBright:0.74, rimWidthF:0.0020, haloF:0.0093, borderLeanF:0.0293, gooeyF:0.014 });
+    expect(LENS).toMatchObject({ DIM:0.40, tint:0.40, rimBright:0.74, rimWidthF:0.0020, haloF:0.0093, borderLeanF:0.0293, gooeyF:0.014, lightF:0.55 });
   });
 });
 
