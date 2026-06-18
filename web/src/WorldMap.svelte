@@ -22,13 +22,14 @@
       const worker = new Worker(new URL("./lib/territoryWorker.js", import.meta.url), { type: "module" });
       worker.onerror = (ev) => console.error("territory worker error", ev.message || ev);
       worker.onmessage = (e) => {
-        const dw = 1100, dh = Math.round((dw * H) / W);
-        terrCanvas.width = dw; terrCanvas.height = dh;
-        const ctx = terrCanvas.getContext("2d");
-        ctx.clearRect(0, 0, dw, dh);
-        ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
-        ctx.drawImage(e.data.bitmap, 0, 0, W, H, 0, 0, dw, dh);   // 2x -> display = AA
-        worker.terminate();
+        try {
+          const dw = 1100, dh = Math.round((dw * H) / W);
+          terrCanvas.width = dw; terrCanvas.height = dh;
+          const ctx = terrCanvas.getContext("2d");
+          ctx.clearRect(0, 0, dw, dh);
+          ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+          ctx.drawImage(e.data.bitmap, 0, 0, W, H, 0, 0, dw, dh);   // 2x -> display = AA
+        } catch (err) { console.error("territory draw failed", err); } finally { worker.terminate(); }
       };
       worker.postMessage({ coverageBitmap: cov, baseBitmap: base, W, H,
         manifestCourses: manifest.courses, territoryRows: rows }, [cov, base]);
