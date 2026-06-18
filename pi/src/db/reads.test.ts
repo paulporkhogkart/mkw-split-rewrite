@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { openDb, applySchema } from './connect';
-import { courseLeaderboard, friendsPbs, currentWr, myPbs, myPbSplits, courseTrails, roster, playerTrails } from './reads';
+import { courseLeaderboard, friendsPbs, currentWr, myPbs, myPbSplits, courseTrails, roster, playerTrails, territoryOwners } from './reads';
 
 function seeded() {
   const db = openDb(':memory:');
@@ -145,5 +145,30 @@ describe('playerTrails', () => {
     const t = playerTrails(db5(), 1, 1, 1, 150, 'last_pb', 3);
     expect(t.map((r) => r.run_id)).toEqual([30, 20, 10]);
     expect(t.filter((r) => r.is_pb).map((r) => r.run_id)).toEqual([10]);
+  });
+});
+
+describe('territoryOwners', () => {
+  it('returns each course #1 PB holder + colour, null when unclaimed', () => {
+    const db = openDb(':memory:'); applySchema(db);
+    db.exec("INSERT INTO seasons(id,name,is_active) VALUES (1,'S1',1)");
+    db.exec("INSERT INTO players(id,display_name,color) VALUES (1,'Paul','#a78bfa'),(2,'Gub','#2dd4bf')");
+    db.exec("INSERT INTO courses(id,slug,display_name) VALUES (1,'rr','RR'),(2,'mc','MC'),(3,'pb','PB')");
+    // rr: Paul 108s beats Gub 112s -> Paul; mc: Gub only -> Gub; pb: no PB -> unclaimed
+    db.exec("INSERT INTO runs(season_id,player_id,course_id,cc,status,provenance,total_time_ms,is_pb) VALUES " +
+      "(1,1,1,150,'finished','live',108000,1),(1,2,1,150,'finished','live',112000,1),(1,2,2,150,'finished','live',99000,1)");
+    const by = Object.fromEntries(territoryOwners(db, 1, 150).map(r => [r.slug, r]));
+    expect(by.rr.owner_name).toBe('Paul'); expect(by.rr.color).toBe('#a78bfa');
+    expect(by.mc.owner_name).toBe('Gub');
+    expect(by.pb.owner_player_id).toBe(null); expect(by.pb.color).toBe(null);
+  });
+  it('filters by season and cc', () => {
+    const db = openDb(':memory:'); applySchema(db);
+    db.exec("INSERT INTO seasons(id,name,is_active) VALUES (1,'S1',1),(2,'S2',0)");
+    db.exec("INSERT INTO players(id,display_name,color) VALUES (1,'Paul','#a78bfa')");
+    db.exec("INSERT INTO courses(id,slug,display_name) VALUES (1,'rr','RR')");
+    db.exec("INSERT INTO runs(season_id,player_id,course_id,cc,status,provenance,total_time_ms,is_pb) VALUES " +
+      "(2,1,1,150,'finished','live',108000,1),(1,1,1,200,'finished','live',90000,1)");
+    expect(territoryOwners(db, 1, 150).find(r => r.slug === 'rr')?.owner_player_id).toBe(null);
   });
 });

@@ -29,7 +29,7 @@ export function createApp(db: DatabaseSync, hub: EventHub,
   // The public website fetches these reads cross-origin. They serve already-public data (same
   // category as the open /v1/presence stream), so they skip the token gate and get permissive
   // CORS (incl. preflight). Everything else (writes, stats, screen, other reads) stays gated.
-  const PUBLIC_READS = ['/v1/leaderboard', '/v1/world-records', '/v1/roster'];
+  const PUBLIC_READS = ['/v1/leaderboard', '/v1/world-records', '/v1/roster', '/v1/territory'];
   const readCors = cors({ origin: '*', allowMethods: ['GET'] });
   for (const p of PUBLIC_READS) app.use(p, readCors);
 

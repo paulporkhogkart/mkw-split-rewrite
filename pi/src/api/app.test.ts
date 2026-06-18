@@ -52,7 +52,7 @@ describe('reads need a token', () => {
 describe('public website reads (open + CORS)', () => {
   it('leaderboard / world-records / roster are open without a token and send CORS', async () => {
     const { app } = appWith();
-    for (const path of ['/v1/leaderboard?course=rainbow_road&cc=150', '/v1/world-records?course=rainbow_road&cc=150', '/v1/roster']) {
+    for (const path of ['/v1/leaderboard?course=rainbow_road&cc=150', '/v1/world-records?course=rainbow_road&cc=150', '/v1/roster', '/v1/territory?cc=150']) {
       const res = await app.request(path, { headers: { origin: 'http://localhost:1430' } });
       expect(res.status).not.toBe(401);
       expect(res.headers.get('access-control-allow-origin')).toBe('*');

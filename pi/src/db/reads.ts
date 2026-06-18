@@ -105,6 +105,28 @@ export function roster(db: DatabaseSync, seasonId: number): RosterRow[] {
   ).all(seasonId) as RosterRow[];
 }
 
+export type TerritoryOwner = {
+  course_id: number; slug: string; display_name: string;
+  owner_player_id: number | null; owner_name: string | null; color: string | null;
+};
+
+/** Every course with its #1 PB holder (lowest total_time_ms, is_pb) for the season+cc,
+ *  plus that player's colour. owner_* / color are null for unclaimed courses. */
+export function territoryOwners(db: DatabaseSync, seasonId: number, cc: number): TerritoryOwner[] {
+  return db.prepare(
+    `SELECT c.id AS course_id, c.slug, c.display_name,
+            t.player_id AS owner_player_id, p.display_name AS owner_name, p.color
+     FROM courses c
+     LEFT JOIN (
+       SELECT course_id, player_id,
+              ROW_NUMBER() OVER (PARTITION BY course_id ORDER BY total_time_ms ASC) AS rn
+       FROM runs WHERE season_id=? AND cc=? AND is_pb=1 AND total_time_ms IS NOT NULL
+     ) t ON t.course_id = c.id AND t.rn = 1
+     LEFT JOIN players p ON p.id = t.player_id
+     ORDER BY c.slug`
+  ).all(seasonId, cc) as TerritoryOwner[];
+}
+
 export type TrailMode = 'none' | 'pbs' | 'best' | 'last' | 'last_pb' | 'all';
 export type PlayerTrailRun = { run_id: number; total_ms: number | null; status: string; is_pb: boolean; points: number[][] };
 type TrailRow = { id: number; total_time_ms: number | null; status: string; is_pb: number };
