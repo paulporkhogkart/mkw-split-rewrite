@@ -9,15 +9,18 @@
   let error = false;
 
   // Hover popup (glance tooltip: open on icon enter, close on icon leave).
-  let view = null, shown = false, popupEl, stageEl, popupStyle = "", closeTimer = 0, activeHit = null;
+  let view = null, shown = false, popupEl, stageEl, popupStyle = "", closeTimer = 0, activeHit = null, token = 0;
 
   async function openCourse(course, hitEl) {
     clearTimeout(closeTimer);
     activeHit = hitEl;
+    const my = ++token;
     const v = await fetchCourseView(API_BASE, course).catch(() => null);
-    if (!v) return;
+    if (!v || my !== token) return;                 // fetch failed, or a newer hover superseded us
     view = v;
     await tick();                                   // CoursePopup renders -> measurable
+    const fig = popupEl && popupEl.querySelector("img.fig");
+    if (fig && fig.src) { const s = fig.src; fig.src = ""; fig.src = s; }   // re-arm the play-once GIF
     place(hitEl);
     requestAnimationFrame(() => (shown = true));    // class drives the fade/scale-in
   }
@@ -42,7 +45,10 @@
 
   // Touch: a tap outside the open course's icon dismisses the popup.
   function onDocPointerDown(e) { if (shown && activeHit && !activeHit.contains(e.target)) shown = false; }
-  onDestroy(() => { if (typeof document !== "undefined") document.removeEventListener("pointerdown", onDocPointerDown); });
+  onDestroy(() => {
+    clearTimeout(closeTimer);
+    if (typeof document !== "undefined") document.removeEventListener("pointerdown", onDocPointerDown);
+  });
 
   onMount(async () => {
     if (typeof document !== "undefined") document.addEventListener("pointerdown", onDocPointerDown);
@@ -68,6 +74,7 @@
         <div class="territory" aria-hidden="true"></div>
         <div class="icons">
           {#each manifest.courses as c (c.slug)}
+            <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
             <div class="hit" data-slug={c.slug} style={hitStyle(c.hit)}
                  on:mouseenter={(e) => openCourse(c, e.currentTarget)}
                  on:mouseleave={scheduleClose}
