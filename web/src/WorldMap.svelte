@@ -3,10 +3,36 @@
   import { baseUrl, manifestUrl, spriteUrl, hitStyle, spriteStyle } from "./lib/map.js";
   import CoursePopup from "./CoursePopup.svelte";
   import { fetchCourseView, preloadPlayerGifs, freshGifUrl } from "./lib/courseData.js";
-  import { API_BASE } from "./lib/api.js";
+  import { API_BASE, territoryUrl } from "./lib/api.js";
 
   let manifest = null;
   let error = false;
+
+  let terrCanvas;   // the .territory <canvas>
+
+  async function renderTerritory() {
+    if (!terrCanvas || !manifest) return;
+    try {
+      const [rows, cov, base] = await Promise.all([
+        fetch(territoryUrl(150)).then((r) => r.json()),
+        createImageBitmap(await (await fetch(`/map/island.png`)).blob()),
+        createImageBitmap(await (await fetch(`/map/base.jpg`)).blob()),
+      ]);
+      const W = cov.width, H = cov.height;
+      const worker = new Worker(new URL("./lib/territoryWorker.js", import.meta.url), { type: "module" });
+      worker.onmessage = (e) => {
+        const dw = 1100, dh = Math.round((dw * H) / W);
+        terrCanvas.width = dw; terrCanvas.height = dh;
+        const ctx = terrCanvas.getContext("2d");
+        ctx.clearRect(0, 0, dw, dh);
+        ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+        ctx.drawImage(e.data.bitmap, 0, 0, W, H, 0, 0, dw, dh);   // 2x -> display = AA
+        worker.terminate();
+      };
+      worker.postMessage({ coverageBitmap: cov, baseBitmap: base, W, H,
+        manifestCourses: manifest.courses, territoryRows: rows }, [cov, base]);
+    } catch (e) { console.error("territory render failed", e); }
+  }
 
   // Hover popup (glance tooltip: open on icon enter, close on icon leave).
   let view = null, shown = false, popupEl, stageEl, popupStyle = "", closeTimer = 0, activeHit = null, token = 0, figUrl = "";
@@ -57,6 +83,7 @@
       const r = await fetch(manifestUrl(), { cache: "no-store" });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       manifest = await r.json();
+      renderTerritory();
     } catch (e) {
       console.error("world map: manifest load failed", e);
       error = true;
@@ -73,7 +100,7 @@
       <div class="stage" bind:this={stageEl}>
         <img class="base" src={baseUrl()} alt="Mario Kart World map" />
         <!-- SP2 (territory) draws here, between the base and the icons -->
-        <div class="territory" aria-hidden="true"></div>
+        <canvas class="territory" bind:this={terrCanvas} aria-hidden="true"></canvas>
         <div class="icons">
           {#each manifest.courses as c (c.slug)}
             <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
@@ -113,8 +140,9 @@
   }
   .stage { position: relative; width: 100%; }
   /* Calm at rest: the whole map sits muted so the hovered course (and SP2's territory) leads. */
-  .base { display: block; width: 100%; height: auto; filter: saturate(.82) brightness(.9); }
-  .territory, .popups { position: absolute; inset: 0; pointer-events: none; }
+  .base { display: block; width: 100%; height: auto; filter: saturate(.82) brightness(.82); }
+  .territory { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .popups { position: absolute; inset: 0; pointer-events: none; }
   .icons { position: absolute; inset: 0; }
   .hit { position: absolute; cursor: pointer; }
   .spr, .shadow {
