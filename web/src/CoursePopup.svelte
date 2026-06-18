@@ -4,7 +4,7 @@
   // view-model; renders nothing until one is supplied.
   import Fire from "../../src/components/Fire.svelte";
   export let view = null;
-  export let openId = 0;   // bumped on each open so the figure GIF replays from frame 1
+  export let figUrl = "";   // a fresh object URL per open (set by the map) so the GIF replays
   const fmt = (ms) => { if (ms == null) return "—"; const s = ms/1000, m = Math.floor(s/60); return `${m}:${(s-m*60 < 10 ? "0" : "")}${(s-m*60).toFixed(3)}`; };
   const gap = (ms) => (ms == null ? "-.---" : "+" + (ms/1000).toFixed(3));
 </script>
@@ -16,9 +16,7 @@
   <div class="strip">
     <div class="spine" style="background:{view.leader?.color || '#888'}"></div>
     {#if view.onFire}<Fire color={view.leader?.color || '#888'} active={true} />{/if}
-    {#key openId}
-      <img class="fig" src={view.onFire ? view.fireGifUrl : view.gifUrl} alt="" draggable="false" />
-    {/key}
+    <img class="fig" src={figUrl} alt="" draggable="false" />
   </div>
   <div class="lb">
     <div class="head"><span class="title">{view.name}</span>

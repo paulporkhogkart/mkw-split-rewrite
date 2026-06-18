@@ -43,15 +43,26 @@ export async function fetchColorById(apiBase, { fetchImpl = fetch } = {}) {
   return map;
 }
 
-/** Warm the browser cache with every roster player's popup GIFs (posted + fire), so the
- *  first hover doesn't wait on a multi-MB download. Browser-only; fire-and-forget. */
+const gifBlobs = new Map();   // /players/<name>.gif -> Blob, preloaded once and reused across opens
+
+/** Preload every roster player's popup GIFs as in-memory blobs. A blob lets each open spin up
+ *  a fresh object URL, which restarts the GIF from frame 1 - a cached <img> with the same src
+ *  stays frozen on its last decoded frame. Done once; fire-and-forget. */
 export async function preloadPlayerGifs(apiBase, { fetchImpl = fetch } = {}) {
-  if (typeof Image === "undefined") return;
   const roster = (await j(fetchImpl, `${apiBase}/v1/roster`)) || [];
-  for (const p of roster) {
-    const base = gifBase(p.display_name);
-    for (const url of [`${base}.gif`, `${base}__fire.gif`]) { const im = new Image(); im.src = url; }
-  }
+  const urls = [];
+  for (const p of roster) { const b = gifBase(p.display_name); urls.push(`${b}.gif`, `${b}__fire.gif`); }
+  await Promise.all(urls.map(async (u) => {
+    if (gifBlobs.has(u)) return;
+    try { const r = await fetchImpl(u); if (r.ok) gifBlobs.set(u, await r.blob()); } catch { /* ignore */ }
+  }));
+}
+
+/** A fresh object URL for a (preloaded) GIF so it replays from the start; falls back to the
+ *  plain path when it isn't preloaded yet. The caller revokes the previous object URL. */
+export function freshGifUrl(path) {
+  const blob = gifBlobs.get(path);
+  return blob && typeof URL !== "undefined" && URL.createObjectURL ? URL.createObjectURL(blob) : path;
 }
 
 const viewCache = new Map();

@@ -2,14 +2,14 @@
   import { onMount, onDestroy, tick } from "svelte";
   import { baseUrl, manifestUrl, spriteUrl, hitStyle, spriteStyle } from "./lib/map.js";
   import CoursePopup from "./CoursePopup.svelte";
-  import { fetchCourseView, preloadPlayerGifs } from "./lib/courseData.js";
+  import { fetchCourseView, preloadPlayerGifs, freshGifUrl } from "./lib/courseData.js";
   import { API_BASE } from "./lib/api.js";
 
   let manifest = null;
   let error = false;
 
   // Hover popup (glance tooltip: open on icon enter, close on icon leave).
-  let view = null, shown = false, popupEl, stageEl, popupStyle = "", closeTimer = 0, activeHit = null, token = 0, openId = 0;
+  let view = null, shown = false, popupEl, stageEl, popupStyle = "", closeTimer = 0, activeHit = null, token = 0, figUrl = "";
 
   async function openCourse(course, hitEl) {
     clearTimeout(closeTimer);
@@ -18,7 +18,8 @@
     const v = await fetchCourseView(API_BASE, course).catch(() => null);
     if (!v || my !== token) return;                 // fetch failed, or a newer hover superseded us
     view = v;
-    openId += 1;                                    // recreates the figure GIF -> replays from frame 1
+    if (figUrl.startsWith("blob:")) URL.revokeObjectURL(figUrl);  // free the previous object URL
+    figUrl = freshGifUrl(v.onFire ? v.fireGifUrl : v.gifUrl);     // fresh object URL -> GIF replays from frame 1
     await tick();                                   // CoursePopup renders -> measurable
     place(hitEl);
     requestAnimationFrame(() => (shown = true));    // class drives the fade/scale-in
@@ -46,6 +47,7 @@
   function onDocPointerDown(e) { if (shown && activeHit && !activeHit.contains(e.target)) shown = false; }
   onDestroy(() => {
     clearTimeout(closeTimer);
+    if (figUrl.startsWith("blob:")) URL.revokeObjectURL(figUrl);
     if (typeof document !== "undefined") document.removeEventListener("pointerdown", onDocPointerDown);
   });
 
@@ -88,7 +90,7 @@
         </div>
         <div class="popups">
           <div class="popup" class:show={shown} bind:this={popupEl} style={popupStyle} aria-hidden={!shown}>
-            <CoursePopup {view} {openId} />
+            <CoursePopup {view} {figUrl} />
           </div>
         </div>
       </div>
