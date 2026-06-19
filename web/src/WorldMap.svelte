@@ -5,11 +5,32 @@
   import { fetchCourseView, preloadPlayerGifs, freshGifUrl } from "./lib/courseData.js";
   import { API_BASE, territoryUrl, territoryTimelineUrl } from "./lib/api.js";
   import { buildSnapshots } from "./lib/timeline.js";
+  import TimelineScrubber from "./TimelineScrubber.svelte";
 
   let manifest = null;
   let error = false;
 
-  let terrCanvas;   // the .territory <canvas>
+  // Two stacked .territory layers: paint the next snapshot onto the hidden one, then flip which is
+  // visible -> CSS crossfades (play) or hard-cuts (scrub). LIVE shows the canonical high-res
+  // present; historical indices show reduced-res cache frames.
+  let terrA, terrB;
+  let activeLayer = 0;        // index into [terrA, terrB] currently visible
+  let crossfade = false;      // true -> animate the opacity swap (play); false -> hard cut (scrub)
+  let presentBitmap = null;   // canonical present (native res), shown at LIVE + as fallback
+  let playing = false, playTimer = 0;
+  // showSnapshot coalescing: the knob (tlIndex) tracks instantly while only the newest request paints.
+  let pendingIndex = null, pendingAnimate = false, rendering = false;
+
+  const DW = 1100, DH = 888;  // display-layer pixels (asset aspect 2200:1775)
+  const layerEl = (i) => (i === 0 ? terrA : terrB);
+  function paintLayer(canvasEl, bitmap) {
+    if (!canvasEl || !bitmap) return;
+    canvasEl.width = DW; canvasEl.height = DH;
+    const ctx = canvasEl.getContext("2d");
+    ctx.clearRect(0, 0, DW, DH);
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(bitmap, 0, 0, bitmap.width, bitmap.height, 0, 0, DW, DH);   // AA downscale for the 2200 present
+  }
 
   // --- Timeline (SP4): historical ownership snapshots, lazily rendered + capped cache ---
   // N can be ~200; full-res layers (2200x1775, ~15 MB each) x N would OOM, so historical frames
@@ -24,8 +45,10 @@
   const tlCache = [];         // index -> ImageBitmap (sparse)
   const tlOrder = [];         // FIFO of cached indices, for eviction
 
+  // Canonical present territory (high-res /v1/territory): render once and paint it to the active
+  // layer. Kept as the LIVE view and as the fallback when the timeline endpoint is unavailable.
   async function renderTerritory() {
-    if (!terrCanvas || !manifest) return;
+    if (!terrA || !manifest) return;
     try {
       const [rows, cov, base] = await Promise.all([
         fetch(territoryUrl(150)).then((r) => r.json()),
@@ -37,12 +60,8 @@
       worker.onerror = (ev) => console.error("territory worker error", ev.message || ev);
       worker.onmessage = (e) => {
         try {
-          const dw = 1100, dh = Math.round((dw * H) / W);
-          terrCanvas.width = dw; terrCanvas.height = dh;
-          const ctx = terrCanvas.getContext("2d");
-          ctx.clearRect(0, 0, dw, dh);
-          ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
-          ctx.drawImage(e.data.bitmap, 0, 0, W, H, 0, 0, dw, dh);   // 2x -> display = AA
+          presentBitmap = e.data.bitmap;                      // native 2200 canonical present
+          paintLayer(layerEl(activeLayer), presentBitmap);    // show it on the visible layer
         } catch (err) { console.error("territory draw failed", err); } finally { worker.terminate(); }
       };
       worker.postMessage({ coverageBitmap: cov, baseBitmap: base, W, H,
@@ -104,6 +123,45 @@
     }
   }
 
+  // Swap the visible territory to snapshot i. The knob updates immediately; rendering is coalesced
+  // so rapid scrubbing only paints the newest frame. animate=true crossfades (play), false cuts.
+  async function showSnapshot(i, animate) {
+    i = Math.max(0, Math.min(i, snapshots.length - 1));
+    tlIndex = i;
+    pendingIndex = i; pendingAnimate = animate;
+    if (rendering) return;            // an active loop will pick up pendingIndex
+    rendering = true;
+    try {
+      while (pendingIndex !== null) {
+        const target = pendingIndex, anim = pendingAnimate; pendingIndex = null;
+        const atLive = target === snapshots.length - 1;
+        let bmp;
+        try { bmp = atLive && presentBitmap ? presentBitmap : await ensureBitmap(target); }
+        catch { continue; }
+        if (pendingIndex !== null) continue;   // superseded mid-render -> skip the stale paint
+        const next = 1 - activeLayer;
+        paintLayer(layerEl(next), bmp);
+        crossfade = !!anim;
+        activeLayer = next;
+      }
+    } finally { rendering = false; }
+  }
+
+  function step() {
+    if (!playing) return;
+    const last = snapshots.length - 1;
+    const next = Math.min(tlIndex + 1, last);
+    showSnapshot(next, true);
+    if (next >= last) { playing = false; return; }   // reached the present -> park at LIVE
+    playTimer = setTimeout(step, 700);
+  }
+  function togglePlay() {
+    if (playing) { playing = false; clearTimeout(playTimer); return; }
+    if (tlIndex >= snapshots.length - 1) showSnapshot(0, false);   // restart from the beginning
+    playing = true;
+    playTimer = setTimeout(step, 700);
+  }
+
   // Hover popup (glance tooltip: open on icon enter, close on icon leave).
   let view = null, shown = false, popupEl, stageEl, popupStyle = "", closeTimer = 0, activeHit = null, token = 0, figUrl = "";
 
@@ -145,9 +203,10 @@
     clearTimeout(closeTimer);
     if (figUrl.startsWith("blob:")) URL.revokeObjectURL(figUrl);
     if (typeof document !== "undefined") document.removeEventListener("pointerdown", onDocPointerDown);
+    clearTimeout(playTimer);
     tlWorker?.terminate();
     for (const b of tlCache) b?.close?.();
-    tlCov?.close?.(); tlBase?.close?.();
+    tlCov?.close?.(); tlBase?.close?.(); presentBitmap?.close?.();
   });
 
   onMount(async () => {
@@ -156,7 +215,7 @@
       const r = await fetch(manifestUrl(), { cache: "no-store" });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       manifest = await r.json();
-      await tick();            // let Svelte mount the .territory canvas (bind terrCanvas) before drawing
+      await tick();            // let Svelte mount the .territory layers (bind terrA/terrB) before drawing
       renderTerritory();       // canonical present (high-res) = default view + fallback
       loadTimeline();          // SP4: fetch history + prepare lazy scrub-frame cache (additive)
     } catch (e) {
@@ -175,7 +234,8 @@
       <div class="stage" bind:this={stageEl}>
         <img class="base" src={baseUrl()} alt="Mario Kart World map" />
         <!-- SP2 (territory) draws here, between the base and the icons -->
-        <canvas class="territory" bind:this={terrCanvas} aria-hidden="true"></canvas>
+        <canvas class="territory layer" class:on={activeLayer === 0} class:cross={crossfade} bind:this={terrA} aria-hidden="true"></canvas>
+        <canvas class="territory layer" class:on={activeLayer === 1} class:cross={crossfade} bind:this={terrB} aria-hidden="true"></canvas>
         <div class="icons">
           {#each manifest.courses as c (c.slug)}
             <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
@@ -200,10 +260,18 @@
       <div class="msg">Loading map…</div>
     {/if}
   </div>
+  {#if timelineReady && snapshots.length}
+    <div class="timeline">
+      <TimelineScrubber {snapshots} index={tlIndex} {playing}
+        on:scrub={(e) => showSnapshot(e.detail.index, false)}
+        on:toggle={togglePlay} />
+    </div>
+  {/if}
 </div>
 
 <style>
   .map-view { padding: 16px; }
+  .timeline { max-width: 1100px; margin: 12px auto 0; }
   .frame {
     position: relative; max-width: 1100px; margin: 0 auto;
     background: var(--feed-bg); border: 1px solid var(--bd);
@@ -217,6 +285,10 @@
   /* Calm at rest: the whole map sits muted so the hovered course (and SP2's territory) leads. */
   .base { display: block; width: 100%; height: auto; filter: saturate(.82) brightness(.82); }
   .territory { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  /* Crossfade layers: only the .on layer is visible; .cross enables the transition (play). */
+  .layer { opacity: 0; }
+  .layer.on { opacity: 1; }
+  .layer.cross { transition: opacity 0.28s ease; }
   .popups { position: absolute; inset: 0; pointer-events: none; }
   .icons { position: absolute; inset: 0; }
   .hit { position: absolute; cursor: pointer; }
