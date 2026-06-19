@@ -1,5 +1,6 @@
 import { serve } from '@hono/node-server';
 import { openDb, applySchema } from './db/connect';
+import { migrateSeason0Recovered } from './db/season0Recovery';
 import { EventHub } from './api/events';
 import { createApp, makeWs } from './api/app';
 import { PresenceHub } from './presence/hub';
@@ -13,6 +14,7 @@ const PORT = Number(process.env.PORT ?? 8787);
 
 const db = openDb(DB_PATH);
 applySchema(db);
+migrateSeason0Recovered(db);   // one-time: real Discord-recovered Season 0 progression
 const hub = new EventHub();
 const live = makeLiveCompletion(db);
 const pace = makePaceDelta(db);
