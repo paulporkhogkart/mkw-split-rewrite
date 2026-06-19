@@ -7,3 +7,4 @@ export const API_BASE =
   (env.DEV ? "http://localhost:8787" : "https://api.thekartoff.com");
 
 export const territoryUrl = (cc = 150) => `${API_BASE}/v1/territory?cc=${cc}`;
+export const territoryTimelineUrl = (cc = 150) => `${API_BASE}/v1/territory/timeline?cc=${cc}`;

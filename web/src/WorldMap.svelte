@@ -3,12 +3,26 @@
   import { baseUrl, manifestUrl, spriteUrl, hitStyle, spriteStyle } from "./lib/map.js";
   import CoursePopup from "./CoursePopup.svelte";
   import { fetchCourseView, preloadPlayerGifs, freshGifUrl } from "./lib/courseData.js";
-  import { API_BASE, territoryUrl } from "./lib/api.js";
+  import { API_BASE, territoryUrl, territoryTimelineUrl } from "./lib/api.js";
+  import { buildSnapshots } from "./lib/timeline.js";
 
   let manifest = null;
   let error = false;
 
   let terrCanvas;   // the .territory <canvas>
+
+  // --- Timeline (SP4): historical ownership snapshots, lazily rendered + capped cache ---
+  // N can be ~200; full-res layers (2200x1775, ~15 MB each) x N would OOM, so historical frames
+  // render at a reduced internal width and only a bounded window is kept (re-rendered on demand).
+  // The present view stays the canonical high-res renderTerritory (= /v1/territory).
+  const TL_RENDER_W = 1100;   // internal render width for scrub frames (display res, not 2200)
+  const TL_CACHE_CAP = 32;    // max cached scrub bitmaps (~32 x 3.9 MB, ~125 MB ceiling)
+  let snapshots = [];
+  let tlIndex = 0;
+  let timelineReady = false;
+  let tlWorker = null, tlCov = null, tlBase = null, tlW = 0, tlH = 0, tlPending = null;
+  const tlCache = [];         // index -> ImageBitmap (sparse)
+  const tlOrder = [];         // FIFO of cached indices, for eviction
 
   async function renderTerritory() {
     if (!terrCanvas || !manifest) return;
@@ -34,6 +48,60 @@
       worker.postMessage({ coverageBitmap: cov, baseBitmap: base, W, H,
         manifestCourses: manifest.courses, territoryRows: rows }, [cov, base]);
     } catch (e) { console.error("territory render failed", e); }
+  }
+
+  // Render one snapshot's territory (reduced res) via a persistent worker. One render is in
+  // flight at a time (callers await / coalesce), so a single pending resolver suffices. The
+  // source bitmaps are NOT transferred, so they survive for the next snapshot.
+  function tlRenderViaWorker(territoryRows) {
+    return new Promise((resolve, reject) => {
+      tlPending = { resolve, reject };
+      tlWorker.postMessage({
+        coverageBitmap: tlCov, baseBitmap: tlBase, W: tlW, H: tlH,
+        manifestCourses: manifest.courses, territoryRows,
+      });
+    });
+  }
+
+  // Lazily render + cache snapshot i's bitmap, evicting the oldest beyond the cap (never the
+  // current index or the one just produced). Evicted frames re-render on demand.
+  async function ensureBitmap(i) {
+    if (tlCache[i]) return tlCache[i];
+    const rows = Object.entries(snapshots[i].owners).map(([slug, o]) => ({ slug, color: o.color }));
+    const bmp = await tlRenderViaWorker(rows);
+    tlCache[i] = bmp;
+    tlOrder.push(i);
+    while (tlOrder.length > TL_CACHE_CAP) {
+      const old = tlOrder.shift();
+      if (old !== tlIndex && old !== i && tlCache[old]) { tlCache[old].close?.(); tlCache[old] = undefined; }
+    }
+    return bmp;
+  }
+
+  // Fetch the merged run history, build ownership snapshots, and prepare the reduced-res worker
+  // + source bitmaps. Additive: the canonical present render stays as-is; on any failure (e.g.
+  // endpoint unavailable) we simply keep the live one-shot territory and no timeline appears.
+  async function loadTimeline() {
+    try {
+      const res = await fetch(territoryTimelineUrl(150));
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const { events, colors } = await res.json();
+      const snaps = buildSnapshots(events, colors);
+      if (!snaps.length) return;
+      const [cov, base] = await Promise.all([
+        createImageBitmap(await (await fetch(`/map/island.png`)).blob(), { resizeWidth: TL_RENDER_W, resizeQuality: "high" }),
+        createImageBitmap(await (await fetch(`/map/base.jpg`)).blob(), { resizeWidth: TL_RENDER_W, resizeQuality: "high" }),
+      ]);
+      tlCov = cov; tlBase = base; tlW = cov.width; tlH = cov.height;
+      tlWorker = new Worker(new URL("./lib/territoryWorker.js", import.meta.url), { type: "module" });
+      tlWorker.onmessage = (e) => { const p = tlPending; tlPending = null; p?.resolve(e.data.bitmap); };
+      tlWorker.onerror = (ev) => { const p = tlPending; tlPending = null; console.error("timeline worker error", ev.message || ev); p?.reject(new Error("worker error")); };
+      snapshots = snaps;
+      tlIndex = snaps.length - 1;
+      timelineReady = true;
+    } catch (e) {
+      console.error("timeline load failed (keeping live territory):", e);
+    }
   }
 
   // Hover popup (glance tooltip: open on icon enter, close on icon leave).
@@ -77,6 +145,9 @@
     clearTimeout(closeTimer);
     if (figUrl.startsWith("blob:")) URL.revokeObjectURL(figUrl);
     if (typeof document !== "undefined") document.removeEventListener("pointerdown", onDocPointerDown);
+    tlWorker?.terminate();
+    for (const b of tlCache) b?.close?.();
+    tlCov?.close?.(); tlBase?.close?.();
   });
 
   onMount(async () => {
@@ -86,7 +157,8 @@
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       manifest = await r.json();
       await tick();            // let Svelte mount the .territory canvas (bind terrCanvas) before drawing
-      renderTerritory();
+      renderTerritory();       // canonical present (high-res) = default view + fallback
+      loadTimeline();          // SP4: fetch history + prepare lazy scrub-frame cache (additive)
     } catch (e) {
       console.error("world map: manifest load failed", e);
       error = true;
