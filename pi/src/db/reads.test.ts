@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { openDb, applySchema } from './connect';
-import { courseLeaderboard, friendsPbs, currentWr, myPbs, myPbSplits, courseTrails, roster, playerTrails, territoryOwners } from './reads';
+import { courseLeaderboard, friendsPbs, currentWr, myPbs, myPbSplits, courseTrails, roster, playerTrails, territoryOwners, territoryTimeline } from './reads';
 
 function seeded() {
   const db = openDb(':memory:');
@@ -170,5 +170,24 @@ describe('territoryOwners', () => {
     db.exec("INSERT INTO runs(season_id,player_id,course_id,cc,status,provenance,total_time_ms,is_pb) VALUES " +
       "(2,1,1,150,'finished','live',108000,1),(1,1,1,200,'finished','live',90000,1)");
     expect(territoryOwners(db, 1, 150).find(r => r.slug === 'rr')?.owner_player_id).toBe(null);
+  });
+});
+
+describe('territoryTimeline', () => {
+  it('returns finished runs across seasons ordered by time, excluding carryover, with colours', () => {
+    const db = openDb(':memory:'); applySchema(db);
+    db.exec("INSERT INTO seasons(id,name,is_active) VALUES (1,'Season 0',0),(2,'Season 1',1)");
+    db.exec("INSERT INTO players(id,display_name,color) VALUES (1,'Aliias','#4ade80'),(2,'Gub','#2dd4bf')");
+    db.exec("INSERT INTO courses(id,slug,display_name) VALUES (1,'mario_circuit','Mario Circuit')");
+    db.exec("INSERT INTO runs(season_id,player_id,course_id,cc,status,provenance,ended_at,total_time_ms) VALUES (1,1,1,150,'finished','legacy_import','2025-06-26T00:00:00Z',83000)");
+    db.exec("INSERT INTO runs(season_id,player_id,course_id,cc,status,provenance,ended_at,total_time_ms) VALUES (2,2,1,150,'finished','live','2026-06-10T00:00:00Z',70000)");
+    db.exec("INSERT INTO runs(season_id,player_id,course_id,cc,status,provenance,ended_at,total_time_ms) VALUES (2,1,1,150,'finished','carryover','2025-07-01T00:00:00Z',84000)"); // excluded
+    db.exec("INSERT INTO runs(season_id,player_id,course_id,cc,status,provenance,ended_at,total_time_ms) VALUES (1,2,1,150,'reset','live','2025-06-27T00:00:00Z',NULL)");       // excluded (not finished)
+    const r = territoryTimeline(db, 150);
+    expect(r.events).toEqual([
+      { t: Date.parse('2025-06-26T00:00:00Z'), player: 'Aliias', slug: 'mario_circuit', ms: 83000 },
+      { t: Date.parse('2026-06-10T00:00:00Z'), player: 'Gub', slug: 'mario_circuit', ms: 70000 },
+    ]);
+    expect(r.colors).toEqual({ Aliias: '#4ade80', Gub: '#2dd4bf' });
   });
 });

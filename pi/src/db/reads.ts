@@ -127,6 +127,31 @@ export function territoryOwners(db: DatabaseSync, seasonId: number, cc: number):
   ).all(seasonId, cc) as TerritoryOwner[];
 }
 
+export type TimelineEvent = { t: number; player: string; slug: string; ms: number };
+
+/** Merged finished-run stream across all seasons for the timeline replay: every finished run at
+ *  `cc` with a real time, excluding `provenance='carryover'` (those duplicate prior bests at the
+ *  original time -> phantom ownership flips), ordered by `ended_at`. `t` = epoch ms. Plus each
+ *  player's colour. Public, season-agnostic (the timeline spans S0 recovery + S1 live). */
+export function territoryTimeline(db: DatabaseSync, cc: number):
+    { events: TimelineEvent[]; colors: Record<string, string> } {
+  const rows = db.prepare(
+    `SELECT p.display_name AS player, c.slug AS slug, r.total_time_ms AS ms, r.ended_at AS ended_at
+     FROM runs r JOIN players p ON p.id=r.player_id JOIN courses c ON c.id=r.course_id
+     WHERE r.cc=? AND r.status='finished' AND r.provenance!='carryover' AND r.total_time_ms IS NOT NULL
+       AND r.ended_at IS NOT NULL
+     ORDER BY r.ended_at ASC, r.id ASC`
+  ).all(cc) as { player: string; slug: string; ms: number; ended_at: string }[];
+  const events = rows
+    .map((r) => ({ t: Date.parse(r.ended_at), player: r.player, slug: r.slug, ms: r.ms }))
+    .filter((e) => Number.isFinite(e.t))
+    .sort((a, b) => a.t - b.t);
+  const colors: Record<string, string> = {};
+  for (const p of db.prepare('SELECT display_name, color FROM players WHERE color IS NOT NULL').all() as any[])
+    colors[p.display_name] = p.color;
+  return { events, colors };
+}
+
 export type TrailMode = 'none' | 'pbs' | 'best' | 'last' | 'last_pb' | 'all';
 export type PlayerTrailRun = { run_id: number; total_ms: number | null; status: string; is_pb: boolean; points: number[][] };
 type TrailRow = { id: number; total_time_ms: number | null; status: string; is_pb: number };

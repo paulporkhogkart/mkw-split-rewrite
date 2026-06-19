@@ -3,7 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { Env } from './app';
 import { activeSeasonId, listSeasons, courseIdBySlug } from '../db/seasons';
 import { slugify } from '../db/slug';
-import { courseLeaderboard, overallLeaderboard, friendsPbs, playerPbs, currentWr, myPbs, myPbSplits, courseTrails, roster, playerTrails, territoryOwners } from '../db/reads';
+import { courseLeaderboard, overallLeaderboard, friendsPbs, playerPbs, currentWr, myPbs, myPbSplits, courseTrails, roster, playerTrails, territoryOwners, territoryTimeline } from '../db/reads';
 import type { TrailMode } from '../db/reads';
 import { requireToken } from './auth';
 import { playerByToken } from '../db/players';
@@ -21,6 +21,7 @@ export function readsRoutes(db: DatabaseSync): Hono<Env> {
   });
   r.get('/v1/leaderboard/overall', (c) => c.json(overallLeaderboard(db, season(c), num(c.req.query('cc'), 150))));
   r.get('/v1/territory', (c) => c.json(territoryOwners(db, season(c), num(c.req.query('cc'), 150))));
+  r.get('/v1/territory/timeline', (c) => c.json(territoryTimeline(db, num(c.req.query('cc'), 150))));
   r.get('/v1/friends-pbs', (c) => {
     const cid = course(c); if (cid === null) return c.json({ error: 'unknown course' }, 400);
     return c.json(friendsPbs(db, season(c), cid, num(c.req.query('cc'), 150)));
