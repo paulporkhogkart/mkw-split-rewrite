@@ -4,7 +4,8 @@
   import CoursePopup from "./CoursePopup.svelte";
   import { fetchCourseView, preloadPlayerGifs, freshGifUrl } from "./lib/courseData.js";
   import { API_BASE, territoryUrl, territoryTimelineUrl } from "./lib/api.js";
-  import { buildSnapshots } from "./lib/timeline.js";
+  import { buildSnapshots, flippedCourses } from "./lib/timeline.js";
+  import { prepareTransition, interpolatePatch } from "./lib/territoryAnim.js";
   import TimelineScrubber from "./TimelineScrubber.svelte";
 
   let manifest = null;
@@ -19,6 +20,11 @@
   let playing = false, playTimer = 0;
   // showSnapshot coalescing: the knob (tlIndex) tracks instantly while only the newest request paints.
   let pendingIndex = null, rendering = false;
+  // Border-push animation: per-frame source buffers (backing res) + the rAF transition runner.
+  let bkCoverage = null, bkTerr = null;
+  let animRaf = 0, animResolve = null;
+  const ANIM_MS = 480, STEP_DWELL_MS = 120;   // slide duration + dwell on the settled frame (tunable)
+  const easeInOut = (t) => t * t * (3 - 2 * t);
 
   // Backing store = display CSS width x devicePixelRatio (capped at the 2200 asset), so the
   // territory is rendered hi-res then downscaled into device pixels (crisp on any DPI).
@@ -124,6 +130,7 @@
       snapshots = snaps;
       tlIndex = snaps.length - 1;
       timelineReady = true;
+      buildBackingBuffers();      // prepare the per-frame animation source buffers
     } catch (e) {
       console.error("timeline load failed (keeping live territory):", e);
     }
@@ -150,19 +157,88 @@
     } finally { rendering = false; }
   }
 
-  function step() {
+  // Paint one snapshot's canonical full frame (LIVE = present bitmap, else the cached/rendered
+  // scrub frame). Awaitable; used to settle each animated step on a crisp AA frame.
+  async function drawBaseFrame(i) {
+    i = Math.max(0, Math.min(i, snapshots.length - 1));
+    const atLive = i === snapshots.length - 1;
+    let bmp;
+    try { bmp = atLive && presentBitmap ? presentBitmap : await ensureBitmap(i); }
+    catch { return; }
+    paintBitmap(bmp);
+  }
+
+  // Backing-resolution coverage + terrain buffers (read once from the full-res source bitmaps),
+  // so the per-frame transition patch composites in device pixels that line up with the canvas.
+  function buildBackingBuffers() {
+    if (!tlCov || !tlBase || !backW) return;
+    const c = document.createElement("canvas"); c.width = backW; c.height = backH;
+    const x = c.getContext("2d", { willReadFrequently: true });
+    x.drawImage(tlCov, 0, 0, backW, backH);
+    const cd = x.getImageData(0, 0, backW, backH).data;
+    bkCoverage = new Uint8Array(backW * backH);
+    for (let p = 0; p < bkCoverage.length; p++) bkCoverage[p] = cd[p * 4];
+    x.clearRect(0, 0, backW, backH);
+    x.drawImage(tlBase, 0, 0, backW, backH);
+    bkTerr = new Uint8ClampedArray(x.getImageData(0, 0, backW, backH).data);
+  }
+
+  const rowsOf = (i) => Object.entries(snapshots[i].owners).map(([slug, o]) => ({ slug, color: o.color }));
+
+  function cancelAnim() {                 // stop the running transition and unblock its awaiter
+    cancelAnimationFrame(animRaf);
+    if (animResolve) { const r = animResolve; animResolve = null; r(); }
+  }
+
+  // Animate the border-push from snapshot `from` to `to`, then settle on the canonical frame.
+  // The canvas must already show `from`; only the changed cells are re-rendered per frame, so the
+  // rest stays perfectly still (no flash). Borders slide because the gooey argmax of the tau-lerped
+  // owner masks moves continuously from the A-partition to the B-partition.
+  function animateTransition(from, to) {
+    return new Promise((resolve) => {
+      cancelAnim();
+      animResolve = resolve;
+      const settle = () => drawBaseFrame(to).then(() => { if (animResolve === resolve) { animResolve = null; resolve(); } });
+      if (!bkCoverage || !bkTerr || !flippedCourses(snapshots[from], snapshots[to]).length) { settle(); return; }
+      let prep;
+      try {
+        prep = prepareTransition({ coverage: bkCoverage, terr: bkTerr, W: backW, H: backH,
+          manifestCourses: manifest.courses, rowsA: rowsOf(from), rowsB: rowsOf(to) });
+      } catch (e) { console.error("transition prep failed", e); settle(); return; }
+      if (!prep) { settle(); return; }
+      const ctx = terr.getContext("2d");
+      const t0 = performance.now();
+      const tick = (now) => {
+        if (animResolve !== resolve) return;            // cancelled by scrub
+        const tau = easeInOut(Math.min(1, (now - t0) / ANIM_MS));
+        const patch = interpolatePatch(prep, tau);
+        ctx.putImageData(new ImageData(patch.rgba, patch.w, patch.h), patch.x, patch.y);
+        if (tau < 1) animRaf = requestAnimationFrame(tick);
+        else settle();
+      };
+      animRaf = requestAnimationFrame(tick);
+    });
+  }
+
+  async function step() {
     if (!playing) return;
     const last = snapshots.length - 1;
-    const next = Math.min(tlIndex + 1, last);
-    showSnapshot(next);
+    const from = tlIndex, next = Math.min(from + 1, last);
+    tlIndex = next;                        // knob + date track the destination as the border slides
+    await animateTransition(from, next);
+    if (!playing) return;                  // paused during the slide
     if (next >= last) { playing = false; return; }   // reached the present -> park at LIVE
-    playTimer = setTimeout(step, 700);
+    playTimer = setTimeout(step, STEP_DWELL_MS);
   }
-  function togglePlay() {
-    if (playing) { playing = false; clearTimeout(playTimer); return; }
-    if (tlIndex >= snapshots.length - 1) showSnapshot(0);   // restart from the beginning
+  async function togglePlay() {
+    if (playing) { playing = false; clearTimeout(playTimer); return; }   // pause: current slide finishes, then stops
+    if (tlIndex >= snapshots.length - 1) { await drawBaseFrame(0); tlIndex = 0; }   // restart: show frame 0 first
     playing = true;
-    playTimer = setTimeout(step, 700);
+    playTimer = setTimeout(step, STEP_DWELL_MS);
+  }
+  function onScrub(index) {                 // dragging the knob pauses play and hard-cuts to the frame
+    playing = false; clearTimeout(playTimer); cancelAnim();
+    showSnapshot(index);
   }
 
   // Hover popup (glance tooltip: open on icon enter, close on icon leave).
@@ -208,6 +284,7 @@
     if (typeof document !== "undefined") document.removeEventListener("pointerdown", onDocPointerDown);
     if (typeof window !== "undefined") window.removeEventListener("resize", onResize);
     clearTimeout(playTimer);
+    cancelAnimationFrame(animRaf);
     tlWorker?.terminate();
     for (const b of tlCache) b?.close?.();
     tlCov?.close?.(); tlBase?.close?.(); presentBitmap?.close?.();
@@ -215,6 +292,7 @@
 
   function onResize() {
     sizeCanvas();
+    buildBackingBuffers();                      // re-read the source buffers at the new backing size
     for (const b of tlCache) b?.close?.();      // cached scrub frames are sized to the old backing -> drop them
     tlCache.length = 0; tlOrder.length = 0;
     if (snapshots.length) showSnapshot(tlIndex);
@@ -276,7 +354,7 @@
   {#if timelineReady && snapshots.length}
     <div class="timeline">
       <TimelineScrubber {snapshots} index={tlIndex} {playing}
-        on:scrub={(e) => showSnapshot(e.detail.index)}
+        on:scrub={(e) => onScrub(e.detail.index)}
         on:toggle={togglePlay} />
     </div>
   {/if}
