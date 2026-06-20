@@ -80,28 +80,28 @@ const courses = [
 ];
 
 describe("prepareOwners", () => {
-  it("keeps claimed courses only, dedupes colours, computes centres", () => {
+  it("seeds ALL courses; claimed dedupe by colour, unclaimed -> one non-paintable owner", () => {
     const rows = [
       { slug:"a", color:"#ff0000" },
       { slug:"b", color:"#ff0000" },   // same colour -> same owner index
-      { slug:"c", color:null },        // unclaimed -> dropped (not a seed)
+      { slug:"c", color:null },        // unclaimed -> the single non-paintable index
     ];
     const r = prepareOwners(courses, rows);
-    expect(r.ownerRgb).toEqual([[255,0,0]]);
-    expect(r.ownerOf).toEqual([0,0]);
-    expect(r.centers).toEqual([[0.1,0.5],[0.9,0.5]]);
+    expect(r.centers).toEqual([[0.1,0.5],[0.9,0.5],[0.5,0.5]]); // every course is a seed
+    expect(r.ownerOf).toEqual([0,0,1]);                          // a,b -> 0 (red); c -> 1 (unclaimed)
+    expect(r.ownerRgb[0]).toEqual([255,0,0]);
+    expect(r.paintable).toEqual([true,false]);
   });
 
-  it("drops courses whose colour is malformed (treats as unclaimed)", () => {
+  it("treats malformed colours as unclaimed (non-paintable), still seeded", () => {
     const rows = [
       { slug:"a", color:"#ff0000" },
-      { slug:"b", color:"notacolor" },  // malformed -> dropped
-      { slug:"c", color:"#abc" },       // 3-digit hex, unsupported -> dropped
+      { slug:"b", color:"notacolor" },  // malformed -> unclaimed
+      { slug:"c", color:"#abc" },       // 3-digit hex unsupported -> unclaimed
     ];
     const r = prepareOwners(courses, rows);
-    expect(r.ownerRgb).toEqual([[255,0,0]]);
-    expect(r.ownerOf).toEqual([0]);
-    expect(r.centers).toEqual([[0.1,0.5]]);
+    expect(r.ownerOf).toEqual([0,1,1]);
+    expect(r.paintable).toEqual([true,false]);
   });
 });
 
@@ -121,5 +121,25 @@ describe("buildTerritory", () => {
     const W=4,H=1, coverage=new Uint8Array(W*H).fill(255), terr=new Uint8ClampedArray(W*H*4);
     const rgba=buildTerritory({ coverage, W, H, terr, manifestCourses:courses, territoryRows:[{slug:"a",color:null}] });
     expect(Array.from(rgba).every(v=>v===0)).toBe(true);
+  });
+
+  it("a single claim paints only its own course cell, not the whole island", () => {
+    const W=12,H=1, coverage=new Uint8Array(W*H).fill(255);
+    const terr=new Uint8ClampedArray(W*H*4).fill(180);
+    const rows=[{slug:"c",color:"#00ff00"}]; // only middle course c claimed; a,b unclaimed
+    const rgba=buildTerritory({ coverage, W, H, terr, manifestCourses:courses, territoryRows:rows });
+    expect(rgba[6*4+3]).toBeGreaterThan(0);  // c's cell (centre) painted
+    expect(rgba[0*4+3]).toBe(0);             // a's cell (left) untouched
+    expect(rgba[11*4+3]).toBe(0);            // b's cell (right) untouched
+  });
+
+  it("same-owner claims do NOT merge across an unclaimed cell between them", () => {
+    const W=12,H=1, coverage=new Uint8Array(W*H).fill(255);
+    const terr=new Uint8ClampedArray(W*H*4).fill(180);
+    const rows=[{slug:"a",color:"#ff0000"},{slug:"b",color:"#ff0000"}]; // a,b same colour; c unclaimed between
+    const rgba=buildTerritory({ coverage, W, H, terr, manifestCourses:courses, territoryRows:rows });
+    expect(rgba[0*4+3]).toBeGreaterThan(0);  // a painted
+    expect(rgba[11*4+3]).toBeGreaterThan(0); // b painted
+    expect(rgba[6*4+3]).toBe(0);             // c (between) stays unclaimed -> not merged
   });
 });

@@ -77,13 +77,14 @@ export const hexRgb = (h) => { h = h.replace("#",""); return [parseInt(h.slice(0
 export const ownerLightOf = (rgb) => mix(rgb, [255,255,255], LENS.lightF);
 
 export function paintLens(o) {
-  const { W, H, terr, ownerSm, dB, coastCov, near, ownerRgb, px } = o;
+  const { W, H, terr, ownerSm, dB, coastCov, near, ownerRgb, px, paintable } = o;
   const out = new Uint8ClampedArray(W * H * 4);
   const light = ownerRgb.map(ownerLightOf);
   for (let p = 0; p < W * H; p++) {
     const cov = coastCov[p]; if (cov <= 0.004) continue;
     let oi = ownerSm[p], dist;
     if (oi < 0) { oi = near[p]; if (oi < 0) continue; dist = 0; } else dist = dB[p];   // ocean feather borrows nearest owner at the rim
+    if (paintable && !paintable[oi]) continue;   // unclaimed owner -> leave plain terrain showing through
     const O = ownerRgb[oi], Ol = light[oi], q = p * 4;
     const Dd = [terr[q] * LENS.DIM, terr[q + 1] * LENS.DIM, terr[q + 2] * LENS.DIM];   // dimmed terrain (texture survives)
     const inward = smooth(0, px.borderLean, dist);
@@ -98,26 +99,36 @@ export function paintLens(o) {
 
 export function prepareOwners(manifestCourses, territoryRows) {
   const colorBySlug = Object.fromEntries(territoryRows.map((r) => [r.slug, r.color]));
-  const idxOf = {}, ownerRgb = [], centers = [], ownerOf = [];
+  const idxOf = {}, ownerRgb = [], paintable = [], centers = [], ownerOf = [];
+  let unclaimedIdx = -1;
+  // Seed EVERY course so a claim only owns its own Voronoi cell. Unclaimed courses
+  // collapse to one non-paintable owner that still occupies its cell (blocks bleed).
   for (const c of manifestCourses) {
     const color = colorBySlug[c.slug];
-    if (!color || !/^#[0-9a-f]{6}$/i.test(color)) continue; // unclaimed or malformed colour -> not a seed
-    if (!(color in idxOf)) { idxOf[color] = ownerRgb.length; ownerRgb.push(hexRgb(color)); }
+    const claimed = color && /^#[0-9a-f]{6}$/i.test(color);
+    let oi;
+    if (claimed) {
+      if (!(color in idxOf)) { idxOf[color] = ownerRgb.length; ownerRgb.push(hexRgb(color)); paintable.push(true); }
+      oi = idxOf[color];
+    } else {
+      if (unclaimedIdx < 0) { unclaimedIdx = ownerRgb.length; ownerRgb.push([0, 0, 0]); paintable.push(false); }
+      oi = unclaimedIdx;
+    }
     centers.push([c.hit.x + c.hit.w / 2, c.hit.y + c.hit.h / 2]);
-    ownerOf.push(idxOf[color]);
+    ownerOf.push(oi);
   }
-  return { centers, ownerOf, ownerRgb };
+  return { centers, ownerOf, ownerRgb, paintable };
 }
 
 export function buildTerritory({ coverage, W, H, terr, manifestCourses, territoryRows }) {
-  const { centers, ownerOf, ownerRgb } = prepareOwners(manifestCourses, territoryRows);
-  if (ownerRgb.length === 0) return new Uint8ClampedArray(W * H * 4);   // nobody claims anything
+  const { centers, ownerOf, ownerRgb, paintable } = prepareOwners(manifestCourses, territoryRows);
+  if (!paintable.some(Boolean)) return new Uint8ClampedArray(W * H * 4);   // nobody claims anything
   const land = new Uint8Array(W * H), coastCov = new Float32Array(W * H);
   for (let p = 0; p < W * H; p++) { land[p] = coverage[p] > 127 ? 1 : 0; coastCov[p] = coverage[p] / 255; }
   const centersPx = centers.map((c) => [c[0] * W, c[1] * H]);
   const near = nearestOwner(W, H, centersPx, ownerOf);
   const ownerSm = gooeyPartition(near, land, W, H, ownerRgb.length, Math.round(LENS.gooeyF * W));
   const dB = borderDistance(ownerSm, W, H);
-  return paintLens({ ownerSm, dB, coastCov, near, W, H, ownerRgb, terr,
+  return paintLens({ ownerSm, dB, coastCov, near, W, H, ownerRgb, terr, paintable,
     px: { rimW: LENS.rimWidthF * W, halo: LENS.haloF * W, borderLean: LENS.borderLeanF * W } });
 }
