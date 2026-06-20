@@ -37,3 +37,16 @@ export function buildSnapshots(events, colors) {
   }
   return snaps;
 }
+
+// Slugs whose owning player differs between two ownership snapshots (capture, first
+// claim, or loss). snapA may be null (everything in snapB counts as flipped). Pure.
+export function flippedCourses(snapA, snapB) {
+  const a = snapA ? snapA.owners : {};
+  const b = snapB.owners;
+  const slugs = new Set([...Object.keys(a), ...Object.keys(b)]);
+  const out = [];
+  for (const slug of slugs) {
+    if ((a[slug]?.player ?? null) !== (b[slug]?.player ?? null)) out.push(slug);
+  }
+  return out.sort();
+}
