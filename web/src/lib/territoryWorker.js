@@ -9,12 +9,13 @@ function readRGBA(bitmap, W, H) {
 }
 
 self.onmessage = async (e) => {
-  const { coverageBitmap, baseBitmap, W, H, manifestCourses, territoryRows } = e.data;
-  const cd = readRGBA(coverageBitmap, W, H);
-  const coverage = new Uint8Array(W * H);
-  for (let p = 0; p < W * H; p++) coverage[p] = cd[p * 4];     // R channel = grayscale coverage
-  const terr = readRGBA(baseBitmap, W, H);
-  const rgba = buildTerritory({ coverage, W, H, terr, manifestCourses, territoryRows });
-  const bitmap = await createImageBitmap(new ImageData(rgba, W, H));
+  const { coverageBitmap, baseBitmap, W, H, targetW, targetH, manifestCourses, territoryRows } = e.data;
+  const rw = targetW || W, rh = targetH || H;                  // render at the caller's target size
+  const cd = readRGBA(coverageBitmap, rw, rh);
+  const coverage = new Uint8Array(rw * rh);
+  for (let p = 0; p < rw * rh; p++) coverage[p] = cd[p * 4];   // R channel = grayscale coverage
+  const terr = readRGBA(baseBitmap, rw, rh);
+  const rgba = buildTerritory({ coverage, W: rw, H: rh, terr, manifestCourses, territoryRows });
+  const bitmap = await createImageBitmap(new ImageData(rgba, rw, rh));
   self.postMessage({ bitmap }, [bitmap]);
 };

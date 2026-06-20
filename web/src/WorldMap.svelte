@@ -10,34 +10,39 @@
   let manifest = null;
   let error = false;
 
-  // Two stacked .territory layers: paint the next snapshot onto the hidden one, then flip which is
-  // visible -> CSS crossfades (play) or hard-cuts (scrub). LIVE shows the canonical high-res
-  // present; historical indices show reduced-res cache frames.
-  let terrA, terrB;
-  let activeLayer = 0;        // index into [terrA, terrB] currently visible
-  let crossfade = false;      // true -> animate the opacity swap (play); false -> hard cut (scrub)
+  // One territory canvas sized to the display's device pixels (hi-res -> downscale, never up).
+  // LIVE shows the canonical high-res present; historical indices show cached scrub frames.
+  let terr;                        // the single territory canvas
+  let backW = 1100, backH = 888;   // backing-store pixels (device px), set by sizeCanvas
+  const ASSET_W = 2200;            // cap: the island/base asset native width
   let presentBitmap = null;   // canonical present (native res), shown at LIVE + as fallback
   let playing = false, playTimer = 0;
   // showSnapshot coalescing: the knob (tlIndex) tracks instantly while only the newest request paints.
-  let pendingIndex = null, pendingAnimate = false, rendering = false;
+  let pendingIndex = null, rendering = false;
 
-  const DW = 1100, DH = 888;  // display-layer pixels (asset aspect 2200:1775)
-  const layerEl = (i) => (i === 0 ? terrA : terrB);
-  function paintLayer(canvasEl, bitmap) {
-    if (!canvasEl || !bitmap) return;
-    canvasEl.width = DW; canvasEl.height = DH;
-    const ctx = canvasEl.getContext("2d");
-    ctx.clearRect(0, 0, DW, DH);
+  // Backing store = display CSS width x devicePixelRatio (capped at the 2200 asset), so the
+  // territory is rendered hi-res then downscaled into device pixels (crisp on any DPI).
+  function sizeCanvas() {
+    if (!terr || !stageEl) return;
+    const cssW = stageEl.clientWidth || 1100;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    backW = Math.min(ASSET_W, Math.round(cssW * dpr));
+    backH = Math.round(backW * (1775 / 2200));
+    terr.width = backW; terr.height = backH;
+  }
+  function paintBitmap(bitmap) {     // draw a full-frame territory bitmap, AA-downscaled into the backing store
+    if (!terr || !bitmap) return;
+    const ctx = terr.getContext("2d");
+    ctx.clearRect(0, 0, backW, backH);
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(bitmap, 0, 0, bitmap.width, bitmap.height, 0, 0, DW, DH);   // AA downscale for the 2200 present
+    ctx.drawImage(bitmap, 0, 0, bitmap.width, bitmap.height, 0, 0, backW, backH);
   }
 
   // --- Timeline (SP4): historical ownership snapshots, lazily rendered + capped cache ---
   // N can be ~200; full-res layers (2200x1775, ~15 MB each) x N would OOM, so historical frames
   // render at a reduced internal width and only a bounded window is kept (re-rendered on demand).
   // The present view stays the canonical high-res renderTerritory (= /v1/territory).
-  const TL_RENDER_W = 1100;   // internal render width for scrub frames (display res, not 2200)
-  const TL_CACHE_CAP = 32;    // max cached scrub bitmaps (~32 x 3.9 MB, ~125 MB ceiling)
+  const TL_CACHE_CAP = 24;    // max cached scrub bitmaps; rendered at the backing size (<= asset 2200)
   let snapshots = [];
   let tlIndex = 0;
   let timelineReady = false;
@@ -45,10 +50,10 @@
   const tlCache = [];         // index -> ImageBitmap (sparse)
   const tlOrder = [];         // FIFO of cached indices, for eviction
 
-  // Canonical present territory (high-res /v1/territory): render once and paint it to the active
-  // layer. Kept as the LIVE view and as the fallback when the timeline endpoint is unavailable.
+  // Canonical present territory (high-res /v1/territory): render once and paint it to the canvas.
+  // Kept as the LIVE view and as the fallback when the timeline endpoint is unavailable.
   async function renderTerritory() {
-    if (!terrA || !manifest) return;
+    if (!terr || !manifest) return;
     try {
       const [rows, cov, base] = await Promise.all([
         fetch(territoryUrl(150)).then((r) => r.json()),
@@ -60,8 +65,8 @@
       worker.onerror = (ev) => console.error("territory worker error", ev.message || ev);
       worker.onmessage = (e) => {
         try {
-          presentBitmap = e.data.bitmap;                      // native 2200 canonical present
-          paintLayer(layerEl(activeLayer), presentBitmap);    // show it on the visible layer
+          presentBitmap = e.data.bitmap;        // native 2200 canonical present
+          if (!snapshots.length || tlIndex >= snapshots.length - 1) paintBitmap(presentBitmap);  // only when LIVE is showing
         } catch (err) { console.error("territory draw failed", err); } finally { worker.terminate(); }
       };
       worker.postMessage({ coverageBitmap: cov, baseBitmap: base, W, H,
@@ -77,6 +82,7 @@
       tlPending = { resolve, reject };
       tlWorker.postMessage({
         coverageBitmap: tlCov, baseBitmap: tlBase, W: tlW, H: tlH,
+        targetW: backW, targetH: backH,            // render scrub frames at the backing resolution
         manifestCourses: manifest.courses, territoryRows,
       });
     });
@@ -108,8 +114,8 @@
       const snaps = buildSnapshots(events, colors);
       if (!snaps.length) return;
       const [cov, base] = await Promise.all([
-        createImageBitmap(await (await fetch(`/map/island.png`)).blob(), { resizeWidth: TL_RENDER_W, resizeQuality: "high" }),
-        createImageBitmap(await (await fetch(`/map/base.jpg`)).blob(), { resizeWidth: TL_RENDER_W, resizeQuality: "high" }),
+        createImageBitmap(await (await fetch(`/map/island.png`)).blob()),   // full-res source; the worker downscales per frame
+        createImageBitmap(await (await fetch(`/map/base.jpg`)).blob()),
       ]);
       tlCov = cov; tlBase = base; tlW = cov.width; tlH = cov.height;
       tlWorker = new Worker(new URL("./lib/territoryWorker.js", import.meta.url), { type: "module" });
@@ -123,26 +129,23 @@
     }
   }
 
-  // Swap the visible territory to snapshot i. The knob updates immediately; rendering is coalesced
-  // so rapid scrubbing only paints the newest frame. animate=true crossfades (play), false cuts.
-  async function showSnapshot(i, animate) {
+  // Hard-cut to snapshot i (scrub + the default). Rendering is coalesced so rapid scrubbing only
+  // paints the newest frame. Play animates the step instead (see Task 5's animateTransition).
+  async function showSnapshot(i) {
     i = Math.max(0, Math.min(i, snapshots.length - 1));
     tlIndex = i;
-    pendingIndex = i; pendingAnimate = animate;
+    pendingIndex = i;
     if (rendering) return;            // an active loop will pick up pendingIndex
     rendering = true;
     try {
       while (pendingIndex !== null) {
-        const target = pendingIndex, anim = pendingAnimate; pendingIndex = null;
+        const target = pendingIndex; pendingIndex = null;
         const atLive = target === snapshots.length - 1;
         let bmp;
         try { bmp = atLive && presentBitmap ? presentBitmap : await ensureBitmap(target); }
         catch { continue; }
         if (pendingIndex !== null) continue;   // superseded mid-render -> skip the stale paint
-        const next = 1 - activeLayer;
-        paintLayer(layerEl(next), bmp);
-        crossfade = !!anim;
-        activeLayer = next;
+        paintBitmap(bmp);
       }
     } finally { rendering = false; }
   }
@@ -151,13 +154,13 @@
     if (!playing) return;
     const last = snapshots.length - 1;
     const next = Math.min(tlIndex + 1, last);
-    showSnapshot(next, true);
+    showSnapshot(next);
     if (next >= last) { playing = false; return; }   // reached the present -> park at LIVE
     playTimer = setTimeout(step, 700);
   }
   function togglePlay() {
     if (playing) { playing = false; clearTimeout(playTimer); return; }
-    if (tlIndex >= snapshots.length - 1) showSnapshot(0, false);   // restart from the beginning
+    if (tlIndex >= snapshots.length - 1) showSnapshot(0);   // restart from the beginning
     playing = true;
     playTimer = setTimeout(step, 700);
   }
@@ -203,11 +206,20 @@
     clearTimeout(closeTimer);
     if (figUrl.startsWith("blob:")) URL.revokeObjectURL(figUrl);
     if (typeof document !== "undefined") document.removeEventListener("pointerdown", onDocPointerDown);
+    if (typeof window !== "undefined") window.removeEventListener("resize", onResize);
     clearTimeout(playTimer);
     tlWorker?.terminate();
     for (const b of tlCache) b?.close?.();
     tlCov?.close?.(); tlBase?.close?.(); presentBitmap?.close?.();
   });
+
+  function onResize() {
+    sizeCanvas();
+    for (const b of tlCache) b?.close?.();      // cached scrub frames are sized to the old backing -> drop them
+    tlCache.length = 0; tlOrder.length = 0;
+    if (snapshots.length) showSnapshot(tlIndex);
+    else if (presentBitmap) paintBitmap(presentBitmap);
+  }
 
   onMount(async () => {
     if (typeof document !== "undefined") document.addEventListener("pointerdown", onDocPointerDown);
@@ -215,13 +227,15 @@
       const r = await fetch(manifestUrl(), { cache: "no-store" });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       manifest = await r.json();
-      await tick();            // let Svelte mount the .territory layers (bind terrA/terrB) before drawing
+      await tick();            // let Svelte mount the .territory canvas (bind terr) before drawing
+      sizeCanvas();            // size the backing store to the display before the first paint
       renderTerritory();       // canonical present (high-res) = default view + fallback
       loadTimeline();          // SP4: fetch history + prepare lazy scrub-frame cache (additive)
     } catch (e) {
       console.error("world map: manifest load failed", e);
       error = true;
     }
+    window.addEventListener("resize", onResize);
     preloadPlayerGifs(API_BASE).catch(() => {});   // warm the GIF cache so hovers don't wait on a load
   });
 </script>
@@ -234,8 +248,7 @@
       <div class="stage" bind:this={stageEl}>
         <img class="base" src={baseUrl()} alt="Mario Kart World map" />
         <!-- SP2 (territory) draws here, between the base and the icons -->
-        <canvas class="territory layer" class:on={activeLayer === 0} class:cross={crossfade} bind:this={terrA} aria-hidden="true"></canvas>
-        <canvas class="territory layer" class:on={activeLayer === 1} class:cross={crossfade} bind:this={terrB} aria-hidden="true"></canvas>
+        <canvas class="territory" bind:this={terr} aria-hidden="true"></canvas>
         <div class="icons">
           {#each manifest.courses as c (c.slug)}
             <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
@@ -263,7 +276,7 @@
   {#if timelineReady && snapshots.length}
     <div class="timeline">
       <TimelineScrubber {snapshots} index={tlIndex} {playing}
-        on:scrub={(e) => showSnapshot(e.detail.index, false)}
+        on:scrub={(e) => showSnapshot(e.detail.index)}
         on:toggle={togglePlay} />
     </div>
   {/if}
@@ -285,10 +298,6 @@
   /* Calm at rest: the whole map sits muted so the hovered course (and SP2's territory) leads. */
   .base { display: block; width: 100%; height: auto; filter: saturate(.82) brightness(.82); }
   .territory { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-  /* Crossfade layers: only the .on layer is visible; .cross enables the transition (play). */
-  .layer { opacity: 0; }
-  .layer.on { opacity: 1; }
-  .layer.cross { transition: opacity 0.28s ease; }
   .popups { position: absolute; inset: 0; pointer-events: none; }
   .icons { position: absolute; inset: 0; }
   .hit { position: absolute; cursor: pointer; }
