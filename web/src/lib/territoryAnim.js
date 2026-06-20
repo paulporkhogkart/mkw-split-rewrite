@@ -56,14 +56,29 @@ function chamferDist(seed, W, H) {
   return d;
 }
 
-export function prepareTransition({ coverage, terr, W, H, manifestCourses, rowsA, rowsB }) {
+// The nearest-course Voronoi field + per-course bounding boxes. CONSTANT for a given size (courses
+// never move), so compute once and reuse across every transition (see prepareTransition's `field`).
+export function buildCourseField(manifestCourses, W, H) {
+  const centersPx = manifestCourses.map((c) => [(c.hit.x + c.hit.w / 2) * W, (c.hit.y + c.hit.h / 2) * H]);
+  const nc = nearestCourse(W, H, centersPx);
+  const courseBox = Array.from({ length: manifestCourses.length }, () => ({ minx: W, miny: H, maxx: -1, maxy: -1 }));
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const b = courseBox[nc[y * W + x]];
+    if (x < b.minx) b.minx = x; if (x > b.maxx) b.maxx = x; if (y < b.miny) b.miny = y; if (y > b.maxy) b.maxy = y;
+  }
+  return { nc, courseBox };
+}
+
+export function prepareTransition({ coverage, terr, W, H, manifestCourses, rowsA, rowsB, field }) {
   const { centers, ownerOfA, ownerOfB, ownerRgb, paintable } = unifiedOwners(manifestCourses, rowsA, rowsB);
   const flipped = new Set();
   for (let i = 0; i < manifestCourses.length; i++) if (ownerOfA[i] !== ownerOfB[i]) flipped.add(i);
   if (flipped.size === 0) return null;
 
-  const centersPx = centers.map((c) => [c[0] * W, c[1] * H]);
-  const nc = nearestCourse(W, H, centersPx);
+  // The nearest-course field + per-course bboxes are CONSTANT (courses never move), so the caller
+  // passes a cached `field` to skip the O(W*H*courses) recompute every step (that recompute was the
+  // ~34ms-per-step playback hitch). Fallback builds it on demand.
+  const { nc, courseBox } = field || buildCourseField(manifestCourses, W, H);
 
   // Padding (the square-glow fix): paintLens drives the interior tint off the border-distance field
   // over `borderLean` and the rim over `halo`; a cropped window's edge is a false border whose
@@ -73,9 +88,8 @@ export function prepareTransition({ coverage, terr, W, H, manifestCourses, rowsA
   const reach = Math.ceil((LENS.borderLeanF + LENS.haloF) * W) + 2;
   const pad = Math.max(reach, gooeyR);
   let minx = W, miny = H, maxx = -1, maxy = -1;
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (flipped.has(nc[y * W + x])) {
-    if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y;
-  }
+  for (const c of flipped) { const b = courseBox[c]; if (b.maxx < 0) continue;
+    if (b.minx < minx) minx = b.minx; if (b.miny < miny) miny = b.miny; if (b.maxx > maxx) maxx = b.maxx; if (b.maxy > maxy) maxy = b.maxy; }
   const cx0 = clamp(minx - pad, 0, W - 1), cy0 = clamp(miny - pad, 0, H - 1);          // composite (output) region
   const cx1 = clamp(maxx + pad, 0, W - 1), cy1 = clamp(maxy + pad, 0, H - 1);
   const gx0 = clamp(cx0 - reach, 0, W - 1), gy0 = clamp(cy0 - reach, 0, H - 1);         // compute region (discard ring = reach)

@@ -5,7 +5,7 @@
   import { fetchCourseView, preloadPlayerGifs, freshGifUrl } from "./lib/courseData.js";
   import { API_BASE, territoryUrl, territoryTimelineUrl } from "./lib/api.js";
   import { buildSnapshots, flippedCourses } from "./lib/timeline.js";
-  import { prepareTransition, interpolatePatch } from "./lib/territoryAnim.js";
+  import { prepareTransition, interpolatePatch, buildCourseField } from "./lib/territoryAnim.js";
   import TimelineScrubber from "./TimelineScrubber.svelte";
 
   let manifest = null;
@@ -20,8 +20,8 @@
   let playing = false;
   // showSnapshot coalescing: the knob (tlIndex) tracks instantly while only the newest request paints.
   let pendingIndex = null, rendering = false;
-  // Border-push animation: per-frame source buffers (backing res) + the rAF transition runner.
-  let bkCoverage = null, bkTerr = null;
+  // Capture animation: per-frame source buffers (backing res) + the constant course field + the rAF runner.
+  let bkCoverage = null, bkTerr = null, bkField = null;
   let animRaf = 0, animResolve = null;
   const ANIM_MS = 800;   // time the front takes to cross one cell (tunable); steps chain with no dwell
   const easeFlow = (t) => t;   // linear: a steady advance, so chained captures (esp. adjacent runs) flow without holds
@@ -207,6 +207,7 @@
     x.clearRect(0, 0, backW, backH);
     x.drawImage(tlBase, 0, 0, backW, backH);
     bkTerr = new Uint8ClampedArray(x.getImageData(0, 0, backW, backH).data);
+    bkField = manifest ? buildCourseField(manifest.courses, backW, backH) : null;   // constant nearest-course field (reused every step)
   }
 
   const rowsOf = (i) => Object.entries(snapshots[i].owners).map(([slug, o]) => ({ slug, color: o.color }));
@@ -230,7 +231,7 @@
       let prep;
       try {
         prep = prepareTransition({ coverage: bkCoverage, terr: bkTerr, W: backW, H: backH,
-          manifestCourses: manifest.courses, rowsA: rowsOf(from), rowsB: rowsOf(to) });
+          manifestCourses: manifest.courses, rowsA: rowsOf(from), rowsB: rowsOf(to), field: bkField });
       } catch (e) { console.error("transition prep failed", e); hardSet(); return; }
       if (!prep) { hardSet(); return; }
       const ctx = terr.getContext("2d");
