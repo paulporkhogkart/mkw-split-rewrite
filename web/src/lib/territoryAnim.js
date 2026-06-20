@@ -123,19 +123,22 @@ export function prepareTransition({ coverage, terr, W, H, manifestCourses, rowsA
   const groups = new Map();                             // new-owner index -> Set(flipped course index)
   for (const c of flipped) { const ob = ownerOfB[c]; if (!groups.has(ob)) groups.set(ob, new Set()); groups.get(ob).add(c); }
   for (const [ob, cellSet] of groups) {
-    const gpix = []; let sx = 0, sy = 0, adjacent = false;
+    // Seed = ob's pre-existing (A-state) land that DIRECTLY TOUCHES a captured cell (the contact
+    // border the front advances from). Crucially this is ONLY the contacting land: seeding every
+    // ob pixel in the window let a DISCONNECTED far blob of ours pull a second front in from the
+    // opposite, non-adjoining side (the "shimmer from the side we don't own" bug). No contact at
+    // all -> a first/non-adjacent claim -> erupt radially from the group centroid.
+    const seed = new Uint8Array(gw * gh);
+    const gpix = []; let sx = 0, sy = 0, hasSeed = false;
     for (let lp = 0; lp < gw * gh; lp++) {
       if (!cellSet.has(courseLocal[lp])) continue;
       const x = lp % gw, y = (lp / gw) | 0; gpix.push(lp); sx += x; sy += y;
-      if (!adjacent &&                                  // does the group share a border with ob's A-state land?
-        ((x + 1 < gw && !cellSet.has(courseLocal[lp + 1]) && oaField[lp + 1] === ob) ||
-         (x - 1 >= 0 && !cellSet.has(courseLocal[lp - 1]) && oaField[lp - 1] === ob) ||
-         (y + 1 < gh && !cellSet.has(courseLocal[lp + gw]) && oaField[lp + gw] === ob) ||
-         (y - 1 >= 0 && !cellSet.has(courseLocal[lp - gw]) && oaField[lp - gw] === ob))) adjacent = true;
+      if (x + 1 < gw && !cellSet.has(courseLocal[lp + 1]) && oaField[lp + 1] === ob) { seed[lp + 1] = 1; hasSeed = true; }
+      if (x - 1 >= 0 && !cellSet.has(courseLocal[lp - 1]) && oaField[lp - 1] === ob) { seed[lp - 1] = 1; hasSeed = true; }
+      if (y + 1 < gh && !cellSet.has(courseLocal[lp + gw]) && oaField[lp + gw] === ob) { seed[lp + gw] = 1; hasSeed = true; }
+      if (y - 1 >= 0 && !cellSet.has(courseLocal[lp - gw]) && oaField[lp - gw] === ob) { seed[lp - gw] = 1; hasSeed = true; }
     }
-    const seed = new Uint8Array(gw * gh);
-    if (adjacent) { for (let lp = 0; lp < gw * gh; lp++) if (oaField[lp] === ob && !cellSet.has(courseLocal[lp])) seed[lp] = 1; }   // front from ob's border
-    else if (gpix.length) seed[Math.round(sy / gpix.length) * gw + Math.round(sx / gpix.length)] = 1;   // radial from the group centroid
+    if (!hasSeed && gpix.length) seed[Math.round(sy / gpix.length) * gw + Math.round(sx / gpix.length)] = 1;   // radial from the group centroid
     const cham = chamferDist(seed, gw, gh);
 
     // Equalise the reveal by the captured AREA's depth distribution: remap each pixel's geodesic

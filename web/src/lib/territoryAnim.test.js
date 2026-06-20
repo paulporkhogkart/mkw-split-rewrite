@@ -200,3 +200,44 @@ describe("non-adjacent capture erupts radially", () => {
     expect(at(168, y)).toBe(at(192, y));    // both edges the same -> symmetric eruption, not a one-sided front
   });
 });
+
+// The new owner's land that is NOT edge-adjacent to the captured cell must not seed the front. A
+// DISCONNECTED ob blob sitting inside the patch window (separated from the cell by enemy land) used
+// to pull a SECOND front in from the far side (the user's "shimmer from the side we don't own"). The
+// captured cell's reveal must depend only on the adjoining contact, so adding the far blob changes
+// nothing. Collinear F .. E .. C .. R: E is a thin enemy wedge between far-ob F and captured C.
+describe("far non-adjoining land of the new owner does not seed a second front", () => {
+  const W = 600, H = 200;
+  const cov = new Uint8Array(W * H).fill(255), tr = new Uint8ClampedArray(W * H * 4).fill(150);
+  const crs = [
+    { slug: "F", hit: { x: 290 / W, y: 0.5, w: 0, h: 0 } },   // far ob blob (left)
+    { slug: "E", hit: { x: 300 / W, y: 0.5, w: 0, h: 0 } },   // thin enemy wedge
+    { slug: "C", hit: { x: 310 / W, y: 0.5, w: 0, h: 0 } },   // captured
+    { slug: "R", hit: { x: 410 / W, y: 0.5, w: 0, h: 0 } },   // adjoining ob (right)
+  ];
+  const RED = "#ff0000", BLUE = "#0000ff";
+  const aF = [{ slug: "F", color: BLUE }, { slug: "E", color: RED }, { slug: "C", color: RED }, { slug: "R", color: BLUE }];
+  const bF = [{ slug: "F", color: BLUE }, { slug: "E", color: RED }, { slug: "C", color: BLUE }, { slug: "R", color: BLUE }];
+  const aNo = [{ slug: "F", color: RED }, { slug: "E", color: RED }, { slug: "C", color: RED }, { slug: "R", color: BLUE }];   // no far blob
+  const bNo = [{ slug: "F", color: RED }, { slug: "E", color: RED }, { slug: "C", color: BLUE }, { slug: "R", color: BLUE }];
+  it("the captured cell's reveal is one-sided and unchanged by the far blob", () => {
+    const withF = prepareTransition({ coverage: cov, terr: tr, W, H, manifestCourses: crs, rowsA: aF, rowsB: bF });
+    const noF = prepareTransition({ coverage: cov, terr: tr, W, H, manifestCourses: crs, rowsA: aNo, rowsB: bNo });
+    const gw = withF.gw, gh = withF.gh;
+    let ob = -1, minx = gw, maxx = -1;
+    for (let p = 0; p < gw * gh; p++) if (withF.oaField[p] !== withF.obField[p]) { ob = withF.obField[p]; const x = p % gw; if (x < minx) minx = x; if (x > maxx) maxx = x; }
+    const mid = (minx + maxx) / 2;
+    let farPx = 0, lSum = 0, lN = 0, rSum = 0, rN = 0;
+    for (let p = 0; p < gw * gh; p++) {
+      const x = p % gw, flip = withF.oaField[p] !== withF.obField[p];
+      if (!flip && withF.oaField[p] === ob && x < minx) farPx++;                       // our land LEFT of the cell = the far blob
+      if (flip && withF.reveal[p] <= 1.001) { if (x < mid) { lSum += withF.reveal[p]; lN++; } else { rSum += withF.reveal[p]; rN++; } }
+    }
+    expect(farPx).toBeGreaterThan(300);                  // non-vacuous: the far blob really is in the window
+    expect(lN).toBeGreaterThan(50); expect(rN).toBeGreaterThan(50);
+    expect(rSum / rN).toBeLessThan(lSum / lN);            // front from the RIGHT (the adjoining side) reveals first
+    let maxDiff = 0;
+    for (let p = 0; p < gw * gh; p++) if (withF.oaField[p] !== withF.obField[p]) maxDiff = Math.max(maxDiff, Math.abs(withF.reveal[p] - noF.reveal[p]));
+    expect(maxDiff).toBeLessThanOrEqual(0.01);            // the far blob does not change the captured cell's reveal at all
+  });
+});
