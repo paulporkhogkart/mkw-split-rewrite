@@ -1,10 +1,11 @@
-// Pure transition math for the territory border-push animation. No DOM.
-// Heavy work (unified owners, nearest-course field, per-owner blurred masks for the
-// before/after snapshots) is precomputed once per transition; interpolatePatch is the
-// cheap per-frame call. Lerping the BLURRED owner masks then argmaxing makes the gooey
-// border slide continuously from the A-partition to the B-partition (a real border push;
-// an isolated first claim with no adjacent same-owner mass instead grows from its course).
-import { boxBlur, borderDistance, paintLens, hexRgb, LENS } from "./territory.js";
+// Pure transition math for the territory "invasion" animation. No DOM.
+// On a capture, the new owner's colour sweeps across the captured cell as a FRONT advancing from
+// where that owner already holds ground (a geodesic reveal); a first claim with no adjacent
+// territory grows from its course centre instead. Heavy work (unified owners, nearest-course field,
+// the per-cell reveal field) is precomputed once per transition; interpolatePatch is the per-frame
+// call: it thresholds the reveal at the eased progress, gooey-smooths the front, lens-paints it, and
+// adds a hot leading edge that fades out at the endpoints.
+import { boxBlur, gooeyPartition, borderDistance, paintLens, hexRgb, LENS } from "./territory.js";
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const isHex = (c) => c && /^#[0-9a-f]{6}$/i.test(c);
@@ -41,6 +42,20 @@ function nearestCourse(W, H, centersPx) {
   return nc;
 }
 
+// Two-pass chamfer distance from a seed mask (1 = seed). Unreached pixels keep ~1e9.
+function chamferDist(seed, W, H) {
+  const d = new Float32Array(W * H).fill(1e9);
+  for (let p = 0; p < W * H; p++) if (seed[p]) d[p] = 0;
+  const O = 1, D = 1.41421;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const p = y * W + x; let m = d[p];
+    if (x > 0) m = Math.min(m, d[p - 1] + O); if (y > 0) m = Math.min(m, d[p - W] + O);
+    if (x > 0 && y > 0) m = Math.min(m, d[p - W - 1] + D); if (x < W - 1 && y > 0) m = Math.min(m, d[p - W + 1] + D); d[p] = m; }
+  for (let y = H - 1; y >= 0; y--) for (let x = W - 1; x >= 0; x--) { const p = y * W + x; let m = d[p];
+    if (x < W - 1) m = Math.min(m, d[p + 1] + O); if (y < H - 1) m = Math.min(m, d[p + W] + O);
+    if (x < W - 1 && y < H - 1) m = Math.min(m, d[p + W + 1] + D); if (x > 0 && y < H - 1) m = Math.min(m, d[p + W - 1] + D); d[p] = m; }
+  return d;
+}
+
 export function prepareTransition({ coverage, terr, W, H, manifestCourses, rowsA, rowsB }) {
   const { centers, ownerOfA, ownerOfB, ownerRgb, paintable } = unifiedOwners(manifestCourses, rowsA, rowsB);
   const flipped = new Set();
@@ -50,16 +65,13 @@ export function prepareTransition({ coverage, terr, W, H, manifestCourses, rowsA
   const centersPx = centers.map((c) => [c[0] * W, c[1] * H]);
   const nc = nearestCourse(W, H, centersPx);
 
-  // Padding. paintLens derives the interior TINT from the border-distance field over `borderLean`
-  // and the rim over `halo`; in a cropped window the window EDGE acts as a false border, so those
-  // effects bleed `reach` px inward. So (a) pad the COMPOSITE (kept) region by `reach` — enough to
-  // paint the moving border's full tint into the neighbour AND to clear the flip's partition shift
-  // (>= blurR) — and (b) DISCARD a further `reach` ring so the false-edge tint/rim never reaches a
-  // kept pixel (its dB there stays >= borderLean = the saturated interior that matches the base).
-  // (The old code discarded only blurR < borderLean, which is what produced the "square glow".)
-  const blurR = Math.round(LENS.gooeyF * W);
+  // Padding (the square-glow fix): paintLens drives the interior tint off the border-distance field
+  // over `borderLean` and the rim over `halo`; a cropped window's edge is a false border whose
+  // effects bleed `reach` inward. Pad the COMPOSITE (kept) region by `reach` and DISCARD a further
+  // `reach` ring so kept pixels keep their true (saturated-interior) distance = identical to the base.
+  const gooeyR = Math.round(LENS.gooeyF * W);
   const reach = Math.ceil((LENS.borderLeanF + LENS.haloF) * W) + 2;
-  const pad = Math.max(reach, blurR);
+  const pad = Math.max(reach, gooeyR);
   let minx = W, miny = H, maxx = -1, maxy = -1;
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (flipped.has(nc[y * W + x])) {
     if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y;
@@ -70,48 +82,78 @@ export function prepareTransition({ coverage, terr, W, H, manifestCourses, rowsA
   const gx1 = clamp(cx1 + reach, 0, W - 1), gy1 = clamp(cy1 + reach, 0, H - 1);
   const gw = gx1 - gx0 + 1, gh = gy1 - gy0 + 1;
 
+  // Window slices + per-pixel owner (A and B states) and the course id.
   const nOwners = ownerRgb.length;
   const land = new Uint8Array(gw * gh), covSlice = new Float32Array(gw * gh), terrSlice = new Uint8ClampedArray(gw * gh * 4);
-  const maskA = Array.from({ length: nOwners }, () => new Float32Array(gw * gh));
-  const maskB = Array.from({ length: nOwners }, () => new Float32Array(gw * gh));
-  const nearA = new Int16Array(gw * gh), nearB = new Int16Array(gw * gh);
+  const oaField = new Int16Array(gw * gh), obField = new Int16Array(gw * gh), courseLocal = new Int16Array(gw * gh);
   for (let yy = 0; yy < gh; yy++) for (let xx = 0; xx < gw; xx++) {
     const gp = (gy0 + yy) * W + (gx0 + xx), lp = yy * gw + xx;
-    const isLand = coverage[gp] > 127 ? 1 : 0;
-    land[lp] = isLand; covSlice[lp] = coverage[gp] / 255;
+    land[lp] = coverage[gp] > 127 ? 1 : 0; covSlice[lp] = coverage[gp] / 255;
     terrSlice[lp * 4] = terr[gp * 4]; terrSlice[lp * 4 + 1] = terr[gp * 4 + 1]; terrSlice[lp * 4 + 2] = terr[gp * 4 + 2]; terrSlice[lp * 4 + 3] = terr[gp * 4 + 3];
-    const course = nc[gp], oa = ownerOfA[course], ob = ownerOfB[course];
-    nearA[lp] = oa; nearB[lp] = ob;
-    if (isLand) { maskA[oa][lp] = 1; maskB[ob][lp] = 1; }
+    const c = nc[gp]; courseLocal[lp] = c; oaField[lp] = ownerOfA[c]; obField[lp] = ownerOfB[c];
   }
-  const blurA = maskA.map((m) => boxBlur(m, blurR, gw, gh));
-  const blurB = maskB.map((m) => boxBlur(m, blurR, gw, gh));
+
+  // Reveal field over the flipped cells: geodesic distance from the NEW owner's pre-existing (A-state)
+  // territory -> the front advances from the attacker's side. No such territory (first claim) -> radial
+  // from the course centre. Normalised to 0..1 within each cell.
+  const reveal = new Float32Array(gw * gh);
+  const chamferByOb = {};
+  for (const c of flipped) {
+    const ob = ownerOfB[c];
+    if (!(ob in chamferByOb)) {
+      const seed = new Uint8Array(gw * gh); let any = false;
+      for (let lp = 0; lp < gw * gh; lp++) if (oaField[lp] === ob) { seed[lp] = 1; any = true; }
+      chamferByOb[ob] = any ? chamferDist(seed, gw, gh) : null;
+    }
+    const cham = chamferByOb[ob];
+    const cxp = centers[c][0] * W - gx0, cyp = centers[c][1] * H - gy0;
+    let mx = 1e-6; const cell = [];
+    for (let lp = 0; lp < gw * gh; lp++) if (courseLocal[lp] === c) {
+      const x = lp % gw, y = (lp / gw) | 0;
+      const r = (cham && cham[lp] < 1e8) ? cham[lp] : Math.hypot(x - cxp, y - cyp);   // front, else radial fallback
+      reveal[lp] = r; cell.push(lp); if (r > mx) mx = r;
+    }
+    for (const lp of cell) reveal[lp] /= mx;
+  }
 
   return {
-    gw, gh, nOwners, ownerRgb, paintable, land, covSlice, terrSlice, blurA, blurB, nearA, nearB,
+    gw, gh, nOwners, ownerRgb, paintable, gooeyR, land, covSlice, terrSlice, oaField, obField, reveal,
     out: { x: cx0, y: cy0, w: cx1 - cx0 + 1, h: cy1 - cy0 + 1, ox: cx0 - gx0, oy: cy0 - gy0 },
     px: { rimW: LENS.rimWidthF * W, halo: LENS.haloF * W, borderLean: LENS.borderLeanF * W },
   };
 }
 
 export function interpolatePatch(prep, tau) {
-  const { gw, gh, nOwners, ownerRgb, paintable, land, covSlice, terrSlice, blurA, blurB, nearA, nearB, out, px } = prep;
+  const { gw, gh, nOwners, ownerRgb, paintable, gooeyR, land, covSlice, terrSlice, oaField, obField, reveal, out, px } = prep;
   const t = clamp(tau, 0, 1);
-  const ownerSm = new Int16Array(gw * gh).fill(-1);
+  // Owner per pixel at this progress: flipped cells switch where the front has passed (t >= reveal);
+  // clamped so t=0 is exactly the A-state and t=1 the B-state (the patch then equals the base frame).
+  const ownerField = new Int16Array(gw * gh);
   for (let p = 0; p < gw * gh; p++) {
-    if (!land[p]) continue;
-    let best = -Infinity, bi = -1;
-    for (let o = 0; o < nOwners; o++) { const v = (1 - t) * blurA[o][p] + t * blurB[o][p]; if (v > best) { best = v; bi = o; } }
-    ownerSm[p] = bi;
+    const oa = oaField[p], ob = obField[p];
+    ownerField[p] = oa === ob ? oa : t <= 0 ? oa : t >= 1 ? ob : (t >= reveal[p] ? ob : oa);
   }
-  const near = t < 0.5 ? nearA : nearB;                       // coast feather owner (exact at the endpoints)
+  const ownerSm = gooeyPartition(ownerField, land, gw, gh, nOwners, gooeyR);          // gooey-smooth the hard front
   const dB = borderDistance(ownerSm, gw, gh);
-  const full = paintLens({ W: gw, H: gh, terr: terrSlice, ownerRgb, paintable, ownerSm, dB, near, coastCov: covSlice, px });
+  const rgba = paintLens({ W: gw, H: gh, terr: terrSlice, ownerRgb, paintable, ownerSm, dB, near: ownerField, coastCov: covSlice, px });
 
-  const rgba = new Uint8ClampedArray(out.w * out.h * 4);     // crop the composite sub-rect (drop the blurR ring)
+  // Hot leading edge along the advancing front, fading out at the endpoints (so t=0/1 match the base).
+  const bump = 4 * t * (1 - t);
+  if (bump > 0.01) {
+    const GW = 0.12, S = 0.9 * bump;
+    for (let p = 0; p < gw * gh; p++) {
+      if (oaField[p] === obField[p] || !land[p]) continue;
+      const d = Math.abs(reveal[p] - t); if (d >= GW) continue;
+      const k = (1 - d / GW) * S, q = p * 4;
+      rgba[q] += (255 - rgba[q]) * k * 0.85; rgba[q + 1] += (250 - rgba[q + 1]) * k * 0.8; rgba[q + 2] += (255 - rgba[q + 2]) * k;
+    }
+  }
+
+  // Crop the composite sub-rect (drop the discarded reach ring).
+  const outRgba = new Uint8ClampedArray(out.w * out.h * 4);
   for (let yy = 0; yy < out.h; yy++) for (let xx = 0; xx < out.w; xx++) {
     const s = ((out.oy + yy) * gw + (out.ox + xx)) * 4, d = (yy * out.w + xx) * 4;
-    rgba[d] = full[s]; rgba[d + 1] = full[s + 1]; rgba[d + 2] = full[s + 2]; rgba[d + 3] = full[s + 3];
+    outRgba[d] = rgba[s]; outRgba[d + 1] = rgba[s + 1]; outRgba[d + 2] = rgba[s + 2]; outRgba[d + 3] = rgba[s + 3];
   }
-  return { x: out.x, y: out.y, w: out.w, h: out.h, rgba };
+  return { x: out.x, y: out.y, w: out.w, h: out.h, rgba: outRgba };
 }

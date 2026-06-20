@@ -87,3 +87,27 @@ describe("no window-edge artefact (2D)", () => {
     }
   });
 });
+
+// The invasion front must sweep FROM the new owner's existing territory across the captured cell.
+describe("invasion front direction", () => {
+  const N = 120;
+  const cov = new Uint8Array(N * N).fill(255);
+  const tr = new Uint8ClampedArray(N * N * 4).fill(160);
+  const crs = [
+    { slug: "L", hit: { x: 0.15, y: 0.5, w: 0, h: 0 } },  // attacker (blue), left
+    { slug: "M", hit: { x: 0.50, y: 0.5, w: 0, h: 0 } },  // captured (red -> blue), middle
+    { slug: "R", hit: { x: 0.85, y: 0.5, w: 0, h: 0 } },  // defender (red), right
+  ];
+  const a = [{ slug: "L", color: "#0000ff" }, { slug: "M", color: "#ff0000" }, { slug: "R", color: "#ff0000" }];
+  const b = [{ slug: "L", color: "#0000ff" }, { slug: "M", color: "#0000ff" }, { slug: "R", color: "#ff0000" }];
+  it("mid-slide: the side nearest the attacker is converted, the far side not yet", () => {
+    const prep = prepareTransition({ coverage: cov, terr: tr, W: N, H: N, manifestCourses: crs, rowsA: a, rowsB: b });
+    const p = interpolatePatch(prep, 0.5);
+    const at = (gx, gy) => { const i = ((gy - p.y) * p.w + (gx - p.x)) * 4; return { r: p.rgba[i], b: p.rgba[i + 2] }; };
+    const y = Math.round(0.5 * N);
+    const near = at(Math.round(0.42 * N), y);   // M-cell, near the attacker (left)
+    const far = at(Math.round(0.58 * N), y);    // M-cell, near the defender (right)
+    expect(near.b).toBeGreaterThan(near.r);     // already blue (front passed)
+    expect(far.r).toBeGreaterThan(far.b);       // still red (front not arrived)
+  });
+});

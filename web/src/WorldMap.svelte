@@ -23,8 +23,8 @@
   // Border-push animation: per-frame source buffers (backing res) + the rAF transition runner.
   let bkCoverage = null, bkTerr = null;
   let animRaf = 0, animResolve = null;
-  const ANIM_MS = 480, STEP_DWELL_MS = 120;   // slide duration + dwell on the settled frame (tunable)
-  const easeOut = (t) => 1 - Math.pow(1 - t, 3);   // fast lunge, decelerating into place (territory surges, then settles)
+  const ANIM_MS = 1300, STEP_DWELL_MS = 300;   // slide duration + dwell on the settled frame (tunable)
+  const easeCharge = (t) => t * t * t;   // ease-in "charge": hold, then surge across the captured ground
 
   // Fit-to-viewport layout: the console (title + transport) sits on top; the map fills the
   // remaining height so the whole view fits without scrolling. Box sizes are computed in JS.
@@ -236,7 +236,7 @@
       const t0 = performance.now();
       const tick = (now) => {
         if (animResolve !== resolve) return;            // cancelled by scrub
-        const tau = easeOut(Math.min(1, (now - t0) / ANIM_MS));
+        const tau = easeCharge(Math.min(1, (now - t0) / ANIM_MS));
         const patch = interpolatePatch(prep, tau);
         ctx.putImageData(new ImageData(patch.rgba, patch.w, patch.h), patch.x, patch.y);
         if (tau < 1) animRaf = requestAnimationFrame(tick);
