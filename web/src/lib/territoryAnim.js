@@ -137,10 +137,22 @@ export function prepareTransition({ coverage, terr, W, H, manifestCourses, rowsA
     if (adjacent) { for (let lp = 0; lp < gw * gh; lp++) if (oaField[lp] === ob && !cellSet.has(courseLocal[lp])) seed[lp] = 1; }   // front from ob's border
     else if (gpix.length) seed[Math.round(sy / gpix.length) * gw + Math.round(sx / gpix.length)] = 1;   // radial from the group centroid
     const cham = chamferDist(seed, gw, gh);
-    let mx = 1e-6;
-    for (const lp of gpix) if (cham[lp] < 1e8 && cham[lp] > mx) mx = cham[lp];
-    for (let lp = 0; lp < gw * gh; lp++) { const rv = cham[lp] < 1e8 ? cham[lp] / mx : 2; if (rv < reveal[lp]) reveal[lp] = rv; }
-    if (mx > extent) extent = mx;
+
+    // Equalise the reveal by the captured AREA's depth distribution: remap each pixel's geodesic
+    // distance through the flipped cells' distance-CDF, so an EQUAL share of captured area flips per
+    // equal progress. Without this a cell adjoining a long border fills fast near the front and leaves
+    // a thin deep tail, so the sweep front-loads then dwells -> the "sweep, then static" pause.
+    const sorted = [];
+    for (const lp of gpix) if (cham[lp] < 1e8) sorted.push(cham[lp]);
+    if (!sorted.length) continue;
+    sorted.sort((a, b) => a - b);
+    const n = sorted.length;
+    const cdf = (v) => { let lo = 0, hi = n; while (lo < hi) { const m = (lo + hi) >> 1; if (sorted[m] <= v) lo = m + 1; else hi = m; } return lo / n; };
+    for (let lp = 0; lp < gw * gh; lp++) { const rv = cham[lp] < 1e8 ? cdf(cham[lp]) : 2; if (rv < reveal[lp]) reveal[lp] = rv; }
+    // Duration scales with a ROBUST front-travel depth (a high percentile, not the single farthest
+    // pixel) so one outlier pixel can't inflate the sweep into a long, slow, static-tailed crawl.
+    const travel = sorted[Math.min(n - 1, Math.floor(n * 0.8))];
+    if (travel > extent) extent = travel;
   }
 
   // Small windows (a single cell) re-partition LIVE each frame: cheap, and prepareTransition stays

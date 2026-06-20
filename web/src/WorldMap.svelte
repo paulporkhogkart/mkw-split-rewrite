@@ -23,7 +23,7 @@
   // Capture animation: per-frame source buffers (backing res) + the constant course field + the rAF runner.
   let bkCoverage = null, bkTerr = null, bkField = null, slug2idx = null;
   let animRaf = 0, animResolve = null;
-  const FRONT_SPEED = 0.18;   // px/ms — the front advances at this CONSTANT speed (so nothing "slows down"); tunable
+  const FRONT_SPEED = 0.30;   // px/ms — the front advances at this CONSTANT speed (so nothing "slows down"); tunable
   const MIN_MS = 320, MAX_MS = 5000, MAX_RUN = 12;   // duration clamp + max cells coalesced into one continuous sweep
   const easeFlow = (t) => t;   // linear: a steady advance, so a coalesced run reads as one unbroken motion
 
@@ -228,8 +228,9 @@
       cancelAnim();
       animResolve = resolve;
       const done = () => { if (animResolve === resolve) { animResolve = null; resolve(); } };
-      const hardSet = () => drawBaseFrame(to).then(done);     // nothing to animate -> just show `to`
-      if (!bkCoverage || !bkTerr || !flippedCourses(snapshots[from], snapshots[to]).length) { hardSet(); return; }
+      const hardSet = () => drawBaseFrame(to).then(done);     // can't animate -> just show `to`
+      if (!flippedCourses(snapshots[from], snapshots[to]).length) { done(); return; }   // no ownership change -> take zero time
+      if (!bkCoverage || !bkTerr) { hardSet(); return; }
       let prep;
       try {
         prep = prepareTransition({ coverage: bkCoverage, terr: bkTerr, W: backW, H: backH,
@@ -267,7 +268,7 @@
     const box = { x0: backW, y0: backH, x1: -1, y1: -1 };
     const add = (ci) => { acc.add(ci); const b = bkField.courseBox[ci]; if (b.minx < box.x0) box.x0 = b.minx; if (b.miny < box.y0) box.y0 = b.miny; if (b.maxx > box.x1) box.x1 = b.maxx; if (b.maxy > box.y1) box.y1 = b.maxy; };
     for (const s of flippedCourses(snapshots[from], snapshots[from + 1])) if (s in slug2idx) add(slug2idx[s]);
-    const AREA_CAP = 0.18 * backW * backH;              // keep the per-frame window affordable
+    const WIN_CAP = 150000;                            // cap the run's WINDOW so it stays on the fast LIVE render path (no per-run render hitch)
     let to = from + 1;
     while (to < last && to - from < MAX_RUN) {
       const flips = flippedCourses(snapshots[to], snapshots[to + 1]);
@@ -279,7 +280,7 @@
           const b = bkField.courseBox[ci]; nx0 = Math.min(nx0, b.minx); ny0 = Math.min(ny0, b.miny); nx1 = Math.max(nx1, b.maxx); ny1 = Math.max(ny1, b.maxy); }
         if (!touches) { ok = false; break; }            // not adjoining the run SO FAR -> stop (contiguous only)
       }
-      if (!ok || (nx1 - nx0) * (ny1 - ny0) > AREA_CAP) break;
+      if (!ok || (nx1 - nx0 + 176) * (ny1 - ny0 + 176) > WIN_CAP) break;   // padded window too big -> would need the slow path
       for (const s of flips) add(slug2idx[s]);
       to++;
     }
