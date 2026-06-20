@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { buildSnapshots, flippedCourses } from "./timeline.js";
 
-const C = { Aliias: "#4ade80", Gub: "#2dd4bf" };
+const C = { Aliias: "#4ade80", Gub: "#38bdf8" };
 
 describe("buildSnapshots", () => {
   it("emits a snapshot only when a course leader changes; owner = running-min", () => {
@@ -13,7 +13,7 @@ describe("buildSnapshots", () => {
     const s = buildSnapshots(events, C);
     expect(s.map((x) => x.owners.mc.player)).toEqual(["Aliias", "Gub"]);
     expect(s.map((x) => x.t)).toEqual([1000, 3000]);
-    expect(s[1].owners.mc.color).toBe("#2dd4bf");
+    expect(s[1].owners.mc.color).toBe("#38bdf8");
   });
 });
 

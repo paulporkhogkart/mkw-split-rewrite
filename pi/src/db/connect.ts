@@ -50,4 +50,8 @@ export function applySchema(db: DatabaseSync): void {
   // Idempotent: at most one current WR per (course,cc). Created here (not in schema.sql)
   // so the column is guaranteed present for both fresh and migrated DBs.
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_wr_current ON world_records(course_id, cc) WHERE is_current=1');
+  // Player recolour (existing DBs): Gub teal -> blue. Idempotent (no row matches once recoloured),
+  // and gated on the old value so it never fights a future colour change. server/importer.py
+  // PLAYER_COLORS carries the same value, so fresh imports seed blue directly.
+  db.exec("UPDATE players SET color = '#38bdf8' WHERE display_name = 'Gub' COLLATE NOCASE AND color = '#2dd4bf'");
 }

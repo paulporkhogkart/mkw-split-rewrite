@@ -152,7 +152,7 @@ describe('territoryOwners', () => {
   it('returns each course #1 PB holder + colour, null when unclaimed', () => {
     const db = openDb(':memory:'); applySchema(db);
     db.exec("INSERT INTO seasons(id,name,is_active) VALUES (1,'S1',1)");
-    db.exec("INSERT INTO players(id,display_name,color) VALUES (1,'Paul','#a78bfa'),(2,'Gub','#2dd4bf')");
+    db.exec("INSERT INTO players(id,display_name,color) VALUES (1,'Paul','#a78bfa'),(2,'Gub','#38bdf8')");
     db.exec("INSERT INTO courses(id,slug,display_name) VALUES (1,'rr','RR'),(2,'mc','MC'),(3,'pb','PB')");
     // rr: Paul 108s beats Gub 112s -> Paul; mc: Gub only -> Gub; pb: no PB -> unclaimed
     db.exec("INSERT INTO runs(season_id,player_id,course_id,cc,status,provenance,total_time_ms,is_pb) VALUES " +
@@ -177,7 +177,7 @@ describe('territoryTimeline', () => {
   it('returns finished runs across seasons ordered by time, excluding carryover, with colours', () => {
     const db = openDb(':memory:'); applySchema(db);
     db.exec("INSERT INTO seasons(id,name,is_active) VALUES (1,'Season 0',0),(2,'Season 1',1)");
-    db.exec("INSERT INTO players(id,display_name,color) VALUES (1,'Aliias','#4ade80'),(2,'Gub','#2dd4bf')");
+    db.exec("INSERT INTO players(id,display_name,color) VALUES (1,'Aliias','#4ade80'),(2,'Gub','#38bdf8')");
     db.exec("INSERT INTO courses(id,slug,display_name) VALUES (1,'mario_circuit','Mario Circuit')");
     db.exec("INSERT INTO runs(season_id,player_id,course_id,cc,status,provenance,ended_at,total_time_ms) VALUES (1,1,1,150,'finished','legacy_import','2025-06-26T00:00:00Z',83000)");
     db.exec("INSERT INTO runs(season_id,player_id,course_id,cc,status,provenance,ended_at,total_time_ms) VALUES (2,2,1,150,'finished','live','2026-06-10T00:00:00Z',70000)");
@@ -188,6 +188,6 @@ describe('territoryTimeline', () => {
       { t: Date.parse('2025-06-26T00:00:00Z'), player: 'Aliias', slug: 'mario_circuit', ms: 83000 },
       { t: Date.parse('2026-06-10T00:00:00Z'), player: 'Gub', slug: 'mario_circuit', ms: 70000 },
     ]);
-    expect(r.colors).toEqual({ Aliias: '#4ade80', Gub: '#2dd4bf' });
+    expect(r.colors).toEqual({ Aliias: '#4ade80', Gub: '#38bdf8' });
   });
 });

@@ -52,3 +52,20 @@ describe('applySchema is_current migration', () => {
     ).toThrow();
   });
 });
+
+describe('applySchema Gub recolour migration', () => {
+  it('recolours an existing teal Gub to blue, idempotently, leaving others alone', () => {
+    const db = openDb(':memory:');
+    applySchema(db);   // build the players table
+    db.exec("INSERT INTO players(id,display_name,color) VALUES (1,'Gub','#2dd4bf'),(2,'Paul','#a78bfa'),(3,'Mystery','#2dd4bf')");
+    applySchema(db);   // a later boot -> the recolour runs
+    const colors = Object.fromEntries(
+      (db.prepare('SELECT display_name, color FROM players').all() as { display_name: string; color: string }[])
+        .map((r) => [r.display_name, r.color]));
+    expect(colors.Gub).toBe('#38bdf8');      // teal -> blue
+    expect(colors.Paul).toBe('#a78bfa');     // untouched
+    expect(colors.Mystery).toBe('#2dd4bf');  // gated on the name: a different teal player is left alone
+    applySchema(db);                         // idempotent: no row matches now, still blue
+    expect((db.prepare("SELECT color FROM players WHERE display_name='Gub'").get() as { color: string }).color).toBe('#38bdf8');
+  });
+});
