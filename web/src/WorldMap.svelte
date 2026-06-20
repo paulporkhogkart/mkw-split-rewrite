@@ -78,7 +78,9 @@
   let snapshots = [];
   let tlIndex = 0;
   let timelineReady = false;
-  let tlWorker = null, tlCov = null, tlBase = null, tlW = 0, tlH = 0, tlPending = null;
+  let tlWorker = null, tlCov = null, tlBase = null, tlW = 0, tlH = 0;
+  const tlQueue = [];         // FIFO of {resolve,reject} awaiting worker replies, matched in post order
+  const tlInFlight = new Map(); // index -> in-flight render promise, so concurrent callers SHARE one render
   const tlCache = [];         // index -> ImageBitmap (sparse)
   const tlOrder = [];         // FIFO of cached indices, for eviction
 
@@ -111,7 +113,7 @@
   // source bitmaps are NOT transferred, so they survive for the next snapshot.
   function tlRenderViaWorker(territoryRows) {
     return new Promise((resolve, reject) => {
-      tlPending = { resolve, reject };
+      tlQueue.push({ resolve, reject });     // worker replies in post order -> FIFO match, never a clobbered resolver
       tlWorker.postMessage({
         coverageBitmap: tlCov, baseBitmap: tlBase, W: tlW, H: tlH,
         targetW: backW, targetH: backH,            // render scrub frames at the backing resolution
@@ -124,15 +126,20 @@
   // current index or the one just produced). Evicted frames re-render on demand.
   async function ensureBitmap(i) {
     if (tlCache[i]) return tlCache[i];
+    if (tlInFlight.has(i)) return tlInFlight.get(i);   // already rendering i -> share it (no duplicate worker job)
     const rows = Object.entries(snapshots[i].owners).map(([slug, o]) => ({ slug, color: o.color }));
-    const bmp = await tlRenderViaWorker(rows);
-    tlCache[i] = bmp;
-    tlOrder.push(i);
-    while (tlOrder.length > TL_CACHE_CAP) {
-      const old = tlOrder.shift();
-      if (old !== tlIndex && old !== i && tlCache[old]) { tlCache[old].close?.(); tlCache[old] = undefined; }
-    }
-    return bmp;
+    const pr = (async () => {
+      const bmp = await tlRenderViaWorker(rows);
+      tlCache[i] = bmp;
+      tlOrder.push(i);
+      while (tlOrder.length > TL_CACHE_CAP) {
+        const old = tlOrder.shift();
+        if (old !== tlIndex && old !== i && tlCache[old]) { tlCache[old].close?.(); tlCache[old] = undefined; }
+      }
+      return bmp;
+    })();
+    tlInFlight.set(i, pr);
+    try { return await pr; } finally { tlInFlight.delete(i); }
   }
 
   // Fetch the merged run history, build ownership snapshots, and prepare the reduced-res worker
@@ -151,8 +158,8 @@
       ]);
       tlCov = cov; tlBase = base; tlW = cov.width; tlH = cov.height;
       tlWorker = new Worker(new URL("./lib/territoryWorker.js", import.meta.url), { type: "module" });
-      tlWorker.onmessage = (e) => { const p = tlPending; tlPending = null; p?.resolve(e.data.bitmap); };
-      tlWorker.onerror = (ev) => { const p = tlPending; tlPending = null; console.error("timeline worker error", ev.message || ev); p?.reject(new Error("worker error")); };
+      tlWorker.onmessage = (e) => { tlQueue.shift()?.resolve(e.data.bitmap); };
+      tlWorker.onerror = (ev) => { console.error("timeline worker error", ev.message || ev); tlQueue.shift()?.reject(new Error("worker error")); };
       snapshots = snaps;
       tlIndex = snaps.length - 1;
       timelineReady = true;
