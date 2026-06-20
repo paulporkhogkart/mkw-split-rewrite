@@ -26,11 +26,36 @@
   const ANIM_MS = 480, STEP_DWELL_MS = 120;   // slide duration + dwell on the settled frame (tunable)
   const easeInOut = (t) => t * t * (3 - 2 * t);
 
+  // Fit-to-viewport layout: the console (title + transport) sits on top; the map fills the
+  // remaining height so the whole view fits without scrolling. Box sizes are computed in JS.
+  let headerH = 46, mapViewEl, consoleEl, mapW = 0, mapH = 0, ro = null;
+  function fitMap() {
+    if (!mapViewEl || !consoleEl) return;
+    const padV = 24, padH = 24, gap = 10;     // .map-view padding (12*2) + the gap to the frame
+    const availH = mapViewEl.clientHeight - consoleEl.offsetHeight - gap - padV;
+    const availW = mapViewEl.clientWidth - padH;
+    const ar = 2200 / 1775;
+    let h = Math.max(140, availH), w = h * ar;
+    if (w > availW) { w = availW; h = availW / ar; }
+    mapW = Math.round(w); mapH = Math.round(h);
+  }
+
+  // Current on-screen standings (territory count per player) for the legend, taken from the
+  // displayed snapshot so it tracks as you scrub. The leader is flagged for a subtle emphasis.
+  $: standings = (timelineReady && snapshots[tlIndex]) ? buildStandings(snapshots[tlIndex].owners) : [];
+  function buildStandings(owners) {
+    const m = {};
+    for (const slug in owners) { const o = owners[slug]; if (!o?.player) continue; (m[o.player] ??= { player: o.player, color: o.color, count: 0 }).count++; }
+    const arr = Object.values(m).sort((a, b) => b.count - a.count || a.player.localeCompare(b.player));
+    if (arr.length) arr[0].lead = true;
+    return arr;
+  }
+
   // Backing store = display CSS width x devicePixelRatio (capped at the 2200 asset), so the
   // territory is rendered hi-res then downscaled into device pixels (crisp on any DPI).
   function sizeCanvas() {
-    if (!terr || !stageEl) return;
-    const cssW = stageEl.clientWidth || 1100;
+    if (!terr) return;
+    const cssW = mapW || (stageEl && stageEl.clientWidth) || 1100;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     backW = Math.min(ASSET_W, Math.round(cssW * dpr));
     backH = Math.round(backW * (1775 / 2200));
@@ -130,7 +155,8 @@
       snapshots = snaps;
       tlIndex = snaps.length - 1;
       timelineReady = true;
-      buildBackingBuffers();      // prepare the per-frame animation source buffers
+      await tick();               // the transport row mounts -> the console grew, so re-fit the map
+      refit();                    // re-fit + size canvas + build the animation source buffers + repaint
     } catch (e) {
       console.error("timeline load failed (keeping live territory):", e);
     }
@@ -282,7 +308,7 @@
     clearTimeout(closeTimer);
     if (figUrl.startsWith("blob:")) URL.revokeObjectURL(figUrl);
     if (typeof document !== "undefined") document.removeEventListener("pointerdown", onDocPointerDown);
-    if (typeof window !== "undefined") window.removeEventListener("resize", onResize);
+    ro?.disconnect();
     clearTimeout(playTimer);
     cancelAnimationFrame(animRaf);
     tlWorker?.terminate();
@@ -290,9 +316,10 @@
     tlCov?.close?.(); tlBase?.close?.(); presentBitmap?.close?.();
   });
 
-  function onResize() {
+  function refit() {                            // re-fit the map box + rebuild backing buffers on any size change
+    fitMap();
     sizeCanvas();
-    buildBackingBuffers();                      // re-read the source buffers at the new backing size
+    buildBackingBuffers();
     for (const b of tlCache) b?.close?.();      // cached scrub frames are sized to the old backing -> drop them
     tlCache.length = 0; tlOrder.length = 0;
     if (snapshots.length) showSnapshot(tlIndex);
@@ -300,26 +327,57 @@
   }
 
   onMount(async () => {
-    if (typeof document !== "undefined") document.addEventListener("pointerdown", onDocPointerDown);
+    if (typeof document !== "undefined") {
+      document.addEventListener("pointerdown", onDocPointerDown);
+      headerH = document.querySelector(".top")?.offsetHeight || headerH;
+    }
     try {
       const r = await fetch(manifestUrl(), { cache: "no-store" });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       manifest = await r.json();
-      await tick();            // let Svelte mount the .territory canvas (bind terr) before drawing
-      sizeCanvas();            // size the backing store to the display before the first paint
+      await tick();            // mount the .console + .territory canvas before measuring/drawing
+      fitMap(); await tick(); fitMap();   // two-pass: the console width settles to the map width
+      sizeCanvas();            // size the backing store to the fitted map before the first paint
       renderTerritory();       // canonical present (high-res) = default view + fallback
       loadTimeline();          // SP4: fetch history + prepare lazy scrub-frame cache (additive)
     } catch (e) {
       console.error("world map: manifest load failed", e);
       error = true;
     }
-    window.addEventListener("resize", onResize);
+    if (mapViewEl && typeof ResizeObserver !== "undefined") { ro = new ResizeObserver(refit); ro.observe(mapViewEl); }
     preloadPlayerGifs(API_BASE).catch(() => {});   // warm the GIF cache so hovers don't wait on a load
   });
 </script>
 
-<div class="map-view">
-  <div class="frame">
+<div class="map-view" bind:this={mapViewEl} style="height:calc(100dvh - {headerH}px)">
+  <div class="console" bind:this={consoleEl} style="width:{mapW ? mapW + 'px' : '100%'}">
+    <div class="head">
+      <div class="title">
+        <h1>Territory</h1>
+        <p>Who holds the fastest time on each course</p>
+      </div>
+      {#if standings.length}
+        <ul class="legend">
+          {#each standings as s (s.player)}
+            <li class:lead={s.lead}>
+              <span class="sw" style="background:{s.color}"></span>
+              <span class="nm">{s.player}</span>
+              <span class="ct">{s.count}</span>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </div>
+    {#if timelineReady && snapshots.length}
+      <div class="transport">
+        <TimelineScrubber {snapshots} index={tlIndex} {playing}
+          on:scrub={(e) => onScrub(e.detail.index)}
+          on:toggle={togglePlay} />
+      </div>
+    {/if}
+  </div>
+
+  <div class="frame" style={mapW ? `width:${mapW}px;height:${mapH}px` : ""}>
     {#if error}
       <div class="msg">Map unavailable.</div>
     {:else if manifest}
@@ -351,20 +409,33 @@
       <div class="msg">Loading map…</div>
     {/if}
   </div>
-  {#if timelineReady && snapshots.length}
-    <div class="timeline">
-      <TimelineScrubber {snapshots} index={tlIndex} {playing}
-        on:scrub={(e) => onScrub(e.detail.index)}
-        on:toggle={togglePlay} />
-    </div>
-  {/if}
 </div>
 
 <style>
-  .map-view { padding: 16px; }
-  .timeline { max-width: 1100px; margin: 12px auto 0; }
+  .map-view {
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    padding: 12px; box-sizing: border-box; overflow: hidden;
+  }
+
+  /* Console: a restrained graphite control panel (title + live standings, then the transport)
+     that sits above the map and aligns to its width. */
+  .console { max-width: 100%; background: var(--panel); border: 1px solid var(--bd); border-radius: var(--r); }
+  .head { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; padding: 9px 13px; }
+  .title h1 { font-size: 14px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--tx); }
+  .title p { margin-top: 2px; font-size: 11px; color: var(--tx-dim); }
+
+  /* Standings legend: who holds how many courses right now (updates as you scrub). */
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; justify-content: flex-end; list-style: none; }
+  .legend li { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--tx-mut); }
+  .legend .sw { width: 9px; height: 9px; border-radius: 2px; flex: none; box-shadow: inset 0 0 0 1px rgba(0,0,0,.35); }
+  .legend .ct { font-variant-numeric: tabular-nums; color: var(--tx-dim); min-width: 1.1em; text-align: right; }
+  .legend li.lead .nm, .legend li.lead .ct { color: var(--tx); font-weight: 600; }
+
+  .transport { padding: 2px 11px 9px; border-top: 1px solid var(--bd-soft); }
+
+  /* The map: a feed-style frame sized in JS to fill the remaining viewport height. */
   .frame {
-    position: relative; max-width: 1100px; margin: 0 auto;
+    position: relative; flex: none; min-height: 140px;
     background: var(--feed-bg); border: 1px solid var(--bd);
     border-radius: var(--r); overflow: hidden;
   }
@@ -372,9 +443,9 @@
     content: ""; position: absolute; inset: 0; pointer-events: none;
     border-radius: var(--r); box-shadow: inset 0 0 60px 10px rgba(0,0,0,.45);
   }
-  .stage { position: relative; width: 100%; }
+  .stage { position: relative; width: 100%; height: 100%; }
   /* Calm at rest: the whole map sits muted so the hovered course (and SP2's territory) leads. */
-  .base { display: block; width: 100%; height: auto; filter: saturate(.82) brightness(.82); }
+  .base { display: block; width: 100%; height: 100%; object-fit: cover; filter: saturate(.82) brightness(.82); }
   .territory { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
   .popups { position: absolute; inset: 0; pointer-events: none; }
   .icons { position: absolute; inset: 0; }
@@ -411,5 +482,5 @@
   }
   .popup.show { opacity: 1; transform: scale(1); }
   .msg { padding: 4rem; text-align: center; color: var(--tx-dim); }
-  @media (max-width: 560px) { .map-view { padding: 8px; } }
+  @media (max-width: 640px) { .map-view { height: auto !important; padding: 8px; } }
 </style>

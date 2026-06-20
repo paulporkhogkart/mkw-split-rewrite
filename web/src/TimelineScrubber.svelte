@@ -64,16 +64,17 @@
 {/if}
 
 <style>
+  /* Sits inside the World Map console (which provides the panel surface), so the scrubber itself
+     is a transparent transport row. */
   .scrubber {
     display: flex;
     align-items: center;
     gap: 14px;
     width: 100%;
     box-sizing: border-box;
-    padding: 9px 13px;
-    background: var(--panel);
-    border: 1px solid var(--bd);
-    border-radius: var(--r);
+    padding: 4px 0 0;
+    background: transparent;
+    border: 0;
   }
 
   .play {
