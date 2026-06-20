@@ -111,3 +111,23 @@ describe("invasion front direction", () => {
     expect(far.r).toBeGreaterThan(far.b);       // still red (front not arrived)
   });
 });
+
+// A capture whose new owner has territory NEARBY (inside the patch padding) but NOT edge-adjacent
+// must erupt radially from the course, not sweep in from the disconnected blob (the Dry Bones bug).
+describe("non-adjacent capture erupts radially", () => {
+  const NW = 400, NH = 80;
+  const cov = new Uint8Array(NW * NH).fill(255);
+  const tr = new Uint8ClampedArray(NW * NH * 4).fill(160);
+  const crs = []; for (let i = 0; i < 12; i++) crs.push({ slug: "c" + i, hit: { x: (i + 1) * 0.075, y: 0.5, w: 0, h: 0 } });
+  const R = "#ff0000", B = "#0000ff";
+  const aRows = crs.map((c, i) => ({ slug: c.slug, color: i === 3 ? B : R }));            // c3 = the attacker's existing (non-adjacent) land
+  const bRows = crs.map((c, i) => ({ slug: c.slug, color: (i === 3 || i === 5) ? B : R })); // c5 (between c4 and c6) is captured
+  it("mid-slide the captured cell converts symmetrically (centre-out), not from one side", () => {
+    const prep = prepareTransition({ coverage: cov, terr: tr, W: NW, H: NH, manifestCourses: crs, rowsA: aRows, rowsB: bRows });
+    const p = interpolatePatch(prep, 0.7);
+    const at = (gx, gy) => { const i = ((gy - p.y) * p.w + (gx - p.x)) * 4; return p.rgba[i + 2] > p.rgba[i]; }; // true = blue
+    const y = 40;
+    expect(at(180, y)).toBe(true);          // centre converted (radial reaches it first)
+    expect(at(168, y)).toBe(at(192, y));    // both edges the same -> symmetric eruption, not a one-sided front
+  });
+});

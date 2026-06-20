@@ -97,21 +97,39 @@ export function prepareTransition({ coverage, terr, W, H, manifestCourses, rowsA
   // territory -> the front advances from the attacker's side. No such territory (first claim) -> radial
   // from the course centre. Normalised to 0..1 within each cell.
   const reveal = new Float32Array(gw * gh);
-  const chamferByOb = {};
-  for (const c of flipped) {
-    const ob = ownerOfB[c];
+  const chamferByOb = {};                               // ob -> chamfer from its A-state territory (lazy)
+  const chamferFor = (ob) => {
     if (!(ob in chamferByOb)) {
       const seed = new Uint8Array(gw * gh); let any = false;
       for (let lp = 0; lp < gw * gh; lp++) if (oaField[lp] === ob) { seed[lp] = 1; any = true; }
       chamferByOb[ob] = any ? chamferDist(seed, gw, gh) : null;
     }
-    const cham = chamferByOb[ob];
+    return chamferByOb[ob];
+  };
+  for (const c of flipped) {
+    const ob = ownerOfB[c];
+    // The front only sweeps when the new owner's territory actually SHARES A BORDER with this cell.
+    // Near-but-not-adjacent territory (caught by the patch padding) must NOT pull a front from a
+    // disconnected blob -> a capture with no adjoining owner land erupts radially from the course.
+    const cell = []; let adjacent = false;
+    for (let lp = 0; lp < gw * gh; lp++) {
+      if (courseLocal[lp] !== c) continue;
+      cell.push(lp);
+      if (!adjacent) {
+        const x = lp % gw, y = (lp / gw) | 0;
+        if ((x + 1 < gw && courseLocal[lp + 1] !== c && oaField[lp + 1] === ob) ||
+            (x - 1 >= 0 && courseLocal[lp - 1] !== c && oaField[lp - 1] === ob) ||
+            (y + 1 < gh && courseLocal[lp + gw] !== c && oaField[lp + gw] === ob) ||
+            (y - 1 >= 0 && courseLocal[lp - gw] !== c && oaField[lp - gw] === ob)) adjacent = true;
+      }
+    }
+    const cham = adjacent ? chamferFor(ob) : null;      // front iff the new owner borders this cell
     const cxp = centers[c][0] * W - gx0, cyp = centers[c][1] * H - gy0;
-    let mx = 1e-6; const cell = [];
-    for (let lp = 0; lp < gw * gh; lp++) if (courseLocal[lp] === c) {
+    let mx = 1e-6;
+    for (const lp of cell) {
       const x = lp % gw, y = (lp / gw) | 0;
-      const r = (cham && cham[lp] < 1e8) ? cham[lp] : Math.hypot(x - cxp, y - cyp);   // front, else radial fallback
-      reveal[lp] = r; cell.push(lp); if (r > mx) mx = r;
+      const r = (cham && cham[lp] < 1e8) ? cham[lp] : Math.hypot(x - cxp, y - cyp);   // front, else radial
+      reveal[lp] = r; if (r > mx) mx = r;
     }
     for (const lp of cell) reveal[lp] /= mx;
   }
