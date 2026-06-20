@@ -24,7 +24,7 @@
   let bkCoverage = null, bkTerr = null;
   let animRaf = 0, animResolve = null;
   const ANIM_MS = 480, STEP_DWELL_MS = 120;   // slide duration + dwell on the settled frame (tunable)
-  const easeInOut = (t) => t * t * (3 - 2 * t);
+  const easeOut = (t) => 1 - Math.pow(1 - t, 3);   // fast lunge, decelerating into place (territory surges, then settles)
 
   // Fit-to-viewport layout: the console (title + transport) sits on top; the map fills the
   // remaining height so the whole view fits without scrolling. Box sizes are computed in JS.
@@ -236,7 +236,7 @@
       const t0 = performance.now();
       const tick = (now) => {
         if (animResolve !== resolve) return;            // cancelled by scrub
-        const tau = easeInOut(Math.min(1, (now - t0) / ANIM_MS));
+        const tau = easeOut(Math.min(1, (now - t0) / ANIM_MS));
         const patch = interpolatePatch(prep, tau);
         ctx.putImageData(new ImageData(patch.rgba, patch.w, patch.h), patch.x, patch.y);
         if (tau < 1) animRaf = requestAnimationFrame(tick);

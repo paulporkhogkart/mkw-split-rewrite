@@ -59,4 +59,31 @@ describe("partial flip (b: RED->BLUE)", () => {
     expect(at(p0,10).b).toBeGreaterThan(at(p0,10).r);
     expect(at(p1,10).b).toBeGreaterThan(at(p1,10).r);
   });
+
+});
+
+// Regression for the "square glow": over a small cropped window, borderDistance treats the window
+// EDGE as a false border, whose tint-lean (borderLean, the widest paintLens falloff) bled past the
+// old discard ring into the kept region. Needs a 2D grid at a real scale to manifest (H=1 is
+// degenerate: every pixel is a frame edge).
+describe("no window-edge artefact (2D)", () => {
+  const N = 160;
+  const cov = new Uint8Array(N * N).fill(255);
+  const tr = new Uint8ClampedArray(N * N * 4).fill(160);
+  const crs = [{ slug: "L", hit: { x: 0.25, y: 0.5, w: 0, h: 0 } }, { slug: "R", hit: { x: 0.75, y: 0.5, w: 0, h: 0 } }];
+  const aAll = [{ slug: "L", color: "#ff0000" }, { slug: "R", color: "#ff0000" }];   // whole island one owner
+  const bFlip = [{ slug: "L", color: "#ff0000" }, { slug: "R", color: "#0000ff" }];  // R flips to blue
+  it("the kept patch equals the full-frame base at the endpoints", () => {
+    const prep = prepareTransition({ coverage: cov, terr: tr, W: N, H: N, manifestCourses: crs, rowsA: aAll, rowsB: bFlip });
+    for (const [tau, rows] of [[0, aAll], [1, bFlip]]) {
+      const p = interpolatePatch(prep, tau);
+      const full = buildTerritory({ coverage: cov, W: N, H: N, terr: tr, manifestCourses: crs, territoryRows: rows });
+      let maxd = 0;
+      for (let yy = 0; yy < p.h; yy++) for (let xx = 0; xx < p.w; xx++) {
+        const s = ((p.y + yy) * N + (p.x + xx)) * 4, d = (yy * p.w + xx) * 4;
+        for (let c = 0; c < 4; c++) maxd = Math.max(maxd, Math.abs(p.rgba[d + c] - full[s + c]));
+      }
+      expect(maxd, `tau=${tau}`).toBeLessThanOrEqual(1);
+    }
+  });
 });

@@ -50,19 +50,24 @@ export function prepareTransition({ coverage, terr, W, H, manifestCourses, rowsA
   const centersPx = centers.map((c) => [c[0] * W, c[1] * H]);
   const nc = nearestCourse(W, H, centersPx);
 
-  // Tight bbox of the flipped cells, then pad: haloPx (rim bleed into neighbours) is kept in
-  // the composite output; blurR (gooey reach) extends the COMPUTE region and is discarded so
-  // borderDistance's artificial frame-edge rim never reaches a painted pixel.
+  // Padding. paintLens derives the interior TINT from the border-distance field over `borderLean`
+  // and the rim over `halo`; in a cropped window the window EDGE acts as a false border, so those
+  // effects bleed `reach` px inward. So (a) pad the COMPOSITE (kept) region by `reach` — enough to
+  // paint the moving border's full tint into the neighbour AND to clear the flip's partition shift
+  // (>= blurR) — and (b) DISCARD a further `reach` ring so the false-edge tint/rim never reaches a
+  // kept pixel (its dB there stays >= borderLean = the saturated interior that matches the base).
+  // (The old code discarded only blurR < borderLean, which is what produced the "square glow".)
   const blurR = Math.round(LENS.gooeyF * W);
-  const haloPx = Math.ceil(LENS.haloF * W) + 2;
+  const reach = Math.ceil((LENS.borderLeanF + LENS.haloF) * W) + 2;
+  const pad = Math.max(reach, blurR);
   let minx = W, miny = H, maxx = -1, maxy = -1;
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (flipped.has(nc[y * W + x])) {
     if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y;
   }
-  const cx0 = clamp(minx - haloPx, 0, W - 1), cy0 = clamp(miny - haloPx, 0, H - 1);   // composite (output) region
-  const cx1 = clamp(maxx + haloPx, 0, W - 1), cy1 = clamp(maxy + haloPx, 0, H - 1);
-  const gx0 = clamp(cx0 - blurR, 0, W - 1), gy0 = clamp(cy0 - blurR, 0, H - 1);        // compute region (+blurR ring)
-  const gx1 = clamp(cx1 + blurR, 0, W - 1), gy1 = clamp(cy1 + blurR, 0, H - 1);
+  const cx0 = clamp(minx - pad, 0, W - 1), cy0 = clamp(miny - pad, 0, H - 1);          // composite (output) region
+  const cx1 = clamp(maxx + pad, 0, W - 1), cy1 = clamp(maxy + pad, 0, H - 1);
+  const gx0 = clamp(cx0 - reach, 0, W - 1), gy0 = clamp(cy0 - reach, 0, H - 1);         // compute region (discard ring = reach)
+  const gx1 = clamp(cx1 + reach, 0, W - 1), gy1 = clamp(cy1 + reach, 0, H - 1);
   const gw = gx1 - gx0 + 1, gh = gy1 - gy0 + 1;
 
   const nOwners = ownerRgb.length;
