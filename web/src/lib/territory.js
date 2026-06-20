@@ -38,8 +38,9 @@ export function gooeyPartition(near, land, W, H, nOwners, radius) {
   // Caller contract: nOwners must equal max(ownerOf)+1, else a land pixel whose
   // owner index >= nOwners would stay -1 (a gap). buildTerritory guarantees this.
   for (let o = 0; o < nOwners; o++) {
-    mask.fill(0);
-    for (let p = 0; p < mask.length; p++) if (land[p] && near[p] === o) mask[p] = 1;
+    mask.fill(0); let any = false;
+    for (let p = 0; p < mask.length; p++) if (land[p] && near[p] === o) { mask[p] = 1; any = true; }
+    if (!any) continue;   // owner absent from this window -> its blurred mask is all 0 and never wins the argmax
     const b = boxBlur(mask, radius, W, H);
     for (let p = 0; p < b.length; p++) { if (!land[p]) continue; if (b[p] > best[p]) { best[p] = b[p]; ownerSm[p] = o; } }
   }

@@ -112,6 +112,50 @@ describe("invasion front direction", () => {
   });
 });
 
+// A run of adjoining captures by one owner (X, Y, Z all taken) must reveal as ONE continuous front
+// sweeping near->far, not every cell animating simultaneously.
+describe("adjoining run sweeps as one continuous front", () => {
+  const NW = 400, NH = 80;
+  const cov = new Uint8Array(NW * NH).fill(255), tr = new Uint8ClampedArray(NW * NH * 4).fill(160);
+  const crs = [
+    { slug: "A", hit: { x: 0.10, y: 0.5, w: 0, h: 0 } },  // attacker (blue)
+    { slug: "X", hit: { x: 0.35, y: 0.5, w: 0, h: 0 } },
+    { slug: "Y", hit: { x: 0.55, y: 0.5, w: 0, h: 0 } },
+    { slug: "Z", hit: { x: 0.75, y: 0.5, w: 0, h: 0 } },
+    { slug: "D", hit: { x: 0.95, y: 0.5, w: 0, h: 0 } },  // defender (red)
+  ];
+  const B = "#0000ff", R = "#ff0000";
+  const aRows = crs.map((c) => ({ slug: c.slug, color: c.slug === "A" ? B : R }));
+  const bRows = crs.map((c) => ({ slug: c.slug, color: c.slug === "D" ? R : B }));   // A,X,Y,Z blue; D red
+  it("mid-sweep the near cell is taken but the far cell is not", () => {
+    const prep = prepareTransition({ coverage: cov, terr: tr, W: NW, H: NH, manifestCourses: crs, rowsA: aRows, rowsB: bRows });
+    const p = interpolatePatch(prep, 0.5);
+    const isB = (gx, gy) => { const i = ((gy - p.y) * p.w + (gx - p.x)) * 4; return p.rgba[i + 2] > p.rgba[i]; };
+    expect(isB(140, 40)).toBe(true);    // X (nearest the attacker) already taken
+    expect(isB(300, 40)).toBe(false);   // Z (far end of the run) not yet -> one front sweeping through
+  });
+});
+
+// A big window uses the precomputed-endpoint BLEND path; its endpoints must still equal the base.
+describe("blend path (big window)", () => {
+  const N = 650;
+  const cov = new Uint8Array(N * N).fill(255), tr = new Uint8ClampedArray(N * N * 4).fill(160);
+  const crs = [{ slug: "L", hit: { x: 0.3, y: 0.5, w: 0, h: 0 } }, { slug: "R", hit: { x: 0.7, y: 0.5, w: 0, h: 0 } }];
+  const aAll = [{ slug: "L", color: "#ff0000" }, { slug: "R", color: "#ff0000" }];
+  const bFlip = [{ slug: "L", color: "#ff0000" }, { slug: "R", color: "#0000ff" }];
+  it("selects blend and the endpoints equal the full-frame base", () => {
+    const prep = prepareTransition({ coverage: cov, terr: tr, W: N, H: N, manifestCourses: crs, rowsA: aAll, rowsB: bFlip });
+    expect(prep.live).toBe(false);      // window > 130k -> blend
+    for (const [t, rows] of [[0, aAll], [1, bFlip]]) {
+      const p = interpolatePatch(prep, t);
+      const full = buildTerritory({ coverage: cov, W: N, H: N, terr: tr, manifestCourses: crs, territoryRows: rows });
+      let maxd = 0;
+      for (let yy = 0; yy < p.h; yy++) for (let xx = 0; xx < p.w; xx++) { const s = ((p.y + yy) * N + (p.x + xx)) * 4, d = (yy * p.w + xx) * 4; for (let c = 0; c < 4; c++) maxd = Math.max(maxd, Math.abs(p.rgba[d + c] - full[s + c])); }
+      expect(maxd, `t=${t}`).toBeLessThanOrEqual(1);
+    }
+  });
+});
+
 // A capture whose new owner has territory NEARBY (inside the patch padding) but NOT edge-adjacent
 // must erupt radially from the course, not sweep in from the disconnected blob (the Dry Bones bug).
 describe("non-adjacent capture erupts radially", () => {

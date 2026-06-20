@@ -21,10 +21,11 @@
   // showSnapshot coalescing: the knob (tlIndex) tracks instantly while only the newest request paints.
   let pendingIndex = null, rendering = false;
   // Capture animation: per-frame source buffers (backing res) + the constant course field + the rAF runner.
-  let bkCoverage = null, bkTerr = null, bkField = null;
+  let bkCoverage = null, bkTerr = null, bkField = null, slug2idx = null;
   let animRaf = 0, animResolve = null;
-  const ANIM_MS = 800;   // time the front takes to cross one cell (tunable); steps chain with no dwell
-  const easeFlow = (t) => t;   // linear: a steady advance, so chained captures (esp. adjacent runs) flow without holds
+  const FRONT_SPEED = 0.18;   // px/ms — the front advances at this CONSTANT speed (so nothing "slows down"); tunable
+  const MIN_MS = 320, MAX_MS = 5000, MAX_RUN = 12;   // duration clamp + max cells coalesced into one continuous sweep
+  const easeFlow = (t) => t;   // linear: a steady advance, so a coalesced run reads as one unbroken motion
 
   // Fit-to-viewport layout: the console (title + transport) sits on top; the map fills the
   // remaining height so the whole view fits without scrolling. Box sizes are computed in JS.
@@ -207,7 +208,8 @@
     x.clearRect(0, 0, backW, backH);
     x.drawImage(tlBase, 0, 0, backW, backH);
     bkTerr = new Uint8ClampedArray(x.getImageData(0, 0, backW, backH).data);
-    bkField = manifest ? buildCourseField(manifest.courses, backW, backH) : null;   // constant nearest-course field (reused every step)
+    bkField = manifest ? buildCourseField(manifest.courses, backW, backH) : null;   // constant nearest-course field + adjacency (reused every step)
+    if (manifest && !slug2idx) slug2idx = Object.fromEntries(manifest.courses.map((cc, i) => [cc.slug, i]));
   }
 
   const rowsOf = (i) => Object.entries(snapshots[i].owners).map(([slug, o]) => ({ slug, color: o.color }));
@@ -234,11 +236,12 @@
           manifestCourses: manifest.courses, rowsA: rowsOf(from), rowsB: rowsOf(to), field: bkField });
       } catch (e) { console.error("transition prep failed", e); hardSet(); return; }
       if (!prep) { hardSet(); return; }
+      const dur = Math.max(MIN_MS, Math.min(MAX_MS, prep.extent / FRONT_SPEED));   // constant speed -> duration scales with the front's travel
       const ctx = terr.getContext("2d");
       const t0 = performance.now();
       const tick = (now) => {
         if (animResolve !== resolve) return;            // cancelled by scrub/pause
-        const tau = easeFlow(Math.min(1, (now - t0) / ANIM_MS));
+        const tau = easeFlow(Math.min(1, (now - t0) / dur));
         const patch = interpolatePatch(prep, tau);
         ctx.putImageData(new ImageData(patch.rgba, patch.w, patch.h), patch.x, patch.y);
         if (tau < 1) animRaf = requestAnimationFrame(tick);
@@ -248,14 +251,50 @@
     });
   }
 
+  // Coalesce a run of consecutive captures by the SAME owner into ADJOINING cells -> the front sweeps
+  // across them as one continuous motion (no per-cell break). Returns the run's end snapshot index.
+  function singleNewOwner(snapIdx, flips) {
+    let ob = null;
+    for (const s of flips) { const p = snapshots[snapIdx].owners[s]?.player ?? null; if (p == null) return null; if (ob == null) ob = p; else if (ob !== p) return null; }
+    return ob;
+  }
+  function runEnd(from) {
+    const last = snapshots.length - 1;
+    if (from >= last || !bkField || !slug2idx) return Math.min(from + 1, last);
+    const ob = singleNewOwner(from + 1, flippedCourses(snapshots[from], snapshots[from + 1]));
+    if (ob == null) return from + 1;                    // multi-owner step -> don't coalesce
+    const acc = new Set();                              // the RUN's captured cells ONLY -> stays spatially contiguous
+    const box = { x0: backW, y0: backH, x1: -1, y1: -1 };
+    const add = (ci) => { acc.add(ci); const b = bkField.courseBox[ci]; if (b.minx < box.x0) box.x0 = b.minx; if (b.miny < box.y0) box.y0 = b.miny; if (b.maxx > box.x1) box.x1 = b.maxx; if (b.maxy > box.y1) box.y1 = b.maxy; };
+    for (const s of flippedCourses(snapshots[from], snapshots[from + 1])) if (s in slug2idx) add(slug2idx[s]);
+    const AREA_CAP = 0.18 * backW * backH;              // keep the per-frame window affordable
+    let to = from + 1;
+    while (to < last && to - from < MAX_RUN) {
+      const flips = flippedCourses(snapshots[to], snapshots[to + 1]);
+      if (singleNewOwner(to + 1, flips) !== ob) break;  // a different owner captures next -> stop the run
+      let ok = flips.length > 0, nx0 = box.x0, ny0 = box.y0, nx1 = box.x1, ny1 = box.y1;
+      for (const s of flips) {
+        const ci = slug2idx[s]; let touches = false;
+        if (ci != null) { for (const a of bkField.adj[ci]) if (acc.has(a)) { touches = true; break; }
+          const b = bkField.courseBox[ci]; nx0 = Math.min(nx0, b.minx); ny0 = Math.min(ny0, b.miny); nx1 = Math.max(nx1, b.maxx); ny1 = Math.max(ny1, b.maxy); }
+        if (!touches) { ok = false; break; }            // not adjoining the run SO FAR -> stop (contiguous only)
+      }
+      if (!ok || (nx1 - nx0) * (ny1 - ny0) > AREA_CAP) break;
+      for (const s of flips) add(slug2idx[s]);
+      to++;
+    }
+    return to;
+  }
+
   async function step() {
     if (!playing) return;
     const last = snapshots.length - 1;
-    const from = tlIndex, next = Math.min(from + 1, last);
-    tlIndex = next;                        // knob + date track the destination as the front advances
-    await animateTransition(from, next);
+    const from = tlIndex;
+    const to = runEnd(from);               // coalesce an adjoining same-owner run into one continuous sweep
+    tlIndex = to;
+    await animateTransition(from, to);
     if (!playing) { drawBaseFrame(tlIndex); return; }          // paused -> settle the crisp canonical frame
-    if (next >= last) { playing = false; drawBaseFrame(last); return; }   // reached LIVE -> canonical present
+    if (to >= last) { playing = false; drawBaseFrame(last); return; }   // reached LIVE -> canonical present
     step();                                                    // chain immediately, no dwell -> continuous flow
   }
   async function togglePlay() {

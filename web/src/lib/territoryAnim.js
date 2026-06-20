@@ -61,12 +61,16 @@ function chamferDist(seed, W, H) {
 export function buildCourseField(manifestCourses, W, H) {
   const centersPx = manifestCourses.map((c) => [(c.hit.x + c.hit.w / 2) * W, (c.hit.y + c.hit.h / 2) * H]);
   const nc = nearestCourse(W, H, centersPx);
-  const courseBox = Array.from({ length: manifestCourses.length }, () => ({ minx: W, miny: H, maxx: -1, maxy: -1 }));
+  const n = manifestCourses.length;
+  const courseBox = Array.from({ length: n }, () => ({ minx: W, miny: H, maxx: -1, maxy: -1 }));
+  const adj = Array.from({ length: n }, () => new Set());   // Voronoi neighbours (which cells border which)
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-    const b = courseBox[nc[y * W + x]];
+    const c = nc[y * W + x], b = courseBox[c];
     if (x < b.minx) b.minx = x; if (x > b.maxx) b.maxx = x; if (y < b.miny) b.miny = y; if (y > b.maxy) b.maxy = y;
+    if (x + 1 < W) { const d = nc[y * W + x + 1]; if (d !== c) { adj[c].add(d); adj[d].add(c); } }
+    if (y + 1 < H) { const d = nc[(y + 1) * W + x]; if (d !== c) { adj[c].add(d); adj[d].add(c); } }
   }
-  return { nc, courseBox };
+  return { nc, courseBox, adj };
 }
 
 export function prepareTransition({ coverage, terr, W, H, manifestCourses, rowsA, rowsB, field }) {
@@ -107,85 +111,116 @@ export function prepareTransition({ coverage, terr, W, H, manifestCourses, rowsA
     const c = nc[gp]; courseLocal[lp] = c; oaField[lp] = ownerOfA[c]; obField[lp] = ownerOfB[c];
   }
 
-  // Reveal field over the flipped cells: geodesic distance from the NEW owner's pre-existing (A-state)
-  // territory -> the front advances from the attacker's side. No such territory (first claim) -> radial
-  // from the course centre. Normalised to 0..1 within each cell.
-  const reveal = new Float32Array(gw * gh);
-  const chamferByOb = {};                               // ob -> chamfer from its A-state territory (lazy)
-  const chamferFor = (ob) => {
-    if (!(ob in chamferByOb)) {
-      const seed = new Uint8Array(gw * gh); let any = false;
-      for (let lp = 0; lp < gw * gh; lp++) if (oaField[lp] === ob) { seed[lp] = 1; any = true; }
-      chamferByOb[ob] = any ? chamferDist(seed, gw, gh) : null;
-    }
-    return chamferByOb[ob];
-  };
-  for (const c of flipped) {
-    const ob = ownerOfB[c];
-    // The front only sweeps when the new owner's territory actually SHARES A BORDER with this cell.
-    // Near-but-not-adjacent territory (caught by the patch padding) must NOT pull a front from a
-    // disconnected blob -> a capture with no adjoining owner land erupts radially from the course.
-    const cell = []; let adjacent = false;
+  // Reveal field. Cells are grouped by NEW OWNER and each group reveals as ONE continuous front: a
+  // geodesic (chamfer) sweep from the owner's pre-existing (A-state) land IF the group adjoins it (so
+  // the front advances from the attacker's side AND chains across a whole run of adjoining captures);
+  // a group that doesn't adjoin the owner's land erupts radially from its centroid. Normalised 0..1
+  // across the group, so one progress sweeps the entire run. `extent` (max px) drives the duration.
+  // Reveal time per pixel (0..1), set for the WHOLE window from each group's chamfer so the gooey band
+  // just outside the flipped cells transitions WITH the front, not early. 2 = "never" (until the clamp).
+  const reveal = new Float32Array(gw * gh).fill(2);
+  let extent = 1;
+  const groups = new Map();                             // new-owner index -> Set(flipped course index)
+  for (const c of flipped) { const ob = ownerOfB[c]; if (!groups.has(ob)) groups.set(ob, new Set()); groups.get(ob).add(c); }
+  for (const [ob, cellSet] of groups) {
+    const gpix = []; let sx = 0, sy = 0, adjacent = false;
     for (let lp = 0; lp < gw * gh; lp++) {
-      if (courseLocal[lp] !== c) continue;
-      cell.push(lp);
-      if (!adjacent) {
-        const x = lp % gw, y = (lp / gw) | 0;
-        if ((x + 1 < gw && courseLocal[lp + 1] !== c && oaField[lp + 1] === ob) ||
-            (x - 1 >= 0 && courseLocal[lp - 1] !== c && oaField[lp - 1] === ob) ||
-            (y + 1 < gh && courseLocal[lp + gw] !== c && oaField[lp + gw] === ob) ||
-            (y - 1 >= 0 && courseLocal[lp - gw] !== c && oaField[lp - gw] === ob)) adjacent = true;
-      }
+      if (!cellSet.has(courseLocal[lp])) continue;
+      const x = lp % gw, y = (lp / gw) | 0; gpix.push(lp); sx += x; sy += y;
+      if (!adjacent &&                                  // does the group share a border with ob's A-state land?
+        ((x + 1 < gw && !cellSet.has(courseLocal[lp + 1]) && oaField[lp + 1] === ob) ||
+         (x - 1 >= 0 && !cellSet.has(courseLocal[lp - 1]) && oaField[lp - 1] === ob) ||
+         (y + 1 < gh && !cellSet.has(courseLocal[lp + gw]) && oaField[lp + gw] === ob) ||
+         (y - 1 >= 0 && !cellSet.has(courseLocal[lp - gw]) && oaField[lp - gw] === ob))) adjacent = true;
     }
-    const cham = adjacent ? chamferFor(ob) : null;      // front iff the new owner borders this cell
-    const cxp = centers[c][0] * W - gx0, cyp = centers[c][1] * H - gy0;
+    const seed = new Uint8Array(gw * gh);
+    if (adjacent) { for (let lp = 0; lp < gw * gh; lp++) if (oaField[lp] === ob && !cellSet.has(courseLocal[lp])) seed[lp] = 1; }   // front from ob's border
+    else if (gpix.length) seed[Math.round(sy / gpix.length) * gw + Math.round(sx / gpix.length)] = 1;   // radial from the group centroid
+    const cham = chamferDist(seed, gw, gh);
     let mx = 1e-6;
-    for (const lp of cell) {
-      const x = lp % gw, y = (lp / gw) | 0;
-      const r = (cham && cham[lp] < 1e8) ? cham[lp] : Math.hypot(x - cxp, y - cyp);   // front, else radial
-      reveal[lp] = r; if (r > mx) mx = r;
-    }
-    for (const lp of cell) reveal[lp] /= mx;
+    for (const lp of gpix) if (cham[lp] < 1e8 && cham[lp] > mx) mx = cham[lp];
+    for (let lp = 0; lp < gw * gh; lp++) { const rv = cham[lp] < 1e8 ? cham[lp] / mx : 2; if (rv < reveal[lp]) reveal[lp] = rv; }
+    if (mx > extent) extent = mx;
   }
 
+  // Small windows (a single cell) re-partition LIVE each frame: cheap, and prepareTransition stays
+  // ~3ms so there's no per-step hitch, plus the moving border keeps its rim. Big windows (a coalesced
+  // run) render the two endpoint states ONCE here; interpolatePatch then just blends between them
+  // along the front -> O(window)/frame, and the one-time render cost is amortised over the long sweep.
+  const px = { rimW: LENS.rimWidthF * W, halo: LENS.haloF * W, borderLean: LENS.borderLeanF * W };
+  const live = gw * gh <= 165000;
+  let startRgba = null, endRgba = null;
+  if (!live) {
+    const renderState = (field) => {
+      const sm = gooeyPartition(field, land, gw, gh, nOwners, gooeyR);
+      const dB = borderDistance(sm, gw, gh);
+      return paintLens({ W: gw, H: gh, terr: terrSlice, ownerRgb, paintable, ownerSm: sm, dB, near: field, coastCov: covSlice, px });
+    };
+    startRgba = renderState(oaField); endRgba = renderState(obField);
+  }
   return {
-    gw, gh, nOwners, ownerRgb, paintable, gooeyR, land, covSlice, terrSlice, oaField, obField, reveal,
-    out: { x: cx0, y: cy0, w: cx1 - cx0 + 1, h: cy1 - cy0 + 1, ox: cx0 - gx0, oy: cy0 - gy0 },
-    px: { rimW: LENS.rimWidthF * W, halo: LENS.haloF * W, borderLean: LENS.borderLeanF * W },
+    live, gw, gh, land, reveal, extent, out: { x: cx0, y: cy0, w: cx1 - cx0 + 1, h: cy1 - cy0 + 1, ox: cx0 - gx0, oy: cy0 - gy0 },
+    nOwners, ownerRgb, paintable, gooeyR, covSlice, terrSlice, oaField, obField, px,   // live mode
+    startRgba, endRgba,                                                                // blend mode
   };
 }
 
 export function interpolatePatch(prep, tau) {
-  const { gw, gh, nOwners, ownerRgb, paintable, gooeyR, land, covSlice, terrSlice, oaField, obField, reveal, out, px } = prep;
   const t = clamp(tau, 0, 1);
-  // Owner per pixel at this progress: flipped cells switch where the front has passed (t >= reveal);
-  // clamped so t=0 is exactly the A-state and t=1 the B-state (the patch then equals the base frame).
+  return prep.live ? livePatch(prep, t) : blendPatch(prep, t);
+}
+
+// Glow envelope: full across the whole sweep, fading only at the very ends (so t=0/1 == the base).
+const glowBump = (t) => clamp(Math.min(t, 1 - t) / 0.12, 0, 1);
+
+function crop(full, prep) {
+  const { gw, out } = prep;
+  const r = new Uint8ClampedArray(out.w * out.h * 4);
+  for (let yy = 0; yy < out.h; yy++) for (let xx = 0; xx < out.w; xx++) {
+    const s = ((out.oy + yy) * gw + (out.ox + xx)) * 4, d = (yy * out.w + xx) * 4;
+    r[d] = full[s]; r[d + 1] = full[s + 1]; r[d + 2] = full[s + 2]; r[d + 3] = full[s + 3];
+  }
+  return { x: out.x, y: out.y, w: out.w, h: out.h, rgba: r };
+}
+
+// Live: re-partition the (small) window each frame -> a true gooey moving border + rim.
+function livePatch(prep, t) {
+  const { gw, gh, nOwners, ownerRgb, paintable, gooeyR, land, covSlice, terrSlice, oaField, obField, reveal, px } = prep;
   const ownerField = new Int16Array(gw * gh);
   for (let p = 0; p < gw * gh; p++) {
     const oa = oaField[p], ob = obField[p];
     ownerField[p] = oa === ob ? oa : t <= 0 ? oa : t >= 1 ? ob : (t >= reveal[p] ? ob : oa);
   }
-  const ownerSm = gooeyPartition(ownerField, land, gw, gh, nOwners, gooeyR);          // gooey-smooth the hard front
+  const ownerSm = gooeyPartition(ownerField, land, gw, gh, nOwners, gooeyR);
   const dB = borderDistance(ownerSm, gw, gh);
   const rgba = paintLens({ W: gw, H: gh, terr: terrSlice, ownerRgb, paintable, ownerSm, dB, near: ownerField, coastCov: covSlice, px });
+  const bump = glowBump(t);
+  if (bump > 0.01) for (let p = 0; p < gw * gh; p++) {
+    if (oaField[p] === obField[p] || !land[p]) continue;
+    const d = Math.abs(reveal[p] - t); if (d >= 0.12) continue;
+    const k = (1 - d / 0.12) * 0.9 * bump, q = p * 4;
+    rgba[q] += (255 - rgba[q]) * k * 0.85; rgba[q + 1] += (250 - rgba[q + 1]) * k * 0.8; rgba[q + 2] += (255 - rgba[q + 2]) * k;
+  }
+  return crop(rgba, prep);
+}
 
-  // Hot leading edge along the advancing front, fading out at the endpoints (so t=0/1 match the base).
-  const bump = 4 * t * (1 - t);
-  if (bump > 0.01) {
-    const GW = 0.12, S = 0.9 * bump;
-    for (let p = 0; p < gw * gh; p++) {
-      if (oaField[p] === obField[p] || !land[p]) continue;
-      const d = Math.abs(reveal[p] - t); if (d >= GW) continue;
-      const k = (1 - d / GW) * S, q = p * 4;
-      rgba[q] += (255 - rgba[q]) * k * 0.85; rgba[q + 1] += (250 - rgba[q + 1]) * k * 0.8; rgba[q + 2] += (255 - rgba[q + 2]) * k;
+// Blend: a big coalesced run -> blend the two precomputed endpoint renders along the front (cheap).
+function blendPatch(prep, t) {
+  const { gw, gh, land, reveal, startRgba, endRgba } = prep;
+  const FEATHER = 0.06, bump = glowBump(t);
+  const full = new Uint8ClampedArray(gw * gh * 4);
+  for (let p = 0; p < gw * gh; p++) {
+    const q = p * 4, r = reveal[p];
+    const f = t <= 0 ? 0 : t >= 1 ? 1 : clamp((t - r) / FEATHER + 0.5, 0, 1);   // 1 behind the front, 0 ahead, soft between
+    full[q] = startRgba[q] + (endRgba[q] - startRgba[q]) * f;
+    full[q + 1] = startRgba[q + 1] + (endRgba[q + 1] - startRgba[q + 1]) * f;
+    full[q + 2] = startRgba[q + 2] + (endRgba[q + 2] - startRgba[q + 2]) * f;
+    full[q + 3] = startRgba[q + 3] + (endRgba[q + 3] - startRgba[q + 3]) * f;
+    if (bump > 0.01 && land[p]) {
+      const d = Math.abs(r - t);
+      if (d < 0.12) { const k = (1 - d / 0.12) * 0.9 * bump;
+        full[q] += (255 - full[q]) * k * 0.85; full[q + 1] += (250 - full[q + 1]) * k * 0.8; full[q + 2] += (255 - full[q + 2]) * k; }
     }
   }
-
-  // Crop the composite sub-rect (drop the discarded reach ring).
-  const outRgba = new Uint8ClampedArray(out.w * out.h * 4);
-  for (let yy = 0; yy < out.h; yy++) for (let xx = 0; xx < out.w; xx++) {
-    const s = ((out.oy + yy) * gw + (out.ox + xx)) * 4, d = (yy * out.w + xx) * 4;
-    outRgba[d] = rgba[s]; outRgba[d + 1] = rgba[s + 1]; outRgba[d + 2] = rgba[s + 2]; outRgba[d + 3] = rgba[s + 3];
-  }
-  return { x: out.x, y: out.y, w: out.w, h: out.h, rgba: outRgba };
+  return crop(full, prep);
 }
