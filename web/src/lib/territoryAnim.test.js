@@ -156,6 +156,31 @@ describe("blend path (big window)", () => {
   });
 });
 
+// The blend (big-window) glow must light ONLY the captured cells, like the live path. The reveal
+// field carries mid/high values on far, NON-flipped neighbours; an unguarded glow there shimmers
+// across land that never changes hands (the "shimmer from the opposite side" bug). Pixels identical
+// at both endpoints (non-flipped, off the moving rim) must stay EXACTLY the base at every progress.
+describe("blend glow does not leak onto non-flipped territory", () => {
+  const N = 650;
+  const cov = new Uint8Array(N * N).fill(255), tr = new Uint8ClampedArray(N * N * 4).fill(130);
+  const crs = [{ slug: "L", hit: { x: 0.3, y: 0.5, w: 0, h: 0 } }, { slug: "R", hit: { x: 0.7, y: 0.5, w: 0, h: 0 } }];
+  const aAll = [{ slug: "L", color: "#ff0000" }, { slug: "R", color: "#ff0000" }];
+  const bFlip = [{ slug: "L", color: "#ff0000" }, { slug: "R", color: "#0000ff" }];
+  it("stable non-flipped pixels never brighten across the sweep", () => {
+    const prep = prepareTransition({ coverage: cov, terr: tr, W: N, H: N, manifestCourses: crs, rowsA: aAll, rowsB: bFlip });
+    expect(prep.live).toBe(false);                          // big window -> blend path
+    const P0 = interpolatePatch(prep, 0), P1 = interpolatePatch(prep, 1), w = P0.w;
+    const stable = [];                                      // identical at both endpoints = non-flipped, off the rim
+    for (let i = 0; i < w * P0.h; i++) { const d = i * 4;
+      if (P0.rgba[d] === P1.rgba[d] && P0.rgba[d + 1] === P1.rgba[d + 1] && P0.rgba[d + 2] === P1.rgba[d + 2]) stable.push(d); }
+    expect(stable.length).toBeGreaterThan(1000);            // non-vacuous: such pixels exist in the window
+    let maxOver = 0;
+    for (const tau of [0.2, 0.4, 0.6, 0.8, 0.9, 0.95]) { const P = interpolatePatch(prep, tau);
+      for (const d of stable) maxOver = Math.max(maxOver, P.rgba[d] - P0.rgba[d], P.rgba[d + 1] - P0.rgba[d + 1], P.rgba[d + 2] - P0.rgba[d + 2]); }
+    expect(maxOver).toBeLessThanOrEqual(1);                 // no glow brightening on land that never changes hands
+  });
+});
+
 // A capture whose new owner has territory NEARBY (inside the patch padding) but NOT edge-adjacent
 // must erupt radially from the course, not sweep in from the disconnected blob (the Dry Bones bug).
 describe("non-adjacent capture erupts radially", () => {

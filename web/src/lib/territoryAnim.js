@@ -218,7 +218,7 @@ function livePatch(prep, t) {
 
 // Blend: a big coalesced run -> blend the two precomputed endpoint renders along the front (cheap).
 function blendPatch(prep, t) {
-  const { gw, gh, land, reveal, startRgba, endRgba } = prep;
+  const { gw, gh, land, reveal, startRgba, endRgba, oaField, obField } = prep;
   const FEATHER = 0.06, bump = glowBump(t);
   const full = new Uint8ClampedArray(gw * gh * 4);
   for (let p = 0; p < gw * gh; p++) {
@@ -228,7 +228,10 @@ function blendPatch(prep, t) {
     full[q + 1] = startRgba[q + 1] + (endRgba[q + 1] - startRgba[q + 1]) * f;
     full[q + 2] = startRgba[q + 2] + (endRgba[q + 2] - startRgba[q + 2]) * f;
     full[q + 3] = startRgba[q + 3] + (endRgba[q + 3] - startRgba[q + 3]) * f;
-    if (bump > 0.01 && land[p]) {
+    // Glow ONLY on the captured (flipped) cells, exactly like livePatch. Without the oa!=ob guard the
+    // reveal field's high values on far, NON-flipped neighbours light up at high tau -> a glow haze
+    // shimmering across territory that never changes hands (on the side the new owner doesn't hold).
+    if (bump > 0.01 && land[p] && oaField[p] !== obField[p]) {
       const d = Math.abs(r - t);
       if (d < 0.12) { const k = (1 - d / 0.12) * 0.9 * bump;
         full[q] += (255 - full[q]) * k * 0.85; full[q + 1] += (250 - full[q + 1]) * k * 0.8; full[q + 2] += (255 - full[q + 2]) * k; }
