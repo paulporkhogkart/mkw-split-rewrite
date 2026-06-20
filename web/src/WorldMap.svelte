@@ -17,14 +17,14 @@
   let backW = 1100, backH = 888;   // backing-store pixels (device px), set by sizeCanvas
   const ASSET_W = 2200;            // cap: the island/base asset native width
   let presentBitmap = null;   // canonical present (native res), shown at LIVE + as fallback
-  let playing = false, playTimer = 0;
+  let playing = false;
   // showSnapshot coalescing: the knob (tlIndex) tracks instantly while only the newest request paints.
   let pendingIndex = null, rendering = false;
   // Border-push animation: per-frame source buffers (backing res) + the rAF transition runner.
   let bkCoverage = null, bkTerr = null;
   let animRaf = 0, animResolve = null;
-  const ANIM_MS = 1300, STEP_DWELL_MS = 300;   // slide duration + dwell on the settled frame (tunable)
-  const easeCharge = (t) => t * t * t;   // ease-in "charge": hold, then surge across the captured ground
+  const ANIM_MS = 800;   // time the front takes to cross one cell (tunable); steps chain with no dwell
+  const easeFlow = (t) => t;   // linear: a steady advance, so chained captures (esp. adjacent runs) flow without holds
 
   // Fit-to-viewport layout: the console (title + transport) sits on top; the map fills the
   // remaining height so the whole view fits without scrolling. Box sizes are computed in JS.
@@ -216,31 +216,32 @@
     if (animResolve) { const r = animResolve; animResolve = null; r(); }
   }
 
-  // Animate the border-push from snapshot `from` to `to`, then settle on the canonical frame.
-  // The canvas must already show `from`; only the changed cells are re-rendered per frame, so the
-  // rest stays perfectly still (no flash). Borders slide because the gooey argmax of the tau-lerped
-  // owner masks moves continuously from the A-partition to the B-partition.
+  // Animate the capture from `from` to `to`. The canvas must already show `from`; only the changed
+  // cells are re-rendered per frame (the invasion front), so the rest stays still (no flash). The
+  // tau=1 patch is LEFT on the canvas (no per-step full settle) so chained steps flow continuously;
+  // the canonical AA frame is settled on pause / at the end.
   function animateTransition(from, to) {
     return new Promise((resolve) => {
       cancelAnim();
       animResolve = resolve;
-      const settle = () => drawBaseFrame(to).then(() => { if (animResolve === resolve) { animResolve = null; resolve(); } });
-      if (!bkCoverage || !bkTerr || !flippedCourses(snapshots[from], snapshots[to]).length) { settle(); return; }
+      const done = () => { if (animResolve === resolve) { animResolve = null; resolve(); } };
+      const hardSet = () => drawBaseFrame(to).then(done);     // nothing to animate -> just show `to`
+      if (!bkCoverage || !bkTerr || !flippedCourses(snapshots[from], snapshots[to]).length) { hardSet(); return; }
       let prep;
       try {
         prep = prepareTransition({ coverage: bkCoverage, terr: bkTerr, W: backW, H: backH,
           manifestCourses: manifest.courses, rowsA: rowsOf(from), rowsB: rowsOf(to) });
-      } catch (e) { console.error("transition prep failed", e); settle(); return; }
-      if (!prep) { settle(); return; }
+      } catch (e) { console.error("transition prep failed", e); hardSet(); return; }
+      if (!prep) { hardSet(); return; }
       const ctx = terr.getContext("2d");
       const t0 = performance.now();
       const tick = (now) => {
-        if (animResolve !== resolve) return;            // cancelled by scrub
-        const tau = easeCharge(Math.min(1, (now - t0) / ANIM_MS));
+        if (animResolve !== resolve) return;            // cancelled by scrub/pause
+        const tau = easeFlow(Math.min(1, (now - t0) / ANIM_MS));
         const patch = interpolatePatch(prep, tau);
         ctx.putImageData(new ImageData(patch.rgba, patch.w, patch.h), patch.x, patch.y);
         if (tau < 1) animRaf = requestAnimationFrame(tick);
-        else settle();
+        else done();        // leave the tau=1 patch; settle on pause/end keeps chained play fluid
       };
       animRaf = requestAnimationFrame(tick);
     });
@@ -250,20 +251,20 @@
     if (!playing) return;
     const last = snapshots.length - 1;
     const from = tlIndex, next = Math.min(from + 1, last);
-    tlIndex = next;                        // knob + date track the destination as the border slides
+    tlIndex = next;                        // knob + date track the destination as the front advances
     await animateTransition(from, next);
-    if (!playing) return;                  // paused during the slide
-    if (next >= last) { playing = false; return; }   // reached the present -> park at LIVE
-    playTimer = setTimeout(step, STEP_DWELL_MS);
+    if (!playing) { drawBaseFrame(tlIndex); return; }          // paused -> settle the crisp canonical frame
+    if (next >= last) { playing = false; drawBaseFrame(last); return; }   // reached LIVE -> canonical present
+    step();                                                    // chain immediately, no dwell -> continuous flow
   }
   async function togglePlay() {
-    if (playing) { playing = false; clearTimeout(playTimer); return; }   // pause: current slide finishes, then stops
+    if (playing) { playing = false; cancelAnim(); return; }    // pause: stop the sweep; step() settles the frame
     if (tlIndex >= snapshots.length - 1) { await drawBaseFrame(0); tlIndex = 0; }   // restart: show frame 0 first
     playing = true;
-    playTimer = setTimeout(step, STEP_DWELL_MS);
+    step();
   }
   function onScrub(index) {                 // dragging the knob pauses play and hard-cuts to the frame
-    playing = false; clearTimeout(playTimer); cancelAnim();
+    playing = false; cancelAnim();
     showSnapshot(index);
   }
 
@@ -309,7 +310,6 @@
     if (figUrl.startsWith("blob:")) URL.revokeObjectURL(figUrl);
     if (typeof document !== "undefined") document.removeEventListener("pointerdown", onDocPointerDown);
     ro?.disconnect();
-    clearTimeout(playTimer);
     cancelAnimationFrame(animRaf);
     tlWorker?.terminate();
     for (const b of tlCache) b?.close?.();
