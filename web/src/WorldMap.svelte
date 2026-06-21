@@ -7,6 +7,8 @@
   import { buildSnapshots, flippedCourses, leaderboardAt } from "./lib/timeline.js";
   import { prepareTransition, interpolatePatch, buildCourseField } from "./lib/territoryAnim.js";
   import TimelineScrubber from "./TimelineScrubber.svelte";
+  import MapFireLayer from "./MapFireLayer.svelte";
+  import { fireListAt } from "./lib/onFire.js";
 
   let manifest = null;
   let error = false;
@@ -60,6 +62,10 @@
   // snapshot's t can predate recent runs - at LIVE use Infinity to include every event.
   $: atLive = !timelineReady || tlIndex >= snapshots.length - 1;
   $: frameTime = atLive ? Infinity : (snapshots[tlIndex]?.t ?? Infinity);
+  // On-fire courses for the shown frame (live or scrubbed-back), from the in-memory data.
+  $: fireList = (timelineReady && manifest)
+    ? fireListAt({ courses: manifest.courses, events: tlEvents, wrs: tlWrs, colors: tlColors, t: frameTime })
+    : [];
 
   // Backing store = display CSS width x devicePixelRatio (capped at the 2200 asset), so the
   // territory is rendered hi-res then downscaled into device pixels (crisp on any DPI).
@@ -431,6 +437,8 @@
         <img class="base" src={baseUrl()} alt="Mario Kart World map" />
         <!-- SP2 (territory) draws here, between the base and the icons -->
         <canvas class="territory" bind:this={terr} aria-hidden="true"></canvas>
+        <!-- on-fire flames sit behind the icons, above the territory paint -->
+        <MapFireLayer courses={fireList} />
         <div class="icons">
           {#each manifest.courses as c (c.slug)}
             <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
