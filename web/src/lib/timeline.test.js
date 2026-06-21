@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildSnapshots, flippedCourses } from "./timeline.js";
+import { buildSnapshots, flippedCourses, leaderboardAt } from "./timeline.js";
 
 const C = { Aliias: "#4ade80", Gub: "#38bdf8" };
 
@@ -32,5 +32,26 @@ describe("flippedCourses", () => {
   it("treats a null prior snapshot as everything flipped", () => {
     const b = snap({ dk:{player:"Paul"}, mc:{player:"Gub"} });
     expect(flippedCourses(null, b)).toEqual(["dk","mc"]);
+  });
+});
+
+describe("leaderboardAt", () => {
+  it("takes each player's running-minimum up to t, sorted ascending", () => {
+    const events = [
+      { t: 1000, player: "Aliias", slug: "mc", ms: 90000 },
+      { t: 2000, player: "Aliias", slug: "mc", ms: 88000 }, // improves own time
+      { t: 3000, player: "Gub", slug: "mc", ms: 80000 },
+      { t: 5000, player: "Aliias", slug: "mc", ms: 70000 }, // after the cutoff -> ignored
+    ];
+    expect(leaderboardAt(events, "mc", 3000)).toEqual([
+      { player: "Gub", ms: 80000 },
+      { player: "Aliias", ms: 88000 },
+    ]);
+  });
+
+  it("ignores other courses and is empty for an unknown slug or no events", () => {
+    const events = [{ t: 1000, player: "Gub", slug: "mc", ms: 80000 }];
+    expect(leaderboardAt(events, "dk", 9999)).toEqual([]);
+    expect(leaderboardAt([], "mc", 9999)).toEqual([]);
   });
 });

@@ -50,3 +50,17 @@ export function flippedCourses(snapA, snapB) {
   }
   return out.sort();
 }
+
+// Per-course leaderboard AS OF time `t`: each player's running-minimum ms among that course's
+// events with `event.t <= t`, sorted ascending. Drives the historical hover popup off the same
+// event stream that builds the ownership snapshots, so the board matches the map. Pure.
+export function leaderboardAt(events, slug, t) {
+  const best = {}; // player -> min ms up to t
+  for (const e of events) {
+    if (e.slug !== slug || e.t > t) continue;
+    if (best[e.player] == null || e.ms < best[e.player]) best[e.player] = e.ms;
+  }
+  return Object.entries(best)
+    .map(([player, ms]) => ({ player, ms }))
+    .sort((a, b) => a.ms - b.ms);
+}
