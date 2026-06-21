@@ -12,4 +12,8 @@ describe("viewFromHash", () => {
     expect(viewFromHash("#/territory")).toBe("territory");
     expect(viewFromHash("#territory")).toBe("territory");
   });
+  it("returns heat for the unlisted heat hash", () => {
+    expect(viewFromHash("#/heat")).toBe("heat");
+    expect(viewFromHash("#heat")).toBe("heat");
+  });
 });
