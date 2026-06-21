@@ -1,0 +1,122 @@
+{
+  "the": {
+    "fontSize": "0.415em",
+    "letterSpacing": "0.01em",
+    "rotate": "-90deg",
+    "nudgeX": "0.015em",
+    "nudgeY": "0.175em",
+    "scaleX": 1,
+    "slotW": "0.235em",
+    "slotH": "0.74em",
+    "lift": "0.16em",
+    "gap": "0.13em",
+    "color": "#9a9ca1"
+  },
+  "players": {
+    "paul": {
+      "color": "#a78bfa",
+      "default": {
+        "source": "figure",
+        "frame": 0,
+        "x": 0.015,
+        "y": 0.04,
+        "scale": 0.67,
+        "rotate": 0,
+        "clip": false
+      },
+      "fire": {
+        "source": "figure",
+        "frame": 0,
+        "x": -0.04,
+        "y": 0.065,
+        "scale": 0.61,
+        "rotate": 0,
+        "clip": false
+      }
+    },
+    "gub": {
+      "color": "#38bdf8",
+      "default": {
+        "source": "figure",
+        "frame": 0,
+        "x": 0.015,
+        "y": 0.015,
+        "scale": 0.71,
+        "rotate": 0,
+        "clip": false
+      },
+      "fire": {
+        "source": "figure",
+        "frame": 0,
+        "x": -0.015,
+        "y": 0.05,
+        "scale": 0.64,
+        "rotate": 0,
+        "clip": false
+      }
+    },
+    "luke": {
+      "color": "#f87171",
+      "default": {
+        "source": "figure",
+        "frame": 0,
+        "x": 0.005,
+        "y": 0.035,
+        "scale": 0.67,
+        "rotate": 0,
+        "clip": false
+      },
+      "fire": {
+        "source": "figure",
+        "frame": 0,
+        "x": 0.015,
+        "y": 0.04,
+        "scale": 0.67,
+        "rotate": 0,
+        "clip": false
+      }
+    },
+    "aliias": {
+      "color": "#4ade80",
+      "default": {
+        "source": "figure",
+        "frame": 0,
+        "x": 0.03,
+        "y": 0.04,
+        "scale": 0.67,
+        "rotate": 0,
+        "clip": false
+      },
+      "fire": {
+        "source": "figure",
+        "frame": 0,
+        "x": 0.03,
+        "y": 0.04,
+        "scale": 0.67,
+        "rotate": 0,
+        "clip": false
+      }
+    },
+    "alex": {
+      "color": "#fbbf24",
+      "default": {
+        "source": "figure",
+        "frame": 0,
+        "x": 0.015,
+        "y": 0.015,
+        "scale": 0.71,
+        "rotate": 0,
+        "clip": false
+      },
+      "fire": {
+        "source": "figure",
+        "frame": 0,
+        "x": -0.015,
+        "y": 0.05,
+        "scale": 0.64,
+        "rotate": 0,
+        "clip": false
+      }
+    }
+  }
+}

@@ -1,6 +1,7 @@
 <script>
-  // Self-contained, presentational timeline strip. Props in, events out; it knows nothing about
-  // the map or the data — so it can be placed anywhere (placement is provisional per SP4).
+  // Self-contained, presentational timeline strip: a play toggle + a scrub track. Props in,
+  // events out; it knows nothing about the map or the data. The date readout now lives on the
+  // map pane itself (WorldMap), so there's no date/LIVE/end-label chrome here.
   import { createEventDispatcher } from "svelte";
 
   export let snapshots = [];
@@ -12,8 +13,6 @@
 
   $: n = snapshots.length;
   $: last = Math.max(0, n - 1);
-  $: atLive = index >= last;
-  $: cur = snapshots[index] || null;
 
   const pct = (i) => (last > 0 ? (i / last) * 100 : 0);
   const onScrub = (e) => dispatch("scrub", { index: +e.target.value });
@@ -30,49 +29,37 @@
       {/if}
     </button>
 
-    <div class="track-wrap">
-      <div class="track">
-        <div class="rail" aria-hidden="true"></div>
-        <div class="fill" aria-hidden="true" style="width:{pct(index)}%"></div>
-        <div class="ticks" aria-hidden="true">
-          {#each snapshots as s, i}
-            <span class="tick" style="left:{pct(i)}%;{coloredTicks && s.gainColor ? `--c:${s.gainColor}` : ''}"></span>
-          {/each}
-        </div>
-        <input
-          class="range"
-          type="range"
-          min="0"
-          max={last}
-          step="1"
-          value={index}
-          on:input={onScrub}
-          aria-label="Timeline position"
-        />
+    <div class="track">
+      <div class="rail" aria-hidden="true"></div>
+      <div class="fill" aria-hidden="true" style="width:{pct(index)}%"></div>
+      <div class="ticks" aria-hidden="true">
+        {#each snapshots as s, i}
+          <span class="tick" style="left:{pct(i)}%;{coloredTicks && s.gainColor ? `--c:${s.gainColor}` : ''}"></span>
+        {/each}
       </div>
-      <div class="ends" aria-hidden="true">
-        <span>{snapshots[0]?.date ?? ""}</span>
-        <span>{snapshots[last]?.date ?? ""}</span>
-      </div>
-    </div>
-
-    <div class="readout">
-      <span class="date">{cur?.date ?? ""}</span>
-      {#if atLive}<span class="live">LIVE</span>{/if}
+      <input
+        class="range"
+        type="range"
+        min="0"
+        max={last}
+        step="1"
+        value={index}
+        on:input={onScrub}
+        aria-label="Timeline position"
+      />
     </div>
   </div>
 {/if}
 
 <style>
-  /* Sits inside the World Map console (which provides the panel surface), so the scrubber itself
-     is a transparent transport row. */
+  /* Sits inside the World Map console, which provides the panel surface, so the scrubber itself
+     is a transparent transport row: a play button + the scrub track. */
   .scrubber {
     display: flex;
     align-items: center;
     gap: 14px;
     width: 100%;
     box-sizing: border-box;
-    padding: 4px 0 0;
     background: transparent;
     border: 0;
   }
@@ -95,9 +82,7 @@
   .play:focus-visible { outline: none; border-color: var(--accent); }
   .play svg { width: 15px; height: 15px; fill: currentColor; display: block; }
 
-  .track-wrap { flex: 1; min-width: 0; }
-
-  .track { position: relative; height: 26px; }
+  .track { position: relative; flex: 1; min-width: 0; height: 26px; }
 
   /* The rail, fill and ticks sit centred behind the (transparent-track) range input. */
   .rail {
@@ -170,42 +155,7 @@
   .range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--accent-bg); }
   .range:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 3px var(--accent-bg); }
 
-  .ends {
-    display: flex;
-    justify-content: space-between;
-    margin-top: 4px;
-    font-family: var(--mono);
-    font-size: 10px;
-    color: var(--tx-dim);
-  }
-
-  .readout {
-    flex: none;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 96px;
-    justify-content: flex-end;
-  }
-  .date {
-    font-family: var(--mono);
-    font-variant-numeric: tabular-nums;
-    font-size: 13px;
-    color: var(--tx);
-    letter-spacing: 0.2px;
-  }
-  .live {
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0.8px;
-    color: #fff;
-    background: var(--accent);
-    padding: 2px 5px;
-    border-radius: var(--r-sm);
-  }
-
   @media (max-width: 560px) {
-    .scrubber { gap: 10px; padding: 8px 10px; }
-    .readout { min-width: 84px; }
+    .scrubber { gap: 10px; }
   }
 </style>

@@ -31,9 +31,10 @@
   // remaining height so the whole view fits without scrolling. Box sizes are computed in JS.
   let headerH = 46, mapViewEl, consoleEl, mapW = 0, mapH = 0, ro = null;
   function fitMap() {
-    if (!mapViewEl || !consoleEl) return;
-    const padV = 24, padH = 24, gap = 10;     // .map-view padding (12*2) + the gap to the frame
-    const availH = mapViewEl.clientHeight - consoleEl.offsetHeight - gap - padV;
+    if (!mapViewEl) return;
+    const padV = 24, padH = 24;               // .map-view padding (12*2)
+    const consoleH = consoleEl ? consoleEl.offsetHeight + 10 : 0;   // console + its 10px gap to the frame
+    const availH = mapViewEl.clientHeight - consoleH - padV;
     const availW = mapViewEl.clientWidth - padH;
     const ar = 2200 / 1775;
     let h = Math.max(140, availH), w = h * ar;
@@ -41,16 +42,20 @@
     mapW = Math.round(w); mapH = Math.round(h);
   }
 
-  // Current on-screen standings (territory count per player) for the legend, taken from the
-  // displayed snapshot so it tracks as you scrub. The leader is flagged for a subtle emphasis.
-  $: standings = (timelineReady && snapshots[tlIndex]) ? buildStandings(snapshots[tlIndex].owners) : [];
-  function buildStandings(owners) {
-    const m = {};
-    for (const slug in owners) { const o = owners[slug]; if (!o?.player) continue; (m[o.player] ??= { player: o.player, color: o.color, count: 0 }).count++; }
-    const arr = Object.values(m).sort((a, b) => b.count - a.count || a.player.localeCompare(b.player));
-    if (arr.length) arr[0].lead = true;
-    return arr;
+  // Date of the currently-shown snapshot, stamped on the map pane (top-right). Inter + tabular
+  // figures rather than a monospace readout, so it reads as a broadcast caption, not code.
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  // Date + time of the shown snapshot from its raw timestamp, so the time is in the viewer's
+  // local timezone (the snapshot's `date` field is UTC and used only for identity/dedup).
+  function fmtStamp(t) {
+    if (t == null) return null;
+    const dt = new Date(t);
+    return {
+      date: `${dt.getDate()} ${MONTHS[dt.getMonth()]} ${dt.getFullYear()}`,
+      time: dt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
+    };
   }
+  $: stamp = (timelineReady && snapshots[tlIndex]) ? fmtStamp(snapshots[tlIndex].t) : null;
 
   // Backing store = display CSS width x devicePixelRatio (capped at the 2200 asset), so the
   // territory is rendered hi-res then downscaled into device pixels (crisp on any DPI).
@@ -398,32 +403,13 @@
 </script>
 
 <div class="map-view" bind:this={mapViewEl} style="height:calc(100dvh - {headerH}px)">
-  <div class="console" bind:this={consoleEl} style="width:{mapW ? mapW + 'px' : '100%'}">
-    <div class="head">
-      <div class="title">
-        <h1>Territory</h1>
-        <p>Who holds the fastest time on each course</p>
-      </div>
-      {#if standings.length}
-        <ul class="legend">
-          {#each standings as s (s.player)}
-            <li class:lead={s.lead}>
-              <span class="sw" style="background:{s.color}"></span>
-              <span class="nm">{s.player}</span>
-              <span class="ct">{s.count}</span>
-            </li>
-          {/each}
-        </ul>
-      {/if}
+  {#if timelineReady && snapshots.length}
+    <div class="console" bind:this={consoleEl} style="width:{mapW ? mapW + 'px' : '100%'}">
+      <TimelineScrubber {snapshots} index={tlIndex} {playing}
+        on:scrub={(e) => onScrub(e.detail.index)}
+        on:toggle={togglePlay} />
     </div>
-    {#if timelineReady && snapshots.length}
-      <div class="transport">
-        <TimelineScrubber {snapshots} index={tlIndex} {playing}
-          on:scrub={(e) => onScrub(e.detail.index)}
-          on:toggle={togglePlay} />
-      </div>
-    {/if}
-  </div>
+  {/if}
 
   <div class="frame" style={mapW ? `width:${mapW}px;height:${mapH}px` : ""}>
     {#if error}
@@ -452,6 +438,7 @@
             <CoursePopup {view} {figUrl} />
           </div>
         </div>
+        {#if stamp}<div class="datestamp"><span class="d">{stamp.date}</span><span class="t">{stamp.time}</span></div>{/if}
       </div>
     {:else}
       <div class="msg">Loading map…</div>
@@ -465,21 +452,8 @@
     padding: 12px; box-sizing: border-box; overflow: hidden;
   }
 
-  /* Console: a restrained graphite control panel (title + live standings, then the transport)
-     that sits above the map and aligns to its width. */
-  .console { max-width: 100%; background: var(--panel); border: 1px solid var(--bd); border-radius: var(--r); }
-  .head { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; padding: 9px 13px; }
-  .title h1 { font-size: 14px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--tx); }
-  .title p { margin-top: 2px; font-size: 11px; color: var(--tx-dim); }
-
-  /* Standings legend: who holds how many courses right now (updates as you scrub). */
-  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; justify-content: flex-end; list-style: none; }
-  .legend li { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--tx-mut); }
-  .legend .sw { width: 9px; height: 9px; border-radius: 2px; flex: none; box-shadow: inset 0 0 0 1px rgba(0,0,0,.35); }
-  .legend .ct { font-variant-numeric: tabular-nums; color: var(--tx-dim); min-width: 1.1em; text-align: right; }
-  .legend li.lead .nm, .legend li.lead .ct { color: var(--tx); font-weight: 600; }
-
-  .transport { padding: 2px 11px 9px; border-top: 1px solid var(--bd-soft); }
+  /* Console: a slim graphite panel holding just the timeline scrubber, aligned to the map width. */
+  .console { max-width: 100%; padding: 7px 12px; background: var(--panel); border: 1px solid var(--bd); border-radius: var(--r); }
 
   /* The map: a feed-style frame sized in JS to fill the remaining viewport height. */
   .frame {
@@ -496,6 +470,16 @@
   .base { display: block; width: 100%; height: 100%; object-fit: cover; filter: saturate(.82) brightness(.82); }
   .territory { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
   .popups { position: absolute; inset: 0; pointer-events: none; }
+  /* Date of the shown frame, stamped top-right on the map. Inter + tabular figures (not a mono
+     readout) so it reads as a broadcast caption rather than a code stamp. */
+  .datestamp {
+    position: absolute; top: 10px; right: 12px; z-index: 60; pointer-events: none;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 1px;
+    font-family: 'Inter', var(--ui); font-variant-numeric: tabular-nums;
+    text-shadow: 0 1px 8px rgba(0,0,0,.85), 0 0 2px rgba(0,0,0,.9);
+  }
+  .datestamp .d { font-weight: 700; font-size: 12px; letter-spacing: .16em; text-transform: uppercase; color: #f3f4f6; }
+  .datestamp .t { font-weight: 600; font-size: 11px; letter-spacing: .14em; color: #b9bbc0; }
   .icons { position: absolute; inset: 0; }
   .hit { position: absolute; cursor: pointer; }
   .spr, .shadow {

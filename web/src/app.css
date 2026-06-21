@@ -3,3 +3,9 @@
 html, body { overflow: auto; height: auto; }
 #app { height: auto; min-height: 100vh; }
 body { background: var(--bg); }
+
+/* Brand face (self-hosted — the CDN does not load reliably; see memory). Used by
+   the header wordmark + nav. The rest of the site keeps the Segoe UI chrome font. */
+@font-face{font-family:'Inter';font-style:normal;font-weight:700;font-display:swap;src:url('/fonts/inter-700.woff2') format('woff2');}
+@font-face{font-family:'Inter';font-style:normal;font-weight:800;font-display:swap;src:url('/fonts/inter-800.woff2') format('woff2');}
+@font-face{font-family:'Inter';font-style:normal;font-weight:900;font-display:swap;src:url('/fonts/inter-900.woff2') format('woff2');}
