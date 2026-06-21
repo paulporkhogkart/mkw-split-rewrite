@@ -6,6 +6,7 @@
   import wordmarkConfig from "./lib/wordmark.config.json";
   import CardWall from "./CardWall.svelte";
   import WorldMap from "./WorldMap.svelte";
+  import HeatGraph from "./HeatGraph.svelte";
 
   // The navbar wears a random player's figure + colour each load; hovering lights the on-fire
   // variant. The player's colour drives the whole nav accent (OFF tag + active-tab marker).
@@ -55,7 +56,9 @@
   </nav>
 </header>
 <main>
-  {#if view === "territory"}<WorldMap />{:else}<CardWall />{/if}
+  {#if view === "territory"}<WorldMap />
+  {:else if view === "heat"}<HeatGraph />
+  {:else}<CardWall />{/if}
 </main>
 
 <style>
