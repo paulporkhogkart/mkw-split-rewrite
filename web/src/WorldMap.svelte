@@ -453,6 +453,8 @@
             </div>
           {/each}
         </div>
+        <!-- front flame pass: licks OVER the icons (screen-blended), so they sit inside the fire -->
+        <MapFireLayer courses={fireList} front />
         <div class="popups">
           <div class="popup" class:show={shown} bind:this={popupEl} style={popupStyle} aria-hidden={!shown}>
             <CoursePopup {view} {figUrl} />
