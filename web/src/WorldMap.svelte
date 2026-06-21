@@ -2,7 +2,7 @@
   import { onMount, onDestroy, tick } from "svelte";
   import { baseUrl, manifestUrl, spriteUrl, hitStyle, spriteStyle } from "./lib/map.js";
   import CoursePopup from "./CoursePopup.svelte";
-  import { fetchCourseView, buildHistoricalCourseView, fetchCourseWr, preloadPlayerGifs, freshGifUrl } from "./lib/courseData.js";
+  import { buildCourseView, preloadPlayerGifs, freshGifUrl } from "./lib/courseData.js";
   import { API_BASE, territoryUrl, territoryTimelineUrl } from "./lib/api.js";
   import { buildSnapshots, flippedCourses, leaderboardAt } from "./lib/timeline.js";
   import { prepareTransition, interpolatePatch, buildCourseField } from "./lib/territoryAnim.js";
@@ -56,6 +56,10 @@
     };
   }
   $: stamp = (timelineReady && snapshots[tlIndex]) ? fmtStamp(snapshots[tlIndex].t) : null;
+  // The shown frame's cutoff time. buildSnapshots only emits on ownership change, so the last
+  // snapshot's t can predate recent runs - at LIVE use Infinity to include every event.
+  $: atLive = !timelineReady || tlIndex >= snapshots.length - 1;
+  $: frameTime = atLive ? Infinity : (snapshots[tlIndex]?.t ?? Infinity);
 
   // Backing store = display CSS width x devicePixelRatio (capped at the 2200 asset), so the
   // territory is rendered hi-res then downscaled into device pixels (crisp on any DPI).
@@ -81,7 +85,7 @@
   // The present view stays the canonical high-res renderTerritory (= /v1/territory).
   const TL_CACHE_CAP = 24;    // max cached scrub bitmaps; rendered at the backing size (<= asset 2200)
   let snapshots = [];
-  let tlEvents = [], tlColors = {};   // retained run stream + colour map for historical hover boards
+  let tlEvents = [], tlColors = {}, tlWrs = {};   // retained run stream + colour + current-WR maps
   let tlIndex = 0;
   let timelineReady = false;
   let tlWorker = null, tlCov = null, tlBase = null, tlW = 0, tlH = 0;
@@ -155,10 +159,10 @@
     try {
       const res = await fetch(territoryTimelineUrl(150));
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const { events, colors } = await res.json();
+      const { events, colors, wrs } = await res.json();
       const snaps = buildSnapshots(events, colors);
       if (!snaps.length) return;
-      tlEvents = events; tlColors = colors;   // kept for the historical hover popup
+      tlEvents = events; tlColors = colors; tlWrs = wrs || {};   // kept for the unified board + fire
       const [cov, base] = await Promise.all([
         createImageBitmap(await (await fetch(`/map/island.png`)).blob()),   // full-res source; the worker downscales per frame
         createImageBitmap(await (await fetch(`/map/base.jpg`)).blob()),
@@ -330,22 +334,14 @@
     clearTimeout(closeTimer);
     activeHit = hitEl;
     const my = ++token;
-    const atLive = !timelineReady || tlIndex >= snapshots.length - 1;
-    let v;
-    if (atLive) {
-      v = await fetchCourseView(API_BASE, course).catch(() => null);   // canonical current board
-    } else {
-      // Scrubbed back: reconstruct the board AS OF the shown snapshot from the retained event
-      // stream (matches the territory colours on the map). WR is the current WR (no historical
-      // WR yet). A course with no runs by then has no board -> no popup opens.
-      const t = snapshots[tlIndex].t;
-      const wr = await fetchCourseWr(API_BASE, course).catch(() => null);
-      const standings = leaderboardAt(tlEvents, course.slug, t);
-      v = standings.length
-        ? buildHistoricalCourseView({ standings, colorByName: tlColors, courseName: course.name, wr })
-        : null;
-    }
-    if (!v || my !== token) return;                 // fetch failed / empty board, or a newer hover superseded us
+    // One path for every frame: the board AS OF the shown moment, reconstructed from the
+    // in-memory event stream (matches the territory colours). WR is the current WR (tlWrs).
+    // A course with no runs by then has no board -> no popup opens.
+    const standings = leaderboardAt(tlEvents, course.slug, frameTime);
+    const v = standings.length
+      ? buildCourseView({ standings, colorByName: tlColors, courseName: course.name, wr: tlWrs[course.slug] ?? null })
+      : null;
+    if (!v || my !== token) return;                 // empty board, or a newer hover superseded us
     view = v;
     if (figUrl.startsWith("blob:")) URL.revokeObjectURL(figUrl);  // free the previous object URL
     figUrl = freshGifUrl(v.onFire ? v.fireGifUrl : v.gifUrl);     // fresh object URL -> GIF replays from frame 1
