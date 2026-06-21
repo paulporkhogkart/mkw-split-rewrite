@@ -161,7 +161,7 @@
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const { events, colors, wrs } = await res.json();
       const snaps = buildSnapshots(events, colors);
-      if (!snaps.length) return;
+      if (!snaps.length) return false;
       tlEvents = events; tlColors = colors; tlWrs = wrs || {};   // kept for the unified board + fire
       const [cov, base] = await Promise.all([
         createImageBitmap(await (await fetch(`/map/island.png`)).blob()),   // full-res source; the worker downscales per frame
@@ -176,8 +176,10 @@
       timelineReady = true;
       await tick();               // the transport row mounts -> the console grew, so re-fit the map
       refit();                    // re-fit + size canvas + build the animation source buffers + repaint
+      return true;
     } catch (e) {
       console.error("timeline load failed (keeping live territory):", e);
+      return false;
     }
   }
 
@@ -192,9 +194,8 @@
     try {
       while (pendingIndex !== null) {
         const target = pendingIndex; pendingIndex = null;
-        const atLive = target === snapshots.length - 1;
         let bmp;
-        try { bmp = atLive && presentBitmap ? presentBitmap : await ensureBitmap(target); }
+        try { bmp = await ensureBitmap(target); }
         catch { continue; }
         if (pendingIndex !== null) continue;   // superseded mid-render -> skip the stale paint
         paintBitmap(bmp);
@@ -206,9 +207,8 @@
   // scrub frame). Awaitable; used to settle each animated step on a crisp AA frame.
   async function drawBaseFrame(i) {
     i = Math.max(0, Math.min(i, snapshots.length - 1));
-    const atLive = i === snapshots.length - 1;
     let bmp;
-    try { bmp = atLive && presentBitmap ? presentBitmap : await ensureBitmap(i); }
+    try { bmp = await ensureBitmap(i); }
     catch { return; }
     paintBitmap(bmp);
   }
@@ -403,8 +403,8 @@
       await tick();            // mount the .console + .territory canvas before measuring/drawing
       fitMap(); await tick(); fitMap();   // two-pass: the console width settles to the map width
       sizeCanvas();            // size the backing store to the fitted map before the first paint
-      renderTerritory();       // canonical present (high-res) = default view + fallback
-      loadTimeline();          // SP4: fetch history + prepare lazy scrub-frame cache (additive)
+      const ok = await loadTimeline();   // primary: history drives every frame incl. LIVE (last snapshot)
+      if (!ok) renderTerritory();        // fallback only: static present, no scrubber/popups/fire
     } catch (e) {
       console.error("world map: manifest load failed", e);
       error = true;
