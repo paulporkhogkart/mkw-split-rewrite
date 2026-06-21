@@ -2,9 +2,9 @@
   import { onMount, onDestroy, tick } from "svelte";
   import { baseUrl, manifestUrl, spriteUrl, hitStyle, spriteStyle } from "./lib/map.js";
   import CoursePopup from "./CoursePopup.svelte";
-  import { fetchCourseView, preloadPlayerGifs, freshGifUrl } from "./lib/courseData.js";
+  import { fetchCourseView, buildHistoricalCourseView, fetchCourseWr, preloadPlayerGifs, freshGifUrl } from "./lib/courseData.js";
   import { API_BASE, territoryUrl, territoryTimelineUrl } from "./lib/api.js";
-  import { buildSnapshots, flippedCourses } from "./lib/timeline.js";
+  import { buildSnapshots, flippedCourses, leaderboardAt } from "./lib/timeline.js";
   import { prepareTransition, interpolatePatch, buildCourseField } from "./lib/territoryAnim.js";
   import TimelineScrubber from "./TimelineScrubber.svelte";
 
@@ -81,6 +81,7 @@
   // The present view stays the canonical high-res renderTerritory (= /v1/territory).
   const TL_CACHE_CAP = 24;    // max cached scrub bitmaps; rendered at the backing size (<= asset 2200)
   let snapshots = [];
+  let tlEvents = [], tlColors = {};   // retained run stream + colour map for historical hover boards
   let tlIndex = 0;
   let timelineReady = false;
   let tlWorker = null, tlCov = null, tlBase = null, tlW = 0, tlH = 0;
@@ -157,6 +158,7 @@
       const { events, colors } = await res.json();
       const snaps = buildSnapshots(events, colors);
       if (!snaps.length) return;
+      tlEvents = events; tlColors = colors;   // kept for the historical hover popup
       const [cov, base] = await Promise.all([
         createImageBitmap(await (await fetch(`/map/island.png`)).blob()),   // full-res source; the worker downscales per frame
         createImageBitmap(await (await fetch(`/map/base.jpg`)).blob()),
@@ -328,8 +330,22 @@
     clearTimeout(closeTimer);
     activeHit = hitEl;
     const my = ++token;
-    const v = await fetchCourseView(API_BASE, course).catch(() => null);
-    if (!v || my !== token) return;                 // fetch failed, or a newer hover superseded us
+    const atLive = !timelineReady || tlIndex >= snapshots.length - 1;
+    let v;
+    if (atLive) {
+      v = await fetchCourseView(API_BASE, course).catch(() => null);   // canonical current board
+    } else {
+      // Scrubbed back: reconstruct the board AS OF the shown snapshot from the retained event
+      // stream (matches the territory colours on the map). WR is the current WR (no historical
+      // WR yet). A course with no runs by then has no board -> no popup opens.
+      const t = snapshots[tlIndex].t;
+      const wr = await fetchCourseWr(API_BASE, course).catch(() => null);
+      const standings = leaderboardAt(tlEvents, course.slug, t);
+      v = standings.length
+        ? buildHistoricalCourseView({ standings, colorByName: tlColors, courseName: course.name, wr })
+        : null;
+    }
+    if (!v || my !== token) return;                 // fetch failed / empty board, or a newer hover superseded us
     view = v;
     if (figUrl.startsWith("blob:")) URL.revokeObjectURL(figUrl);  // free the previous object URL
     figUrl = freshGifUrl(v.onFire ? v.fireGifUrl : v.gifUrl);     // fresh object URL -> GIF replays from frame 1
