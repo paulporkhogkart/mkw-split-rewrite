@@ -78,8 +78,8 @@
     cursor: pointer;
     transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
   }
-  .play:hover { border-color: var(--accent); color: #fff; }
-  .play:focus-visible { outline: none; border-color: var(--accent); }
+  .play:hover { border-color: var(--tx-mut); color: #fff; background: var(--raised); }
+  .play:focus-visible { outline: none; border-color: var(--tx-mut); }
   .play svg { width: 15px; height: 15px; fill: currentColor; display: block; }
 
   .track { position: relative; flex: 1; min-width: 0; height: 26px; }
@@ -102,7 +102,7 @@
     transform: translateY(-50%);
     height: 4px;
     border-radius: var(--r-sm);
-    background: var(--accent-soft);
+    background: rgba(255, 255, 255, 0.18);
     transition: width 0.15s linear;
   }
   .ticks { position: absolute; inset: 0; pointer-events: none; }
@@ -124,7 +124,7 @@
     top: 50%;
     transform: translateY(-50%);
     width: 100%;
-    height: 16px;
+    height: 18px;
     margin: 0;
     background: transparent;
     -webkit-appearance: none;
@@ -132,28 +132,28 @@
     cursor: pointer;
   }
   .range:focus { outline: none; }
-  .range::-webkit-slider-runnable-track { background: transparent; height: 16px; }
-  .range::-moz-range-track { background: transparent; height: 16px; }
+  .range::-webkit-slider-runnable-track { background: transparent; height: 18px; }
+  .range::-moz-range-track { background: transparent; height: 18px; }
   .range::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: var(--accent);
-    border: 2px solid #fff;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
+    width: 2px;
+    height: 18px;
+    border-radius: 1px;
+    background: #f3f4f6;
+    border: none;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 1px 4px rgba(0, 0, 0, 0.6);
   }
   .range::-moz-range-thumb {
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: var(--accent);
-    border: 2px solid #fff;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
+    width: 2px;
+    height: 18px;
+    border-radius: 1px;
+    background: #f3f4f6;
+    border: none;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 1px 4px rgba(0, 0, 0, 0.6);
   }
-  .range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--accent-bg); }
-  .range:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 3px var(--accent-bg); }
+  .range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 0 0 3px rgba(255, 255, 255, 0.3); }
+  .range:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 0 0 3px rgba(255, 255, 255, 0.3); }
 
   @media (max-width: 560px) {
     .scrubber { gap: 10px; }
