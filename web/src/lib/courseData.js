@@ -5,30 +5,53 @@ import { isOnFire } from "./fireModel.js";
 const NEUTRAL = "#888";
 const gifBase = (name) => `/players/${(name || "").toLowerCase()}`;
 
-/** Pure: raw rows + wr + colour map -> popup view-model. */
-export function buildCourseView({ rows, wr, colorById, courseName }) {
-  const sorted = [...rows].sort((a, b) => a.total_time_ms - b.total_time_ms);
-  const leadMs = sorted.length ? sorted[0].total_time_ms : null;
-  const viewRows = sorted.map((r, i) => ({
+/** Internal: normalized entries [{name, color, time_ms, time_str?}] -> popup view-model.
+ *  Sorts by time, ranks, computes gap-to-#1, on-fire, and the leader's gif urls. */
+function assembleCourseView({ entries, wr, courseName }) {
+  const sorted = [...entries].sort((a, b) => a.time_ms - b.time_ms);
+  const leadMs = sorted.length ? sorted[0].time_ms : null;
+  const rows = sorted.map((e, i) => ({
     rank: i + 1,
+    name: e.name,
+    color: e.color || NEUTRAL,
+    time_ms: e.time_ms,
+    time_str: e.time_str,
+    gap_ms: i === 0 ? null : e.time_ms - leadMs,
+  }));
+  const leader = sorted[0] || null;
+  const wrMs = wr && wr.record_ms != null ? wr.record_ms : null;
+  const onFire = isOnFire({ t1: leadMs, t2: sorted[1] ? sorted[1].time_ms : null, wr: wrMs });
+  return {
+    name: courseName,
+    wr_ms: wrMs,
+    leader: leader ? { name: leader.name, color: leader.color || NEUTRAL } : null,
+    onFire,
+    gifUrl: leader ? `${gifBase(leader.name)}.gif` : null,
+    fireGifUrl: leader ? `${gifBase(leader.name)}__fire.gif` : null,
+    rows,
+  };
+}
+
+/** Pure: raw leaderboard rows (player_id-keyed) + wr + colour map -> popup view-model. */
+export function buildCourseView({ rows, wr, colorById, courseName }) {
+  const entries = rows.map((r) => ({
     name: r.display_name,
     color: colorById[r.player_id] || NEUTRAL,
     time_ms: r.total_time_ms,
     time_str: r.total_time_str,
-    gap_ms: i === 0 ? null : r.total_time_ms - leadMs,
   }));
-  const leader = sorted[0];
-  const wrMs = wr && wr.record_ms != null ? wr.record_ms : null;
-  const onFire = isOnFire({ t1: leadMs, t2: sorted[1] ? sorted[1].total_time_ms : null, wr: wrMs });
-  return {
-    name: courseName,
-    wr_ms: wrMs,
-    leader: leader ? { name: leader.display_name, color: colorById[leader.player_id] || NEUTRAL } : null,
-    onFire,
-    gifUrl: leader ? `${gifBase(leader.display_name)}.gif` : null,
-    fireGifUrl: leader ? `${gifBase(leader.display_name)}__fire.gif` : null,
-    rows: viewRows,
-  };
+  return assembleCourseView({ entries, wr, courseName });
+}
+
+/** Pure: historical standings ([{player, ms}] from leaderboardAt) + name-keyed colours + wr
+ *  -> popup view-model. Same shape as buildCourseView; CoursePopup formats time_ms itself. */
+export function buildHistoricalCourseView({ standings, colorByName, courseName, wr }) {
+  const entries = standings.map((s) => ({
+    name: s.player,
+    color: colorByName[s.player] || NEUTRAL,
+    time_ms: s.ms,
+  }));
+  return assembleCourseView({ entries, wr, courseName });
 }
 
 const j = async (fetchImpl, url) => { const r = await fetchImpl(url); return r.ok ? r.json() : null; };
@@ -41,6 +64,18 @@ export async function fetchColorById(apiBase, { fetchImpl = fetch } = {}) {
   for (const p of roster) if (p.color) map[p.player_id] = p.color;
   fetchColorById._cache = map;
   return map;
+}
+
+const wrCache = new Map();
+
+/** Current WR for a course (the raw { record_ms } row, or null), cached per slug. The historical
+ *  hover popup has no historical WR yet, so it shows the current WR. Swap this for a time-indexed
+ *  lookup once historical WRs are scraped. */
+export async function fetchCourseWr(apiBase, course, { fetchImpl = fetch } = {}) {
+  if (wrCache.has(course.slug)) return wrCache.get(course.slug);
+  const wr = await j(fetchImpl, `${apiBase}/v1/world-records?course=${encodeURIComponent(course.slug)}&cc=150`);
+  wrCache.set(course.slug, wr);
+  return wr;
 }
 
 const gifBlobs = new Map();   // /players/<name>.gif -> Blob, preloaded once and reused across opens
