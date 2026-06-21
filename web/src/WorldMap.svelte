@@ -14,11 +14,11 @@
   let error = false;
 
   // One territory canvas sized to the display's device pixels (hi-res -> downscale, never up).
-  // LIVE shows the canonical high-res present; historical indices show cached scrub frames.
+  // LIVE shows the timeline's last snapshot; /v1/territory is only the no-timeline fallback.
   let terr;                        // the single territory canvas
   let backW = 1100, backH = 888;   // backing-store pixels (device px), set by sizeCanvas
   const ASSET_W = 2200;            // cap: the island/base asset native width
-  let presentBitmap = null;   // canonical present (native res), shown at LIVE + as fallback
+  let presentBitmap = null;   // shown only as the no-timeline fallback
   let playing = false;
   // showSnapshot coalescing: the knob (tlIndex) tracks instantly while only the newest request paints.
   let pendingIndex = null, rendering = false;
@@ -88,7 +88,7 @@
   // --- Timeline (SP4): historical ownership snapshots, lazily rendered + capped cache ---
   // N can be ~200; full-res layers (2200x1775, ~15 MB each) x N would OOM, so historical frames
   // render at a reduced internal width and only a bounded window is kept (re-rendered on demand).
-  // The present view stays the canonical high-res renderTerritory (= /v1/territory).
+  // renderTerritory (= /v1/territory) is used only as the no-timeline fallback.
   const TL_CACHE_CAP = 24;    // max cached scrub bitmaps; rendered at the backing size (<= asset 2200)
   let snapshots = [];
   let tlEvents = [], tlColors = {}, tlWrs = {};   // retained run stream + colour + current-WR maps
@@ -209,8 +209,8 @@
     } finally { rendering = false; }
   }
 
-  // Paint one snapshot's canonical full frame (LIVE = present bitmap, else the cached/rendered
-  // scrub frame). Awaitable; used to settle each animated step on a crisp AA frame.
+  // Paint one snapshot's canonical full frame via ensureBitmap. Awaitable; used to settle each
+  // animated step on a crisp AA frame.
   async function drawBaseFrame(i) {
     i = Math.max(0, Math.min(i, snapshots.length - 1));
     let bmp;
