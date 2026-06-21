@@ -50,12 +50,12 @@
   </a>
   <nav class="nav" bind:this={navEl}>
     <a class="tab" class:on={view === "live"} href="#/">Live</a>
-    <a class="tab" class:on={view === "map"} href="#/map">Territory</a>
+    <a class="tab" class:on={view === "territory"} href="#/territory">Territory</a>
     <span class="marker" style="left:{mk.left}px;width:{mk.width}px"></span>
   </nav>
 </header>
 <main>
-  {#if view === "map"}<WorldMap />{:else}<CardWall />{/if}
+  {#if view === "territory"}<WorldMap />{:else}<CardWall />{/if}
 </main>
 
 <style>

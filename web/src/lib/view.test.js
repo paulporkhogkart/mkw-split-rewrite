@@ -6,9 +6,10 @@ describe("viewFromHash", () => {
     expect(viewFromHash("")).toBe("live");
     expect(viewFromHash("#/")).toBe("live");
     expect(viewFromHash("#/unknown")).toBe("live");
+    expect(viewFromHash("#/map")).toBe("live"); // old route no longer matches
   });
-  it("returns map for the map hash", () => {
-    expect(viewFromHash("#/map")).toBe("map");
-    expect(viewFromHash("#map")).toBe("map");
+  it("returns territory for the territory hash", () => {
+    expect(viewFromHash("#/territory")).toBe("territory");
+    expect(viewFromHash("#territory")).toBe("territory");
   });
 });
