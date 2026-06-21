@@ -134,7 +134,7 @@ export type TimelineEvent = { t: number; player: string; slug: string; ms: numbe
  *  original time -> phantom ownership flips), ordered by `ended_at`. `t` = epoch ms. Plus each
  *  player's colour. Public, season-agnostic (the timeline spans S0 recovery + S1 live). */
 export function territoryTimeline(db: DatabaseSync, cc: number):
-    { events: TimelineEvent[]; colors: Record<string, string> } {
+    { events: TimelineEvent[]; colors: Record<string, string>; wrs: Record<string, number> } {
   const rows = db.prepare(
     `SELECT p.display_name AS player, c.slug AS slug, r.total_time_ms AS ms, r.ended_at AS ended_at
      FROM runs r JOIN players p ON p.id=r.player_id JOIN courses c ON c.id=r.course_id
@@ -149,7 +149,13 @@ export function territoryTimeline(db: DatabaseSync, cc: number):
   const colors: Record<string, string> = {};
   for (const p of db.prepare('SELECT display_name, color FROM players WHERE color IS NOT NULL').all() as any[])
     colors[p.display_name] = p.color;
-  return { events, colors };
+  const wrs: Record<string, number> = {};
+  for (const w of db.prepare(
+    `SELECT c.slug AS slug, w.record_ms AS ms
+     FROM world_records w JOIN courses c ON c.id = w.course_id
+     WHERE w.cc = ? AND w.is_current = 1`
+  ).all(cc) as { slug: string; ms: number }[]) wrs[w.slug] = w.ms;
+  return { events, colors, wrs };
 }
 
 export type TrailMode = 'none' | 'pbs' | 'best' | 'last' | 'last_pb' | 'all';
