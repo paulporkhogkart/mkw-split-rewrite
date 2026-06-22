@@ -2,15 +2,15 @@
 // stream. Uses the same inputs as the territory map's flames (leaderboardAt + fireModel), so the
 // heat page and the map cannot disagree on which courses are lit. Pure: no DOM, no fetch.
 import { fireBarPct, isOnFire, snuffLeadMs } from "./fireModel.js";
-import { leaderboardAt } from "./timeline.js";
+import { leaderboardAt, wrAsOf } from "./timeline.js";
 
 const NEUTRAL = "#888";
 
 /** Standing + fire metrics for one course AS OF `t`, or null when the course lacks a real #2 or
  *  a current WR (both are required to judge "on fire", matching the explorer's regen). */
-export function courseRowAt({ course, events, wrs, colors, t }) {
+export function courseRowAt({ course, events, wrHistory, colors, t }) {
   const board = leaderboardAt(events, course.slug, t);
-  const wr = wrs[course.slug] ?? null;
+  const wr = wrAsOf(wrHistory, course.slug, t);
   if (board.length < 2 || !wr) return null;
   const t1 = board[0].ms;
   const t2 = board[1].ms;
@@ -33,10 +33,10 @@ export function courseRowAt({ course, events, wrs, colors, t }) {
 }
 
 /** One row per qualifying course (real #2 + current WR) as of `t`. */
-export function heatRows({ courses, events, wrs, colors, t }) {
+export function heatRows({ courses, events, wrHistory, colors, t }) {
   const rows = [];
   for (const c of courses) {
-    const row = courseRowAt({ course: c, events, wrs, colors, t });
+    const row = courseRowAt({ course: c, events, wrHistory, colors, t });
     if (row) rows.push(row);
   }
   return rows;

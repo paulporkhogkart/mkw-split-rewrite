@@ -13,10 +13,10 @@ export function onFireCourses(entries) {
 
 /** On-fire render list for the shown frame: each lit course's standing AS OF `t` (shared
  *  derivation), the leader's colour, and the course's hit box. */
-export function fireListAt({ courses, events, wrs, colors, t }) {
+export function fireListAt({ courses, events, wrHistory, colors, t }) {
   const out = [];
   for (const c of courses) {
-    const row = courseRowAt({ course: c, events, wrs, colors, t });
+    const row = courseRowAt({ course: c, events, wrHistory, colors, t });
     if (row && row.fire) out.push({ slug: row.slug, hit: c.hit, color: row.color, t1: row.t1, t2: row.t2, wr: row.wr });
   }
   return out;

@@ -31,17 +31,17 @@ describe("fireListAt", () => {
     { t: 1000, player: "Paul", slug: "mc", ms: 114914 },
     { t: 1000, player: "Gub",  slug: "rr", ms: 90000 },
   ];
-  const wrs = { mc: 107414, rr: 80000 };
+  const wrHistory = { mc: [[0, 107414]], rr: [[0, 80000]] };
   const colors = { Gub: "#38bdf8", Paul: "#a78bfa" };
 
   it("returns on-fire courses with leader colour + hit + the formula inputs", () => {
-    const out = fireListAt({ courses, events, wrs, colors, t: Infinity });
+    const out = fireListAt({ courses, events, wrHistory, colors, t: Infinity });
     expect(out).toHaveLength(1);
     expect(out[0]).toMatchObject({ slug: "mc", color: "#38bdf8", t1: 110579, t2: 114914, wr: 107414, hit: { x: 0.1 } });
   });
 
   it("excludes a course whose runner-up does not exist yet at t", () => {
-    const out = fireListAt({ courses, events, wrs, colors, t: 999 }); // before any event
+    const out = fireListAt({ courses, events, wrHistory, colors, t: 999 }); // before any event
     expect(out).toEqual([]);
   });
 });
