@@ -183,13 +183,34 @@ describe('territoryTimeline', () => {
     db.exec("INSERT INTO runs(season_id,player_id,course_id,cc,status,provenance,ended_at,total_time_ms) VALUES (2,2,1,150,'finished','live','2026-06-10T00:00:00Z',70000)");
     db.exec("INSERT INTO runs(season_id,player_id,course_id,cc,status,provenance,ended_at,total_time_ms) VALUES (2,1,1,150,'finished','carryover','2025-07-01T00:00:00Z',84000)"); // excluded
     db.exec("INSERT INTO runs(season_id,player_id,course_id,cc,status,provenance,ended_at,total_time_ms) VALUES (1,2,1,150,'reset','live','2025-06-27T00:00:00Z',NULL)");       // excluded (not finished)
-    db.exec("INSERT INTO world_records(course_id,cc,holder_name,record_ms,record_str,is_current) VALUES (1,150,'WR',60000,'1:00.000',1)");
+    db.exec("INSERT INTO world_records(course_id,cc,holder_name,record_ms,record_str,is_current,achieved_at) VALUES (1,150,'WR',60000,'1:00.000',1,'2025-06-04T00:00:00.000Z')");
     const r = territoryTimeline(db, 150);
     expect(r.events).toEqual([
       { t: Date.parse('2025-06-26T00:00:00Z'), player: 'Aliias', slug: 'mario_circuit', ms: 83000 },
       { t: Date.parse('2026-06-10T00:00:00Z'), player: 'Gub', slug: 'mario_circuit', ms: 70000 },
     ]);
     expect(r.colors).toEqual({ Aliias: '#4ade80', Gub: '#38bdf8' });
-    expect(r.wrs).toEqual({ mario_circuit: 60000 });
+    expect(r.wrHistory).toEqual({ mario_circuit: [[Date.parse('2025-06-04T00:00:00.000Z'), 60000]] });
+  });
+
+  it('wrHistory carries the full progression, ascending, excluding removed + undated rows', () => {
+    const db = openDb(':memory:'); applySchema(db);
+    db.exec("INSERT INTO seasons(id,name,is_active) VALUES (1,'S1',1)");
+    db.exec("INSERT INTO players(id,display_name,color) VALUES (1,'Gub','#38bdf8')");
+    db.exec("INSERT INTO courses(id,slug,display_name) VALUES (1,'mario_circuit','Mario Circuit')");
+    // two real WRs (out of insert order), one DQ'd (removed_at), one undated (achieved_at NULL)
+    db.exec("INSERT INTO world_records(course_id,cc,holder_name,record_ms,record_str,is_current,achieved_at) VALUES (1,150,'B',61000,'1:01.000',0,'2025-08-01T00:00:00.000Z')");
+    db.exec("INSERT INTO world_records(course_id,cc,holder_name,record_ms,record_str,is_current,achieved_at) VALUES (1,150,'A',62000,'1:02.000',0,'2025-07-01T00:00:00.000Z')");
+    db.exec("INSERT INTO world_records(course_id,cc,holder_name,record_ms,record_str,is_current,achieved_at,removed_at) VALUES (1,150,'DQ',59000,'0:59.000',0,'2025-09-01T00:00:00.000Z','2025-09-02T00:00:00.000Z')");
+    db.exec("INSERT INTO world_records(course_id,cc,holder_name,record_ms,record_str,is_current,achieved_at) VALUES (1,150,'Undated',58000,'0:58.000',1,NULL)");
+    // a different cc must not leak in
+    db.exec("INSERT INTO world_records(course_id,cc,holder_name,record_ms,record_str,is_current,achieved_at) VALUES (1,200,'Other',50000,'0:50.000',1,'2025-07-15T00:00:00.000Z')");
+    const r = territoryTimeline(db, 150);
+    expect(r.wrHistory).toEqual({
+      mario_circuit: [
+        [Date.parse('2025-07-01T00:00:00.000Z'), 62000],
+        [Date.parse('2025-08-01T00:00:00.000Z'), 61000],
+      ],
+    });
   });
 });

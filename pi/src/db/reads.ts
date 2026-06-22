@@ -134,7 +134,7 @@ export type TimelineEvent = { t: number; player: string; slug: string; ms: numbe
  *  original time -> phantom ownership flips), ordered by `ended_at`. `t` = epoch ms. Plus each
  *  player's colour. Public, season-agnostic (the timeline spans S0 recovery + S1 live). */
 export function territoryTimeline(db: DatabaseSync, cc: number):
-    { events: TimelineEvent[]; colors: Record<string, string>; wrs: Record<string, number> } {
+    { events: TimelineEvent[]; colors: Record<string, string>; wrHistory: Record<string, [number, number][]> } {
   const rows = db.prepare(
     `SELECT p.display_name AS player, c.slug AS slug, r.total_time_ms AS ms, r.ended_at AS ended_at
      FROM runs r JOIN players p ON p.id=r.player_id JOIN courses c ON c.id=r.course_id
@@ -149,13 +149,18 @@ export function territoryTimeline(db: DatabaseSync, cc: number):
   const colors: Record<string, string> = {};
   for (const p of db.prepare('SELECT display_name, color FROM players WHERE color IS NOT NULL').all() as any[])
     colors[p.display_name] = p.color;
-  const wrs: Record<string, number> = {};
+  const wrHistory: Record<string, [number, number][]> = {};
   for (const w of db.prepare(
-    `SELECT c.slug AS slug, w.record_ms AS ms
+    `SELECT c.slug AS slug, w.record_ms AS ms, w.achieved_at AS achieved_at
      FROM world_records w JOIN courses c ON c.id = w.course_id
-     WHERE w.cc = ? AND w.is_current = 1 AND w.removed_at IS NULL`
-  ).all(cc) as { slug: string; ms: number }[]) wrs[w.slug] = w.ms;
-  return { events, colors, wrs };
+     WHERE w.cc = ? AND w.removed_at IS NULL AND w.achieved_at IS NOT NULL`
+  ).all(cc) as { slug: string; ms: number; achieved_at: string }[]) {
+    const at = Date.parse(w.achieved_at);
+    if (!Number.isFinite(at)) continue;                 // undated/unparseable -> not placeable on the timeline
+    (wrHistory[w.slug] ||= []).push([at, w.ms]);
+  }
+  for (const slug in wrHistory) wrHistory[slug].sort((a, b) => a[0] - b[0]);
+  return { events, colors, wrHistory };
 }
 
 export type TrailMode = 'none' | 'pbs' | 'best' | 'last' | 'last_pb' | 'all';
