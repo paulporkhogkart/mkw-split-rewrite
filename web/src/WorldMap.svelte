@@ -4,7 +4,7 @@
   import CoursePopup from "./CoursePopup.svelte";
   import { buildCourseView, preloadPlayerGifs, freshGifUrl } from "./lib/courseData.js";
   import { API_BASE, territoryUrl, territoryTimelineUrl } from "./lib/api.js";
-  import { buildSnapshots, flippedCourses, leaderboardAt } from "./lib/timeline.js";
+  import { buildSnapshots, flippedCourses, leaderboardAt, wrAsOf } from "./lib/timeline.js";
   import { prepareTransition, interpolatePatch, buildCourseField } from "./lib/territoryAnim.js";
   import TimelineScrubber from "./TimelineScrubber.svelte";
   import MapFireLayer from "./MapFireLayer.svelte";
@@ -64,7 +64,7 @@
   $: frameTime = atLive ? Infinity : (snapshots[tlIndex]?.t ?? Infinity);
   // On-fire courses for the shown frame (live or scrubbed-back), from the in-memory data.
   $: fireList = (timelineReady && manifest)
-    ? fireListAt({ courses: manifest.courses, events: tlEvents, wrs: tlWrs, colors: tlColors, t: frameTime })
+    ? fireListAt({ courses: manifest.courses, events: tlEvents, wrHistory: tlWrHistory, colors: tlColors, t: frameTime })
     : [];
 
   // Backing store = display CSS width x devicePixelRatio (capped at the 2200 asset), so the
@@ -91,7 +91,7 @@
   // renderTerritory (= /v1/territory) is used only as the no-timeline fallback.
   const TL_CACHE_CAP = 24;    // max cached scrub bitmaps; rendered at the backing size (<= asset 2200)
   let snapshots = [];
-  let tlEvents = [], tlColors = {}, tlWrs = {};   // retained run stream + colour + current-WR maps
+  let tlEvents = [], tlColors = {}, tlWrHistory = {};   // retained run stream + colour + WR-history maps
   let tlIndex = 0;
   let timelineReady = false;
   let tlWorker = null, tlCov = null, tlBase = null, tlW = 0, tlH = 0;
@@ -165,10 +165,10 @@
     try {
       const res = await fetch(territoryTimelineUrl(150));
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const { events, colors, wrs } = await res.json();
+      const { events, colors, wrHistory } = await res.json();
       const snaps = buildSnapshots(events, colors);
       if (!snaps.length) return false;
-      tlEvents = events; tlColors = colors; tlWrs = wrs || {};   // kept for the unified board + fire
+      tlEvents = events; tlColors = colors; tlWrHistory = wrHistory || {};   // kept for the unified board + fire
       const [cov, base] = await Promise.all([
         createImageBitmap(await (await fetch(`/map/island.png`)).blob()),   // full-res source; the worker downscales per frame
         createImageBitmap(await (await fetch(`/map/base.jpg`)).blob()),
@@ -341,11 +341,11 @@
     activeHit = hitEl;
     const my = ++token;
     // One path for every frame: the board AS OF the shown moment, reconstructed from the
-    // in-memory event stream (matches the territory colours). WR is the current WR (tlWrs).
+    // in-memory event stream (matches the territory colours). WR is the WR in effect at this frame.
     // A course with no runs by then has no board -> no popup opens.
     const standings = leaderboardAt(tlEvents, course.slug, frameTime);
     const v = standings.length
-      ? buildCourseView({ standings, colorByName: tlColors, courseName: course.name, wr: tlWrs[course.slug] ?? null })
+      ? buildCourseView({ standings, colorByName: tlColors, courseName: course.name, wr: wrAsOf(tlWrHistory, course.slug, frameTime) })
       : null;
     if (!v || my !== token) return;                 // empty board, or a newer hover superseded us
     view = v;

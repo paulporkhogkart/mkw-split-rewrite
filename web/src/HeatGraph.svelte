@@ -128,8 +128,8 @@
           return r.json();
         }),
       ]);
-      const { events, colors, wrs } = tl;
-      rows = heatRows({ courses: mf.courses, events: events || [], wrs: wrs || {}, colors: colors || {}, t: Infinity });
+      const { events, colors, wrHistory } = tl;
+      rows = heatRows({ courses: mf.courses, events: events || [], wrHistory: wrHistory || {}, colors: colors || {}, t: Infinity });
       loaded = true;
     } catch (e) {
       console.error("heat graph load failed", e);
