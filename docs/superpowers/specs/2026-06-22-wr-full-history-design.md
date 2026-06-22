@@ -14,7 +14,9 @@ character/costume/kart, nation, date, and video link — captured from each cour
 This data powers (in a later spec) the territory/heat history playback (the actual WR holder
 per historical date) and "which character/kart wins which course" analysis. **This spec is the
 data layer only**: scrape → normalize → store → flag mismatches → verify. Consumption is out of
-scope (§10).
+scope (§10). mkwrs is the **single source of truth** — nothing in `world_records` predates its
+per-course history, so each per-track page is authoritative for that course's entire WR history
+(this is what makes the §7 mirror semantics safe).
 
 User decisions locked in brainstorming:
 - **Scope:** data layer now; territory consumption is a follow-up spec.
@@ -176,18 +178,20 @@ characterRaw, costumeRaw|null, kartRaw, videoUrl|null }`.
   re-runs the scrape (or a `--reresolve` pass over `source_raw`), and the flag auto-resolves.
 
 **Verified flag volume (audit over all 30 pages):** characters 50/50 and costumes 32/32 resolve
-cleanly; karts produce exactly **3 real flags**:
+cleanly; all karts resolve once **three aliases** are seeded. mkwrs uses MK8-era display names for
+a few returning karts, whereas our roster uses the in-game MKWorld names:
 
 ```
-KART_ALIASES = { 'r_o_b_h_o_g': 'rob_hog' }   // slugify('R.O.B. H.O.G.') = 'r_o_b_h_o_g'
+KART_ALIASES = {                  // keyed by slugify(raw)
+  'r_o_b_h_o_g': 'rob_hog',       // 'R.O.B. H.O.G.'
+  'biddybuggy':  'buggybud',      // 'Biddybuggy'  -> MKWorld name Buggybud
+  'tiny_titan':  'rally_romper',  // 'Tiny Titan'  -> MKWorld name Rally Romper
+}
 ```
 
-…plus `Biddybuggy` and `Tiny Titan`, which are **absent from our captured kart roster**. These
-are genuine review items: during spec/implementation the user confirms the canonical slug
-(`biddybuggy`, `tiny_titan`) and we add them to `roster.ts`'s kart set (they're real karts; we
-simply have no template). The seed alias map ships with the R.O.B. entry; the two missing karts
-are added to the roster list so the first real run is flag-clean (or, if the user prefers, left
-to surface as first-run flags — decided at spec review).
+With these seeded, the first real run is **flag-clean** (0 unresolved across all categories). The
+`wr_name_flags` table + `wr-flags` CLI are then reserved for genuinely new/unseen names that
+appear in future scrapes (e.g. another returning kart/costume with an MK8-era mkwrs name).
 
 ## 7. Reconcile / mirror semantics (`history_reconcile.ts`)
 
@@ -202,10 +206,12 @@ The history page is ground truth for a course. For each scraped row (oldest→ne
 - **is_current:** set on the row matching the page's current WR (top of the first table / newest
   history row), 0 on others for that course — stays consistent with the main-page scraper (same
   source, so they agree).
-- **Removal / DQ:** any `provenance IN ('scraped','scraped_history')` row for *that course* not
-  present in the fresh scrape → set `removed_at = now` (kept for audit, excluded from canonical
-  reads). **`legacy_import` rows are left untouched** (safe default — they may predate mkwrs
-  coverage; never silently deleted).
+- **Removal / DQ:** mkwrs is the **single source of truth** and nothing in `world_records`
+  predates its per-course history, so the page is authoritative for the course's *entire* history
+  across **all provenances**. Any existing WR row for the scraped course **not** present in the
+  fresh scrape → set `removed_at = now` (soft delete: kept for audit, excluded from canonical
+  reads), regardless of provenance. Existing `legacy_import`/`scraped` rows that DO match a page
+  row are matched by natural key and enriched in place (never duplicated).
 
 `reconcileHistory` returns `{ course, inserted, enriched, unchanged, removed, flagged }`.
 
@@ -246,8 +252,9 @@ owns the rich fields (incl. the current row's, enriched within hours by the drip
 - **Reconcile tests** (in-memory DB): insert / enrich-in-place / dedup by natural key / removal
   marks `removed_at` / `is_current` move / legacy_import untouched.
 - **e2e dry-run** against a **copy** of the real `pi/mkw.db`: full `--all` parse+reconcile, assert
-  no exceptions, sane totals, `wr_name_flags` contains only the known 3 (or 0 after roster seed),
-  invariant `currents = 30`.
+  no exceptions, sane totals, `wr_name_flags` has **0 unresolved** (3 kart aliases seeded), a
+  **small `removed_at` count** (existing legacy/scraped rows match + enrich rather than mass
+  remove + reinsert — guards against holder-name drift), and invariant `currents = 30`.
 
 ## 10. Out of scope (explicit follow-up)
 
@@ -264,5 +271,7 @@ enhancement; here they are simply skipped.
 - **Anti-bot blocking** → randomized polite spacing, browser UA + referer, sequential, back-off;
   drip is ~one page per several hours. Dev-box backfill uses a different IP than the Pi.
 - **Name roster gaps** → flags table + CLI; nothing is silently mis-mapped (unresolved → NULL).
-- **Over-aggressive removal** → removal scoped to scraped provenance for the just-scraped course;
-  legacy rows untouched; rows marked, never deleted.
+- **Over-aggressive removal** → safe because mkwrs is the single source of truth (nothing predates
+  it); removal is **soft** (`removed_at`, excluded from reads, never hard-deleted) and scoped to
+  the just-scraped course. The e2e dry-run asserts a small removed count so holder-name drift
+  (which would cause spurious remove + reinsert) is caught.
