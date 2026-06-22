@@ -43,8 +43,8 @@ export function reconcileHistory(
       let wrId: number;
       if (existing) {
         wrId = existing.id;
-        const sets: string[] = [], vals: unknown[] = [];
-        const set = (col: string, val: unknown, cur: unknown) => {
+        const sets: string[] = [], vals: (string | number | null)[] = [];
+        const set = (col: string, val: string | number | null, cur: unknown) => {
           if (val != null && val !== cur) { sets.push(`${col}=?`); vals.push(val); }
         };
         set('nation', r.nation, existing.nation);
