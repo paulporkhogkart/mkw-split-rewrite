@@ -106,4 +106,25 @@ describe('makeLapDelta', () => {
     lap.invalidateCourse(CID);
     expect(lap(1, COURSE, [52000])).toBeNull();           // fresh load -> no comparison
   });
+
+  it('bestSegments snapshots the current best-ever finished segment per lap', () => {
+    const lap = makeLapDelta(seeded());
+    expect(lap.bestSegments(1, COURSE)).toEqual(new Map([[1, 50000], [2, 51000], [3, 50000]]));
+    expect(lap.bestSegments(1, 'Nope')).toBeNull();       // unknown course
+  });
+
+  it('honours a pinned gold baseline so a fresh gold survives the finish upload', () => {
+    const d = seeded();                                   // pre-race best lap 1 = 50000 (run 1)
+    const lap = makeLapDelta(d);
+    const golds = new Map<number, number | null>([[1, 50000], [2, 51000], [3, 50000]]);
+    // During the race the live lap 1 (49000) beats the pre-race best -> gold.
+    expect(last(lap(1, COURSE, [49000], 2, golds)).gold).toBe(true);
+    // The run finishes + uploads; its lap 1 (49000) is now the db best and the
+    // model-rebuild hook drops the cache.
+    insertRun(d, 5, 1, [49000, 52000, 53000], { isPb: 1 });
+    d.exec('UPDATE runs SET is_pb=0 WHERE id=2');
+    lap.invalidateCourse(CID);
+    // Still pinned to the pre-race baseline: the gold must NOT demote to green.
+    expect(last(lap(1, COURSE, [49000], 2, golds)).gold).toBe(true);
+  });
 });

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { applySchema } from '../db/connect';
 import { PresenceHub, type PresenceEntry } from './hub';
+import { makeLapDelta } from './lapDelta';
 
 function db() {
   const d = new DatabaseSync(':memory:'); applySchema(d);
@@ -201,6 +202,39 @@ describe('PresenceHub', () => {
     hub.update(1, { screen: 'MAIN_MENU' });
     expect(got.at(-1).player.lap_deltas).toBeNull();
     expect(got.at(-1).player.lap_delta).toBeNull();
+  });
+
+  it('pins the lap gold across the finish upload, refreshing only at the next race', () => {
+    const d = db();
+    d.exec(`INSERT INTO courses(id,slug,display_name) VALUES(7,'rainbow_road','Rainbow Road');
+            INSERT INTO runs(id,season_id,player_id,course_id,cc,status,total_time_ms,is_pb,provenance) VALUES
+              (40,1,1,7,150,'finished',62000,0,'live'),   -- holds the lap-1 gold (20000)
+              (41,1,1,7,150,'finished',60500,1,'live');   -- the PB run
+            INSERT INTO run_laps(run_id,lap_index,lap_time_ms) VALUES
+              (40,1,20000),(40,2,21000),(40,3,21000),
+              (41,1,20500),(41,2,20000),(41,3,20000);`);
+    const laps = makeLapDelta(d);
+    const hub = new PresenceHub(d, noCompletion, noPace, laps, () => 1000);
+    const got: any[] = [];
+    hub.addSink((m) => got.push(m));
+    // Racing: live lap 1 (19000) beats the pre-race best-ever (20000) -> gold.
+    hub.update(1, { screen: 'RACING', course: 'Rainbow Road', splits_ms: [19000] });
+    expect(got.at(-1).player.lap_deltas[0].gold).toBe(true);
+    // The finish uploads a run whose lap 1 (19000) becomes the db best, and the
+    // model-rebuild hook drops the lap cache.
+    d.exec(`UPDATE runs SET is_pb=0 WHERE id=41;
+            INSERT INTO runs(id,season_id,player_id,course_id,cc,status,total_time_ms,is_pb,provenance)
+              VALUES(42,1,1,7,150,'finished',58000,1,'live');
+            INSERT INTO run_laps(run_id,lap_index,lap_time_ms) VALUES (42,1,19000),(42,2,20000),(42,3,19000);`);
+    laps.invalidateCourse(7);
+    // Still on the results screen (in race context): the gold must hold.
+    hub.update(1, { screen: 'POST_TIME_TRIAL', course: 'Rainbow Road', final_time: '0:58.000', splits_ms: [19000] });
+    expect(got.at(-1).player.lap_deltas[0].gold).toBe(true);
+    // Back to the menus, then a fresh race: the baseline now includes the uploaded
+    // run, so re-running 19000 only ties the db best -> no longer a fresh gold.
+    hub.update(1, { screen: 'MAIN_MENU', course: 'Rainbow Road' });
+    hub.update(1, { screen: 'RACING', course: 'Rainbow Road', splits_ms: [19000] });
+    expect(got.at(-1).player.lap_deltas[0].gold).toBe(false);
   });
 
   it('passes the model-derived dividers from the completion provider straight through', () => {

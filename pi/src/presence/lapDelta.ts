@@ -21,12 +21,17 @@ export interface LapInfo { pb_laps_ms: number[]; deltas: LapDeltaResult[]; }
 
 export type LapDelta = ((
   playerId: number, course: string | null | undefined, splitsMs: number[] | null | undefined,
-  pinnedRunId?: number | null,
+  pinnedRunId?: number | null, pinnedGolds?: Map<number, number | null> | null,
 ) => LapInfo | null) & {
   /** Drop a course's cached PB laps + golds (chained into the model-rebuild
    *  invalidation, which fires on every finished trailed upload - keeps golds
    *  fresh across a session without per-frame queries). */
   invalidateCourse(courseId: number): void;
+  /** The best-ever finished segment per lap_index right now (1-based key). The hub
+   *  snapshots this at race entry and pins it for the race so a gold the player
+   *  sets mid-race survives their own finish upload (which would otherwise enter
+   *  the live MIN and demote the gold to green). */
+  bestSegments(playerId: number, course: string | null | undefined): Map<number, number | null> | null;
 };
 
 export function makeLapDelta(db: DatabaseSync, cc = 150): LapDelta {
@@ -34,7 +39,7 @@ export function makeLapDelta(db: DatabaseSync, cc = 150): LapDelta {
   // self-heals) + lazily-filled best-ever segment per lap (one query per lap line).
   const cache = new Map<string, { runId: number; pbLaps: number[]; golds: Map<number, number | null> }>();
 
-  const fn = ((playerId, course, splitsMs, pinnedRunId = null) => {
+  const fn = ((playerId, course, splitsMs, pinnedRunId = null, pinnedGolds = null) => {
     if (!course) return null;
     const courseId = courseIdBySlug(db, slugify(course));
     if (courseId == null) return null;
@@ -73,13 +78,16 @@ export function makeLapDelta(db: DatabaseSync, cc = 150): LapDelta {
     let live = 0, ref = 0;
     for (let i = 0; i < n; i++) {
       live += splitsMs![i]; ref += entry.pbLaps[i];
-      const gold = goldFor(i + 1);
+      // Pinned baseline (the race's pre-race best, frozen by the hub) when given,
+      // else the live best-ever. The pin keeps a mid-race gold from demoting once
+      // the player's own finish upload lands in the live MIN.
+      const bestSeg = pinnedGolds ? (pinnedGolds.get(i + 1) ?? null) : goldFor(i + 1);
       deltas.push({
         lap: i + 1,
         delta_ms: live - ref,
         seg_delta_ms: splitsMs![i] - entry.pbLaps[i],
         gained: splitsMs![i] < entry.pbLaps[i],
-        gold: gold != null && splitsMs![i] < gold,
+        gold: bestSeg != null && splitsMs![i] < bestSeg,
       });
     }
     return { pb_laps_ms: entry.pbLaps, deltas };
@@ -88,6 +96,21 @@ export function makeLapDelta(db: DatabaseSync, cc = 150): LapDelta {
   fn.invalidateCourse = (courseId: number) => {
     const prefix = `${courseId}:`;
     for (const key of [...cache.keys()]) if (key.startsWith(prefix)) cache.delete(key);
+  };
+
+  fn.bestSegments = (playerId: number, course: string | null | undefined) => {
+    if (!course) return null;
+    const courseId = courseIdBySlug(db, slugify(course));
+    if (courseId == null) return null;
+    const season = activeSeasonId(db);
+    const rows = db.prepare(
+      `SELECT rl.lap_index AS i, MIN(rl.lap_time_ms) AS m FROM run_laps rl JOIN runs r ON r.id = rl.run_id
+       WHERE r.season_id=? AND r.player_id=? AND r.course_id=? AND r.cc=? AND r.status='finished'
+       GROUP BY rl.lap_index`
+    ).all(season, playerId, courseId, cc) as { i: number; m: number | null }[];
+    const map = new Map<number, number | null>();
+    for (const r of rows) map.set(r.i, r.m);
+    return map;
   };
   return fn;
 }

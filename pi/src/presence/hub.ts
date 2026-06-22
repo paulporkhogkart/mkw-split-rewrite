@@ -43,9 +43,14 @@ interface LapD { lap: number; delta_ms: number; seg_delta_ms: number; gained: bo
 type PaceFn = (playerId: number, course: string | null | undefined,
                completion: number | null | undefined, elapsedMs: number | null | undefined) => number | null;
 
-/** Per-lap LiveSplit-style delta (see presence/lapDelta.ts); call shape only. */
-type LapFn = (playerId: number, course: string | null | undefined,
-              splitsMs: number[] | null | undefined) => { pb_laps_ms: number[]; deltas: LapD[] } | null;
+/** Per-lap LiveSplit-style delta (see presence/lapDelta.ts); call shape only.
+ *  `pinnedGolds` freezes the best-ever-segment baseline for the race (see latchedPb). */
+type LapFn = ((playerId: number, course: string | null | undefined,
+               splitsMs: number[] | null | undefined, pinnedRunId?: number | null,
+               pinnedGolds?: Map<number, number | null> | null,
+              ) => { pb_laps_ms: number[]; deltas: LapD[] } | null) & {
+  bestSegments?(playerId: number, course: string | null | undefined): Map<number, number | null> | null;
+};
 
 type Sink = (msg: unknown) => void;
 
@@ -66,11 +71,14 @@ export class PresenceHub {
   // Cached career snapshot per player (offStats). It only changes on a finished
   // upload (refreshOffStats), so attaching it to idle live frames costs no query.
   private offStatsCache = new Map<number, PresenceEntry['off_stats']>();
-  // The PB (ms + run id) pinned per player for the duration of a race
-  // (RACING/POST_TIME_TRIAL): the finish upload updates the db PB within ~a second,
-  // but the card delta and the rail's lap comparison must keep reading against the
-  // PRE-RACE PB until the next race starts.
-  private pbLatch = new Map<number, { course: string; pb: number | null; runId: number | null }>();
+  // The PB (ms + run id) AND the best-ever-segment baseline (per lap_index) pinned
+  // per player for the duration of a race (RACING/POST_TIME_TRIAL): the finish
+  // upload updates the db PB + golds within ~a second, but the card delta and the
+  // rail's lap comparison (incl. its gold flag) must keep reading against the
+  // PRE-RACE values until the next race starts - else a gold the player just set
+  // demotes to green as its own run enters the live best-ever MIN.
+  private pbLatch = new Map<number,
+    { course: string; pb: number | null; runId: number | null; golds: Map<number, number | null> | null }>();
 
   constructor(private db: DatabaseSync, private completion: LiveCompletion,
               private pace: PaceFn = () => null, private laps: LapFn = () => null,
@@ -135,8 +143,8 @@ export class PresenceHub {
     const pb_delta_ms = racing ? this.pace(playerId, frame.course, completion, frame.elapsed_ms) : null;
     const pin = this.latchedPb(playerId, cur, frame);
     // Lap comparison stays up through the finished/results state (the rail reads
-    // it there), pinned to the pre-race PB run.
-    const li = inRaceCtx ? this.laps(playerId, frame.course, frame.splits_ms, pin.runId) : null;
+    // it there), pinned to the pre-race PB run + pre-race gold baseline.
+    const li = inRaceCtx ? this.laps(playerId, frame.course, frame.splits_ms, pin.runId, pin.golds) : null;
 
     const entry: PresenceEntry = {
       player_id: playerId, name: cur.name, color: cur.color, online: true,
@@ -160,19 +168,23 @@ export class PresenceHub {
   }
 
   /** The PB for the entry: pinned at race entry, held through RACING/POST_TIME_TRIAL
-   *  (so the finished delta + lap comparison read against the pre-race PB), live
-   *  everywhere else. Returns { pb, runId }. */
-  private latchedPb(playerId: number, cur: PresenceEntry, frame: PresenceFrame): { pb: number | null; runId: number | null } {
+   *  (so the finished delta + lap comparison read against the pre-race PB + golds),
+   *  live everywhere else. Returns { pb, runId, golds }. The gold baseline is
+   *  snapshotted once, at latch creation - which is before the current run uploads,
+   *  so it is the genuine pre-race best-ever segment per lap. */
+  private latchedPb(playerId: number, cur: PresenceEntry, frame: PresenceFrame):
+      { pb: number | null; runId: number | null; golds: Map<number, number | null> | null } {
     const inRace = frame.screen === 'RACING' || frame.screen === 'POST_TIME_TRIAL';
     if (!inRace) {
       this.pbLatch.delete(playerId);
-      return this.pbForCourse(playerId, frame.course);
+      return { ...this.pbForCourse(playerId, frame.course), golds: null };
     }
     const wasInRace = cur.online && (cur.screen === 'RACING' || cur.screen === 'POST_TIME_TRIAL');
     const course = frame.course ?? '';
     let latch = this.pbLatch.get(playerId);
     if (!latch || !wasInRace || latch.course !== course) {
-      latch = { course, ...this.pbForCourse(playerId, frame.course) };
+      latch = { course, ...this.pbForCourse(playerId, frame.course),
+                golds: this.laps.bestSegments ? this.laps.bestSegments(playerId, frame.course) : null };
       this.pbLatch.set(playerId, latch);
     }
     return latch;
