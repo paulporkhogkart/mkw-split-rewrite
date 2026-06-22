@@ -23,8 +23,17 @@ export const THUMBNAIL_GIFS: Record<string, string[]> = {
   Gub: ['https://i.imgur.com/3u7SCNw.gif', 'https://i.imgur.com/nARULQI.gif'],
 };
 
+// TEMP (2026-06-23): Gub + Alex thumbnails are pinned to a single static image instead of
+// their GIFs above; everyone else keeps their GIFs. To restore, delete TEMP_THUMBNAILS and
+// the override line in gifFor().
+const TEMP_THUMBNAILS: Record<string, string> = {
+  Gub: 'https://i.imgur.com/FLwnRZ5.png',
+  Alex: 'https://i.imgur.com/aw8z3He.png',
+};
+
 /** Random GIF for a player, or null when none is configured (legacy KeyError fix). */
 export function gifFor(name: string): string | null {
+  if (TEMP_THUMBNAILS[name]) return TEMP_THUMBNAILS[name];   // TEMP: pinned static thumbnail
   const list = THUMBNAIL_GIFS[name];
   return list && list.length ? list[Math.floor(Math.random() * list.length)] : null;
 }
