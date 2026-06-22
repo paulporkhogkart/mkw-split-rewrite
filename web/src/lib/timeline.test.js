@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildSnapshots, flippedCourses, leaderboardAt } from "./timeline.js";
+import { buildSnapshots, flippedCourses, leaderboardAt, wrAsOf } from "./timeline.js";
 
 const C = { Aliias: "#4ade80", Gub: "#38bdf8" };
 
@@ -53,5 +53,29 @@ describe("leaderboardAt", () => {
     const events = [{ t: 1000, player: "Gub", slug: "mc", ms: 80000 }];
     expect(leaderboardAt(events, "dk", 9999)).toEqual([]);
     expect(leaderboardAt([], "mc", 9999)).toEqual([]);
+  });
+});
+
+describe("wrAsOf", () => {
+  // achievedMs intentionally NOT ascending, to prove order-independence (min over <= t).
+  const hist = { rr: [[100, 95000], [300, 99000], [200, 91000]] };
+
+  it("returns the min record achieved by t (latest effective WR for clean data)", () => {
+    expect(wrAsOf(hist, "rr", 250)).toBe(91000); // 95000@100 and 91000@200 are <= 250
+  });
+  it("ignores a stray slower-but-later row (min over entries <= t)", () => {
+    expect(wrAsOf(hist, "rr", 350)).toBe(91000); // all three <= 350; 99000@300 ignored
+  });
+  it("returns null before the first achieved entry", () => {
+    expect(wrAsOf(hist, "rr", 50)).toBe(null);
+  });
+  it("includes an entry achieved exactly at t", () => {
+    expect(wrAsOf(hist, "rr", 100)).toBe(95000);
+  });
+  it("equals the current (best-ever) WR at t = Infinity", () => {
+    expect(wrAsOf(hist, "rr", Infinity)).toBe(91000);
+  });
+  it("returns null for an unknown slug", () => {
+    expect(wrAsOf(hist, "nope", Infinity)).toBe(null);
   });
 });

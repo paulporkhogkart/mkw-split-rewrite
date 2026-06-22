@@ -64,3 +64,19 @@ export function leaderboardAt(events, slug, t) {
     .map(([player, ms]) => ({ player, ms }))
     .sort((a, b) => a.ms - b.ms);
 }
+
+// The WR in effect for `slug` at time `t`: the minimum record_ms among that course's history
+// entries achieved by `t` (achievedMs <= t). null when none exist yet. Entries arrive pre-sorted
+// ascending by achievedMs, but we scan all and take the running min (no early break) so a stray
+// out-of-order/legacy row can never report a slower record than one already achieved. At
+// t = Infinity this is the best-ever = the current WR, so the LIVE frame is unchanged. Pure.
+export function wrAsOf(wrHistory, slug, t) {
+  const entries = wrHistory[slug];
+  if (!entries) return null;
+  let best = null;
+  for (const [achievedMs, recordMs] of entries) {
+    if (achievedMs > t) continue;              // not yet achieved at this frame
+    if (best == null || recordMs < best) best = recordMs;
+  }
+  return best;
+}
