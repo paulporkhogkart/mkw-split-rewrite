@@ -20,8 +20,15 @@
   // Nothing picked yet: an idle online card shows the offline-style career stats
   // instead of three empty "—" rows (offline cards always take the stat block).
   $: hasSel = !!(vm.char || vm.kart || vm.trk);
+  // A PB finish keeps the card "on fire" through the post-race window — figure + flames —
+  // even though the run has ended (and forces it on if the fire wasn't already lit mid-run).
+  // vm.finPb is set only on a finished/held-finished readout that beat (or first-ever-set)
+  // the PB, and the hold persists it through the pause/reset loaders, so it clears exactly
+  // when the next race starts or a real menu drops the readout. (CardWall reuses this card,
+  // so this also lights the website live page.)
+  $: forceFire = vm.state === "finished" && vm.finPb;
   // On fire swaps to the player's on-pace portrait (falls back to the online figure).
-  $: fig = onFire ? (onpaceFigure(vm.name) || figureFor(vm.name, true)) : figureFor(vm.name, vm.online);
+  $: fig = (onFire || forceFire) ? (onpaceFigure(vm.name) || figureFor(vm.name, true)) : figureFor(vm.name, vm.online);
   // On fire: lit while racing AND on PB pace. Pace mode reads the live (delayed)
   // pace delta; laps mode reads the last completed lap split. fireState applies
   // the "consistently ahead" on-window + anti-flicker off-window.
@@ -33,7 +40,7 @@
 
 <div class="tt" class:off={!vm.online} style="--pc:{vm.color}">
   <div class="spine"></div>
-  {#if isRacing}<Fire color={vm.color} active={onFire} />{/if}
+  {#if isRacing || forceFire}<Fire color={vm.color} active={onFire || forceFire} />{/if}
   {#if fig}<div class="fig" style="background-image:url({fig})"></div>{/if}
   <div class="data">
     <div class="nm">{vm.name}</div>
