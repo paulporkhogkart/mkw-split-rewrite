@@ -161,7 +161,7 @@ function currentWrReignMs(db: DatabaseSync, courseId: number, cc: number, holder
   if (!holder) return null;
   const rows = db
     .prepare(
-      'SELECT holder_name, achieved_at FROM world_records WHERE course_id=? AND cc=? ORDER BY achieved_at DESC, id DESC',
+      'SELECT holder_name, achieved_at FROM world_records WHERE course_id=? AND cc=? AND removed_at IS NULL ORDER BY achieved_at DESC, id DESC',
     )
     .all(courseId, cc) as { holder_name: string | null; achieved_at: string | null }[];
   let start: string | null = null;
@@ -187,7 +187,7 @@ function wrVideo(
   if (currentUrl) return { url: currentUrl, note: null };
   const rows = db
     .prepare(
-      'SELECT video_url, is_current FROM world_records WHERE course_id=? AND cc=? ORDER BY achieved_at DESC, id DESC LIMIT 10',
+      'SELECT video_url, is_current FROM world_records WHERE course_id=? AND cc=? AND removed_at IS NULL ORDER BY achieved_at DESC, id DESC LIMIT 10',
     )
     .all(courseId, cc) as { video_url: string | null; is_current: number }[];
   // Skip the current (index 0) — it has no video (otherwise we'd have returned above).

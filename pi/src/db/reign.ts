@@ -16,7 +16,7 @@ export function wrReign(
   if (!prevHolder) return null;
   const rows = db.prepare(
     `SELECT holder_name, achieved_at FROM world_records
-     WHERE course_id=? AND cc=? ORDER BY achieved_at DESC, id DESC`
+     WHERE course_id=? AND cc=? AND removed_at IS NULL ORDER BY achieved_at DESC, id DESC`
   ).all(courseId, cc) as { holder_name: string | null; achieved_at: string | null }[];
 
   let reignStart: string | null = null;

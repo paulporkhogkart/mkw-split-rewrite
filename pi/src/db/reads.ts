@@ -28,7 +28,7 @@ export function playerPbs(db: DatabaseSync, seasonId: number, playerId: number, 
 export function currentWr(db: DatabaseSync, courseId: number, cc: number) {
   return (db.prepare(
     `SELECT holder_name, record_ms, record_str, achieved_at, video_url, character, vehicle
-     FROM world_records WHERE course_id=? AND cc=? AND is_current=1 LIMIT 1`
+     FROM world_records WHERE course_id=? AND cc=? AND is_current=1 AND removed_at IS NULL LIMIT 1`
   ).get(courseId, cc) as any) ?? null;
 }
 
@@ -153,7 +153,7 @@ export function territoryTimeline(db: DatabaseSync, cc: number):
   for (const w of db.prepare(
     `SELECT c.slug AS slug, w.record_ms AS ms
      FROM world_records w JOIN courses c ON c.id = w.course_id
-     WHERE w.cc = ? AND w.is_current = 1`
+     WHERE w.cc = ? AND w.is_current = 1 AND w.removed_at IS NULL`
   ).all(cc) as { slug: string; ms: number }[]) wrs[w.slug] = w.ms;
   return { events, colors, wrs };
 }

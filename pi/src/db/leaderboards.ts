@@ -29,7 +29,7 @@ export function overallStandings(db: DatabaseSync, seasonId: number, cc: number)
 
 /** Sum of the current WR record_ms across all courses that have one (for the overall WR aggregate row). */
 export function wrAggregate(db: DatabaseSync, cc: number): { total_ms: number; count: number } {
-  const row = db.prepare('SELECT COALESCE(SUM(record_ms),0) total, COUNT(*) n FROM world_records WHERE cc=? AND is_current=1')
+  const row = db.prepare('SELECT COALESCE(SUM(record_ms),0) total, COUNT(*) n FROM world_records WHERE cc=? AND is_current=1 AND removed_at IS NULL')
     .get(cc) as { total: number; n: number };
   return { total_ms: row.total, count: row.n };
 }
