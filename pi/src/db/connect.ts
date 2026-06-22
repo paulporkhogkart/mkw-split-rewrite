@@ -50,6 +50,27 @@ export function applySchema(db: DatabaseSync): void {
   // Idempotent: at most one current WR per (course,cc). Created here (not in schema.sql)
   // so the column is guaranteed present for both fresh and migrated DBs.
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_wr_current ON world_records(course_id, cc) WHERE is_current=1');
+  // --- WR full-history capture (additive) ---
+  for (const col of [
+    'nation TEXT', 'character_slug TEXT', 'kart_slug TEXT', 'costume_slug TEXT',
+    'lap_splits_ms TEXT', 'coins TEXT', 'mushrooms TEXT',
+    'date_precision TEXT', 'removed_at TEXT', 'source_raw TEXT',
+  ]) {
+    try { db.exec(`ALTER TABLE world_records ADD COLUMN ${col}`); } catch { /* present */ }
+  }
+  db.exec(`CREATE TABLE IF NOT EXISTS wr_name_flags (
+    id INTEGER PRIMARY KEY,
+    category TEXT NOT NULL,
+    raw_value TEXT NOT NULL,
+    slug_guess TEXT,
+    example_course_id INTEGER,
+    example_wr_id INTEGER,
+    occurrences INTEGER NOT NULL DEFAULT 1,
+    resolved_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(category, raw_value)
+  )`);
+  db.exec(`CREATE TABLE IF NOT EXISTS wr_meta (key TEXT PRIMARY KEY, value TEXT)`);
   // Player recolour (existing DBs): Gub teal -> blue. Idempotent (no row matches once recoloured),
   // and gated on the old value so it never fights a future colour change. server/importer.py
   // PLAYER_COLORS carries the same value, so fresh imports seed blue directly.

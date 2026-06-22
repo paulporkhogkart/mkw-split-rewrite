@@ -113,10 +113,34 @@ CREATE TABLE IF NOT EXISTS world_records (
     video_url    TEXT,
     character    TEXT,
     vehicle      TEXT,
+    nation         TEXT,
+    character_slug TEXT,
+    kart_slug      TEXT,
+    costume_slug   TEXT,
+    lap_splits_ms  TEXT,
+    coins          TEXT,
+    mushrooms      TEXT,
+    date_precision TEXT,
+    removed_at     TEXT,
+    source_raw     TEXT,
     is_current   INTEGER NOT NULL DEFAULT 0,
     provenance   TEXT NOT NULL DEFAULT 'legacy_import',
     created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS wr_name_flags (
+    id                INTEGER PRIMARY KEY,
+    category          TEXT NOT NULL,
+    raw_value         TEXT NOT NULL,
+    slug_guess        TEXT,
+    example_course_id INTEGER,
+    example_wr_id     INTEGER,
+    occurrences       INTEGER NOT NULL DEFAULT 1,
+    resolved_at       TEXT,
+    created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(category, raw_value)
+);
+CREATE TABLE IF NOT EXISTS wr_meta (key TEXT PRIMARY KEY, value TEXT);
 
 CREATE INDEX IF NOT EXISTS idx_runs_leaderboard ON runs(season_id, course_id, cc, is_pb);
 CREATE INDEX IF NOT EXISTS idx_runs_player      ON runs(season_id, player_id, course_id, cc);
