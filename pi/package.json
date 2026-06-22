@@ -8,6 +8,8 @@
     "mint-token": "node --no-warnings --import tsx src/scripts/mintToken.ts",
     "set-color": "node --no-warnings --import tsx src/scripts/setColor.ts",
     "scrape-wr": "node --no-warnings --import tsx src/scripts/scrapeWr.ts",
+    "scrape-wr-history": "node --no-warnings --import tsx src/scripts/scrapeWrHistory.ts",
+    "wr-flags": "node --no-warnings --import tsx src/scripts/wrFlags.ts",
     "build-course-model": "node --no-warnings --import tsx src/scripts/buildCourseModel.ts",
     "wipe-runs": "node --no-warnings --import tsx src/scripts/wipeRuns.ts",
     "recompute-pbs": "node --no-warnings --import tsx src/scripts/recomputePbs.ts",

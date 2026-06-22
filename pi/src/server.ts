@@ -8,6 +8,7 @@ import { makeLiveCompletion } from './presence/completion';
 import { makePaceDelta } from './presence/pace';
 import { makeLapDelta } from './presence/lapDelta';
 import { startWrScraper } from './wr/scheduler';
+import { startWrHistoryScraper } from './wr/history_scheduler';
 
 const DB_PATH = process.env.MKW_DB ?? 'mkw.db';
 const PORT = Number(process.env.PORT ?? 8787);
@@ -37,4 +38,10 @@ startWrScraper(db, hub, {
   url: process.env.MKWRS_URL,
   minIntervalSec: Number(process.env.MKWRS_MIN_INTERVAL_SEC ?? 900),   // 15 min
   maxIntervalSec: Number(process.env.MKWRS_MAX_INTERVAL_SEC ?? 1800),  // 30 min
+});
+startWrHistoryScraper(db, {
+  minIntervalSec: Number(process.env.MKWRS_HISTORY_MIN_INTERVAL_SEC ?? 7200),    // 2 h
+  maxIntervalSec: Number(process.env.MKWRS_HISTORY_ENABLED === '0'
+    ? 0
+    : process.env.MKWRS_HISTORY_MAX_INTERVAL_SEC ?? 21600),                      // 6 h; 0 disables
 });
