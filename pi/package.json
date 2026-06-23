@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
+    "typecheck": "tsc --noEmit",
     "dev": "node --no-warnings --import tsx src/server.ts",
     "mint-token": "node --no-warnings --import tsx src/scripts/mintToken.ts",
     "set-color": "node --no-warnings --import tsx src/scripts/setColor.ts",
