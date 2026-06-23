@@ -16,4 +16,8 @@ describe("viewFromHash", () => {
     expect(viewFromHash("#/heat")).toBe("heat");
     expect(viewFromHash("#heat")).toBe("heat");
   });
+  it("returns version for the unlisted version hash", () => {
+    expect(viewFromHash("#/version")).toBe("version");
+    expect(viewFromHash("#version")).toBe("version");
+  });
 });

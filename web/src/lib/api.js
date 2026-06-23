@@ -8,3 +8,4 @@ export const API_BASE =
 
 export const territoryUrl = (cc = 150) => `${API_BASE}/v1/territory?cc=${cc}`;
 export const territoryTimelineUrl = (cc = 150) => `${API_BASE}/v1/territory/timeline?cc=${cc}`;
+export const versionUrl = () => `${API_BASE}/v1/version`;
