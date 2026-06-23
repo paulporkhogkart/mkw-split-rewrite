@@ -22,15 +22,83 @@ on:
   push:
     tags:
       - 'v[0-9]*.[0-9]*.[0-9]*'
+  workflow_dispatch:        # manual "force build" — bypasses the change-detection gate
 
 permissions:
   contents: write
 
 jobs:
+  # ── 0. Decide whether this tag actually touches pbenguin (the desktop app) ────
+  #   A version tag is ALSO how the Pi self-updates the server/bot/site, so a tag
+  #   whose only real changes live in the server/bot/site dirs (pi/, web/, server/,
+  #   deploy/) or *.md docs must NOT rebuild or re-release the desktop app (that
+  #   would push a pointless auto-update to every client). set_version.py rewrites
+  #   the 6 version files on every bump, so those never count as a pbenguin change.
+  #   (GitHub ignores on.push.paths for tag pushes — hence this in-workflow guard.)
+  changes:
+    name: Detect pbenguin changes
+    runs-on: ubuntu-latest
+    outputs:
+      pbenguin: ${{ steps.detect.outputs.pbenguin }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0          # full history + tags, to diff against the previous release
+
+      - name: Detect
+        id: detect
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          # Manual run → always build.
+          if [ "$EVENT" = workflow_dispatch ]; then
+            echo "manual dispatch → building pbenguin"
+            echo "pbenguin=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Previous release = most recent tag reachable from this tag's parent.
+          prev="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
+          if [ -z "$prev" ]; then
+            echo "no previous tag → building pbenguin (first release / safe default)"
+            echo "pbenguin=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "comparing $prev..$TAG"
+
+          # Files set_version.py rewrites on every bump — never a pbenguin change alone.
+          version_files='^(package\.json|package-lock\.json|pyproject\.toml|src-tauri/Cargo\.toml|src-tauri/Cargo\.lock|src-tauri/tauri\.conf\.json)$'
+
+          echo "--- changed files ---"
+          git diff --name-only "$prev" "$TAG" || true
+          echo "---------------------"
+
+          # pbenguin change = any changed file that is NOT a version-bump file,
+          # NOT under a server/bot/site dir (pi/ web/ server/ deploy/), and NOT a *.md doc.
+          relevant="$(git diff --name-only "$prev" "$TAG" \
+            | grep -Ev "$version_files" \
+            | grep -Ev '^(pi/|web/|server/|deploy/)' \
+            | grep -Eiv '\.md$' || true)"
+
+          if [ -n "$relevant" ]; then
+            echo "pbenguin-relevant changes:"
+            echo "$relevant"
+            echo "pbenguin=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "only server/bot/site + *.md (+ version bump) → skipping pbenguin build/release"
+            echo "pbenguin=false" >> "$GITHUB_OUTPUT"
+          fi
+
   # ── 1. Build Python sidecar ──────────────────────────────────────────────────
   build-python:
     name: Build Python sidecar (Windows x64)
     runs-on: windows-latest
+    needs: changes
+    if: needs.changes.outputs.pbenguin == 'true'
 
     outputs:
       version: ${{ steps.version.outputs.value }}
@@ -114,7 +182,8 @@ jobs:
   build-tauri:
     name: Build Tauri installer (Windows x64)
     runs-on: windows-latest
-    needs: build-python
+    needs: [changes, build-python]
+    if: needs.changes.outputs.pbenguin == 'true'
 
     steps:
       - uses: actions/checkout@v6
@@ -248,7 +317,8 @@ jobs:
   publish:
     name: Publish release
     runs-on: ubuntu-latest
-    needs: [build-python, build-tauri]
+    needs: [changes, build-python, build-tauri]
+    if: needs.changes.outputs.pbenguin == 'true'
 
     steps:
       - uses: actions/download-artifact@v8
