@@ -237,6 +237,13 @@ export class PresenceHub {
     for (const e of this.map.values()) if (e.online && e.updated_at < cutoff) this.setOffline(e.player_id);
   }
 
+  /** Flush every online entry's last-seen to the db (durability backstop for crashes/
+   *  auto-updates; bounds post-restart staleness to the call interval). Offline entries
+   *  don't change — their value was persisted at the disconnect transition. */
+  persistLastSeen(): void {
+    for (const e of this.map.values()) if (e.online) this.writeLastSeen(e.player_id, e.updated_at);
+  }
+
   /** Best-effort durable last-seen stamp (epoch ms). Inline-prepared (a cached field
    *  can't read this.db at field-init time). A DB hiccup must never break presence,
    *  so failures are swallowed. */

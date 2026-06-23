@@ -306,4 +306,19 @@ describe('PresenceHub', () => {
     hub2.addSink((m) => got.push(m));
     expect(got[0].players.find((p: any) => p.player_id === 1).updated_at).toBe(555000);
   });
+
+  it('persistLastSeen flushes online entries only', () => {
+    const d = db();
+    let t = 7000;
+    const hub = new PresenceHub(d, noCompletion, noPace, noLaps, () => t);
+    hub.addSink(() => {});
+    hub.update(1, { screen: 'RACING' });   // Paul online @7000 (connect write = 7000)
+    t = 8000;
+    hub.update(1, { screen: 'RACING' });   // still online @8000 (updated_at advances; no db write)
+    hub.persistLastSeen();                 // flush: Paul -> 8000; Luke (never connected) untouched
+    expect((d.prepare('SELECT last_seen_at FROM players WHERE id=1').get() as { last_seen_at: number }).last_seen_at)
+      .toBe(8000);
+    expect((d.prepare('SELECT last_seen_at FROM players WHERE id=2').get() as { last_seen_at: number | null }).last_seen_at)
+      .toBe(null);
+  });
 });

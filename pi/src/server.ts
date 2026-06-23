@@ -34,6 +34,7 @@ const server = serve({ fetch: app.fetch, port: PORT }, (info) => {
 });
 injectWebSocket(server);
 setInterval(() => presence.sweep(15000), 5000);   // flip dead/stale sockets offline
+setInterval(() => presence.persistLastSeen(), 30000);   // durable last-seen (survives restarts)
 startWrScraper(db, hub, {
   url: process.env.MKWRS_URL,
   minIntervalSec: Number(process.env.MKWRS_MIN_INTERVAL_SEC ?? 900),   // 15 min
