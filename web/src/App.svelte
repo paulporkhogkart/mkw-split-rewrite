@@ -7,6 +7,7 @@
   import CardWall from "./CardWall.svelte";
   import WorldMap from "./WorldMap.svelte";
   import HeatGraph from "./HeatGraph.svelte";
+  import VersionPage from "./VersionPage.svelte";
 
   // The navbar wears a random player's figure + colour each load; hovering lights the on-fire
   // variant. The player's colour drives the whole nav accent (OFF tag + active-tab marker).
@@ -58,6 +59,7 @@
 <main>
   {#if view === "territory"}<WorldMap />
   {:else if view === "heat"}<HeatGraph />
+  {:else if view === "version"}<VersionPage />
   {:else}<CardWall />{/if}
 </main>
 
