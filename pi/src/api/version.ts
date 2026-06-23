@@ -21,12 +21,19 @@ export function versionRoutes(db: DatabaseSync,
   r.get('/v1/version', async (c) => {
     const lv = await latest(c.req.query('fresh') === '1');
     const bot = readService(db, 'bot');
-    const players = db.prepare(
-      `SELECT p.id AS player_id, p.display_name AS name, p.color, p.app_version, p.last_seen_at
-       FROM season_rosters sr JOIN players p ON p.id = sr.player_id
-       WHERE sr.season_id = ?
-       ORDER BY p.display_name`
-    ).all(activeSeasonId(db)) as PlayerVersionRow[];
+    // The ONLY throwable path: a fresh/partial-migration DB could be missing a table (or have no
+    // active season), so this SQLite read throws synchronously. Localize the guard so it degrades
+    // to [] while server/latest/bot still report — the endpoint must always be HTTP 200. Do NOT
+    // broaden to a body-wide catch (that would null the still-useful diagnostic fields).
+    let players: PlayerVersionRow[] = [];
+    try {
+      players = db.prepare(
+        `SELECT p.id AS player_id, p.display_name AS name, p.color, p.app_version, p.last_seen_at
+         FROM season_rosters sr JOIN players p ON p.id = sr.player_id
+         WHERE sr.season_id = ?
+         ORDER BY p.display_name`
+      ).all(activeSeasonId(db)) as PlayerVersionRow[];
+    } catch { players = []; }
     return c.json({
       latest: { tag: lv.tag, app: lv.app, fetched_at: lv.fetched_at, errors: lv.errors },
       deployed: {

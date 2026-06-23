@@ -27,6 +27,8 @@ describe('GET /v1/version', () => {
     expect(body.players.map((p: any) => p.name)).toEqual(['Aliias', 'Gub', 'Paul']);   // by display_name
     expect(body.players.find((p: any) => p.name === 'Paul').app_version).toBe('2.1.0');
     expect(body.players.find((p: any) => p.name === 'Aliias').app_version).toBeNull();
+    expect(body.players.find((p: any) => p.name === 'Paul').last_seen_at).toBe(1750000000000);
+    expect(body.players.find((p: any) => p.name === 'Aliias').last_seen_at).toBeNull();
   });
 
   it('reports bot:null when no service_status row exists', async () => {
