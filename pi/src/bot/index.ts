@@ -7,9 +7,15 @@ import { dispatch } from './dispatch';
 import { installCommands } from './commands/install';
 import { loadState, saveState } from './state';
 import { announceMissedPbs } from './catchup';
+import { reportService } from '../version/serviceStatus';
+import { repoVersion } from '../version/repoVersion';
 
 const cfg = loadConfig();
 const db = openDb(cfg.dbPath);                 // shared with the server (WAL); reads only
+// Self-report our deployed version so /v1/version can show the bot's running build (a separate
+// process the server can't otherwise see). This is the bot's one allowed write to the shared DB.
+try { reportService(db, 'bot', repoVersion(), Date.now()); }
+catch (err) { console.error('[bot] version self-report failed', err); }
 const announcer = new Announcer(cfg.token, cfg.channelId);
 const send = (embed: EmbedBuilder) => { void announcer.send(embed); };
 
