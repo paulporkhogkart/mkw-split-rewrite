@@ -1,4 +1,4 @@
-import type { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import type { Period } from './types';
 import { BODY_SOURCE_COLUMNS, PORKER_MAP, presentPorkerTables } from './body';
 
@@ -45,7 +45,7 @@ export function resolveCorrelation(mkw: DatabaseSync, porker: DatabaseSync, q: C
   if (q.period.endUtc) { where.push('datetime(ended_at) < ?'); params.push(q.period.endUtc); }
   const runs = mkw.prepare(
     `SELECT total_time_ms AS y, CAST(strftime('%s', datetime(ended_at)) AS INTEGER) AS ep FROM runs WHERE ${where.join(' AND ')}`
-  ).all(...params) as { y: number; ep: number }[];
+  ).all(...(params as SQLInputValue[])) as { y: number; ep: number }[];
 
   const table = PORKER_MAP.find((m) => m.player.toLowerCase() === player.display_name.toLowerCase())?.table;
   const present = new Set(presentPorkerTables(porker).map((t) => t.table));

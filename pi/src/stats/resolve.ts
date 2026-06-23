@@ -1,4 +1,4 @@
-import type { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import type { Dimension, Period, StatResult, StatRow } from './types';
 import { getMetric, type RaceMetric } from './metrics';
 
@@ -80,11 +80,11 @@ export function resolveRace(db: DatabaseSync, q: RaceQuery): StatResult {
     const sql = `SELECT ${g.select} AS key, ${rm.value} AS value
                  FROM runs r ${joins.join(' ')} WHERE ${where.join(' AND ')}
                  GROUP BY key HAVING key IS NOT NULL ORDER BY value DESC`;
-    rows = db.prepare(sql).all(...params) as StatRow[];
+    rows = db.prepare(sql).all(...(params as SQLInputValue[])) as unknown as StatRow[];
     total = rows.reduce((s, r) => s + (r.value ?? 0), 0);
   } else {
     const sql = `SELECT ${rm.value} AS value FROM runs r ${joins.join(' ')} WHERE ${where.join(' AND ')}`;
-    const row = db.prepare(sql).get(...params) as { value: number | null } | undefined;
+    const row = db.prepare(sql).get(...(params as SQLInputValue[])) as { value: number | null } | undefined;
     total = row?.value ?? 0;
     rows = [{ key: q.metric, value: total }];
   }

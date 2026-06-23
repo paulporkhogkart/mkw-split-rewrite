@@ -32,7 +32,7 @@ export function versionRoutes(db: DatabaseSync,
          FROM season_rosters sr JOIN players p ON p.id = sr.player_id
          WHERE sr.season_id = ?
          ORDER BY p.display_name`
-      ).all(activeSeasonId(db)) as PlayerVersionRow[];
+      ).all(activeSeasonId(db)) as unknown as PlayerVersionRow[];
     } catch { players = []; }
     return c.json({
       latest: { tag: lv.tag, app: lv.app, fetched_at: lv.fetched_at, errors: lv.errors },

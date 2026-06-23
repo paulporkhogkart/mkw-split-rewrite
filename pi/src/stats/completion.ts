@@ -1,4 +1,4 @@
-import type { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import type { Dimension, Period, StatResult, StatRow } from './types';
 import { getMetric } from './metrics';
 import { loadCourseModel } from '../db/courseModels';
@@ -40,7 +40,7 @@ export function resolveCompletion(db: DatabaseSync, q: CompletionQuery): StatRes
   if (q.period.startUtc) { where.push('datetime(r.ended_at) >= ?'); params.push(q.period.startUtc); }
   if (q.period.endUtc) { where.push('datetime(r.ended_at) < ?'); params.push(q.period.endUtc); }
   const resets = db.prepare(`SELECT r.id, r.player_id, r.course_id FROM runs r WHERE ${where.join(' AND ')}`)
-    .all(...params) as { id: number; player_id: number; course_id: number }[];
+    .all(...(params as SQLInputValue[])) as { id: number; player_id: number; course_id: number }[];
 
   const modelCache = new Map<number, { m: CourseModel; pe: Prepared } | null>();
   const getModel = (courseIdv: number): { m: CourseModel; pe: Prepared } | null => {

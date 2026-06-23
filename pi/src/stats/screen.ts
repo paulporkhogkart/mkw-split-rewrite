@@ -1,4 +1,4 @@
-import type { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import type { Dimension, Period, StatResult, StatRow } from './types';
 import { getMetric } from './metrics';
 import { toEpochSeconds } from './period';
@@ -43,10 +43,10 @@ export function resolveScreen(db: DatabaseSync, q: ScreenQuery): StatResult {
   let rows: StatRow[]; let total: number | null;
   if (q.groupBy === 'screen' || q.groupBy === 'player') {
     const sel = q.groupBy === 'screen' ? 'screen' : '(SELECT display_name FROM players WHERE id=player_id)';
-    rows = db.prepare(`SELECT ${sel} AS key, ${dur} AS value FROM screen_intervals WHERE ${where.join(' AND ')} GROUP BY key ORDER BY value DESC`).all(...params) as StatRow[];
+    rows = db.prepare(`SELECT ${sel} AS key, ${dur} AS value FROM screen_intervals WHERE ${where.join(' AND ')} GROUP BY key ORDER BY value DESC`).all(...(params as SQLInputValue[])) as unknown as StatRow[];
     total = rows.reduce((s, x) => s + (x.value ?? 0), 0);
   } else {
-    const r = db.prepare(`SELECT ${dur} AS value FROM screen_intervals WHERE ${where.join(' AND ')}`).get(...params) as { value: number | null } | undefined;
+    const r = db.prepare(`SELECT ${dur} AS value FROM screen_intervals WHERE ${where.join(' AND ')}`).get(...(params as SQLInputValue[])) as { value: number | null } | undefined;
     total = r?.value ?? 0;
     rows = [{ key: q.metric, value: total }];
   }
