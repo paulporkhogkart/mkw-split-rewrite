@@ -88,7 +88,7 @@
       <div class="pb"><span>PB</span>{vm.pbStr}{#if vm.delta}<span class="delta {vm.delta.cls}">{vm.delta.text}</span>{/if}</div>
     {/if}
     {#if vm.primary.kind === "time"}
-      <div class="prim time" class:fin={vm.state === "finished"} class:beatpb={vm.finPb}>
+      <div class="prim time" class:fin={vm.state === "finished"} class:beatpb={vm.finPb} class:dnf={vm.state === "dnf"} class:invalid={vm.state === "invalidated"}>
         {#if vm.badge === "fin"}
           <span class="tag" title="Finished">
             <svg viewBox="0 0 12 12" aria-hidden="true">
@@ -195,6 +195,9 @@
      `.pb span { font-size: 7.5px }` rule that would otherwise shrink the timer's .ttx span. */
   .prim.time.fin { color: var(--ls-behind); }
   .prim.time.fin.beatpb { color: var(--ls-ahead); }
+  /* DNF (timeout): a settled, definitively-not-a-PB outcome - the sharp behind red. */
+  .prim.time.dnf { color: var(--ls-behind); }
+  .prim.time.invalid { color: var(--ls-behind); letter-spacing: .04em; }
   /* State badge beside the time: checkered flag / pause bars / reset arrow.
      No nudges: the time text is cap-trimmed (.ttx), so centre IS the digit centre. */
   .tag { display: inline-flex; color: var(--tx-dim); flex: 0 0 auto; }

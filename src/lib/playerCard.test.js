@@ -173,6 +173,19 @@ describe("viewModel", () => {
     expect(viewModel({ ...base, final_time: "1:21.044", pb_ms: null }, () => 2000).finPb).toBe(true); // first finish
     expect(viewModel(base, () => 2000).finPb).toBe(false);                                 // racing: n/a
   });
+  it("dnf: a timed-out racer shows a red DNF instead of a null finish time", () => {
+    const vm = viewModel({ ...base, screen: "POST_TIME_TRIAL", final_time: null, dnf: true }, () => 2000);
+    expect(vm.state).toBe("dnf");
+    expect(vm.primary).toEqual({ kind: "time", text: "DNF" });
+    expect(vm.badge).toBeNull();          // not the finished checkered flag
+    expect(vm.pbStr).toBe("1:19.880");    // PB still shown (base.pb_ms = 79880)
+    expect(vm.bar).toBeNull();
+  });
+  it("dnf takes precedence over the screen logic and persists onto the menu", () => {
+    // at the cap the time vanishes but the screen is briefly still RACING - not 'racing'
+    expect(viewModel({ ...base, screen: "RACING", final_time: null, dnf: true }, () => 2000).state).toBe("dnf");
+    expect(viewModel({ ...base, screen: "RACE_MENU", final_time: null, dnf: true }, () => 2000).primary.text).toBe("DNF");
+  });
   it("a reset keeps the last readout on screen (no In the menus) until a real menu", () => {
     const delayed = { elapsed_ms: 51234, completion: 0.4, pb_delta_ms: 800 };
     const racing = viewModel(base, () => 2000, delayed);            // stashes the readout
@@ -192,6 +205,16 @@ describe("viewModel", () => {
     expect(paused.badge).toBe("pause");
     expect(paused.primary).toEqual({ kind: "time", text: "0:51.234" });
   });
+  it("photo mode pauses the card like the race menu (held readout + pause badge)", () => {
+    // Photo mode freezes the in-game timer; the card must hold the frozen readout
+    // (not flash "In the menus") and show the pause badge, same as RACE_MENU.
+    viewModel(base, () => 2000, { elapsed_ms: 51234, completion: 0.4, pb_delta_ms: 800 });
+    const photo = viewModel({ ...base, screen: "PHOTO_MODE" }, () => 3000);
+    expect(photo.state).toBe("held");
+    expect(photo.badge).toBe("pause");
+    expect(photo.primary).toEqual({ kind: "time", text: "0:51.234" });
+    expect(viewModel({ ...base, screen: "EXIT_PHOTO_MODE" }, () => 4000).badge).toBe("pause");
+  });
   it("a finished readout (FIN + verdict colour) persists through the HOME flow", () => {
     viewModel({ ...base, final_time: "1:18.880" }, () => 2000);     // a PB finish
     const home = viewModel({ ...base, screen: "HOME", final_time: null }, () => 3000);
@@ -202,6 +225,25 @@ describe("viewModel", () => {
   });
   it("a cold pause/reset with nothing held falls back to the menus", () => {
     expect(viewModel({ ...base, screen: "RESET" }, () => 2000).state).toBe("menus");
+  });
+  it("a finish with no captured time shows a dash (not null/blank) and is not a PB", () => {
+    // POST_TIME_TRIAL reached but the time couldn't be read (genuine failed read):
+    // the card must NOT render "null"/blank as the time, nor flag it as a PB.
+    const vm = viewModel({ ...base, screen: "POST_TIME_TRIAL", final_time: null }, () => 2000);
+    expect(vm.primary).toEqual({ kind: "time", text: "-" });
+    expect(vm.finPb).toBe(false);
+    expect(vm.badge).toBe(null);
+  });
+  it("an invalidated run shows a red INVALID + offline-style bar with the cause, never a PB", () => {
+    const vm = viewModel(
+      { ...base, screen: "RACING", invalidated: true, invalid_reason: "Photo Mode", tot_lap: 3 }, () => 2000);
+    expect(vm.state).toBe("invalidated");
+    expect(vm.primary).toEqual({ kind: "time", text: "INVALID" });   // red, like DNF
+    expect(vm.finPb).toBe(false);
+    expect(vm.bar.calibrating).toBe(true);          // offline-style shell
+    expect(vm.bar.calLabel).toBe("Photo Mode");     // the cause rides the bar label
+    expect(vm.bar.fill).toBe(0);
+    expect(vm.bar.dividers).toEqual([1 / 3, 2 / 3]);
   });
   it("offline seen: last seen line; never-seen: plain offline", () => {
     const seen = viewModel({ ...base, online: false, updated_at: 1000 }, () => 1000 + 3 * 3600000);

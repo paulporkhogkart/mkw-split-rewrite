@@ -88,6 +88,9 @@
   let elapsedMs = null;
   let raceSplits = {};      // lap number → split time string
   let raceFinishTime = null; // total time string from finish event
+  let raceDnf = false;      // true once the race clock hit the 9:59.999 cap (timeout)
+  let raceInvalidated = false;   // run killed by an overlay (Photo Mode / GameChat)
+  let raceInvalidReason = null;  // human-readable cause shown on the card + rail
 
   // ── Run review queue ────────────────────────────────────────────────────────
   // Each entry: { attemptId, run, isPb }. The modal renders the head; submit/discard
@@ -837,7 +840,7 @@
         break;
       case "lap_update":
         // Reset splits when lap 1 starts - marks the beginning of a fresh race
-        if (msg.current === 1) { raceSplits = {}; raceFinishTime = null; }
+        if (msg.current === 1) { raceSplits = {}; raceFinishTime = null; raceDnf = false; raceInvalidated = false; raceInvalidReason = null; }
         curLap = msg.current; totLap = msg.total;
         if (msg.split && msg.current != null)
           raceSplits = { ...raceSplits, [msg.current - 1]: msg.split };
@@ -862,6 +865,20 @@
         raceFinishTime = msg.total_time ?? raceFinishTime;
         if (msg.splits) raceSplits = { ...raceSplits, ...msg.splits };
         pushLog(`[finish] ${msg.result}  ${msg.total_time ?? "-"}`);
+        break;
+      case "race_dnf":
+        // The race clock hit the 9:59.999 cap with no finish - a timeout. Held until
+        // the next race's lap 1 (like raceFinishTime) so the card + rail show "DNF".
+        raceDnf = true;
+        pushLog(`[dnf] timed out at 9:59.999`);
+        break;
+      case "run_invalidated":
+        // An overlay (Photo Mode / GameChat) killed the run, or (reason null) a fresh run
+        // restored normal tracking. The card + rail show "Run invalidated - <reason>" and
+        // the now-stale readouts are dropped by the race_cleared that accompanies it.
+        raceInvalidReason = msg.reason ?? null;
+        raceInvalidated = !!raceInvalidReason;
+        pushLog(raceInvalidReason ? `[invalid] run invalidated - ${raceInvalidReason}` : `[invalid] cleared`);
         break;
       case "pb_achieved":
         pushLog(`[pb] ${msg.course}  ${msg.time}`);
@@ -1463,7 +1480,8 @@
                           kart: selKart, kartConf: selKartConf,
                           course: selCourse, courseConf: selCourseConf });
   $: raceStore.set({ curLap, totLap, coins, mushrooms,
-                     splits: raceSplits, finishTime: raceFinishTime, elapsedMs });
+                     splits: raceSplits, finishTime: raceFinishTime, elapsedMs, dnf: raceDnf,
+                     invalidated: raceInvalidated, invalidReason: raceInvalidReason });
   $: tellsStore.set(tells);
   $: roisStore.set(rois);
 

@@ -115,6 +115,22 @@ def emit_race_cleared() -> str:
     return _emit("race_cleared")
 
 
+def emit_race_dnf() -> str:
+    """DNF: the race clock hit the 9:59.999 cap with no finish (a timeout, not a
+    finish). The frontend shows 'DNF' on the card + race rail instead of a null
+    finish time. Emitted once, the instant the cap is reached."""
+    return _emit("race_dnf")
+
+
+def emit_run_invalidated(reason) -> str:
+    """A run was invalidated by an overlay (Photo Mode / GameChat) that interrupted it,
+    or cleared (reason=None) when a fresh run begins. The frontend shows
+    'Run invalidated - <reason>' on the card + race rail and hides the now-stale
+    readouts; reason=None restores the normal display on the next run. The run is still
+    held for review at its end (see emit_run_finalized / the gating), never an auto-PB."""
+    return _emit("run_invalidated", reason=reason)
+
+
 def emit_ghost_import_state(armed: bool, recording: bool) -> str:
     """Ghost-import arm/recording state, so the title-bar button reflects engine
     truth (armed on/off; recording == a ghost is actively being captured)."""

@@ -77,6 +77,18 @@ describe('PresenceHub', () => {
     expect(got.at(-1).player).toMatchObject({ elapsed_ms: null });
   });
 
+  it('passes the dnf (timeout) flag through and stops treating the card as racing', () => {
+    const pace = () => 1234;                                  // a non-null pace == "thinks it is racing"
+    const hub = new PresenceHub(db(), noCompletion, pace, noLaps, () => 2000);
+    const got: any[] = [];
+    hub.addSink((m) => got.push(m));
+    hub.update(1, { screen: 'RACING', course: 'Rainbow Road', final_time: null, dnf: true });
+    expect(got.at(-1).player).toMatchObject({ player_id: 1, dnf: true });
+    expect(got.at(-1).player.pb_delta_ms).toBe(null);         // timed out -> not racing -> no live pace
+    hub.update(2, { screen: 'RACING', course: 'Rainbow Road', final_time: null });
+    expect(got.at(-1).player).toMatchObject({ dnf: false, pb_delta_ms: 1234 });
+  });
+
   it('career stats ride offline + idle-online entries; a racing card drops them', () => {
     const d = db();
     d.exec(`INSERT INTO courses(id,slug,display_name) VALUES(7,'rainbow_road','Rainbow Road');

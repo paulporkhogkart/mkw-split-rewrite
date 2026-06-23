@@ -977,6 +977,15 @@ mod tests {
     }
 
     #[test]
+    fn dnf_uploads_without_a_total_and_is_never_a_pb() {
+        // A 9:59.999 timeout: identity present, no total time. Like a reset, it must
+        // NOT be gated on total_time (no review popup), and it can never be a PB.
+        let dnf = _v(r#"{"course":"X","character":"Mario","kart":"K","status":"dnf"}"#);
+        assert!(missing_fields(&dnf).is_empty());
+        assert!(finished_pb_key(&dnf).is_none());
+    }
+
+    #[test]
     fn resolve_merges_filled_fields_and_releases() {
         let conn = Connection::open_in_memory().unwrap();
         ensure_outbox(&conn);

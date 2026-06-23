@@ -1083,6 +1083,14 @@ def run(args):
         # ── Update all trackers ──────────────────────────────────────────────
         screen, perf  = detector.update(frame)
         eff_screen    = lifecycle.effective_screen(screen)
+        # An invalidated run (Photo Mode / GameChat touched it) is not recorded, and a
+        # timed-out run (DNF) is already settled: present either as non-RACING so every
+        # tracker, the recorder, the finish detector and the DNF check all bail until a
+        # genuinely fresh race start clears the flag. Without this the lap tracker reads
+        # garbage off the post-race screen (a bogus 7/3 lap) and arms a timestamp burst
+        # that spins on the vanished timer.
+        if lifecycle.run_invalidated or lifecycle.timed_out:
+            eff_screen = Screen.UNKNOWN
         selection     = tracker.update(frame, screen, perf.current_score)
 
         _race_complete = ts.total_time is not None
@@ -1118,13 +1126,20 @@ def run(args):
         _on_final_lap = (lap_state.current_lap is not None
                          and lap_state.total_laps
                          and lap_state.current_lap == lap_state.total_laps)
-        finish_just_detected  = (finish.update(frame, eff_screen, bool(_on_final_lap),
-                                               lap_inc=lap_inc,
-                                               estimate_ms=race_elapsed)
-                                 and ts.total_time is None)
+        finish.update(frame, eff_screen, bool(_on_final_lap),
+                      lap_inc=lap_inc, estimate_ms=race_elapsed)
+        # Only a value-validated freeze may CAPTURE a finish time. The bare pixel-still
+        # fallback flags a freeze for UI/DNF (finish.detected) but must not lock a time:
+        # it fires on any static bright screen - the photo-mode pause / "Stop taking
+        # pictures?" dialog - which let a frozen partial time become a false PB on the
+        # final lap. See FinishLatch.capturable + tests/test_timestamp_finish_guard.py.
+        finish_just_detected  = finish.capturable and ts.total_time is None
 
         if finish_just_detected and lap_state.current_lap is not None:
             lapstats.record_lap(lap_state.current_lap, coin_state.coins)
+
+        # ── DNF: race clock hit the 9:59.999 cap without a finish (timeout) ───
+        lifecycle.update_timeout(race_elapsed, eff_screen, finish.detected)
 
         # ── Calibrate on finish detection ────────────────────────────────────
         if finish_just_detected and not minimap._calibrated and screen == Screen.RACING:

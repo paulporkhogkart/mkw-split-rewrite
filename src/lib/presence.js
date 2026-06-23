@@ -153,7 +153,8 @@ export function frame() {
     cur_lap: r.curLap, tot_lap: r.totLap, coins: r.coins, mushrooms: r.mushrooms,
     pos: mm && mm.cx != null ? [mm.cx, mm.cy] : null, final_time: r.finishTime, resets: get(resets),
     track_state: mm ? mm.trackState : null, elapsed_ms: r.elapsedMs ?? null,
-    splits_ms: splits_ms.length ? splits_ms : null,
+    splits_ms: splits_ms.length ? splits_ms : null, dnf: !!r.dnf,
+    invalidated: !!r.invalidated, invalid_reason: r.invalidReason ?? null,
   };
 }
 

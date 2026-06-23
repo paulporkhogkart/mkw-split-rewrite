@@ -7,12 +7,14 @@ import { parseTime } from "./discordFormat.js";
 const SETUP = { CHARACTER_SELECT: "Choosing character…", KART_SELECT: "Choosing kart…", COURSE_SELECT: "Choosing track…",
                 START_TIME_TRIAL: "Starting time trial…",
                 GHOST: "Watching a ghost…", START_REPLAY: "Watching a ghost…", REPLAY_MENU: "Watching a ghost…" };
-const PAUSE_SCREENS = new Set(["RACE_MENU", "HOME"]);
+// Photo mode (+ its exit-confirm dialog) freezes the in-game timer, so it pauses the
+// card exactly like the race menu - hold the frozen readout, show the pause badge.
+const PAUSE_SCREENS = new Set(["RACE_MENU", "HOME", "PHOTO_MODE", "EXIT_PHOTO_MODE"]);
 const RESET_SCREENS = new Set(["RESET", "GHOST_RESET", "UNKNOWN_RESET"]);
 // Screens that sit BETWEEN race contexts (pause menus, reset loaders, mid-race
 // detection blips): the card keeps the last race readout instead of flashing
 // "In the menus". A real menu or the next race drops it.
-const HOLD_SCREENS = new Set(["RACE_MENU", "HOME", "RESET", "GHOST_RESET", "UNKNOWN_RESET", "UNKNOWN_RACE_ACTIVE"]);
+const HOLD_SCREENS = new Set(["RACE_MENU", "HOME", "RESET", "GHOST_RESET", "UNKNOWN_RESET", "UNKNOWN_RACE_ACTIVE", "PHOTO_MODE", "EXIT_PHOTO_MODE"]);
 
 const holds = new Map();   // player_id -> last race display payload
 export function clearHolds() { holds.clear(); }
@@ -106,10 +108,44 @@ export function viewModel(e, now = Date.now, delayed = null, opts = {}) {
       resets: null, pbStr: null, delta: null, finPb: false, badge: null, bar: null,
       stats };
   }
-  const racing = e.screen === "RACING" && !e.final_time;
-  const finished = (e.screen === "RACING" && e.final_time) || e.screen === "POST_TIME_TRIAL";
+  const racing = !e.dnf && e.screen === "RACING" && !e.final_time;
+  const finished = !e.dnf && ((e.screen === "RACING" && e.final_time) || e.screen === "POST_TIME_TRIAL");
+  // A finish that reached the results screen but whose time couldn't be read (a genuine
+  // failed read - NOT an invalidation): show "-", never null/blank, and never a PB. The
+  // yoshi run-review popup is the real "this run wasn't tracked" alert.
+  const untracked = finished && !e.final_time;
   const ident = { name: e.name, color, online: true,
     char: charName(e.character, e.costume), kart: e.kart || null, trk: e.course || null };
+
+  // Invalidated by an overlay (Photo Mode / GameChat): the run is dead and no longer
+  // tracked. Show a red "INVALID" where the time would be (like DNF) and an OFFLINE-style
+  // bar shell whose label carries the cause - no live readouts, never a finish/PB.
+  if (e.invalidated) {
+    holds.delete(e.player_id);
+    const dividers = (Number.isInteger(e.tot_lap) && e.tot_lap >= 2)
+      ? Array.from({ length: e.tot_lap - 1 }, (_, i) => (i + 1) / e.tot_lap) : [];
+    return {
+      state: "invalidated", ...ident,
+      primary: { kind: "time", text: "INVALID" },
+      resets: e.resets ?? 0,
+      pbStr: e.pb_ms != null ? fmtTimeMs(e.pb_ms) : null,
+      delta: null, finPb: false, badge: null,
+      bar: { fill: 0, dividers, calibrating: true, calLabel: e.invalid_reason || "invalid" },
+    };
+  }
+
+  // A timed-out run (the 9:59.999 cap) is terminal but has no finish time: show a red
+  // "DNF" while the flag holds - on any screen, never the racing/finished/null path.
+  if (e.dnf) {
+    holds.delete(e.player_id);
+    return {
+      state: "dnf", ...ident,
+      primary: { kind: "time", text: "DNF" },
+      resets: e.resets ?? 0,
+      pbStr: e.pb_ms != null ? fmtTimeMs(e.pb_ms) : null,
+      delta: null, finPb: false, badge: null, bar: null,
+    };
+  }
 
   if (racing || finished) {
     const state = racing ? "racing" : "finished";
@@ -117,6 +153,7 @@ export function viewModel(e, now = Date.now, delayed = null, opts = {}) {
     // never a dash - the race clock IS zero until GO.
     const primary = racing
       ? { kind: "time", text: fmtTimeMs(Math.round(delayed && delayed.elapsed_ms != null ? delayed.elapsed_ms : 0)) }
+      : untracked ? { kind: "time", text: "-" }
       : { kind: "time", text: e.final_time };
     const clamp01 = (x) => Math.max(0, Math.min(1, x));
     const fill = finished ? (e.completion == null ? 1 : clamp01(e.completion))
@@ -132,7 +169,8 @@ export function viewModel(e, now = Date.now, delayed = null, opts = {}) {
           // instead of "calibrating", which means an online course still building its first model.
           calLabel: e._localSelf ? "offline" : "calibrating" }
       : { fill, dividers: Array.isArray(e.dividers) ? e.dividers : [] };
-    const delta = finished ? pbDelta(e.final_time, e.pb_ms)
+    const delta = untracked ? null
+      : finished ? pbDelta(e.final_time, e.pb_ms)
       : opts.deltaMode === "laps" ? lapDeltaVm(e.lap_delta)
       : liveDelta(delayed ? delayed.pb_delta_ms : null, opts.trend);
     const vm = {
@@ -142,8 +180,8 @@ export function viewModel(e, now = Date.now, delayed = null, opts = {}) {
       delta,
       // Finished colour: green when the final beat the (pre-race) PB; a first-ever
       // finish (no PB to compare) is a PB by definition.
-      finPb: finished && (delta == null || delta.cls.startsWith("ahead")),
-      badge: finished ? "fin" : null,
+      finPb: !untracked && finished && (delta == null || delta.cls.startsWith("ahead")),
+      badge: untracked ? null : finished ? "fin" : null,
       bar,
     };
     // Remember the readout: pause menus + reset loaders keep showing it.

@@ -19,6 +19,9 @@ export interface PresenceFrame {
   track_state?: string | null;
   elapsed_ms?: number | null;
   splits_ms?: number[] | null;   // completed laps' digit-read durations, contiguous from lap 1
+  dnf?: boolean | null;          // timed out at the 9:59.999 cap (terminal, no finish time)
+  invalidated?: boolean | null;  // run killed by an overlay (Photo Mode / GameChat); held for review
+  invalid_reason?: string | null;
 }
 
 /** What the server broadcasts per roster player. */
@@ -28,6 +31,9 @@ export interface PresenceEntry {
   cur_lap: number | null; tot_lap: number | null; coins: number | null; mushrooms: number | null;
   resets: number | null; pb_ms: number | null;
   completion: number | null; dividers: number[]; final_time: string | null; updated_at: number;
+  dnf: boolean;         // timed out at the 9:59.999 cap (card/rail show "DNF", never a PB)
+  invalidated: boolean; // run killed by an overlay (card/rail show "INVALID - <reason>", never a PB)
+  invalid_reason: string | null;
   elapsed_ms: number | null;
   has_model: boolean;   // false -> course has no model yet (bar shows "calibrating")
   pb_delta_ms: number | null;   // live ahead(-)/behind(+) vs own PB at the same completion
@@ -58,7 +64,8 @@ function offlineEntry(player_id: number, name: string, color: string | null, now
                       off_stats: PresenceEntry['off_stats'] = null): PresenceEntry {
   return { player_id, name, color, online: false, screen: null, course: null, character: null, kart: null,
            costume: null, cur_lap: null, tot_lap: null, coins: null, mushrooms: null, resets: null,
-           pb_ms: null, completion: null, dividers: [], final_time: null, updated_at: now, elapsed_ms: null,
+           pb_ms: null, completion: null, dividers: [], final_time: null, updated_at: now, dnf: false,
+           invalidated: false, invalid_reason: null, elapsed_ms: null,
            has_model: false, pb_delta_ms: null, lap_delta: null, lap_deltas: null, pb_laps_ms: null, off_stats };
 }
 
@@ -138,7 +145,8 @@ export class PresenceHub {
     const stale = frame.track_state != null && !FRESH_TRACK.has(frame.track_state);
     const { completion, dividers, model } = this.completion(frame.course, frame.cur_lap, frame.pos, playerId, now, stale, frame.tot_lap);
     // Live PB pace delta only while actually racing (the finished card shows the exact one).
-    const racing = frame.screen === 'RACING' && !frame.final_time;
+    // A timed-out racer (dnf) is terminal, not racing - no live pace.
+    const racing = frame.screen === 'RACING' && !frame.final_time && !frame.dnf && !frame.invalidated;
     const inRaceCtx = frame.screen === 'RACING' || frame.screen === 'POST_TIME_TRIAL';
     const pb_delta_ms = racing ? this.pace(playerId, frame.course, completion, frame.elapsed_ms) : null;
     const pin = this.latchedPb(playerId, cur, frame);
@@ -155,6 +163,8 @@ export class PresenceHub {
       elapsed_ms: frame.elapsed_ms ?? null,
       completion, pb_ms: pin.pb,
       dividers, final_time: frame.final_time ?? null, updated_at: now,
+      dnf: frame.dnf ?? false,
+      invalidated: frame.invalidated ?? false, invalid_reason: frame.invalid_reason ?? null,
       has_model: model, pb_delta_ms,
       lap_delta: li && li.deltas.length ? li.deltas[li.deltas.length - 1] : null,
       lap_deltas: li ? li.deltas : null,

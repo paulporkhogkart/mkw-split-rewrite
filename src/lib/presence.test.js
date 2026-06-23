@@ -17,8 +17,19 @@ describe("presence frame()", () => {
     expect(frame()).toEqual({
       screen: "RACING", course: "Bowsers Castle", character: "Mario", kart: "Std", costume: "Base",
       cur_lap: 2, tot_lap: 3, coins: 7, mushrooms: 1, pos: [12, 34], final_time: null, resets: 4,
-      track_state: "tracking", elapsed_ms: 5000, splits_ms: null,
+      track_state: "tracking", elapsed_ms: 5000, splits_ms: null, dnf: false,
+      invalidated: false, invalid_reason: null,
     });
+  });
+  it("carries the dnf (timeout) flag from the race store", () => {
+    race.set({ curLap: 2, totLap: 3, coins: 7, mushrooms: 1, splits: {}, finishTime: null, elapsedMs: 5000, dnf: true });
+    expect(frame().dnf).toBe(true);
+  });
+  it("carries the invalidated flag + reason from the race store", () => {
+    race.set({ curLap: null, totLap: 3, coins: null, mushrooms: 0, splits: {}, finishTime: null,
+               elapsedMs: null, dnf: false, invalidated: true, invalidReason: "Photo Mode" });
+    expect(frame().invalidated).toBe(true);
+    expect(frame().invalid_reason).toBe("Photo Mode");
   });
   it("sends the completed laps' durations as a contiguous ms prefix", () => {
     race.set({ curLap: 3, totLap: 3, coins: 0, mushrooms: 0, finishTime: null, elapsedMs: 110000,

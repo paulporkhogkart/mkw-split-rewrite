@@ -190,6 +190,9 @@
     </header>
 
     <div class="rv-body">
+      {#if run.invalid_reason}
+        <div class="rv-invalid">This run was invalidated ({run.invalid_reason}) and wasn't tracked - Discard it, or fill it in if you know the result.</div>
+      {/if}
       <!-- Identity — required on every run, finished or reset -->
       <label class="rv-row" class:rv-miss={missCourse}>
         <span class="rv-label">Course{#if missCourse}<i class="rv-flag" aria-label="missing">!</i>{/if}</span>
@@ -322,6 +325,11 @@
   .rv-body {
     padding: .6rem .85rem; overflow-y: auto;
     display: flex; flex-direction: column; gap: .34rem;
+  }
+  .rv-invalid {
+    background: rgba(255, 68, 56, .10); border: 1px solid rgba(255, 68, 56, .45);
+    color: #f3b8b3; border-radius: 6px; padding: 8px 11px;
+    font-size: 12px; line-height: 1.45;
   }
   .rv-row {
     display: grid; grid-template-columns: 78px 1fr; align-items: center; gap: .55rem;

@@ -62,4 +62,8 @@ describe("buildSelfEntry", () => {
     expect(buildSelfEntry({ ...state, minimap: null }).pos).toBeNull();
     expect(buildSelfEntry({ ...state, minimap: { cx: null, cy: null } }).pos).toBeNull();
   });
+  it("carries the dnf (timeout) flag so our own card shows DNF offline", () => {
+    expect(buildSelfEntry(state).dnf).toBe(false);
+    expect(buildSelfEntry({ ...state, race: { ...state.race, dnf: true } }).dnf).toBe(true);
+  });
 });

@@ -14,7 +14,25 @@ from ..database.replay_repo import get_minimap_roi, get_minimap_seed, get_minima
 from .ghost import GhostImport
 
 
+# Pause: resumable. The run continues where it left off when RACING returns.
 _PAUSE_SCREENS = {Screen.RACE_MENU, Screen.HOME}
+
+# Invalidate: terminal for the current run. Entering one of these while a run is in
+# progress (active OR paused) kills it - the run can NEVER re-validate; only a genuinely
+# fresh race start begins a new, valid run. Photo mode / GameChat / the Album photo viewer
+# freeze, suspend, or interrupt the in-game timer, so any run they touch is void.
+_INVALIDATE_SCREENS = {Screen.PHOTO_MODE, Screen.EXIT_PHOTO_MODE, Screen.GAMECHAT,
+                       Screen.GALLERY_VIEW}
+
+# The only screens a genuine new race begins from. While invalidated, RACING is re-entered
+# as a FRESH run only from one of these - the airtight guard against re-validation (e.g.
+# bouncing through Gallery/Home back to RACING must NOT restart an invalidated run).
+_RACE_START_SCREENS = {Screen.START_TIME_TRIAL, Screen.RESET,
+                       Screen.GHOST_RESET, Screen.UNKNOWN_RESET}
+
+# Human-readable invalidation reason shown on the rail / card.
+_INVALID_LABELS = {Screen.PHOTO_MODE: "Photo Mode", Screen.EXIT_PHOTO_MODE: "Photo Mode",
+                   Screen.GAMECHAT: "GameChat", Screen.GALLERY_VIEW: "Gallery"}
 
 
 class RaceLifecycle:
@@ -24,6 +42,13 @@ class RaceLifecycle:
     Attach to a ScreenDetector via:
         detector.on_screen_change = lifecycle.on_screen_change
     """
+
+    # DNF / 9:59.999 timeout: the in-game clock hard-caps at 9:59.999, so the race
+    # clock reaching it (with no finish latched) means the player timed out rather
+    # than finished. 9:59.900 leaves slack below the true cap; only a timeout gets
+    # there. The RaceTimer is wall-clock-carried, so it reaches the cap even when the
+    # near-cap digits are unreadable, and keeps climbing once the timer vanishes.
+    DNF_TIMEOUT_MS = 599_900
 
     def __init__(
         self,
@@ -66,6 +91,17 @@ class RaceLifecycle:
         # re-emit. Reset on each new race / state clear.
         self._finalized = False
 
+        # Set when the race clock hits the 9:59.999 cap (see update_timeout): the run
+        # finalizes as a DNF rather than a null-time "finished". Reset per race.
+        self._timed_out = False
+
+        # Set when an invalidating overlay (Photo Mode / GameChat) touches an in-progress
+        # run. The run is terminal-dead: no tracking, no PB, held for review at its end -
+        # and it can NEVER re-validate. Cleared only by a genuinely fresh _start_race.
+        # _invalid_reason is the human-readable cause shown on the rail / card.
+        self._invalidated = False
+        self._invalid_reason: Optional[str] = None
+
         # The most recent full frame (set externally each loop iteration)
         self.current_frame = None
 
@@ -82,23 +118,33 @@ class RaceLifecycle:
             self._ipc.emit(emit_screen_change(old.name, new.name))
 
         # ── Signal lost: app-restart-style teardown ─────────────────────────
-        # Discard any active run WITHOUT finalizing (no run_finalized -> not
-        # queued for review), clear selections, and drop any ghost capture.
-        # Early return so none of the finalize paths below can run.
+        # Discard any active run WITHOUT finalizing (no run_finalized -> not queued for
+        # review), clear selections + any invalidation, and drop any ghost capture.
         if new == Screen.NO_SIGNAL:
             self._paused_from_racing = False
             self._resuming_race      = False
             if self._ghost.armed or self._ghost.recording:
                 self._ghost.disarm()
                 self._emit_ghost_state()
+            self._clear_invalidation()
             self._clear_race_state()
             self._selection.reset()
+            return
+
+        # ── Invalidate: an overlay (Photo Mode / GameChat) touched an in-progress run ──
+        # Terminal: the run is dead and can NEVER re-validate (only a fresh race start
+        # begins a new one). Fire once, only while a run is actually in progress.
+        if (new in _INVALIDATE_SCREENS and not self._invalidated
+                and self._run_in_progress(old)):
+            self._invalidate(new)
             return
 
         # ── From RACING ─────────────────────────────────────────────────────
         if old == Screen.RACING:
             if new in _PAUSE_SCREENS:
                 self._pause()
+            elif new in _INVALIDATE_SCREENS:
+                pass  # an already-invalidated run re-entering an overlay - not an end
             else:
                 self._paused_from_racing = False
                 self._resuming_race      = False
@@ -111,7 +157,7 @@ class RaceLifecycle:
             if new == Screen.RACING:
                 self._resume()
             elif new in _PAUSE_SCREENS:
-                pass  # HOME ↔ RACE_MENU - still paused, do nothing
+                pass  # HOME <-> RACE_MENU - still paused, do nothing
             else:
                 # Left the pause loop to a non-racing screen - race is over
                 self._paused_from_racing = False
@@ -119,12 +165,15 @@ class RaceLifecycle:
                 self._finalize_recording(completed=False)
                 self._clear_race_state()
 
-        # ── Entering RACING fresh (not a resume) ────────────────────────────
+        # ── Entering RACING ─────────────────────────────────────────────────
         if new == Screen.RACING and old != Screen.RACING:
             if self._resuming_race:
-                self._resuming_race = False   # consumed
+                self._resuming_race = False                  # resume from a pause
+            elif self._invalidated and old not in _RACE_START_SCREENS:
+                pass  # an invalidated run continuing: re-entering RACING from anywhere
+                      # but a genuine restart (RESET / Start TT) never re-validates it
             else:
-                self._start_race(old)
+                self._start_race(old)   # genuine fresh start (clears any invalidation)
 
         # ── Arriving at POST_TIME_TRIAL from anywhere but RACING ────────────
         if new == Screen.POST_TIME_TRIAL and old != Screen.RACING:
@@ -155,6 +204,20 @@ class RaceLifecycle:
     @property
     def ghost_recording(self) -> bool:
         return self._ghost.recording
+
+    @property
+    def run_invalidated(self) -> bool:
+        """True while the current run is invalidated (Photo Mode / GameChat touched it):
+        the main loop treats RACING as non-RACING so all trackers/recorder bail until a
+        genuinely fresh race start clears it."""
+        return self._invalidated
+
+    @property
+    def timed_out(self) -> bool:
+        """True once the race clock hit the 9:59.999 cap (DNF). Like run_invalidated,
+        the main loop then treats RACING as non-RACING so the lap/timestamp trackers
+        bail instead of reading garbage off the post-race screen until the next race."""
+        return self._timed_out
 
     def arm_ghost(self) -> None:
         self._ghost.arm()
@@ -199,6 +262,51 @@ class RaceLifecycle:
         self._paused_from_racing = False
         print("  [Race] Resumed")
 
+    def _run_in_progress(self, old: Screen) -> bool:
+        """A race is in progress (active or paused) - i.e. there is something to
+        invalidate. _race_started_at is set from _start_race until _clear_race_state."""
+        return (self._race_started_at is not None or old == Screen.RACING
+                or self._paused_from_racing)
+
+    def _invalidate(self, screen: Screen):
+        """Mark the current run invalidated by `screen` (Photo Mode / GameChat / Gallery). The
+        run is dead: stop recording, drop the live readouts, and tell the UI - but the run
+        keeps running in-game (untracked) and is HELD for review at its end. Sticky until
+        a genuinely fresh _start_race; it can never re-validate."""
+        # A ghost IMPORT interrupted by an overlay isn't the user's live run: treat it exactly
+        # like a normal ghost abort (GHOST -> elsewhere) - drop the partial capture and stay
+        # ARMED for a clean re-watch, with NO "run invalidated" message. validate() already
+        # rejects a resumed mid-replay (advanced clock -> ARMED), so only a genuinely fresh
+        # re-watch imports.
+        if self._ghost.recording:
+            self._ghost.on_ghost_leave()      # RECORDING -> ARMED (re-arm, like a normal abort)
+            self._mm_rec.stop()
+            self._clear_race_state()          # discard the partial capture
+            self._emit_ghost_state()
+            return
+        self._invalidated    = True
+        self._invalid_reason = _INVALID_LABELS.get(screen, screen.name)
+        if self._ghost.armed:                 # a still-pending arm during a real run - cancel it
+            self._ghost.disarm()
+            self._emit_ghost_state()
+        self._mm_rec.stop()
+        self._clear_race_state()          # blanks the live readouts (emits race_cleared)
+        if self._ipc is not None:
+            from ..ipc.protocol import emit_run_invalidated
+            self._ipc.emit(emit_run_invalidated(self._invalid_reason))
+        print(f"  [Race] INVALIDATED by {self._invalid_reason}")
+
+    def _clear_invalidation(self):
+        """Drop the invalidated state (on a fresh run or a full teardown) and tell the UI
+        to restore the normal display."""
+        if not self._invalidated:
+            return
+        self._invalidated    = False
+        self._invalid_reason = None
+        if self._ipc is not None:
+            from ..ipc.protocol import emit_run_invalidated
+            self._ipc.emit(emit_run_invalidated(None))
+
     def _clear_race_state(self):
         self._laps.reset()
         self._coins.reset()
@@ -211,11 +319,32 @@ class RaceLifecycle:
         if self._timer is not None:
             self._timer.reset()
         self._race_started_at = None
-        self._finalized = False
+        # An invalidated run is held for review exactly ONCE: keep _finalized set across
+        # the clears it triggers (the invalidate clear, then its end-of-run finalize), so
+        # it can't emit a duplicate held run. A fresh _start_race resets it.
+        if not self._invalidated:
+            self._finalized = False
+        self._timed_out = False
         if self._ipc is not None:
             from ..ipc.protocol import emit_race_cleared
             self._ipc.emit(emit_race_cleared())
         print("  [reset] Race stats cleared")
+
+    def update_timeout(self, race_elapsed, screen, finish_detected):
+        """Flag a DNF the moment the race clock reaches the 9:59.999 cap while still
+        RACING with no finish detected. Called once per frame from the main loop.
+
+        Guarded three ways so it can only mean a timeout: the clock must be at the cap
+        (a respawn / mid-race lull sits far below it), the screen must still be RACING
+        (a fade-to-black drops to UNKNOWN), and no finish may be latched (a real slow
+        finish freezes the timer and latches a sub-cap value instead)."""
+        if (race_elapsed is not None and race_elapsed >= self.DNF_TIMEOUT_MS
+                and screen == Screen.RACING and not finish_detected
+                and not self._timed_out and not self._invalidated):
+            self._timed_out = True
+            if self._ipc is not None:
+                from ..ipc.protocol import emit_race_dnf
+                self._ipc.emit(emit_race_dnf())
 
     def finalize_on_finish(self):
         """Emit + save the finished run the instant the final time locks (called from
@@ -231,8 +360,21 @@ class RaceLifecycle:
 
         Idempotent within a race: a no-op if already finalized (the finished run is
         emitted at the finish-lock, then the screen change would otherwise re-run this).
+
+        An INVALIDATED attempt that FINISHED the full race (completed) is still held for
+        review: NO total time + status "finished" + an invalid_reason (see below), so the
+        app HOLDS it (the user is alerted + discards) rather than auto-uploading a PB. But an
+        invalidated run that ends by RESETTING (completed=False) is SILENTLY DISCARDED - there
+        is no finish to review, so it emits nothing (no sound/popup).
         """
         if self._finalized:
+            return
+        # Invalidated + did not finish (reset / abandoned) -> drop it silently: no
+        # run_finalized, so the app never holds it and the user isn't bothered with the
+        # review sound + popup. Mark finalized so a later finalize can't re-fire.
+        if self._invalidated and not completed:
+            self._finalized = True
+            print("  [Race] Invalidated run reset before finishing - discarded")
             return
         is_ghost  = self._ghost.recording
         sel       = self._selection.state
@@ -243,10 +385,24 @@ class RaceLifecycle:
         costume   = None if is_ghost else sel.costume
 
         best_total_time: Optional[str] = None
-        if completed:
+        if completed and not self._invalidated:
             # Total time comes from the TimestampTracker; FinishStillDetector only
-            # flags that the timer froze (it carries no time of its own).
+            # flags that the timer froze (it carries no time of its own). An invalidated
+            # run keeps total_time empty (even if the tracker still holds one) so it is
+            # HELD for review and can never be auto-uploaded as a PB.
             best_total_time = self._ts.total_time
+
+        # A FINISHED invalidated run is HELD: status "finished" + no total time makes the
+        # gating hold it for review (the modal shows the invalid_reason). Reset-before-finish
+        # was already discarded above. A timeout cap with no finish is a DNF.
+        if self._invalidated:
+            status = "finished"
+        elif self._timed_out and best_total_time is None:
+            status = "dnf"
+        elif completed:
+            status = "finished"
+        else:
+            status = "reset"
 
         if completed and best_total_time and not is_ghost and not self._minimap._calibrated:
             new_threshold = self._minimap.calibrate_from_race()
@@ -280,7 +436,8 @@ class RaceLifecycle:
                 "attempt_id": uuid.uuid4().hex,
                 "course":     course,
                 "source":     "ghost" if is_ghost else None,
-                "status":     "finished" if completed else "reset",
+                "status":     status,
+                "invalid_reason": self._invalid_reason if self._invalidated else None,
                 "character":  character,
                 "kart":       None if is_ghost else sel.kart,
                 "costume":    costume,
@@ -304,6 +461,8 @@ class RaceLifecycle:
         from datetime import datetime, timezone
         self._race_started_at = datetime.now(timezone.utc).isoformat()
         self._finalized = False
+        self._timed_out = False
+        self._clear_invalidation()   # a genuinely fresh run restores normal tracking + UI
 
         sel       = self._selection.state
         course    = sel.course

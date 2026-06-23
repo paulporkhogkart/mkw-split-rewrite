@@ -179,6 +179,72 @@ def test_race_end_emits_race_cleared_after_run_finalized():
     assert "race_cleared" in [l["type"] for l in ipc2.lines]
 
 
+def test_update_timeout_flags_only_at_cap_during_racing_without_finish():
+    lc = _lifecycle(_FakeIpc(), total_time=None, splits={})
+    lc.update_timeout(None,     Screen.RACING,  False); assert not lc._timed_out   # no clock yet
+    lc.update_timeout(240_000,  Screen.RACING,  False); assert not lc._timed_out   # mid-race
+    lc.update_timeout(599_899,  Screen.RACING,  False); assert not lc._timed_out   # a hair under cap
+    lc.update_timeout(600_000,  Screen.UNKNOWN, False); assert not lc._timed_out   # at cap but off-RACING (faded)
+    lc.update_timeout(600_000,  Screen.RACING,  True);  assert not lc._timed_out   # real finish latched at cap
+    lc.update_timeout(599_900,  Screen.RACING,  False); assert lc._timed_out       # 9:59.900 reached while racing
+
+
+def test_respawn_fade_does_not_flag_dnf():
+    # aiden.mp4 regression: a mid-race respawn at ~0:46 with a fade-to-black (screen
+    # leaves RACING + reads gap) must never flag a DNF - far below the cap and guarded.
+    lc = _lifecycle(_FakeIpc(), total_time=None, splits={})
+    for elapsed, screen in [
+        (44_000, Screen.RACING), (45_000, Screen.RACING),
+        (46_000, Screen.UNKNOWN), (46_500, Screen.UNKNOWN),
+        (47_000, Screen.RACING), (48_000, Screen.RACING),
+    ]:
+        lc.update_timeout(elapsed, screen, finish_detected=False)
+    assert not lc._timed_out
+
+
+def test_timeout_finalizes_as_dnf():
+    ipc = _FakeIpc()
+    lc = _lifecycle(ipc, total_time=None, splits={1: "0:41.000"})   # one lap done, then timed out
+    lc.update_timeout(600_000, Screen.RACING, finish_detected=False)
+    lc.on_screen_change(Screen.RACING, Screen.POST_TIME_TRIAL)
+    evt = _run_finalized(ipc)
+    assert evt["status"] == "dnf"
+    assert evt["total_time"] is None
+    assert evt["course"] == "Rainbow Road"      # identity still recorded
+    assert evt["character"] == "Mario"
+    assert evt["laps"] == [                      # the completed lap survives
+        {"lap": 1, "time_ms": 41000, "time_str": "0:41.000", "coins": 5, "shrooms": 2},
+    ]
+
+
+def test_timed_out_clears_on_race_state_reset():
+    lc = _lifecycle(_FakeIpc(), total_time=None, splits={})
+    lc.update_timeout(600_000, Screen.RACING, False)
+    assert lc._timed_out
+    lc._clear_race_state()
+    assert not lc._timed_out
+
+
+def test_timed_out_property_mirrors_the_flag():
+    # The main loop reads this to remap eff_screen->UNKNOWN after a DNF, so the lap/
+    # timestamp trackers bail instead of reading garbage (the bogus 7/3 lap + a burst
+    # that spins on the vanished timer) off the post-race screen.
+    lc = _lifecycle(_FakeIpc(), total_time=None, splits={})
+    assert lc.timed_out is False
+    lc.update_timeout(600_000, Screen.RACING, False)
+    assert lc.timed_out is True
+
+
+def test_timeout_emits_race_dnf_once():
+    # The frontend lights up "DNF" the instant the clock hits the cap; the emit must
+    # fire once (on the False->True edge), not every frame while past the cap.
+    ipc = _FakeIpc()
+    lc = _lifecycle(ipc, total_time=None, splits={})
+    lc.update_timeout(600_000, Screen.RACING, False)
+    lc.update_timeout(601_000, Screen.RACING, False)
+    assert [l["type"] for l in ipc.lines].count("race_dnf") == 1
+
+
 def test_reset_with_unknown_identity_still_emits_for_review():
     # The whole point of run-review is to CATCH incomplete runs - including a reset
     # where the engine detected nothing (no course/character/kart). The emit must NOT

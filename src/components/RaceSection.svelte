@@ -25,43 +25,51 @@
 </script>
 
 {#if $race}
-  {@const laps = lapList($race)}
-  {@const splits = $race.splits ?? {}}
-
-  {#each laps as n}
-    {@const splitStr = fmtSplit(splits[n])}
-    {@const isActive = n === $race.curLap}
-    {@const hasValue = splits[n] != null && splits[n] !== ""}
-    {@const d = lapDs ? lapDeltaVm(lapDs[n - 1], "segment") : null}
-    <div class="row">
-      <span class="lbl" class:lbl-dim={!hasValue && !isActive}>Lap {n}</span>
-      <span class="pbv">{pbLaps && pbLaps[n - 1] != null ? fmtTimeMs(pbLaps[n - 1]) : ""}</span>
-      <span class="dlt {d ? d.cls : ''}">{d ? d.text : ""}</span>
-      <span
-        class="val"
-        class:val-dim={!hasValue && !isActive}
-      >{splitStr}</span>
+  {#if $race.invalidated}
+    <!-- The run was killed by an overlay (Photo Mode / GameChat): its readouts are no
+         longer tracked, so show only the cause until the next run restores them. -->
+    <div class="row row-invalid">
+      <span class="invalid-msg">Run invalidated{$race.invalidReason ? ` - ${$race.invalidReason}` : ""}</span>
     </div>
-  {/each}
+  {:else}
+    {@const laps = lapList($race)}
+    {@const splits = $race.splits ?? {}}
 
-  <div class="row row-total">
-    <span class="lbl-total">Total</span>
-    <span class="pbv">{pbTotalMs != null ? fmtTimeMs(pbTotalMs) : ""}</span>
-    <span class="dlt {totalDelta ? totalDelta.cls : ''}">{totalDelta ? totalDelta.text : ""}</span>
-    <span class="val">{$race.finishTime ?? "-"}</span>
-  </div>
+    {#each laps as n}
+      {@const splitStr = fmtSplit(splits[n])}
+      {@const isActive = n === $race.curLap}
+      {@const hasValue = splits[n] != null && splits[n] !== ""}
+      {@const d = lapDs ? lapDeltaVm(lapDs[n - 1], "segment") : null}
+      <div class="row">
+        <span class="lbl" class:lbl-dim={!hasValue && !isActive}>Lap {n}</span>
+        <span class="pbv">{pbLaps && pbLaps[n - 1] != null ? fmtTimeMs(pbLaps[n - 1]) : ""}</span>
+        <span class="dlt {d ? d.cls : ''}">{d ? d.text : ""}</span>
+        <span
+          class="val"
+          class:val-dim={!hasValue && !isActive}
+        >{splitStr}</span>
+      </div>
+    {/each}
 
-  <div class="row">
-    <span class="lbl">Coins</span>
-    <span class="pbv"></span><span class="dlt"></span>
-    <span class="val">{$race.coins ?? "-"}</span>
-  </div>
+    <div class="row row-total">
+      <span class="lbl-total">Total</span>
+      <span class="pbv">{$race.dnf ? "" : (pbTotalMs != null ? fmtTimeMs(pbTotalMs) : "")}</span>
+      <span class="dlt {totalDelta ? totalDelta.cls : ''}">{$race.dnf ? "" : (totalDelta ? totalDelta.text : "")}</span>
+      <span class="val" class:dnf={$race.dnf}>{$race.dnf ? "DNF" : ($race.finishTime ?? "-")}</span>
+    </div>
 
-  <div class="row">
-    <span class="lbl">Mushrooms</span>
-    <span class="pbv"></span><span class="dlt"></span>
-    <span class="val">{$race.mushrooms != null ? `×${$race.mushrooms}` : "-"}</span>
-  </div>
+    <div class="row">
+      <span class="lbl">Coins</span>
+      <span class="pbv"></span><span class="dlt"></span>
+      <span class="val">{$race.coins ?? "-"}</span>
+    </div>
+
+    <div class="row">
+      <span class="lbl">Mushrooms</span>
+      <span class="pbv"></span><span class="dlt"></span>
+      <span class="val">{$race.mushrooms != null ? `×${$race.mushrooms}` : "-"}</span>
+    </div>
+  {/if}
 {/if}
 
 <style>
@@ -111,10 +119,18 @@
     color: var(--tx-dim);
   }
 
+  .val.dnf {
+    color: var(--ls-behind);
+    font-weight: 600;
+  }
+
   .row-total {
     font-weight: 600;
     border-top: 1px solid var(--bd-soft);
   }
+
+  .row-invalid { justify-items: start; padding: 9px 12px; }
+  .invalid-msg { color: var(--ls-behind); font-weight: 600; font-size: 12.5px; }
 
   .lbl-total {
     color: var(--tx);
