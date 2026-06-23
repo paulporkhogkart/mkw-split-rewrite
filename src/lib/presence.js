@@ -2,7 +2,7 @@
 // feeds the broadcast into the `presence` store. Mirrors discord.js (store-driven push) +
 // the bot's ws.ts (reconnect). Presence is ephemeral - a dropped frame self-corrects.
 import { get } from "svelte/store";
-import { screen, selection, race, minimap, presence, myPlayerId, serverConnection, pbSplits, pbTotalMs } from "./stores.js";
+import { screen, selection, race, minimap, presence, myPlayerId, serverConnection, pbSplits, pbTotalMs, appVersion } from "./stores.js";
 import { resets } from "./resets.js";
 import { roster, playerColor } from "./trailSettings.js";
 import { buildSelfEntry } from "./localSelf.js";
@@ -155,6 +155,7 @@ export function frame() {
     track_state: mm ? mm.trackState : null, elapsed_ms: r.elapsedMs ?? null,
     splits_ms: splits_ms.length ? splits_ms : null, dnf: !!r.dnf,
     invalidated: !!r.invalidated, invalid_reason: r.invalidReason ?? null,
+    app_version: get(appVersion) || null,
   };
 }
 

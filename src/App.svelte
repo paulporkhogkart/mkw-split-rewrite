@@ -7,6 +7,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { t } from "./translations.js";
+  import { appVersion } from "./lib/stores.js";
   import { C } from "./lib/palette.js";
   import { send } from "./lib/ipc.js";
   import { screenLabel } from "./lib/format.js";
@@ -1346,6 +1347,7 @@
   onMount(async () => {
     appWindow=getCurrentWindow();
     version=await getVersion();
+    appVersion.set(version);   // expose to the presence frame so the server records our last-ran build
     pushLog(`[app] v${version} starting… ${_elapsed()}`);
     await invoke("start_tracker");
     pushLog(`[app] tracker spawn requested ${_elapsed()}`);

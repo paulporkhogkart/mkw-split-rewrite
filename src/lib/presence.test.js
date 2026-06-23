@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { screen, selection, race, minimap, presence, serverConnection, myPlayerId, pbSplits, pbTotalMs } from "./stores.js";
+import { screen, selection, race, minimap, presence, serverConnection, myPlayerId, pbSplits, pbTotalMs, appVersion } from "./stores.js";
 import { resets } from "./resets.js";
 import { serverUrl, authToken } from "./syncSettings.js";
 import { frame, wsUrl, writeSnapshot, readSnapshot, hydratePresence, markServerConnected, markServerDisconnected, handlePresenceMessage, pushLocalSelf } from "./presence.js";
@@ -18,8 +18,14 @@ describe("presence frame()", () => {
       screen: "RACING", course: "Bowsers Castle", character: "Mario", kart: "Std", costume: "Base",
       cur_lap: 2, tot_lap: 3, coins: 7, mushrooms: 1, pos: [12, 34], final_time: null, resets: 4,
       track_state: "tracking", elapsed_ms: 5000, splits_ms: null, dnf: false,
-      invalidated: false, invalid_reason: null,
+      invalidated: false, invalid_reason: null, app_version: null,
     });
+  });
+  it("carries the app version from the appVersion store", () => {
+    appVersion.set("2.1.0");
+    expect(frame().app_version).toBe("2.1.0");
+    appVersion.set("");
+    expect(frame().app_version).toBeNull();
   });
   it("carries the dnf (timeout) flag from the race store", () => {
     race.set({ curLap: 2, totLap: 3, coins: 7, mushrooms: 1, splits: {}, finishTime: null, elapsedMs: 5000, dnf: true });
