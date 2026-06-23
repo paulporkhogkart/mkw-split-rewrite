@@ -66,7 +66,7 @@ async function fetchJson(url: string, headers: Record<string, string>, fetchImpl
 export function makeLatestFetcher(opts: {
   ttlMs?: number; now?: () => number; fetchImpl?: typeof fetch; repo?: string | null; manifest?: string | null;
 } = {}): LatestFn {
-  const ttl = opts.ttlMs ?? Number(process.env.MKW_VERSION_CACHE_MS ?? 600000);
+  const ttl = opts.ttlMs ?? (Number(process.env.MKW_VERSION_CACHE_MS) || 600000);
   const now = opts.now ?? Date.now;
   const fetchImpl = opts.fetchImpl ?? fetch;
   const resolved = (opts.repo !== undefined || opts.manifest !== undefined)
@@ -84,6 +84,7 @@ export function makeLatestFetcher(opts: {
         const headers: Record<string, string> = { Accept: 'application/vnd.github+json', 'User-Agent': 'mkw-version' };
         if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
         const tags = await fetchJson(`https://api.github.com/repos/${resolved.repo}/tags?per_page=100`, headers, fetchImpl);
+        if (!Array.isArray(tags)) throw new Error('unexpected tags response');
         const picked = pickLatestTag((tags as { name: string }[]).map((t) => t.name));
         if (picked) tag = picked;
       } catch (e) { errors.push(`tags: ${(e as Error).message}`); }

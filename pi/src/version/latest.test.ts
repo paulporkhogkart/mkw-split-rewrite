@@ -59,4 +59,25 @@ describe('makeLatestFetcher', () => {
     expect(r.tag).toBeNull();
     expect(r.errors.some((e) => e.startsWith('tags:'))).toBe(true);
   });
+
+  it('retains the last-good tag across TTL expiry when the source later fails', async () => {
+    let tagsFail = false;
+    const fetchImpl = (async (url: string) => {
+      if (url.includes('/tags')) {
+        if (tagsFail) return { ok: false, status: 503 };
+        return { ok: true, json: async () => [{ name: 'v2.10.0' }] };
+      }
+      return { ok: true, json: async () => ({ version: '2.1.0' }) };
+    }) as unknown as typeof fetch;
+    let t = 1000;
+    const getLatest = makeLatestFetcher({ fetchImpl, now: () => t, repo: 'o/r', manifest: 'https://x/latest.json', ttlMs: 500 });
+    const primed = await getLatest();        // prime cache with a good tag+app
+    expect(primed.tag).toBe('2.10.0');
+    tagsFail = true;                          // now only the tags fetch fails
+    t = 2000;                                 // past TTL -> refetch
+    const r = await getLatest();
+    expect(r.tag).toBe('2.10.0');             // last-good retained
+    expect(r.app).toBe('2.1.0');
+    expect(r.errors.some((e) => e.startsWith('tags:'))).toBe(true);
+  });
 });
