@@ -2,11 +2,13 @@
 fixtures from the two reference captures in temp/.
 
 Outputs (all 1080p space):
-  images/screens/nosignal_elgato.png        grayscale crop at the Elgato preset ROI
-  images/screens/nosignal_ugreen.png        grayscale crop at the UGREEN preset ROI
+  images/nosignal/nosignal_elgato.png       grayscale crop at the Elgato preset ROI
+  images/nosignal/nosignal_ugreen.png       grayscale crop at the UGREEN preset ROI
+  images/nosignal/nosignal_obs.png          grayscale crop at the OBS preset ROI
   screenshots/en_uk/nosignal.png            full Elgato frame (edit-graph node)
   tests/fixtures/nosignal_elgato_frame.png  full Elgato frame
   tests/fixtures/nosignal_ugreen_frame.png  full UGREEN frame (downscaled 1440->1080)
+  tests/fixtures/nosignal_obs_frame.png     full OBS frame
 
 The crop ROIs are read from NO_SIGNAL_PRESETS (single source of truth).  Each
 crop is asserted to contain bright text; if the gate fails, adjust the ROI in
@@ -23,6 +25,7 @@ from mkw_tracker.detection.screen import NO_SIGNAL_PRESETS   # noqa: E402
 REFS = {
     "elgato": os.path.join(ROOT, "temp", "nosignal.png"),
     "ugreen": os.path.join(ROOT, "temp", "nosignal2.png"),
+    "obs": os.path.join(ROOT, "temp", "obs_no_sig.png"),
 }
 
 

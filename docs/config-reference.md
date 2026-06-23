@@ -18,7 +18,7 @@ legacy `tell_roi_*` / `tell_thresh_*` / `tell_alt_*` / `tell_req_also_*` /
 
 ### NO_SIGNAL template (auto-selected, no stored key)
 The NO_SIGNAL screen's template is chosen automatically from the `camera_device`
-name (`elgato`/`ugreen` substring; no match -> Elgato default). There is no stored
+name (`elgato`/`ugreen`/`obs virtual` substring; no match -> Elgato default). There is no stored
 preset key: "manual" mode is simply the presence of a `tell_tree_NO_SIGNAL`
 override (written by editing the NO_SIGNAL node in Edit Screens). "Revert to auto"
 deletes that override.

@@ -29,6 +29,14 @@ def test_apply_auto_picks_preset_from_device(memdb):
     assert _modes(ipc)[-1] == {"type": "nosignal_mode", "auto": True, "brand": "ugreen"}
 
 
+def test_apply_auto_picks_obs_from_device(memdb):
+    d = ScreenDetector(); ipc = _Ipc()
+    _apply_nosignal_auto(_Settings("OBS Virtual Camera"), d, ipc)
+    region = d._tells_by_screen[Screen.NO_SIGNAL].groups[0][0]
+    assert region.roi == NO_SIGNAL_PRESETS["obs"]["roi"]
+    assert _modes(ipc)[-1] == {"type": "nosignal_mode", "auto": True, "brand": "obs"}
+
+
 def test_apply_auto_unknown_device_keeps_elgato_default(memdb):
     d = ScreenDetector(); ipc = _Ipc()
     _apply_nosignal_auto(_Settings("Random USB Cam"), d, ipc)

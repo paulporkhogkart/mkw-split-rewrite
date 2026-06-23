@@ -76,3 +76,22 @@ def test_combo_exposes_detected_and_reset():
     assert c.detected and c.final_ms == 10_000
     c.reset()
     assert not c.detected and c.final_ms is None
+
+
+def test_bare_stillness_is_not_capturable():
+    """Photo-mode exploit: the pixel-still fallback fires on any static bright screen
+    (both MAJOR clips: still=True, value=False). It may flag a freeze for UI/DNF, but a
+    finish TIME must never be captured from bare stillness - only a value-validated
+    freeze is capturable."""
+    c = FinishLatch(templates={})
+    c.still.detected = True                      # static photo-mode screen
+    assert c.detected                            # UI/DNF still see a freeze
+    assert not c.capturable                      # but no time may be captured
+
+
+def test_value_latch_is_capturable():
+    c = FinishLatch(templates={})
+    c.value.feed(50_000, lap_inc=False, estimate_ms=50_000)
+    c.value.feed(50_000, lap_inc=False, estimate_ms=50_050)
+    c.value.feed(50_000, lap_inc=False, estimate_ms=50_100)
+    assert c.value.detected and c.capturable

@@ -91,7 +91,7 @@ def test_serialize_get_tells_config_round_trip():
     assert racing["groups"][0][0]["kind"] == "template"
     assert "aliases" in racing                        # GHOST, UNKNOWN_RACE_ACTIVE
     home = cfg["HOME"]
-    assert len(home["groups"]) == 1 and len(home["groups"][0]) == 2  # OR
+    assert len(home["groups"]) == 1 and len(home["groups"][0]) == 4  # OR: home, home2, +white variants
 
 
 def test_add_and_remove_group_propagates_to_aliases():
@@ -110,7 +110,7 @@ def test_add_region_adds_or_alternative():
     d = ScreenDetector()
     d.add_region("HOME", group=0, roi=[1, 2, 3, 4])
     home = next(e for e in d.get_tells_config() if e["screen"] == "HOME")
-    assert len(home["groups"][0]) == 3
+    assert len(home["groups"][0]) == 5   # home, home2, 2 white variants + the added one
 
 
 def test_update_region_sets_roi_and_thresh():

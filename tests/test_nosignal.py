@@ -23,7 +23,7 @@ def test_no_signal_enum_and_graph_node_exist():
 
 
 def test_presets_are_well_formed():
-    for key in ("elgato", "ugreen"):
+    for key in ("elgato", "ugreen", "obs"):
         p = NO_SIGNAL_PRESETS[key]
         assert p["image_path"].endswith(f"nosignal_{key}.png")
         assert len(p["roi"]) == 4 and p["roi"][2] > p["roi"][0] and p["roi"][3] > p["roi"][1]
@@ -32,7 +32,9 @@ def test_presets_are_well_formed():
 def test_auto_nosignal_preset_matches_brand_substring():
     assert auto_nosignal_preset("Elgato 4K X") == "elgato"
     assert auto_nosignal_preset("UGREEN 25773") == "ugreen"
+    assert auto_nosignal_preset("OBS Virtual Camera") == "obs"
     assert auto_nosignal_preset("elgato 4k x") == "elgato"     # case-insensitive
+    assert auto_nosignal_preset("obs virtual camera") == "obs"  # case-insensitive
     assert auto_nosignal_preset("Some USB Capture") is None
     assert auto_nosignal_preset("") is None
 
@@ -66,6 +68,18 @@ def test_set_nosignal_region_swaps_to_ugreen_and_matches():
     detected, score = detect_tell(_img("nosignal_ugreen_frame.png"),
                                   d._tells_by_screen[Screen.NO_SIGNAL])
     assert detected, f"UGREEN no-signal should detect after swap (score={score})"
+
+
+def test_set_nosignal_region_swaps_to_obs_and_matches():
+    d = ScreenDetector()
+    res = d.set_nosignal_region("obs")
+    assert res is not None
+    region = d._tells_by_screen[Screen.NO_SIGNAL].groups[0][0]
+    assert region.roi == NO_SIGNAL_PRESETS["obs"]["roi"]
+    assert region.image_path.endswith("nosignal_obs.png")
+    detected, score = detect_tell(_img("nosignal_obs_frame.png"),
+                                  d._tells_by_screen[Screen.NO_SIGNAL])
+    assert detected, f"OBS no-signal should detect after swap (score={score})"
 
 
 def test_set_nosignal_region_unknown_preset_returns_none():

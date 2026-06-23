@@ -2,15 +2,17 @@ from mkw_tracker.database.config_repo import set_config, get_config
 from mkw_tracker.database.tell_repo import migrate_tells_to_tree
 
 
-def test_legacy_or_screen_migrates_to_one_group_two_regions(memdb):
-    # HOME-style: primary + alt at distinct ROIs → 1 group, 2 OR regions
+def test_legacy_or_screen_migrates_to_one_group(memdb):
+    # HOME-style: primary + alt overlay onto HOME's default ONE OR group. HOME's
+    # default also carries white-theme variants for both prompt ROIs, so the migrated
+    # group has 4 OR regions (home, home2, home-white, home2-white).
     set_config("tell_roi_HOME", [1110, 805, 1312, 877])
     set_config("tell_thresh_HOME", 55)
     set_config("tell_alt_HOME", ["images/screens/home2.png", [1361, 803, 1548, 875]])
     set_config("tell_alt_thresh_HOME", 55)
     migrate_tells_to_tree()
     tree = get_config("tell_tree_HOME")
-    assert len(tree) == 1 and len(tree[0]) == 2
+    assert len(tree) == 1 and len(tree[0]) == 4
     assert get_config("tell_roi_HOME") is None          # legacy keys removed
     assert get_config("tell_alt_HOME") is None
 

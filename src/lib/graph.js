@@ -9,7 +9,7 @@ export const NH   = 92;    // total card height (image + label strip)
 
 // Logical canvas (content bounding box at 1× zoom).
 export const GRAPH_W = 1346;
-export const GRAPH_H = 316;
+export const GRAPH_H = 428;   // 4 rows: the photo-mode pair sits in row 3 (y=336)
 
 // Layout: nine column-groups, each a tight vertical stack capped at 3 rows tall,
 // so the graph is wide-and-short (fits the edit strip at a big zoom) with little
@@ -27,6 +27,12 @@ export const GRAPH_NODES = [
   // screen on a feed drop), so drawing edges to it would clutter the whole graph.
   { id:"NO_SIGNAL",          x:0,    y:0,   label:"No Signal"   },
   { id:"UNKNOWN",            x:0,    y:112, label:"Unknown"     },
+  // GameChat: a universal overlay (can surface over any screen). Like NO_SIGNAL it
+  // carries no flow edges - edges to/from every screen would clutter the whole graph.
+  { id:"GAMECHAT",           x:0,    y:224, label:"GameChat"    },
+  // Gallery View: the Album single-photo viewer - another universal overlay (reachable
+  // from any screen, obscures it). No flow edges, same as GAMECHAT / NO_SIGNAL.
+  { id:"GALLERY_VIEW",       x:0,    y:336, label:"Gallery View"},
   // col 1 - entry / Switch-overlay cluster
   { id:"TITLE",              x:152,  y:0,   label:"Title"       },
   { id:"HOME",               x:152,  y:112, label:"Home"        },
@@ -56,6 +62,10 @@ export const GRAPH_NODES = [
   { id:"UNKNOWN_RESET",      x:1064, y:224, label:"Reset (?)"   },
   // col 8 - post-time-trial (lone, far right)
   { id:"POST_TIME_TRIAL",    x:1216, y:112, label:"Post-TT"     },
+  // row 3 - photo mode (an in-race overlay that pauses the race), under the race
+  // cluster. Reached from Racing / Race Menu; left only via the exit-confirm dialog.
+  { id:"PHOTO_MODE",         x:760,  y:336, label:"Photo Mode"  },
+  { id:"EXIT_PHOTO_MODE",    x:912,  y:336, label:"Exit Photo"  },
 ];
 
 // HOME edges: HOME↔TITLE and HOME↔GALLERY are constant (full opacity).
@@ -71,6 +81,7 @@ export const GRAPH_EDGES = [
   ["RESET","HOME"],["GHOST_RESET","HOME"],["UNKNOWN_RESET","HOME"],
   ["POST_TIME_TRIAL","HOME"],["RACE_MENU","HOME"],
   ["REPLAY_MENU","HOME"],["REPLAY_RACE_AGAINST","HOME"],
+  ["PHOTO_MODE","HOME"],["EXIT_PHOTO_MODE","HOME"],
   // TITLE
   ["TITLE","MAIN_MENU"],
   // MAIN_MENU
@@ -90,7 +101,7 @@ export const GRAPH_EDGES = [
   // START_REPLAY
   ["START_REPLAY","GHOST"],["START_REPLAY","REPLAY_MENU"],["START_REPLAY","COURSE_SELECT"],
   // RACING
-  ["RACING","POST_TIME_TRIAL"],["RACING","RACE_MENU"],
+  ["RACING","POST_TIME_TRIAL"],["RACING","RACE_MENU"],["RACING","PHOTO_MODE"],
   // GHOST
   ["GHOST","REPLAY_MENU"],
   // UNKNOWN_RACE_ACTIVE
@@ -108,7 +119,11 @@ export const GRAPH_EDGES = [
   // POST_TIME_TRIAL
   ["POST_TIME_TRIAL","COURSE_SELECT"],["POST_TIME_TRIAL","RESET"],
   // RACE_MENU
-  ["RACE_MENU","RACING"],["RACE_MENU","RESET"],
+  ["RACE_MENU","RACING"],["RACE_MENU","RESET"],["RACE_MENU","PHOTO_MODE"],
+  // PHOTO_MODE (pauses the race; leave only via the exit-confirm dialog)
+  ["PHOTO_MODE","EXIT_PHOTO_MODE"],
+  // EXIT_PHOTO_MODE (resume racing, or cancel back into photo mode)
+  ["EXIT_PHOTO_MODE","RACING"],["EXIT_PHOTO_MODE","PHOTO_MODE"],
   // REPLAY_MENU
   ["REPLAY_MENU","GHOST"],["REPLAY_MENU","REPLAY_RACE_AGAINST"],["REPLAY_MENU","GHOST_RESET"],
   // REPLAY_RACE_AGAINST

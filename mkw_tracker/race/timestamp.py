@@ -104,19 +104,27 @@ class TimestampTracker:
         ts = self.state.formatted()
         if ts is None:
             return
-        self.total_time = ts
-        print(f"  Total time: {ts}")
         total_ms = self._to_ms(ts)
         if total_ms is None:
             return
         prior_ms = [self._to_ms(s) for s in self.splits.values()]
         if any(v is None for v in prior_ms):
+            # Can't compute the final lap, but the readable total is the best we have.
             print("  [WARN] Some splits unparseable - final lap time unreliable")
+            self.total_time = ts
+            print(f"  Total time: {ts}")
             return
         final_ms = total_ms - sum(prior_ms)
         if final_ms < 0:
-            print("  [WARN] Final lap time negative - split data unreliable")
+            # Impossible finish: the total is below the sum of the prior lap splits, so
+            # the read is a frozen lap-split flash misread as the finish (the photo-mode
+            # exploit on the final lap). Reject - leave total_time UNSET so nothing locks
+            # and the engine keeps tracking toward the real finish.
+            print(f"  [WARN] Final lap negative ({total_ms} < {sum(prior_ms)} prior) "
+                  f"- rejecting finish read, not locking")
             return
+        self.total_time = ts
+        print(f"  Total time: {ts}")
         self.final_lap_time = self._from_ms(final_ms)
         self.splits[lap]    = self.final_lap_time
         print(f"  Final lap time: {self.final_lap_time}")

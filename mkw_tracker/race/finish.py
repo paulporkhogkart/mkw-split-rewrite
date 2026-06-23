@@ -200,6 +200,19 @@ class FinishLatch:
         return self.value.detected or self.still.detected
 
     @property
+    def capturable(self) -> bool:
+        """Whether a finish TIME may be captured this frame.
+
+        Only a value-validated freeze (the value latch) is capturable. The bare
+        pixel-still fallback fires on ANY static bright screen - the photo-mode pause,
+        its 'Stop taking pictures?' dialog, a fade - and historically that let the
+        timestamp burst capture a frozen partial time as a false PB (see
+        tests/test_timestamp_finish_guard.py + the MAJOR1/MAJOR2 photo-mode clips). So
+        `still` may flag a freeze for UI/DNF via `detected`, but it must never drive a
+        time capture; that is gated here on the value latch alone."""
+        return self.value.detected
+
+    @property
     def final_ms(self) -> Optional[int]:
         return self.value.final_ms
 

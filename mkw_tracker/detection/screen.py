@@ -111,6 +111,10 @@ class Screen(Enum):
     GALLERY              = auto()
     SINGLEPLAYER_MENU    = auto()
     TIME_TRIALS          = auto()
+    PHOTO_MODE           = auto()
+    EXIT_PHOTO_MODE      = auto()
+    GAMECHAT             = auto()
+    GALLERY_VIEW         = auto()
     NO_SIGNAL            = auto()
 
 
@@ -132,13 +136,18 @@ NO_SIGNAL_PRESETS = {
                "roi": (640, 470, 1280, 740)},
     "ugreen": {"image_path": "images/nosignal/nosignal_ugreen.png",
                "roi": (750, 460, 1170, 640)},
+    # OBS Virtual Camera's "no signal" placeholder (centred OBS logo); reuses the
+    # elgato/default ROI - the bright logo ring falls inside it (14k bright px).
+    "obs": {"image_path": "images/nosignal/nosignal_obs.png",
+            "roi": (640, 470, 1280, 740)},
 }
 
 # Case-insensitive substring -> preset.  Device names confirmed by the user:
-# "Elgato 4K X", "UGREEN 25773".  First match wins.
+# "Elgato 4K X", "UGREEN 25773", "OBS Virtual Camera".  First match wins.
 NO_SIGNAL_DEVICE_HINTS = {
     "elgato": ["elgato"],
     "ugreen": ["ugreen"],
+    "obs": ["obs virtual"],
 }
 
 
@@ -170,6 +179,9 @@ TRANSITIONS: Dict[Screen, Set[Screen]] = {
         Screen.POST_TIME_TRIAL, Screen.UNKNOWN_RACE_ACTIVE,
         Screen.RACE_MENU, Screen.REPLAY_MENU, Screen.REPLAY_RACE_AGAINST,
         Screen.GALLERY, Screen.SINGLEPLAYER_MENU, Screen.TIME_TRIALS,
+        # Reachable after a NO_SIGNAL / cold start that lands mid-photo-mode / gamechat /
+        # album viewer.
+        Screen.PHOTO_MODE, Screen.EXIT_PHOTO_MODE, Screen.GAMECHAT, Screen.GALLERY_VIEW,
     },
     Screen.HOME: {Screen.TITLE, Screen.GALLERY},
     Screen.TITLE: {Screen.MAIN_MENU, Screen.HOME},
@@ -181,17 +193,41 @@ TRANSITIONS: Dict[Screen, Set[Screen]] = {
     Screen.COURSE_SELECT: {Screen.START_TIME_TRIAL, Screen.START_REPLAY, Screen.KART_SELECT, Screen.HOME},
     Screen.START_TIME_TRIAL: {Screen.RACING, Screen.RACE_MENU, Screen.COURSE_SELECT, Screen.HOME},
     Screen.START_REPLAY: {Screen.GHOST, Screen.REPLAY_MENU, Screen.COURSE_SELECT, Screen.HOME},
-    Screen.RACING: {Screen.POST_TIME_TRIAL, Screen.RACE_MENU, Screen.HOME},
+    Screen.RACING: {Screen.POST_TIME_TRIAL, Screen.RACE_MENU, Screen.PHOTO_MODE, Screen.HOME},
     Screen.GHOST: {Screen.REPLAY_MENU, Screen.HOME},
     Screen.UNKNOWN_RACE_ACTIVE: {Screen.RACE_MENU, Screen.REPLAY_MENU, Screen.POST_TIME_TRIAL, Screen.RESET, Screen.HOME},
     Screen.RESET: {Screen.RACING, Screen.CHARACTER_SELECT, Screen.COURSE_SELECT, Screen.MAIN_MENU, Screen.TITLE, Screen.HOME},
     Screen.GHOST_RESET: {Screen.GHOST, Screen.MAIN_MENU, Screen.COURSE_SELECT, Screen.HOME},
     Screen.UNKNOWN_RESET: {Screen.UNKNOWN_RACE_ACTIVE, Screen.RACING, Screen.GHOST, Screen.CHARACTER_SELECT, Screen.COURSE_SELECT, Screen.MAIN_MENU, Screen.TITLE, Screen.HOME},
     Screen.POST_TIME_TRIAL: {Screen.HOME, Screen.COURSE_SELECT, Screen.RESET},
-    Screen.RACE_MENU: {Screen.RACING, Screen.RESET, Screen.HOME},
+    Screen.RACE_MENU: {Screen.RACING, Screen.RESET, Screen.PHOTO_MODE, Screen.HOME},
+    # Photo mode pauses the race; you can only leave it via the exit-confirm dialog
+    # (or a home/no-signal interrupt). EXIT_PHOTO_MODE then returns to RACING (or back
+    # into PHOTO_MODE if the dialog is cancelled).
+    Screen.PHOTO_MODE:      {Screen.EXIT_PHOTO_MODE, Screen.HOME},
+    Screen.EXIT_PHOTO_MODE: {Screen.RACING, Screen.PHOTO_MODE, Screen.HOME},
+    # GAMECHAT is a universal overlay: its real return targets are computed from the
+    # screen it interrupted (see _overlay_candidates). HOME is always reachable (you
+    # can press home from gamechat); the rest comes from the pre-gamechat screen.
+    Screen.GAMECHAT:        {Screen.HOME},
+    # GALLERY_VIEW (Album photo viewer) is a universal overlay: real return targets come
+    # from the screen it interrupted (see _overlay_candidates). It can open the album grid
+    # (GALLERY) or pop HOME; GALLERY can open a photo back into GALLERY_VIEW.
+    Screen.GALLERY_VIEW:    {Screen.GALLERY, Screen.HOME},
     Screen.REPLAY_MENU: {Screen.GHOST, Screen.REPLAY_RACE_AGAINST, Screen.HOME, Screen.GHOST_RESET},
     Screen.REPLAY_RACE_AGAINST: {Screen.RESET, Screen.REPLAY_MENU, Screen.HOME},
-    Screen.GALLERY: {Screen.HOME},
+    Screen.GALLERY: {Screen.HOME, Screen.GALLERY_VIEW},
+}
+
+
+# System overlays that float over a real "underlying" screen and return to it. They form a
+# single stack sharing ONE remembered pre-overlay screen (see-through): entering the stack
+# from a real screen records it; moving between overlays preserves it; leaving to a real
+# screen clears it. HOME / GAMECHAT / GALLERY_VIEW are universally reachable (a confirm-miss
+# scan, plus GAMECHAT's per-frame priority); GALLERY is the album grid reached from within
+# the stack. This unifies what used to be per-overlay pre-screens with pairwise see-through.
+_OVERLAY_SCREENS: Set[Screen] = {
+    Screen.HOME, Screen.GAMECHAT, Screen.GALLERY_VIEW, Screen.GALLERY,
 }
 
 
@@ -273,9 +309,17 @@ def _tmpl(image_path, roi, thresh=170, grayscale=True):
 TELLS: list = [
     Tell(screen=Screen.TITLE, groups=[[
         _tmpl("images/screens/title.png", (833, 156, 1082, 360), thresh=75)]]),
+    # HOME / GALLERY / GAMECHAT are Switch system overlays that ship in two colour
+    # themes (dark + an alternate white). A grayscale template cut from one theme can't
+    # match the inverted other (TM_CCOEFF_NORMED goes negative), so each carries an
+    # extra OR-region cut from the white capture at the SAME ROI.
+    # HOME has two prompt ROIs (home.png + home2.png); the white theme carries both,
+    # so each gets its own white OR-variant at the same ROI.
     Tell(screen=Screen.HOME, groups=[[
-        _tmpl("images/screens/home.png",  (1110, 805, 1312, 877), thresh=55),
-        _tmpl("images/screens/home2.png", (1361, 803, 1548, 875), thresh=55)]]),
+        _tmpl("images/screens/home.png",        (1110, 805, 1312, 877), thresh=55),
+        _tmpl("images/screens/home2.png",       (1361, 803, 1548, 875), thresh=55),
+        _tmpl("images/screens/home-white.png",  (1110, 805, 1312, 877), thresh=55),
+        _tmpl("images/screens/home2-white.png", (1361, 803, 1548, 875), thresh=55)]]),
     Tell(screen=Screen.START_TIME_TRIAL, groups=[[
         _tmpl("images/screens/starttimetrial.png", (671, 312, 1267, 359), thresh=199)]]),
     Tell(screen=Screen.START_REPLAY, groups=[[
@@ -334,11 +378,49 @@ TELLS: list = [
     Tell(screen=Screen.REPLAY_RACE_AGAINST, groups=[[
         _tmpl("images/screens/ghostmenu-red.png", (762, 590, 1160, 615), thresh=190)]]),
     Tell(screen=Screen.GALLERY, groups=[[
-        _tmpl("images/screens/gallery.png", (106, 191, 181, 484), thresh=151)]]),
+        _tmpl("images/screens/gallery.png",       (106, 191, 181, 484), thresh=151),
+        _tmpl("images/screens/gallery-white.png", (106, 191, 181, 484), thresh=151)]]),
     Tell(screen=Screen.SINGLEPLAYER_MENU, groups=[[
         _tmpl("images/screens/singleplayer.png", (110, 562, 183, 628), thresh=187)]]),
     Tell(screen=Screen.TIME_TRIALS, groups=[[
         _tmpl("images/screens/timetrials.png", (110, 562, 183, 628), thresh=204)]]),
+    # Photo mode: the in-game timer freezes here but the screen was misclassified as
+    # RACING, so the final-lap finish detector captured a partial time as a false PB.
+    # The HUD is hidden but the photo-mode control glyphs (X / ZL / ZR / A button
+    # prompts) sit at fixed positions - language-independent, so one en_uk template
+    # serves every setup (grayscale TM_CCOEFF_NORMED is exposure-invariant: Paul 1.00,
+    # aiden 0.90). ANDing all four is a strong signature that nothing else satisfies.
+    # threshold 0.60: measured photo frames score >=0.80 (faint menu-fade 0.80), every
+    # non-photo frame <=0.42 (racing/menus/off-map fade) - 0.60 centres that gap with
+    # ~0.2 margin each side, robust across setups.
+    Tell(screen=Screen.PHOTO_MODE, match_threshold=0.60, groups=[
+        [_tmpl("images/screens/photomode-g0.png", (58, 368, 80, 389))],
+        [_tmpl("images/screens/photomode-g1.png", (62, 304, 87, 319))],
+        [_tmpl("images/screens/photomode-g2.png", (100, 302, 126, 319))],
+        [_tmpl("images/screens/photomode-g3.png", (61, 497, 81, 519))]]),
+    # Exiting photo mode shows a "Stop taking photos?" confirmation dialog. This ROI
+    # covers the localized prompt text, so the shipped template is en_uk; other
+    # languages need their own capture (the PHOTO_MODE glyphs above stay universal).
+    Tell(screen=Screen.EXIT_PHOTO_MODE, match_threshold=0.60, groups=[[
+        _tmpl("images/screens/exitphotomode.png", (1015, 418, 1230, 463))]]),
+    # GameChat overlay: a universal Switch overlay (can appear over any screen, like
+    # HOME). The "C" GameChat logo sits at a fixed spot; dark + white theme variants
+    # are ORed. threshold 0.70: own-theme scores 1.00, the inverted-theme cross-score
+    # is ~0.26 and all non-gamechat content is well below, so 0.70 separates cleanly.
+    Tell(screen=Screen.GAMECHAT, match_threshold=0.70, groups=[[
+        _tmpl("images/screens/gamechat.png",       (120, 504, 168, 552)),
+        _tmpl("images/screens/gamechat-white.png", (120, 504, 168, 552))]]),
+    # GALLERY_VIEW: the Switch Album single-photo viewer - a captured frame shown fullscreen
+    # under a "Hide Footer / Delete / Back / Menu" footer. A universal overlay like HOME, but
+    # it OBSCURES the screen underneath, so the normal confirm-miss scan finds it (no per-frame
+    # priority like GAMECHAT). The three ANDed ROIs are the footer's universal button glyphs
+    # (X / B / A) - language-neutral, so one en_uk cut serves every setup. threshold 0.60
+    # mirrors PHOTO_MODE (grayscale TM_CCOEFF_NORMED is exposure-invariant; ANDing 3 glyphs is
+    # a signature nothing else satisfies - the captured photo behind it varies freely).
+    Tell(screen=Screen.GALLERY_VIEW, match_threshold=0.60, groups=[
+        [_tmpl("images/screens/galleryview-g0.png", (1315, 1007, 1336, 1031))],
+        [_tmpl("images/screens/galleryview-g1.png", (1518, 1008, 1538, 1033))],
+        [_tmpl("images/screens/galleryview-g2.png", (1692, 1007, 1708, 1031))]]),
     Tell(screen=Screen.NO_SIGNAL, match_threshold=0.6, groups=[[
         _tmpl(NO_SIGNAL_PRESETS["elgato"]["image_path"],
               NO_SIGNAL_PRESETS["elgato"]["roi"])]]),
@@ -374,6 +456,10 @@ SCREENSHOT_FILES: Dict[Screen, str] = {
     Screen.SINGLEPLAYER_MENU:   "singleplayer.png",
     Screen.TIME_TRIALS:         "timetrials.png",
     Screen.POST_TIME_TRIAL:     "posttimetrial.png",
+    Screen.PHOTO_MODE:          "photomode.png",
+    Screen.EXIT_PHOTO_MODE:     "exitphotomode.png",
+    Screen.GAMECHAT:            "gamechat.png",
+    Screen.GALLERY_VIEW:        "galleryview.png",
     # RESET family is NOT here: it uses dark_loading detection, not a template.
 }
 
@@ -571,7 +657,8 @@ class ScreenDetector:
 
         self.current_screen: Screen = Screen.UNKNOWN
         self._last_unknown_check: float = 0.0
-        self._pre_home_screen: Optional[Screen] = None
+        # The single real screen the current overlay stack floats over (see _OVERLAY_SCREENS).
+        self._pre_overlay_screen: Optional[Screen] = None
         self._loss_streak: int = 0
         self._last_candidate_scores: Dict[Screen, float] = {}
 
@@ -580,26 +667,55 @@ class ScreenDetector:
         # Signal restored: from NO_SIGNAL re-detect from scratch, like UNKNOWN.
         if self.current_screen == Screen.NO_SIGNAL:
             return set(self.transitions.get(Screen.UNKNOWN, set()))
-        if self.current_screen == Screen.HOME:
-            base = self.transitions.get(Screen.HOME, set()).copy()
-            if self._pre_home_screen is None:
-                base |= self.transitions.get(Screen.UNKNOWN, set())
-            else:
-                # Add the pre-home screen itself AND all its neighbours - we may
-                # have been mid-transition when HOME was pressed, so any screen
-                # reachable from the last known state is a valid landing point.
-                base.add(self._pre_home_screen)
-                base |= self.transitions.get(self._pre_home_screen, set())
+        # System overlays (HOME / GAMECHAT / GALLERY_VIEW / GALLERY) float over a real screen
+        # and return to it (or its direct joiners); _overlay_candidates expands that from the
+        # one shared pre-overlay screen.
+        if self.current_screen in _OVERLAY_SCREENS:
+            base = self._overlay_candidates(self._pre_overlay_screen)
         else:
             # set() copies so adding NO_SIGNAL never mutates the shared TRANSITIONS.
             base = set(self.transitions.get(self.current_screen, set()))
-        base.add(Screen.NO_SIGNAL)   # always a candidate (only scanned on a confirm-miss)
+        base.add(Screen.NO_SIGNAL)      # always a candidate (only scanned on a confirm-miss)
+        base.add(Screen.GAMECHAT)       # universal overlay: surfaces over any screen (priority)
+        base.add(Screen.GALLERY_VIEW)   # universal overlay: album viewer obscures any screen
+        return base
+
+    def _overlay_candidates(self, pre_screen: Optional[Screen]) -> Set[Screen]:
+        """Candidate set while sitting on a system overlay (HOME / GAMECHAT): its own
+        transitions plus the real screen it floated over AND that screen's direct
+        joiners - we may have been mid-transition when the overlay appeared, so any
+        screen reachable from the last known state is a valid landing point. A cold
+        re-scan (UNKNOWN's set) when the underlying screen is unknown."""
+        base = self.transitions.get(self.current_screen, set()).copy()
+        if pre_screen is None:
+            base |= self.transitions.get(Screen.UNKNOWN, set())
+        else:
+            base.add(pre_screen)
+            base |= self.transitions.get(pre_screen, set())
         return base
 
     # ------------------------------------------------------------------
     def update(self, frame: np.ndarray) -> tuple:
         t_start = time.perf_counter()
         tells_evaluated: int = 0
+
+        # GAMECHAT priority: the GameChat overlay can surface over ANY screen without
+        # obscuring it, so the underlying tell keeps confirming (Phase 1) and a normal
+        # confirm-miss scan would never look for it. Check it every frame, before the
+        # re-confirm, and switch the instant its logo appears - it outranks whatever is
+        # underneath (the user's rule: gamechat + another screen -> gamechat). Skipped
+        # while already on it, or on NO_SIGNAL where it cannot apply.
+        if self.current_screen not in (Screen.GAMECHAT, Screen.NO_SIGNAL):
+            gc_tell = self._tells_by_screen.get(Screen.GAMECHAT)
+            if gc_tell is not None and gc_tell.groups:
+                gc_hit, gc_score = detect_tell(frame, gc_tell)
+                tells_evaluated += sum(len(g) for g in gc_tell.groups)
+                if gc_hit:
+                    self._on_transition(self.current_screen, Screen.GAMECHAT)
+                    self._loss_streak = 0
+                    elapsed_ms = (time.perf_counter() - t_start) * 1000.0
+                    return self.current_screen, PerfStats(
+                        elapsed_ms, tells_evaluated, gc_score, self._last_candidate_scores)
 
         if self.current_screen == Screen.UNKNOWN:
             now = time.perf_counter()
@@ -688,11 +804,19 @@ class ScreenDetector:
                     self.on_screen_change(Screen.UNKNOWN_RESET, resolved)
                 old = resolved
 
-        if new == Screen.HOME:
-            if old not in (Screen.HOME, Screen.UNKNOWN, Screen.UNKNOWN_RACE_ACTIVE, Screen.GALLERY):
-                self._pre_home_screen = old
-        elif old == Screen.HOME and new != Screen.GALLERY:
-            self._pre_home_screen = None
+        # System overlays (HOME / GAMECHAT / GALLERY_VIEW / GALLERY) float over a real screen
+        # and return to it. They share ONE remembered pre-overlay screen: entering the stack
+        # from a real screen records it; moving between overlays preserves it (see-through, so
+        # RACING -> GALLERY_VIEW -> GALLERY -> HOME still points at RACING and no overlay is
+        # ever another's return target); leaving the stack to a real screen clears it. An
+        # UNKNOWN-ish origin records nothing, forcing a cold re-scan of the underlying screen.
+        new_is_overlay = new in _OVERLAY_SCREENS
+        old_is_overlay = old in _OVERLAY_SCREENS
+        if new_is_overlay and not old_is_overlay:
+            self._pre_overlay_screen = (
+                old if old not in (Screen.UNKNOWN, Screen.UNKNOWN_RACE_ACTIVE) else None)
+        elif old_is_overlay and not new_is_overlay:
+            self._pre_overlay_screen = None
 
         self.current_screen = new
         if self.on_screen_change:

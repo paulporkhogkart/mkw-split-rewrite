@@ -64,7 +64,7 @@ the configured `camera_device` name. No fields.
 
 ### `nosignal_mode`
 NO_SIGNAL detection mode for the editor badge.
-`{ "type": "nosignal_mode", "auto": bool, "brand": "elgato" | "ugreen" | null }`
+`{ "type": "nosignal_mode", "auto": bool, "brand": "elgato" | "ugreen" | "obs" | null }`
 `auto=true` -> template auto-picked from the device name (`brand` = matched preset,
 or `null` for the Elgato default). `auto=false` -> user hand-edited (manual).
 

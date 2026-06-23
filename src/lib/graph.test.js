@@ -14,4 +14,27 @@ describe("screen graph nodes", () => {
     const ids = GRAPH_NODES.map((n) => n.id);
     expect(new Set(ids).size).toBe(ids.length);
   });
+
+  it("includes PHOTO_MODE and EXIT_PHOTO_MODE so photo mode is editable", () => {
+    expect(GRAPH_NODE_MAP["PHOTO_MODE"]?.label).toBeTruthy();
+    expect(GRAPH_NODE_MAP["EXIT_PHOTO_MODE"]?.label).toBeTruthy();
+  });
+
+  it("includes GAMECHAT (universal overlay) so it is editable", () => {
+    expect(GRAPH_NODE_MAP["GAMECHAT"]?.label).toBeTruthy();
+  });
+
+  it("includes GALLERY_VIEW (Album photo viewer, universal overlay) so it is editable", () => {
+    expect(GRAPH_NODE_MAP["GALLERY_VIEW"]?.label).toBeTruthy();
+  });
+});
+
+describe("screen graph edges", () => {
+  it("wires photo mode to/from the race flow", async () => {
+    const { GRAPH_EDGES } = await import("./graph.js");
+    const has = (a, b) => GRAPH_EDGES.some((e) => e[0] === a && e[1] === b);
+    expect(has("RACING", "PHOTO_MODE")).toBe(true);
+    expect(has("PHOTO_MODE", "EXIT_PHOTO_MODE")).toBe(true);
+    expect(has("EXIT_PHOTO_MODE", "RACING")).toBe(true);
+  });
 });

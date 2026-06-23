@@ -5,6 +5,7 @@ describe("nosignalBadgeLabel", () => {
   it("reports the matched brand in auto mode", () => {
     expect(nosignalBadgeLabel({ auto: true, brand: "elgato" })).toBe("Auto · matched Elgato");
     expect(nosignalBadgeLabel({ auto: true, brand: "ugreen" })).toBe("Auto · matched UGREEN");
+    expect(nosignalBadgeLabel({ auto: true, brand: "obs" })).toBe("Auto · matched OBS Virtual Camera");
   });
   it("reports the Elgato default when auto matches nothing", () => {
     expect(nosignalBadgeLabel({ auto: true, brand: null })).toBe("Auto · Elgato default (no card match)");

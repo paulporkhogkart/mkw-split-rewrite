@@ -129,7 +129,7 @@
   // PAUSE_SCREENS mirrors the engine's _PAUSE_SCREENS: returning from one keeps
   // the anchor (the engine clock froze meanwhile); any other fresh entry marks
   // the previous race's final clock value stale until a new value arrives.
-  const PAUSE_SCREENS = new Set(["RACE_MENU", "HOME"]);
+  const PAUSE_SCREENS = new Set(["RACE_MENU", "HOME", "PHOTO_MODE", "EXIT_PHOTO_MODE"]);
   let _wasActive    = false;
   let _prevScreen   = null;
   let _raf          = 0;
