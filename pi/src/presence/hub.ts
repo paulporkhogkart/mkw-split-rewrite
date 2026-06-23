@@ -142,6 +142,7 @@ export class PresenceHub {
   update(playerId: number, frame: PresenceFrame): void {
     const cur = this.map.get(playerId);
     if (!cur) return;
+    const wasOnline = cur.online;
     const now = this.now();
     const stale = frame.track_state != null && !FRESH_TRACK.has(frame.track_state);
     const { completion, dividers, model } = this.completion(frame.course, frame.cur_lap, frame.pos, playerId, now, stale, frame.tot_lap);
@@ -175,6 +176,7 @@ export class PresenceHub {
       off_stats: inRaceCtx ? null : this.cachedOffStats(playerId),
     };
     this.map.set(playerId, entry);
+    if (!wasOnline) this.writeLastSeen(playerId, now);   // offline -> online: stamp the reconnect
     this.broadcast({ type: 'presence_update', player: entry });
   }
 
@@ -205,8 +207,10 @@ export class PresenceHub {
     this.pbLatch.delete(playerId);
     const e = this.map.get(playerId);
     if (!e || !e.online) return;
-    const off = offlineEntry(e.player_id, e.name, e.color, this.now(), this.cachedOffStats(playerId));
+    const now = this.now();
+    const off = offlineEntry(e.player_id, e.name, e.color, now, this.cachedOffStats(playerId));
     this.map.set(playerId, off);
+    this.writeLastSeen(playerId, now);
     this.broadcast({ type: 'presence_update', player: off });
   }
 
@@ -231,6 +235,14 @@ export class PresenceHub {
   sweep(maxAgeMs: number): void {
     const cutoff = this.now() - maxAgeMs;
     for (const e of this.map.values()) if (e.online && e.updated_at < cutoff) this.setOffline(e.player_id);
+  }
+
+  /** Best-effort durable last-seen stamp (epoch ms). Inline-prepared (a cached field
+   *  can't read this.db at field-init time). A DB hiccup must never break presence,
+   *  so failures are swallowed. */
+  private writeLastSeen(playerId: number, ts: number): void {
+    try { this.db.prepare('UPDATE players SET last_seen_at=? WHERE id=?').run(ts, playerId); }
+    catch { /* non-fatal */ }
   }
 
   private pbForCourse(playerId: number, course: string | null | undefined): { pb: number | null; runId: number | null } {

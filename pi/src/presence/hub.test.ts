@@ -270,4 +270,40 @@ describe('PresenceHub', () => {
     hub.update(1, { screen: 'RACING', course: 'bc', cur_lap: 1, tot_lap: 3, pos: [1, 2] });
     expect(seen.at(-1)!.dividers).toEqual([0.33, 0.66]);   // present from the first frame (lap 1)
   });
+
+  it('persists last_seen_at to the db on disconnect', () => {
+    const d = db();
+    const hub = new PresenceHub(d, noCompletion, noPace, noLaps, () => 4242);
+    hub.addSink(() => {});
+    hub.update(1, { screen: 'MAIN_MENU' });   // Paul online
+    hub.setOffline(1);                        // -> persists 4242
+    expect((d.prepare('SELECT last_seen_at FROM players WHERE id=1').get() as { last_seen_at: number }).last_seen_at)
+      .toBe(4242);
+  });
+
+  it('persists last_seen_at on the offline->online transition only', () => {
+    const d = db();
+    let t = 1000;
+    const hub = new PresenceHub(d, noCompletion, noPace, noLaps, () => t);
+    hub.addSink(() => {});
+    hub.update(1, { screen: 'MAIN_MENU' });    // offline -> online: persists 1000
+    expect((d.prepare('SELECT last_seen_at FROM players WHERE id=1').get() as { last_seen_at: number }).last_seen_at)
+      .toBe(1000);
+    t = 2000;
+    hub.update(1, { screen: 'RACING' });       // already online: NO db write
+    expect((d.prepare('SELECT last_seen_at FROM players WHERE id=1').get() as { last_seen_at: number }).last_seen_at)
+      .toBe(1000);                             // still the connect value
+  });
+
+  it('round-trips last-seen across a restart (persist on offline, restore on a new hub)', () => {
+    const d = db();
+    const hub1 = new PresenceHub(d, noCompletion, noPace, noLaps, () => 555000);
+    hub1.addSink(() => {});
+    hub1.update(1, { screen: 'MAIN_MENU' });   // online
+    hub1.setOffline(1);                        // persists 555000
+    const hub2 = new PresenceHub(d, noCompletion, noPace, noLaps, () => 999999);   // "restart"
+    const got: any[] = [];
+    hub2.addSink((m) => got.push(m));
+    expect(got[0].players.find((p: any) => p.player_id === 1).updated_at).toBe(555000);
+  });
 });
