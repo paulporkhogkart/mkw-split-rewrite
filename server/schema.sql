@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS players (
     display_name    TEXT NOT NULL UNIQUE,
     auth_token_hash TEXT UNIQUE,
     color           TEXT,
+    last_seen_at    INTEGER,
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

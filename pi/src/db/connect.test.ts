@@ -69,3 +69,23 @@ describe('applySchema Gub recolour migration', () => {
     expect((db.prepare("SELECT color FROM players WHERE display_name='Gub'").get() as { color: string }).color).toBe('#38bdf8');
   });
 });
+
+describe('applySchema last_seen_at migration', () => {
+  it('adds last_seen_at to a pre-existing players table, idempotently', () => {
+    const db = new DatabaseSync(':memory:');
+    // Legacy players shape (predates last_seen_at): applySchema's CREATE TABLE
+    // IF NOT EXISTS is a no-op, so only the additive ALTER can add the column.
+    db.exec(`CREATE TABLE players(
+      id INTEGER PRIMARY KEY, display_name TEXT NOT NULL UNIQUE,
+      auth_token_hash TEXT UNIQUE, color TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')));
+      INSERT INTO players(id,display_name) VALUES (1,'Paul');`);
+    applySchema(db);   // additive ALTER adds last_seen_at
+    db.prepare('UPDATE players SET last_seen_at=? WHERE id=?').run(1717000000000, 1);
+    expect((db.prepare('SELECT last_seen_at FROM players WHERE id=1').get() as { last_seen_at: number }).last_seen_at)
+      .toBe(1717000000000);
+    applySchema(db);   // idempotent second boot: ALTER is caught, value survives
+    expect((db.prepare('SELECT last_seen_at FROM players WHERE id=1').get() as { last_seen_at: number }).last_seen_at)
+      .toBe(1717000000000);
+  });
+});
