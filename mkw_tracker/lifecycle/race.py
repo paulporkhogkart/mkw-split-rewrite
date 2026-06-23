@@ -32,7 +32,8 @@ _RACE_START_SCREENS = {Screen.START_TIME_TRIAL, Screen.RESET,
 
 # Human-readable invalidation reason shown on the rail / card.
 _INVALID_LABELS = {Screen.PHOTO_MODE: "Photo Mode", Screen.EXIT_PHOTO_MODE: "Photo Mode",
-                   Screen.GAMECHAT: "GameChat", Screen.GALLERY_VIEW: "Gallery"}
+                   Screen.GAMECHAT: "GameChat", Screen.GALLERY_VIEW: "Gallery",
+                   Screen.UNKNOWN_RACE_ACTIVE: "Unknown start"}
 
 
 class RaceLifecycle:
@@ -174,6 +175,12 @@ class RaceLifecycle:
                       # but a genuine restart (RESET / Start TT) never re-validates it
             else:
                 self._start_race(old)   # genuine fresh start (clears any invalidation)
+                # A race we JOINED mid-stream (UNKNOWN_RACE_ACTIVE resolves to RACING) was never
+                # observed from its start - missing early laps + minimap - so it can never be a
+                # valid PB. Invalidate it like any other major disruption: held for review at its
+                # end, never an auto-PB. _start_race ran first so the per-race flags are clean.
+                if old == Screen.UNKNOWN_RACE_ACTIVE:
+                    self._invalidate(Screen.UNKNOWN_RACE_ACTIVE)
 
         # ── Arriving at POST_TIME_TRIAL from anywhere but RACING ────────────
         if new == Screen.POST_TIME_TRIAL and old != Screen.RACING:

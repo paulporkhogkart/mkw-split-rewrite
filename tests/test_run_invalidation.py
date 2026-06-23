@@ -229,3 +229,44 @@ def test_normal_race_still_finalizes_with_its_time():
     assert len(fin) == 1
     assert fin[0]["status"] == "finished" and fin[0]["total_time"] == "1:23.456"
     assert fin[0]["invalid_reason"] is None
+
+
+# ── joined an unknown race (mid-stream) is invalidated, like any other major disruption ──────
+# UNKNOWN_RACE_ACTIVE means we detected an active race we never saw START (cold start / NO_SIGNAL
+# recovery / unknown reset), so the early laps + minimap trail are missing.  When it resolves to
+# RACING the run can never be a valid PB, so it is invalidated exactly like an overlay: held for
+# review at its end, never auto-uploaded.
+
+def test_unknown_race_active_resolving_to_racing_invalidates(memdb):
+    ipc = _FakeIpc(); lc = _lc(ipc)
+    lc._race_started_at = None                                   # this transition IS the (mid) start
+    lc.on_screen_change(Screen.UNKNOWN_RACE_ACTIVE, Screen.RACING)
+    assert lc.run_invalidated
+    assert _inv(ipc)[-1]["reason"] == "Unknown start"
+
+
+def test_unknown_race_active_run_held_for_review_at_finish(memdb):
+    # The user's sequence: unknown race -> race menu -> racing -> finish. Stays invalidated the
+    # whole way and is HELD for review (no auto-PB) at the finish.
+    ipc = _FakeIpc(); lc = _lc(ipc, total_time="2:17.070", splits={1: "0:44.685"})
+    lc._race_started_at = None
+    lc.on_screen_change(Screen.UNKNOWN_RACE_ACTIVE, Screen.RACING)   # joined mid-race (invalid)
+    lc.on_screen_change(Screen.RACING, Screen.RACE_MENU)             # pause
+    lc.on_screen_change(Screen.RACE_MENU, Screen.RACING)            # resume - still invalid
+    assert lc.run_invalidated
+    lc.on_screen_change(Screen.RACING, Screen.POST_TIME_TRIAL)      # finished -> held
+    fin = _finalized(ipc)
+    assert len(fin) == 1
+    assert fin[0]["total_time"] is None
+    assert fin[0]["status"] == "finished"
+    assert fin[0]["invalid_reason"] == "Unknown start"
+
+
+def test_genuine_fresh_start_is_not_invalidated(memdb):
+    # Guard: a race we DID see begin (START_TIME_TRIAL / RESET -> RACING) stays valid.
+    for start in (Screen.START_TIME_TRIAL, Screen.RESET):
+        ipc = _FakeIpc(); lc = _lc(ipc)
+        lc._race_started_at = None
+        lc.on_screen_change(start, Screen.RACING)
+        assert not lc.run_invalidated, start
+        assert not _inv(ipc), start

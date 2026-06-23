@@ -144,3 +144,36 @@ def test_detection_drives_racing_gallery_view_racing():
     d.force_screen(Screen.RACING)
     assert d.update(_shot("galleryview.png"))[0] == Screen.GALLERY_VIEW
     assert d.update(_shot("racing_coin.png"))[0] == Screen.RACING
+
+
+# ── NO_SIGNAL is a cold-start/teardown origin, NOT a real screen an overlay floats over ──
+#    Landing on an overlay (HOME) straight out of NO_SIGNAL must force a cold re-scan, exactly
+#    like landing on it out of UNKNOWN - there is no real screen underneath to return to.
+
+def test_no_signal_is_not_recorded_as_a_pre_overlay_screen():
+    # RACING -> HOME -> NO_SIGNAL (signal drop) -> HOME (signal back, still on the home overlay).
+    # The HOME we recover onto must NOT record NO_SIGNAL as its underlying screen.
+    d = ScreenDetector(switch2_language="en_uk")
+    d.force_screen(Screen.RACING)
+    d.force_screen(Screen.HOME)
+    d.force_screen(Screen.NO_SIGNAL)
+    d.force_screen(Screen.HOME)
+    assert d._pre_overlay_screen is None
+
+
+def test_overlay_after_no_signal_recovery_scans_every_screen():
+    # The reported bug: RACING -> HOME -> NO_SIGNAL -> HOME -> open the game.  After a NO_SIGNAL
+    # recovery the underlying screen is unknown, so leaving the HOME overlay must be able to land
+    # on ANY screen (cold re-scan) - not collapse to just HOME's joiners + NO_SIGNAL.
+    d = ScreenDetector(switch2_language="en_uk")
+    d.force_screen(Screen.RACING)
+    d.force_screen(Screen.HOME)
+    d.force_screen(Screen.NO_SIGNAL)
+    d.force_screen(Screen.HOME)
+    cands = d._candidate_screens()
+    # A cold re-scan can't distinguish RACING/GHOST, so it offers the ambiguous
+    # UNKNOWN_RACE_ACTIVE (which then resolves to RACING) - that, RACE_MENU and the menus
+    # are exactly what was missing when the set collapsed.
+    assert Screen.UNKNOWN_RACE_ACTIVE in cands
+    assert Screen.RACE_MENU in cands
+    assert Screen.COURSE_SELECT in cands

@@ -813,8 +813,15 @@ class ScreenDetector:
         new_is_overlay = new in _OVERLAY_SCREENS
         old_is_overlay = old in _OVERLAY_SCREENS
         if new_is_overlay and not old_is_overlay:
+            # Record the real screen the overlay floats over - UNLESS the origin is an
+            # unknown-ish / teardown state. NO_SIGNAL is a cold restart (its own candidate set
+            # is UNKNOWN's), so an overlay recovered onto out of it has no real screen
+            # underneath; recording NO_SIGNAL would collapse the overlay's exit scan to just
+            # HOME's joiners + NO_SIGNAL (it has no TRANSITIONS entry). None forces a cold
+            # re-scan instead, so the game opening behind the overlay is detectable.
             self._pre_overlay_screen = (
-                old if old not in (Screen.UNKNOWN, Screen.UNKNOWN_RACE_ACTIVE) else None)
+                old if old not in (Screen.UNKNOWN, Screen.UNKNOWN_RACE_ACTIVE,
+                                   Screen.NO_SIGNAL) else None)
         elif old_is_overlay and not new_is_overlay:
             self._pre_overlay_screen = None
 
