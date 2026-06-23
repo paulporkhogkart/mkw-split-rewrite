@@ -10,8 +10,8 @@ const BOOTED_AT = Date.now();   // module load ~ server boot
 
 interface PlayerVersionRow { player_id: number; name: string; color: string | null; app_version: string | null; last_seen_at: number | null; }
 
-/** GET /v1/version — public-but-unlisted diagnostic. Never throws: external lookups degrade to
- *  null + errors[], local DB reads always succeed. */
+/** GET /v1/version — public-but-unlisted diagnostic. Never throws — always HTTP 200: external
+ *  lookups degrade to null + errors[]; the roster read degrades to [] on error. */
 export function versionRoutes(db: DatabaseSync,
                               opts: { latest?: LatestFn; serverVersion?: string; bootedAt?: number } = {}): Hono<Env> {
   const serverVersion = opts.serverVersion ?? repoVersion();

@@ -11,7 +11,7 @@ import { reportService } from '../version/serviceStatus';
 import { repoVersion } from '../version/repoVersion';
 
 const cfg = loadConfig();
-const db = openDb(cfg.dbPath);                 // shared with the server (WAL); reads only
+const db = openDb(cfg.dbPath);                 // shared with the server (WAL); reads only, except the one boot-time version self-report below
 // Self-report our deployed version so /v1/version can show the bot's running build (a separate
 // process the server can't otherwise see). This is the bot's one allowed write to the shared DB.
 try { reportService(db, 'bot', repoVersion(), Date.now()); }

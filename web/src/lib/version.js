@@ -8,7 +8,9 @@ export function parseSemver(v) {
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
 }
 
-/** -1/0/1, or null when either side is unparseable (caller renders "unknown"). */
+/** -1/0/1, or null when either side is unparseable (caller renders "unknown").
+ *  NOTE: pi/src/version/latest.ts has a parallel variant that returns 0 instead of null —
+ *  web returns null so status() can render "unknown" on an unparseable/missing version. */
 export function compareSemver(a, b) {
   const pa = parseSemver(a), pb = parseSemver(b);
   if (!pa || !pb) return null;

@@ -9,7 +9,9 @@ export function parseSemver(v: string): [number, number, number] | null {
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
 }
 
-/** -1/0/1; 0 when either side is unparseable (callers treat that as "can't tell"). */
+/** -1/0/1; 0 when either side is unparseable (callers treat that as "can't tell").
+ *  NOTE: web/src/lib/version.js has a parallel variant that returns null instead of 0 —
+ *  pi returns 0 because it only ever compares already-parsed/normalized tag strings. */
 export function compareSemver(a: string, b: string): number {
   const pa = parseSemver(a), pb = parseSemver(b);
   if (!pa || !pb) return 0;
