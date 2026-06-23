@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { EventHub } from './events';
 import { runsRoutes } from './runs';
 import { readsRoutes } from './reads';
+import { versionRoutes } from './version';
+import type { LatestFn } from '../version/latest';
 import { createStatsApp } from './stats';
 import { screenRoutes } from './screen';
 import { presenceHandlers } from './presence';
@@ -19,7 +21,8 @@ export type Env = { Variables: { playerId: number; playerName: string } };
 const EXPLORER_HTML = fileURLToPath(new URL('../../stat-explorer.html', import.meta.url));
 
 export function createApp(db: DatabaseSync, hub: EventHub,
-                          invalidateModel?: (courseId: number) => void): Hono<Env> {
+                          invalidateModel?: (courseId: number) => void,
+                          opts?: { latest?: LatestFn }): Hono<Env> {
   const app = new Hono<Env>();
   app.get('/health', (c) => c.json({ status: 'ok' }));
   // Every HTTP route except /health and the two WebSocket streams needs a token (read or write).
@@ -29,7 +32,7 @@ export function createApp(db: DatabaseSync, hub: EventHub,
   // The public website fetches these reads cross-origin. They serve already-public data (same
   // category as the open /v1/presence stream), so they skip the token gate and get permissive
   // CORS (incl. preflight). Everything else (writes, stats, screen, other reads) stays gated.
-  const PUBLIC_READS = ['/v1/leaderboard', '/v1/world-records', '/v1/roster', '/v1/territory', '/v1/territory/timeline'];
+  const PUBLIC_READS = ['/v1/leaderboard', '/v1/world-records', '/v1/roster', '/v1/territory', '/v1/territory/timeline', '/v1/version'];
   const readCors = cors({ origin: '*', allowMethods: ['GET'] });
   for (const p of PUBLIC_READS) app.use(p, readCors);
 
@@ -37,6 +40,7 @@ export function createApp(db: DatabaseSync, hub: EventHub,
   app.use('*', (c, next) => (OPEN.has(c.req.path) ? next() : requireTokenAny(db)(c, next)));
   app.route('/', runsRoutes(db, hub, invalidateModel));
   app.route('/', readsRoutes(db));
+  app.route('/', versionRoutes(db, { latest: opts?.latest }));
   app.route('/', createStatsApp(db, { porkerPath: process.env.STATS_PORKER_DB ?? 'porker.db' }));
   app.route('/', screenRoutes(db));
   app.get('/explorer', (c) => {
