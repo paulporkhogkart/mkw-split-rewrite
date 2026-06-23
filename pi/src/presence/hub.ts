@@ -22,6 +22,7 @@ export interface PresenceFrame {
   dnf?: boolean | null;          // timed out at the 9:59.999 cap (terminal, no finish time)
   invalidated?: boolean | null;  // run killed by an overlay (Photo Mode / GameChat); held for review
   invalid_reason?: string | null;
+  app_version?: string | null;  // the player's running pbenguin-app version (persisted as last-ran)
 }
 
 /** What the server broadcasts per roster player. */
@@ -75,6 +76,8 @@ function offlineEntry(player_id: number, name: string, color: string | null, now
 export class PresenceHub {
   private map = new Map<number, PresenceEntry>();
   private sinks = new Set<Sink>();
+  // Last app_version persisted per player, so the ~4Hz frame only writes the DB on change.
+  private appVersionSeen = new Map<number, string>();
   // Cached career snapshot per player (offStats). It only changes on a finished
   // upload (refreshOffStats), so attaching it to idle live frames costs no query.
   private offStatsCache = new Map<number, PresenceEntry['off_stats']>();
@@ -177,6 +180,7 @@ export class PresenceHub {
     };
     this.map.set(playerId, entry);
     if (!wasOnline) this.writeLastSeen(playerId, now);   // offline -> online: stamp the reconnect
+    if (frame.app_version) this.writeAppVersion(playerId, frame.app_version);
     this.broadcast({ type: 'presence_update', player: entry });
   }
 
@@ -250,6 +254,16 @@ export class PresenceHub {
   private writeLastSeen(playerId: number, ts: number): void {
     try { this.db.prepare('UPDATE players SET last_seen_at=? WHERE id=?').run(ts, playerId); }
     catch { /* non-fatal */ }
+  }
+
+  /** Persist the player's last-ran app version, but only when it changes (the frame carries it
+   *  every tick). A DB hiccup must never break presence, so failures are swallowed. */
+  private writeAppVersion(playerId: number, version: string): void {
+    if (this.appVersionSeen.get(playerId) === version) return;
+    try {
+      this.db.prepare('UPDATE players SET app_version=? WHERE id=?').run(version, playerId);
+      this.appVersionSeen.set(playerId, version);
+    } catch { /* non-fatal */ }
   }
 
   private pbForCourse(playerId: number, course: string | null | undefined): { pb: number | null; runId: number | null } {

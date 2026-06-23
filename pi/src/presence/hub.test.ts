@@ -321,4 +321,17 @@ describe('PresenceHub', () => {
     expect((d.prepare('SELECT last_seen_at FROM players WHERE id=2').get() as { last_seen_at: number | null }).last_seen_at)
       .toBe(null);
   });
+
+  it('persists app_version to players on change; absent never clobbers', () => {
+    const d = db();
+    const hub = new PresenceHub(d, noCompletion, noPace, noLaps, () => 1000);
+    hub.addSink(() => {});
+    const ver = () => (d.prepare('SELECT app_version FROM players WHERE id=1').get() as { app_version: string | null }).app_version;
+    hub.update(1, { screen: 'MAIN_MENU', app_version: '2.1.0' });
+    expect(ver()).toBe('2.1.0');
+    hub.update(1, { screen: 'MAIN_MENU', app_version: '2.2.0' });   // changed -> rewritten
+    expect(ver()).toBe('2.2.0');
+    hub.update(1, { screen: 'RACING' });                            // absent -> unchanged
+    expect(ver()).toBe('2.2.0');
+  });
 });
