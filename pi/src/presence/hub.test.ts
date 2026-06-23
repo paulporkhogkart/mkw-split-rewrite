@@ -142,6 +142,18 @@ describe('PresenceHub', () => {
     expect(got[0].players[0].updated_at).toBe(0);
   });
 
+  it('seeds offline updated_at from the stored last_seen_at (restores after a restart)', () => {
+    const d = db();
+    d.prepare('UPDATE players SET last_seen_at=? WHERE id=?').run(1717000000000, 1);
+    const hub = new PresenceHub(d, noCompletion, noPace, noLaps, () => 9999999999999);
+    const got: any[] = [];
+    hub.addSink((m) => got.push(m));
+    const paul = got[0].players.find((p: any) => p.player_id === 1);
+    const luke = got[0].players.find((p: any) => p.player_id === 2);
+    expect(paul.updated_at).toBe(1717000000000);   // restored from the db
+    expect(luke.updated_at).toBe(0);               // NULL last_seen_at -> 0 (never seen)
+  });
+
   it('maps a non-fresh track_state to a held (stale) completion', () => {
     const seen: boolean[] = [];
     const hub = new PresenceHub(db(), (_c, _l, _p, _pid, _t, stale) => { seen.push(!!stale); return { completion: stale ? 0.9 : 0.1, dividers: [] }; }, noPace, noLaps, () =>3000);

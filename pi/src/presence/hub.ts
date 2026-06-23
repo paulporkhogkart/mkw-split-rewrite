@@ -95,10 +95,11 @@ export class PresenceHub {
 
   seedRoster(): void {
     const rows = this.db.prepare(
-      `SELECT p.id, p.display_name, p.color FROM season_rosters sr JOIN players p ON p.id=sr.player_id WHERE sr.season_id=?`
-    ).all(activeSeasonId(this.db)) as { id: number; display_name: string; color: string | null }[];
+      `SELECT p.id, p.display_name, p.color, p.last_seen_at FROM season_rosters sr JOIN players p ON p.id=sr.player_id WHERE sr.season_id=?`
+    ).all(activeSeasonId(this.db)) as { id: number; display_name: string; color: string | null; last_seen_at: number | null }[];
     for (const r of rows)
-      if (!this.map.has(r.id)) this.map.set(r.id, offlineEntry(r.id, r.display_name, r.color, 0, this.cachedOffStats(r.id)));
+      if (!this.map.has(r.id))
+        this.map.set(r.id, offlineEntry(r.id, r.display_name, r.color, r.last_seen_at ?? 0, this.cachedOffStats(r.id)));
   }
 
   /** offStats with the cache in front (populated at seed, refreshed on upload). */
