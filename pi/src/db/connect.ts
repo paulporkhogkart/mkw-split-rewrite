@@ -20,6 +20,12 @@ export function applySchema(db: DatabaseSync): void {
   // Additive: durable last-seen timestamp (epoch ms). Seeded back into presence on boot
   // so offline cards survive a restart. Nullable -> never seen.
   try { db.exec('ALTER TABLE players ADD COLUMN last_seen_at INTEGER'); } catch { /* already present */ }
+  // Additive: last-ran pbenguin-app version per player (reported through the presence frame).
+  // Nullable -> never reported. Read by /v1/version.
+  try { db.exec('ALTER TABLE players ADD COLUMN app_version TEXT'); } catch { /* already present */ }
+  // Service self-report: a separate process (the bot) upserts its deployed version + boot time
+  // here on boot so /v1/version can show it. Created here for migrated DBs; also in schema.sql.
+  db.exec('CREATE TABLE IF NOT EXISTS service_status (service TEXT PRIMARY KEY, version TEXT, booted_at INTEGER)');
   try {
     db.exec('ALTER TABLE world_records ADD COLUMN is_current INTEGER NOT NULL DEFAULT 0');
     // One-time seed (only runs the first time the column is added): flag the

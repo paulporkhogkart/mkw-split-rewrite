@@ -89,3 +89,27 @@ describe('applySchema last_seen_at migration', () => {
       .toBe(1717000000000);
   });
 });
+
+describe('applySchema app_version + service_status migration', () => {
+  it('adds app_version to a legacy players table (idempotent) and creates service_status', () => {
+    const db = new DatabaseSync(':memory:');
+    // Legacy players shape that predates app_version (has last_seen_at already).
+    db.exec(`CREATE TABLE players(
+      id INTEGER PRIMARY KEY, display_name TEXT NOT NULL UNIQUE,
+      auth_token_hash TEXT UNIQUE, color TEXT, last_seen_at INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')));
+      INSERT INTO players(id,display_name) VALUES (1,'Paul');`);
+    applySchema(db);                                   // additive ALTER adds app_version
+    db.prepare('UPDATE players SET app_version=? WHERE id=?').run('2.1.0', 1);
+    expect((db.prepare('SELECT app_version FROM players WHERE id=1').get() as { app_version: string }).app_version)
+      .toBe('2.1.0');
+    // service_status exists and upserts.
+    db.prepare(`INSERT INTO service_status(service,version,booted_at) VALUES('bot','2.1.0',5)
+                ON CONFLICT(service) DO UPDATE SET version=excluded.version`).run();
+    expect((db.prepare("SELECT version FROM service_status WHERE service='bot'").get() as { version: string }).version)
+      .toBe('2.1.0');
+    applySchema(db);                                   // idempotent second boot
+    expect((db.prepare('SELECT app_version FROM players WHERE id=1').get() as { app_version: string }).app_version)
+      .toBe('2.1.0');
+  });
+});

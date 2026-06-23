@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS players (
     auth_token_hash TEXT UNIQUE,
     color           TEXT,
     last_seen_at    INTEGER,
+    app_version     TEXT,
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -142,6 +143,12 @@ CREATE TABLE IF NOT EXISTS wr_name_flags (
     UNIQUE(category, raw_value)
 );
 CREATE TABLE IF NOT EXISTS wr_meta (key TEXT PRIMARY KEY, value TEXT);
+
+CREATE TABLE IF NOT EXISTS service_status (
+    service    TEXT PRIMARY KEY,
+    version    TEXT,
+    booted_at  INTEGER
+);
 
 CREATE INDEX IF NOT EXISTS idx_runs_leaderboard ON runs(season_id, course_id, cc, is_pb);
 CREATE INDEX IF NOT EXISTS idx_runs_player      ON runs(season_id, player_id, course_id, cc);
