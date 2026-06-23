@@ -4,6 +4,8 @@ import { openDb, applySchema } from '../db/connect';
 import { mintToken } from '../db/players';
 import { EventHub } from './events';
 import { createApp, makeWs } from './app';
+import { PresenceHub } from '../presence/hub';
+import { makeLiveCompletion } from '../presence/completion';
 
 function ctx() {
   const db = openDb(':memory:');
@@ -19,7 +21,8 @@ function ctx() {
 describe('WS /v1/events', () => {
   it('delivers a derived event to a connected subscriber', async () => {
     const c = ctx();
-    const { injectWebSocket } = makeWs(c.app, c.hub);
+    const presence = new PresenceHub(c.db, makeLiveCompletion(c.db));
+    const { injectWebSocket } = makeWs(c.app, c.hub, presence, c.db);
     const server = serve({ fetch: c.app.fetch, port: 0 });
     injectWebSocket(server);
     const addr = server.address() as { port: number };
@@ -40,7 +43,7 @@ describe('WS /v1/events', () => {
     expect(['run_finished', 'pb_achieved']).toContain(evt.type);
     // Close the WS client and connections before server.close() so its callback fires.
     wsClient.close();
-    server.closeAllConnections();
+    (server as { closeAllConnections(): void }).closeAllConnections();
     await new Promise<void>((r) => server.close(() => r()));
   });
 });

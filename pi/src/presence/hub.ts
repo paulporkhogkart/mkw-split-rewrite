@@ -2,7 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { activeSeasonId, courseIdBySlug } from '../db/seasons';
 import { slugify } from '../db/slug';
 import { pbRunFor } from '../db/pb';
-import type { LiveCompletion } from './completion';
+import type { CompletionFn } from './completion';
 
 // The engine's _TrackState values (mkw_tracker/minimap/tracker.py) that mean a confident live
 // fix; anything else it emits (e.g. 'reacquire') is treated as stale so completion holds.
@@ -90,7 +90,7 @@ export class PresenceHub {
   private pbLatch = new Map<number,
     { course: string; pb: number | null; runId: number | null; golds: Map<number, number | null> | null }>();
 
-  constructor(private db: DatabaseSync, private completion: LiveCompletion,
+  constructor(private db: DatabaseSync, private completion: CompletionFn,
               private pace: PaceFn = () => null, private laps: LapFn = () => null,
               private now: () => number = Date.now) {
     this.seedRoster();

@@ -10,10 +10,14 @@ import { slugify } from '../db/slug';
  *  the course has no finished run yet; the first upload builds it). */
 export interface LiveResult { completion: number | null; dividers: number[]; model: boolean; }
 
-export type LiveCompletion = ((
+export type CompletionFn = (
   course: string | null | undefined, curLap: number | null | undefined, pos: [number, number] | null | undefined,
   playerId?: number, t?: number, stale?: boolean, totLap?: number | null,
-) => LiveResult) & {
+) => LiveResult;
+
+/** The completion provider plus its cache-invalidation hook. server.ts calls invalidate after a
+ *  model rebuild; the presence hub only needs the callable CompletionFn. */
+export type LiveCompletion = CompletionFn & {
   /** Drop the cached model for a course (call after a rebuild so the next
    *  frame projects on the fresh model without a process restart). */
   invalidate(courseId: number): void;
