@@ -19,7 +19,7 @@
     {#each rows as r (r.id)}
       <div class="row" class:pb={!!r.strip} style={r.strip ? `--pc:${r.strip}` : ""}>
         <div class="when">{r.when}</div>
-        <div class="who" class:sys={r.sys} style={r.who.color ? `color:${r.who.color}` : ""}>{r.who.text}</div>
+        <div class="who" class:sys={r.sys} class:soft={r.soft} style={r.who.color ? `color:${r.who.color}` : ""}>{r.who.text}</div>
         <div class="where" class:dim={r.where.dim}>{r.where.text}</div>
         <div class="what">{#each r.what as s, i (i)}<span class={s.cls} style={s.color ? `color:${s.color}` : ""}>{s.text}</span>{/each}</div>
       </div>
@@ -37,7 +37,10 @@
   .row.pb { border-left-color: var(--pc); }
   .when { font-size: 11px; color: var(--tx-dim); text-align: right; white-space: nowrap; }
   .who { font-weight: 600; color: var(--tx-mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .who.sys { font-size: 10px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; color: var(--tx-dim); }
+  /* System category labels (Rank / Turf / WR): normal-case, name-sized so they sit on the same
+     baseline as the player names, de-emphasised by weight + colour rather than small-caps. */
+  .who.sys { font-weight: 500; color: var(--tx-dim); }
+  .who.soft { opacity: .72; }
   .where { color: var(--tx-mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .where.dim { color: var(--tx-dim); }
   .what { color: var(--tx-mut); }

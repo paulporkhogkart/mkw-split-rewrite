@@ -29,10 +29,15 @@ const hub = new EventHub();
 const activity = new ActivityHub();
 // Presence-driven activity sessions: presence feeds onFrame/onOffline, runs feed noteRun/notePb.
 // Open/finalised sessions broadcast on the activity stream; finalised ones persist to activity_events.
+// Generic "in the menus" rows are low-value and would be unbounded server storage, so menus
+// sessions are tracked (to bound the racing/setup sessions around them) but not sent or
+// persisted. Flip FEED_MENUS to re-enable.
+const FEED_MENUS = false;
 const sessionTracker = new SessionTracker({
   now: Date.now,
-  emitOpen: (v) => activity.publish({ kind: 'session', session: sessionWire(db, v) }),
+  emitOpen: (v) => { if (FEED_MENUS || v.cls !== 'menus') activity.publish({ kind: 'session', session: sessionWire(db, v) }); },
   emitFinal: (v) => {
+    if (!FEED_MENUS && v.cls === 'menus') return;
     insertActivityEvents(db, [sessionInput(activeSeasonId(db), v)]);
     activity.publish({ kind: 'session', session: sessionWire(db, v) });
   },
@@ -49,7 +54,8 @@ const app = createApp(db, hub, (courseId) => {
   live.invalidate(courseId); pace.invalidateCourse(courseId); laps.invalidateCourse(courseId);
   presence.refreshOffStats();   // an upload can change offline players' standings
 }, { activity, sessionTracker });
-const sessionsSnapshot = () => sessionTracker.openSessions().map(v => sessionWire(db, v));
+const sessionsSnapshot = () => sessionTracker.openSessions()
+  .filter(v => FEED_MENUS || v.cls !== 'menus').map(v => sessionWire(db, v));
 const { injectWebSocket } = makeWs(app, hub, presence, db, activity, sessionsSnapshot);
 const server = serve({ fetch: app.fetch, port: PORT }, (info) => {
   console.log(`[pi] listening on http://127.0.0.1:${info.port}`);

@@ -57,7 +57,8 @@ export function toRow(row, now) {
 }
 
 function sessionRow(row, now) {
-  const base = { id: row.key, when: relTime(row.started_ts, now), sys: false, strip: null };
+  // soft: sessions wear a gentler player-name colour than the PB row (the feed's one highlight).
+  const base = { id: row.key, when: relTime(row.started_ts, now), sys: false, strip: null, soft: true };
   const p = row.player;
   const who = p ? { text: p.name, color: p.color } : { text: "", color: null };
   const dur = row.live ? now - row.started_ts : row.duration_ms ?? 0;
