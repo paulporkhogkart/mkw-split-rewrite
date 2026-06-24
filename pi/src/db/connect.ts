@@ -2,7 +2,6 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { backfillWasPb } from './pb';
-import { backfillActivity } from '../activity/backfill';
 
 export function openDb(path: string): DatabaseSync {
   const db = new DatabaseSync(path);
@@ -85,10 +84,4 @@ export function applySchema(db: DatabaseSync): void {
   // and gated on the old value so it never fights a future colour change. server/importer.py
   // PLAYER_COLORS carries the same value, so fresh imports seed blue directly.
   db.exec("UPDATE players SET color = '#38bdf8' WHERE display_name = 'Gub' COLLATE NOCASE AND color = '#2dd4bf'");
-  // One-time activity backfill: replay finished PB history into activity_events so the feed
-  // is non-empty on first deploy. Guarded by empty-table check inside backfillActivity.
-  try {
-    if (((db.prepare('SELECT COUNT(*) c FROM activity_events').get() as any).c as number) === 0)
-      backfillActivity(db);
-  } catch { /* activity_events table absent in an older partial schema — silently skip */ }
 }

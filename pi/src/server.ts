@@ -1,6 +1,7 @@
 import { serve } from '@hono/node-server';
 import { openDb, applySchema } from './db/connect';
 import { migrateSeason0Recovered } from './db/season0Recovery';
+import { backfillActivity } from './activity/backfill';
 import { EventHub } from './api/events';
 import { ActivityHub } from './activity/hub';
 import { createApp, makeWs } from './api/app';
@@ -17,6 +18,7 @@ const PORT = Number(process.env.PORT ?? 8787);
 const db = openDb(DB_PATH);
 applySchema(db);
 migrateSeason0Recovered(db);   // one-time: real Discord-recovered Season 0 progression
+try { backfillActivity(db); } catch { /* guard: safe to skip if activity_events absent */ }
 const hub = new EventHub();
 const activity = new ActivityHub();
 const live = makeLiveCompletion(db);
