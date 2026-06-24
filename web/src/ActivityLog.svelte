@@ -29,13 +29,14 @@
 
 <style>
   .log { max-width: 720px; margin: 22px auto 40px; padding: 0 18px; }
-  .row { display: grid; grid-template-columns: 42px 74px 150px 1fr; align-items: baseline; column-gap: 12px;
+  .row { display: grid; grid-template-columns: 112px 74px 150px 1fr; align-items: baseline; column-gap: 12px;
          padding: 7px 14px 7px 12px; border-bottom: 1px solid var(--bd-soft); border-left: 2px solid transparent;
          background: var(--panel); font-size: 12.5px; }
   .row:first-child { border-top: 1px solid var(--bd-soft); border-top-left-radius: var(--r); border-top-right-radius: var(--r); }
   .row:last-child { border-bottom-left-radius: var(--r); border-bottom-right-radius: var(--r); }
   .row.pb { border-left-color: var(--pc); }
-  .when { font-size: 11px; color: var(--tx-dim); text-align: right; white-space: nowrap; }
+  .when { font-size: 10.5px; color: var(--tx-dim); text-align: left; white-space: nowrap;
+          font-variant-numeric: tabular-nums; }
   .who { font-weight: 600; color: var(--tx-mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* System category labels (Rank / Turf / WR): normal-case, name-sized so they sit on the same
      baseline as the player names, de-emphasised by weight + colour rather than small-caps. */

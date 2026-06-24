@@ -40,6 +40,14 @@ export function relTime(ts, now) {
   return `${Math.floor(h / 24)}d`;
 }
 
+/** An absolute log timestamp in the viewer's local time, single line: "25 Jun 14:32:05". */
+export function fmtStamp(ts) {
+  const d = new Date(ts);
+  const date = d.toLocaleDateString(undefined, { day: "2-digit", month: "short" });
+  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  return `${date} ${time}`;
+}
+
 const paren = (s) => (s == null ? "" : `(${s})`);
 const nameSpan = (n) => ({ text: n.name, cls: "name", color: n.color });
 
@@ -56,7 +64,7 @@ export function toRow(row, now) {
 
 function sessionRow(row, now) {
   // soft: sessions wear a gentler player-name colour than the PB row (the feed's one highlight).
-  const base = { id: row.key, when: relTime(row.started_ts, now), sys: false, strip: null, soft: true };
+  const base = { id: row.key, when: fmtStamp(row.started_ts), sys: false, strip: null, soft: true };
   const p = row.player;
   const who = p ? { text: p.name, color: p.color } : { text: "", color: null };
   const dur = row.live ? now - row.started_ts : row.duration_ms ?? 0;
@@ -83,7 +91,7 @@ function sessionRow(row, now) {
 
 function milestoneRow(row, now) {
   const e = row.event;
-  const when = relTime(e.ts, now);
+  const when = fmtStamp(e.ts);
   const course = e.course?.name ?? "";
   const p = e.player;
   const pay = e.payload || {};
