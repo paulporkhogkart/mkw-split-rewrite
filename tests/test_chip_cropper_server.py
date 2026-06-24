@@ -28,3 +28,17 @@ def test_save_then_load_roundtrips(tmp_path):
             "karts": {}, "courses": {}}
     save_crops(str(path), data)
     assert load_crops(str(path))["combos"]["mario__base"] == {"x": 1, "y": 2, "w": 3, "h": 4}
+
+
+def test_safe_capture_path_allows_inside(tmp_path):
+    from scripts.chip_cropper_server import safe_capture_path
+    root = str(tmp_path / "captures_sdr")
+    p = safe_capture_path(root, "en_uk/combos/mario__base.png")
+    assert p is not None and p.endswith("mario__base.png")
+
+
+def test_safe_capture_path_rejects_traversal(tmp_path):
+    from scripts.chip_cropper_server import safe_capture_path
+    root = str(tmp_path / "captures_sdr")
+    assert safe_capture_path(root, "../../../../etc/passwd") is None
+    assert safe_capture_path(root, "en_uk/../../secret.txt") is None

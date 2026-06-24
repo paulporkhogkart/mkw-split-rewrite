@@ -11,9 +11,19 @@ import argparse
 import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 CATEGORIES = ("combos", "karts", "courses")
+
+
+def safe_capture_path(captures_root: str, rel: str) -> Optional[str]:
+    """Resolve a /captures/<rel> request to an absolute path inside captures_root,
+    or None if it would escape (path traversal guard)."""
+    root = os.path.abspath(captures_root)
+    target = os.path.abspath(os.path.join(root, *rel.split("/")))
+    if target == root or target.startswith(root + os.sep):
+        return target
+    return None
 
 
 def list_captures(captures_root: str, lang: str) -> List[Dict[str, str]]:
@@ -63,8 +73,8 @@ def serve(captures_root: str, lang: str, crops_path: str, html_path: str, port: 
                 return self._send(200, json.dumps(load_crops(crops_path)).encode())
             if self.path.startswith("/captures/"):
                 rel = self.path[len("/captures/"):].split("?", 1)[0]
-                fpath = os.path.join(captures_root, *rel.split("/"))
-                if os.path.isfile(fpath):
+                fpath = safe_capture_path(captures_root, rel)
+                if fpath is not None and os.path.isfile(fpath):
                     with open(fpath, "rb") as fh:
                         return self._send(200, fh.read(), "image/png")
                 return self._send(404, b"not found", "text/plain")
