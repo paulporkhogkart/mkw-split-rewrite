@@ -46,8 +46,8 @@ describe('run -> activity cascade', () => {
     expect((db.prepare("SELECT COUNT(*) c FROM activity_events WHERE type='attempts'").get() as any).c).toBe(0);
   });
 
-  it('resets feed the racing session attempt count, not a cascade attempts row', async () => {
-    const { app, seen, sOpens, sFinals, sessionTracker, paul } = ctx();
+  it('resets feed the racing session attempt count; a PB ends the grind', async () => {
+    const { app, seen, sOpens, sFinals, paul } = ctx();
     await post(app, paul, { attempt_id: 'r1', course: 'Crown City', status: 'reset' });
     await post(app, paul, { attempt_id: 'r2', course: 'Crown City', status: 'reset' });
     expect(seen.length).toBe(0);                                 // resets emit no milestones
@@ -56,8 +56,7 @@ describe('run -> activity cascade', () => {
     expect(seen.map(e => e.type)).not.toContain('attempts');     // attempts lives on the session now
     expect(seen.map(e => e.type)[0]).toBe('pb');
     expect(last(sOpens)).toMatchObject({ attempts: 3 });         // the finish is the 3rd attempt
-    // pbs is a finalise-time outcome ("no PB" / "new PB"): finalise Paul's session and check it banked the PB.
-    sessionTracker.onOffline(2);                                 // Paul's player_id
+    // the PB ends the grind: the racing session finalises with the attempts + the PB outcome banked.
     expect(last(sFinals)).toMatchObject({ cls: 'racing', attempts: 3, pbs: 1 });
   });
 });

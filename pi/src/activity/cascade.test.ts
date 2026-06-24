@@ -15,6 +15,8 @@ describe('buildRunCascade', () => {
       before, after, beforeWr: null, afterWr: null, prevPbMs: 108410,
     });
     expect(out.map(e => e.type)).toEqual(['pb', 'rank', 'turf_claim']);
+    // 1ms apart in story order, so the newest-on-top feed reverses to turf -> rank -> pb.
+    expect(out.map(e => e.ts)).toEqual([1000, 1001, 1002]);
     expect(out[0].payload).toMatchObject({ time_ms: 107980, delta_ms: 107980 - 108410 });
     expect(out[1].payload).toMatchObject({ place: 1, rival_id: 2, gap_ms: 108221 - 107980 });
     expect(out[2]).toMatchObject({ type: 'turf_claim', player_id: 1, payload: { rival_id: 2 } });

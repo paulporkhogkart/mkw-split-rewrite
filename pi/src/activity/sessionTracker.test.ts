@@ -73,10 +73,22 @@ describe('runs', () => {
     expect(last(opens)).toMatchObject({ course_id: 6, attempts: 1 });
   });
 
-  it('records a PB on the open racing session', () => {
-    at(1000); t.noteRun(P, 5); t.notePb(P, 5);
-    at(2000); t.onOffline(P);
-    expect(finals[0]).toMatchObject({ cls: 'racing', course_id: 5, attempts: 1, pbs: 1 });
+  it('a PB banks the outcome and ends the grind (notePb finalises the racing session)', () => {
+    at(1000); t.noteRun(P, 5);          // racing open, 1 attempt
+    at(2000); t.notePb(P, 5);
+    expect(finals).toHaveLength(1);
+    expect(finals[0]).toMatchObject({ cls: 'racing', course_id: 5, attempts: 1, pbs: 1, ended_ts: 2000 });
+  });
+
+  it('after a PB, a later RACING frame opens a NEW racing session (fresh count)', () => {
+    at(0); t.onFrame(P, frame('RACING', 5));
+    at(STABLE_MS); t.onFrame(P, frame('RACING', 5)); t.noteRun(P, 5);   // racing open, 1 attempt
+    at(2000); t.notePb(P, 5);                                           // PB ends the grind
+    const finalizedId = last(finals).session_id;
+    at(3000); t.onFrame(P, frame('RACING', 5));
+    at(3000 + STABLE_MS); t.onFrame(P, frame('RACING', 5));             // commit -> a NEW session
+    expect(last(opens)).toMatchObject({ cls: 'racing', course_id: 5, attempts: 0 });
+    expect(last(opens).session_id).not.toBe(finalizedId);
   });
 
   it('continues an already-open (presence) racing session instead of reopening', () => {

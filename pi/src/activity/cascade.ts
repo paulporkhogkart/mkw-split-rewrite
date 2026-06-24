@@ -31,5 +31,9 @@ export function buildRunCascade(a: RunCascadeArgs): ActivityInput[] {
     else if (t.kind === 'fire') out.push({ ...base, type: 'turf_fire', player_id: t.leaderId, payload: {} });
     else out.push({ ...base, type: 'turf_waver', player_id: t.leaderId, payload: {} });
   }
+  // The burst shares one wall-clock instant, which the newest-on-top feed can't order. Stamp the
+  // events 1ms apart in story order (pb, then the rank climb worst->best, then the turf change) so
+  // the feed reverses them to: turf (newest, top) -> rank 1st -> ... -> rank worst -> pb (bottom).
+  out.forEach((e, i) => { e.ts = a.ts + i; });
   return out;
 }

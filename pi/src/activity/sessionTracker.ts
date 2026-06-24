@@ -187,10 +187,16 @@ export class SessionTracker {
     }
   }
 
-  /** That attempt was a PB - records the outcome for the racing session's finalised row. */
+  /** That attempt was a PB. Banks it on the current racing session and ENDS the grind, so a fresh
+   *  racing session opens on the next RACING frame: the feed then shows a new racing log (timer +
+   *  count from zero) above the milestone cascade, rather than the old grind continuing. */
   notePb(playerId: number, courseId: number): void {
-    const cur = this.st(playerId).session;
-    if (cur && cur.cls === 'racing' && (cur.courseId == null || cur.courseId === courseId)) cur.pbs++;
+    const st = this.st(playerId);
+    const cur = st.session;
+    if (cur && cur.cls === 'racing' && (cur.courseId == null || cur.courseId === courseId)) {
+      cur.pbs++;
+      this.finalize(playerId, this.deps.now());
+    }
   }
 
   /** The player went offline - finalise their open session. */
