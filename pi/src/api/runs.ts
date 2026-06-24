@@ -11,8 +11,11 @@ import { recordGhostImport } from '../db/ghostImport';
 import { recomputeIsPb, recomputeWasPb } from '../db/pb';
 import { courseLeaderboard, currentWr } from '../db/reads';
 import { rebuildCourseModel } from '../db/courseModels';
+import { buildRunCascade } from '../activity/cascade';
+import { commitActivity } from '../activity/publish';
+import type { ActivityHub } from '../activity/hub';
 
-export function runsRoutes(db: DatabaseSync, hub: EventHub,
+export function runsRoutes(db: DatabaseSync, hub: EventHub, activity: ActivityHub,
                            invalidateModel?: (courseId: number) => void): Hono<Env> {
   const r = new Hono<Env>();
 
@@ -46,6 +49,7 @@ export function runsRoutes(db: DatabaseSync, hub: EventHub,
     }
 
     const prevLeader = courseLeaderboard(db, seasonId, courseId, cc)[0] ?? null;
+    const beforeBoard = courseLeaderboard(db, seasonId, courseId, cc);
     const prevMine = db.prepare(
       'SELECT total_time_ms FROM runs WHERE season_id=? AND player_id=? AND course_id=? AND cc=? AND is_pb=1'
     ).get(seasonId, playerId, courseId, cc) as { total_time_ms: number } | undefined;
@@ -93,6 +97,16 @@ export function runsRoutes(db: DatabaseSync, hub: EventHub,
       hub.publish({ type: 'lead_change', course: p.course, cc, new_leader: playerName, prev_leader: prevLeader.display_name, total_time: p.total_time });
     if (wr && mine && mine.total_time_ms < wr.record_ms && p.total_time)
       hub.publish({ type: 'wr_beaten', player: playerName, course: p.course, cc, total_time: p.total_time, wr_time: wr.record_str });
+
+    if (isPb) {
+      const wrMs = wr ? wr.record_ms : null;
+      const inputs = buildRunCascade({
+        ts: Date.now(), seasonId, cc, courseId, moverId: playerId, moverName: playerName,
+        before: beforeBoard, after: lb, beforeWr: wrMs, afterWr: wrMs,
+        prevPbMs: prevMineMs, attempts: null,
+      });
+      commitActivity(db, activity, inputs);
+    }
 
     if (p.source === 'ghost') {
       const newRun = db.prepare("SELECT id FROM runs WHERE attempt_id=?").get(p.attempt_id) as { id: number } | undefined;

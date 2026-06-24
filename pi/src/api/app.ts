@@ -4,6 +4,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { EventHub } from './events';
+import { ActivityHub } from '../activity/hub';
 import { runsRoutes } from './runs';
 import { readsRoutes } from './reads';
 import { versionRoutes } from './version';
@@ -22,7 +23,7 @@ const EXPLORER_HTML = fileURLToPath(new URL('../../stat-explorer.html', import.m
 
 export function createApp(db: DatabaseSync, hub: EventHub,
                           invalidateModel?: (courseId: number) => void,
-                          opts?: { latest?: LatestFn }): Hono<Env> {
+                          opts?: { latest?: LatestFn; activity?: ActivityHub }): Hono<Env> {
   const app = new Hono<Env>();
   app.get('/health', (c) => c.json({ status: 'ok' }));
   // Every HTTP route except /health and the two WebSocket streams needs a token (read or write).
@@ -38,7 +39,8 @@ export function createApp(db: DatabaseSync, hub: EventHub,
 
   const OPEN = new Set(['/health', '/v1/events', '/v1/presence', ...PUBLIC_READS]);
   app.use('*', (c, next) => (OPEN.has(c.req.path) ? next() : requireTokenAny(db)(c, next)));
-  app.route('/', runsRoutes(db, hub, invalidateModel));
+  const activity = opts?.activity ?? new ActivityHub();
+  app.route('/', runsRoutes(db, hub, activity, invalidateModel));
   app.route('/', readsRoutes(db));
   app.route('/', versionRoutes(db, { latest: opts?.latest }));
   app.route('/', createStatsApp(db, { porkerPath: process.env.STATS_PORKER_DB ?? 'porker.db' }));
