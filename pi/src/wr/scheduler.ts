@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { EventHub } from '../api/events';
+import type { ActivityHub } from '../activity/hub';
 import { scrapeOnce, type ScrapeOpts } from './scrape';
 import type { WrReport } from './reconcile';
 
@@ -9,6 +10,7 @@ export type SchedulerOpts = {
   url?: string;
   minIntervalSec: number;
   maxIntervalSec: number;
+  activity?: ActivityHub;       // optional: emit turf/wr activity on WR changes
   scrape?: ScrapeFn;            // injectable for tests; defaults to scrapeOnce
   random?: () => number;        // injectable for tests; defaults to Math.random
 };
@@ -20,7 +22,7 @@ export type SchedulerOpts = {
  *  throws) and the next is scheduled only after the current finishes, so ticks never
  *  overlap. maxIntervalSec <= 0 disables it. Returns a stop function. */
 export function startWrScraper(db: DatabaseSync, hub: EventHub, opts: SchedulerOpts): () => void {
-  const { url, minIntervalSec, maxIntervalSec } = opts;
+  const { url, minIntervalSec, maxIntervalSec, activity } = opts;
   const scrape = opts.scrape ?? scrapeOnce;
   const random = opts.random ?? Math.random;
   if (!maxIntervalSec || maxIntervalSec <= 0) return () => {};
@@ -39,7 +41,7 @@ export function startWrScraper(db: DatabaseSync, hub: EventHub, opts: SchedulerO
 
   const tick = async () => {
     try {
-      const rep = await scrape(db, hub, { url });
+      const rep = await scrape(db, hub, { url, activity });
       console.log(`[wr] scrape: ${JSON.stringify(rep)}`);
     } catch (e) {
       console.error('[wr] scrape failed:', e);

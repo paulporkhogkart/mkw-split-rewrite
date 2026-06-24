@@ -41,6 +41,7 @@ startWrScraper(db, hub, {
   url: process.env.MKWRS_URL,
   minIntervalSec: Number(process.env.MKWRS_MIN_INTERVAL_SEC ?? 900),   // 15 min
   maxIntervalSec: Number(process.env.MKWRS_MAX_INTERVAL_SEC ?? 1800),  // 30 min
+  activity,
 });
 startWrHistoryScraper(db, {
   minIntervalSec: Number(process.env.MKWRS_HISTORY_MIN_INTERVAL_SEC ?? 7200),    // 2 h

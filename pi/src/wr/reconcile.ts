@@ -1,7 +1,13 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { EventHub } from '../api/events';
+import type { ActivityHub } from '../activity/hub';
+import type { ActivityInput } from '../activity/types';
 import { resolveCourseId } from './courses';
 import type { ScrapedWr } from './parse';
+import { courseLeaderboard } from '../db/reads';
+import { activeSeasonId } from '../db/seasons';
+import { turfTransitions } from '../turf/transitions';
+import { commitActivity } from '../activity/publish';
 
 export type WrReport = {
   inserted: number;
@@ -33,18 +39,18 @@ function backfill(db: DatabaseSync, row: Row, s: ScrapedWr): boolean {
   return true;
 }
 
-export function reconcile(db: DatabaseSync, hub: EventHub, scraped: ScrapedWr[], cc = 150): WrReport {
+export function reconcile(db: DatabaseSync, hub: EventHub, scraped: ScrapedWr[], cc = 150, activity?: ActivityHub): WrReport {
   const report: WrReport = { inserted: 0, reflagged: 0, backfilled: 0, unchanged: 0, unmapped: [] };
   for (const s of scraped) {
     const courseId = resolveCourseId(db, s.courseName);
     if (courseId === null) { report.unmapped.push(s.courseName); continue; }
-    try { reconcileOne(db, hub, s, courseId, cc, report); }
+    try { reconcileOne(db, hub, s, courseId, cc, report, activity); }
     catch (e) { console.error(`[wr] reconcile failed for ${s.courseName}:`, e); }
   }
   return report;
 }
 
-function reconcileOne(db: DatabaseSync, hub: EventHub, s: ScrapedWr, courseId: number, cc: number, report: WrReport): void {
+function reconcileOne(db: DatabaseSync, hub: EventHub, s: ScrapedWr, courseId: number, cc: number, report: WrReport, activity?: ActivityHub): void {
   const cur = db.prepare(
     `SELECT id, holder_name, record_ms, record_str, video_url, character, vehicle
      FROM world_records WHERE course_id=? AND cc=? AND is_current=1`
@@ -90,5 +96,17 @@ function reconcileOne(db: DatabaseSync, hub: EventHub, s: ScrapedWr, courseId: n
       improvement_ms: cur.record_ms - s.recordMs,
       character: s.character, vehicle: s.vehicle, video_url: s.videoUrl,
     });
+    if (activity) {
+      const seasonId = activeSeasonId(db);
+      const board = courseLeaderboard(db, seasonId, courseId, cc);
+      const ts = Date.now();
+      const inputs: ActivityInput[] = [{ ts, type: 'wr', season_id: seasonId, player_id: null, course_id: courseId, cc,
+        payload: { time_ms: s.recordMs, time_str: s.recordStr, holder: s.holder, delta_ms: s.recordMs - cur.record_ms } }];
+      for (const t of turfTransitions({ board, wr: cur.record_ms }, { board, wr: s.recordMs })) {
+        if (t.kind === 'fire') inputs.push({ ts, type: 'turf_fire', season_id: seasonId, player_id: t.leaderId, course_id: courseId, cc, payload: {} });
+        else if (t.kind === 'waver') inputs.push({ ts, type: 'turf_waver', season_id: seasonId, player_id: t.leaderId, course_id: courseId, cc, payload: {} });
+      }
+      commitActivity(db, activity, inputs);
+    }
   }
 }

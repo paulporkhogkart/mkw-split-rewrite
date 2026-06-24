@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { EventHub } from '../api/events';
+import type { ActivityHub } from '../activity/hub';
 import { parseWrTable } from './parse';
 import { reconcile, type WrReport } from './reconcile';
 
@@ -9,6 +10,7 @@ export type ScrapeOpts = {
   url?: string;
   cc?: number;
   fetchHtml?: (url: string) => Promise<string>;
+  activity?: ActivityHub;
 };
 
 export async function scrapeOnce(db: DatabaseSync, hub: EventHub, opts: ScrapeOpts = {}): Promise<WrReport> {
@@ -16,7 +18,7 @@ export async function scrapeOnce(db: DatabaseSync, hub: EventHub, opts: ScrapeOp
   const cc = opts.cc ?? 150;
   const fetchHtml = opts.fetchHtml ?? defaultFetchHtml;
   const html = await fetchHtml(url);
-  return reconcile(db, hub, parseWrTable(html), cc);
+  return reconcile(db, hub, parseWrTable(html), cc, opts.activity);
 }
 
 async function defaultFetchHtml(url: string): Promise<string> {
