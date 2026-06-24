@@ -9,3 +9,7 @@ export const API_BASE =
 export const territoryUrl = (cc = 150) => `${API_BASE}/v1/territory?cc=${cc}`;
 export const territoryTimelineUrl = (cc = 150) => `${API_BASE}/v1/territory/timeline?cc=${cc}`;
 export const versionUrl = () => `${API_BASE}/v1/version`;
+export const activityUrl = (before, limit = 100) =>
+  `${API_BASE}/v1/activity?limit=${limit}${before != null ? `&before=${before}` : ""}`;
+export const activityStreamWsUrl = () =>
+  `${API_BASE.replace(/^http/, "ws")}/v1/activity/stream`;
