@@ -32,4 +32,18 @@ describe('buildRunCascade', () => {
     expect(out.map(e => e.type)).toEqual(['pb', 'rank']);
     expect(out[1].payload).toMatchObject({ place: 2, rival_id: 2 });
   });
+
+  it('pb and rank payloads carry the mover display character/kart/costume', () => {
+    const before = [row(2, 108221, 1), row(1, 108600, 2)];
+    const after = [row(1, 107980, 1), row(2, 108221, 2)];
+    const out = buildRunCascade({
+      ts: 1000, seasonId: 1, cc: 150, courseId: 1, moverId: 1, moverName: 'P1',
+      before, after, beforeWr: null, afterWr: null, prevPbMs: 108410,
+      character: 'Koopa Troopa', kart: 'Baby Blooper', costume: null,
+    });
+    const pb = out.find(e => e.type === 'pb')!;
+    expect(pb.payload).toMatchObject({ character: 'Koopa Troopa', kart: 'Baby Blooper', costume: null });
+    const rank = out.find(e => e.type === 'rank')!;
+    expect(rank.payload).toMatchObject({ character: 'Koopa Troopa', kart: 'Baby Blooper' });
+  });
 });
