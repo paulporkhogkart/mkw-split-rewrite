@@ -13,7 +13,7 @@ const pkg = JSON.parse(readFileSync(fileURLToPath(new URL("../package.json", imp
 export default defineConfig({
   plugins: [svelte()],
   define: { __SITE_VERSION__: JSON.stringify(pkg.version) },
-  server: { port: 1430, strictPort: true, fs: { allow: [".."] } },
+  server: { host: "127.0.0.1", port: 1430, strictPort: true, fs: { allow: [".."] } },
   test: { include: ["**/*.test.js"] },
   build: { target: "chrome105" },
 });
