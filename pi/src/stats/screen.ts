@@ -6,17 +6,19 @@ import { toEpochSeconds } from './period';
 export interface ScreenInterval { screen: string; started_ms: number; ended_ms: number; }
 
 /** Insert intervals for one player. Idempotent on (player_id, started_ms); skips
- *  non-positive-length / unnamed intervals. Returns the number actually inserted. */
-export function insertScreenIntervals(db: DatabaseSync, seasonId: number, playerId: number, intervals: ScreenInterval[]): number {
+ *  non-positive-length / unnamed intervals. Returns the rows actually inserted. */
+export function insertScreenIntervals(db: DatabaseSync, seasonId: number, playerId: number, intervals: ScreenInterval[]): ScreenInterval[] {
   const stmt = db.prepare(
     `INSERT OR IGNORE INTO screen_intervals(season_id, player_id, screen, started_ms, ended_ms)
      VALUES (?,?,?,?,?)`);
-  let n = 0;
+  const inserted: ScreenInterval[] = [];
   for (const iv of intervals) {
     if (!iv.screen || !(iv.ended_ms > iv.started_ms)) continue;
-    n += Number(stmt.run(seasonId, playerId, iv.screen, iv.started_ms, iv.ended_ms).changes);
+    if (Number(stmt.run(seasonId, playerId, iv.screen, iv.started_ms, iv.ended_ms).changes) > 0) {
+      inserted.push(iv);
+    }
   }
-  return n;
+  return inserted;
 }
 
 export interface ScreenQuery {

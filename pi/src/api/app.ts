@@ -46,7 +46,7 @@ export function createApp(db: DatabaseSync, hub: EventHub,
   app.route('/', readsRoutes(db));
   app.route('/', versionRoutes(db, { latest: opts?.latest }));
   app.route('/', createStatsApp(db, { porkerPath: process.env.STATS_PORKER_DB ?? 'porker.db' }));
-  app.route('/', screenRoutes(db));
+  app.route('/', screenRoutes(db, activity));
   app.get('/explorer', (c) => {
     try { return c.html(readFileSync(EXPLORER_HTML, 'utf8')); }
     catch { return c.text('stat-explorer.html not found', 404); }

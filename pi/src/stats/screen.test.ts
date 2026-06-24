@@ -17,9 +17,13 @@ function base(): DatabaseSync {
 describe('insertScreenIntervals', () => {
   it('inserts, is idempotent on (player, started_ms), and skips non-positive', () => {
     const d = base();
-    expect(insertScreenIntervals(d, 1, 1, [{ screen: 'MAIN_MENU', started_ms: 1000, ended_ms: 4000 }])).toBe(1);
-    expect(insertScreenIntervals(d, 1, 1, [{ screen: 'MAIN_MENU', started_ms: 1000, ended_ms: 4000 }])).toBe(0); // dup
-    expect(insertScreenIntervals(d, 1, 1, [{ screen: 'X', started_ms: 5000, ended_ms: 5000 }])).toBe(0);          // zero-length
+    const r1 = insertScreenIntervals(d, 1, 1, [{ screen: 'MAIN_MENU', started_ms: 1000, ended_ms: 4000 }]);
+    expect(r1).toHaveLength(1);
+    expect(r1[0]).toEqual({ screen: 'MAIN_MENU', started_ms: 1000, ended_ms: 4000 });
+    const r2 = insertScreenIntervals(d, 1, 1, [{ screen: 'MAIN_MENU', started_ms: 1000, ended_ms: 4000 }]);
+    expect(r2).toHaveLength(0); // dup
+    const r3 = insertScreenIntervals(d, 1, 1, [{ screen: 'X', started_ms: 5000, ended_ms: 5000 }]);
+    expect(r3).toHaveLength(0); // zero-length
   });
 });
 
