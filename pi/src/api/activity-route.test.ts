@@ -25,4 +25,25 @@ describe('GET /v1/activity', () => {
     const body = await res.json();
     expect(body.map((e: any) => e.payload.time_str)).toEqual(['1:47.000', '1:48.000']);
   });
+
+  it('treats malformed ?before as absent (no filter)', async () => {
+    const { db, app } = ctx();
+    const ids = insertActivityEvents(db, [
+      { ts: 1, type: 'pb', season_id: 1, player_id: 1, course_id: 1, cc: 150, payload: { time_str: '1:48.000' } },
+      { ts: 2, type: 'pb', season_id: 1, player_id: 1, course_id: 1, cc: 150, payload: { time_str: '1:47.000' } },
+    ]);
+    const maxId = Math.max(...ids);
+
+    // ?before=maxId filters to events with id < maxId (excludes the most recent)
+    const paginated = await app.request(`/v1/activity?before=${maxId}&limit=10`);
+    expect(paginated.status).toBe(200);
+    let body = await paginated.json();
+    expect(body).toHaveLength(1);
+
+    // ?before=abc (malformed) returns FULL set (treated as no filter)
+    const malformed = await app.request(`/v1/activity?before=abc&limit=10`);
+    expect(malformed.status).toBe(200);
+    body = await malformed.json();
+    expect(body).toHaveLength(2);
+  });
 });
