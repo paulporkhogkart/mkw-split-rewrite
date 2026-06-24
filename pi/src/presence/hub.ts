@@ -9,10 +9,13 @@ import type { FrameInput } from '../activity/sessionTracker';
 // fix; anything else it emits (e.g. 'reacquire') is treated as stale so completion holds.
 const FRESH_TRACK = new Set(['tracking', 'ring_only']);
 
-/** The activity-feed sink (the SessionTracker) the hub feeds each frame + on disconnect. */
+/** The activity-feed sink the hub feeds each frame + on connect/disconnect. onFrame/onOffline
+ *  drive the SessionTracker; onLogin/onLogout mark app open/close (offline<->online edges). */
 export interface ActivitySink {
   onFrame(playerId: number, frame: FrameInput): void;
   onOffline(playerId: number): void;
+  onLogin?(playerId: number): void;    // offline -> online edge (app opened)
+  onLogout?(playerId: number): void;   // online -> offline edge (app closed)
 }
 
 /** What an app sends each frame (its identity comes from the token, not the frame). */
@@ -187,7 +190,7 @@ export class PresenceHub {
       off_stats: inRaceCtx ? null : this.cachedOffStats(playerId),
     };
     this.map.set(playerId, entry);
-    if (!wasOnline) this.writeLastSeen(playerId, now);   // offline -> online: stamp the reconnect
+    if (!wasOnline) { this.writeLastSeen(playerId, now); this.activity?.onLogin?.(playerId); }   // app opened
     if (frame.app_version) this.writeAppVersion(playerId, frame.app_version);
     this.broadcast({ type: 'presence_update', player: entry });
     // Feed the live activity feed: classify this frame's screen into a session (course resolved).
@@ -230,7 +233,8 @@ export class PresenceHub {
     this.map.set(playerId, off);
     this.writeLastSeen(playerId, now);
     this.broadcast({ type: 'presence_update', player: off });
-    this.activity?.onOffline(playerId);   // finalise their open session
+    this.activity?.onOffline(playerId);    // finalise their open session
+    this.activity?.onLogout?.(playerId);   // app closed
   }
 
   /** Recompute the cached off_stats for every roster player - a finished upload can

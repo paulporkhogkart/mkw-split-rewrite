@@ -113,6 +113,10 @@ function milestoneRow(row, now) {
     case "wr":
       return { ...base, sys: true, who: { text: "wr", color: null }, where: { text: course }, strip: null,
         what: [{ text: fmtTime(pay.time_ms), cls: "t" }, { text: " " + paren(signedDelta(pay.delta_ms)), cls: "delta" }, { text: " by " + pay.holder, cls: "dim" }] };
+    case "presence":
+      // App open/close: a soft player-name row, the action in the `where` slot like an off-track session.
+      return { ...base, sys: false, soft: true, who: { text: p.name, color: p.color }, strip: null,
+        where: { text: pay.online ? "opened pbenguin" : "closed pbenguin", dim: true }, what: [] };
     default:
       return null;
   }

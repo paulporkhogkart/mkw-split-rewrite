@@ -58,6 +58,14 @@ describe("toRow milestones", () => {
     expect(r.who.text).toBe("wr");
     expect(r.what.map((s) => s.text).join("")).toBe("1:29.180 (-0.220) by Ralph");
   });
+  it("presence -> soft player row, opened/closed pbenguin in the where slot", () => {
+    const open = mrow("presence", { payload: { online: true } });
+    expect(open.sys).toBe(false);
+    expect(open.soft).toBe(true);
+    expect(open.who).toEqual({ text: "Gub", color: "#38bdf8" });
+    expect(open.where).toEqual({ text: "opened pbenguin", dim: true });
+    expect(mrow("presence", { payload: { online: false } }).where.text).toBe("closed pbenguin");
+  });
 });
 
 describe("toRow sessions", () => {

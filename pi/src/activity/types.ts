@@ -1,7 +1,7 @@
 export type ActivityType =
-  // 'session' is the presence-driven durational activity; the rest are instantaneous milestones.
-  // (Legacy emit-at-end 'attempts'/'screen' events were removed in the sessions redesign.)
-  | 'pb' | 'rank' | 'turf_claim' | 'turf_fire' | 'turf_waver' | 'wr' | 'session';
+  // 'session' is the presence-driven durational activity; 'presence' is an app open/close; the
+  // rest are instantaneous milestones. (Legacy 'attempts'/'screen' were removed in the redesign.)
+  | 'pb' | 'rank' | 'turf_claim' | 'turf_fire' | 'turf_waver' | 'wr' | 'session' | 'presence';
 
 export interface ActivityInput {
   ts: number;

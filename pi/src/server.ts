@@ -6,6 +6,7 @@ import { backfillActivity } from './activity/backfill';
 import { EventHub } from './api/events';
 import { ActivityHub } from './activity/hub';
 import { SessionTracker } from './activity/sessionTracker';
+import { commitActivity } from './activity/publish';
 import { insertActivityEvents, sessionInput, sessionWire } from './db/activity';
 import { activeSeasonId } from './db/seasons';
 import { createApp, makeWs } from './api/app';
@@ -48,7 +49,19 @@ const sessionTracker = new SessionTracker({
 const live = makeLiveCompletion(db);
 const pace = makePaceDelta(db);
 const laps = makeLapDelta(db);
-const presence = new PresenceHub(db, live, pace, laps, Date.now, sessionTracker);
+// App open/close -> a "presence" activity event. Logins within a short window of boot are skipped:
+// after a (re)start every connected app reconnects at once, and that burst isn't a real round of opens.
+const bootAt = Date.now();
+const PRESENCE_LOGIN_GRACE_MS = 10000;
+const presenceActivityEvent = (playerId: number, online: boolean) =>
+  commitActivity(db, activity, [{ ts: Date.now(), type: 'presence', season_id: activeSeasonId(db),
+    player_id: playerId, course_id: null, cc: null, payload: { online } }]);
+const presence = new PresenceHub(db, live, pace, laps, Date.now, {
+  onFrame: (pid, frame) => sessionTracker.onFrame(pid, frame),
+  onOffline: (pid) => sessionTracker.onOffline(pid),
+  onLogin: (pid) => { if (Date.now() - bootAt >= PRESENCE_LOGIN_GRACE_MS) presenceActivityEvent(pid, true); },
+  onLogout: (pid) => presenceActivityEvent(pid, false),
+});
 // A model rebuild refreshes alignments too, so live projection, PB pace curves and
 // lap comparisons (PB laps + golds) all reload; the rebuild fires on every finished
 // trailed upload, which keeps the lap golds fresh as runs land.

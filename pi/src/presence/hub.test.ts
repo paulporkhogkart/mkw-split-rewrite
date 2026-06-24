@@ -56,6 +56,19 @@ describe('PresenceHub', () => {
     expect(got.filter((m) => m.type === 'presence_update' && m.player.player_id === 1 && !m.player.online)).toHaveLength(1);
   });
 
+  it('fires onLogin on the first frame and onLogout on going offline (idempotently)', () => {
+    const logins: number[] = []; const logouts: number[] = [];
+    const sink = { onFrame() {}, onOffline() {},
+                   onLogin: (id: number) => logins.push(id), onLogout: (id: number) => logouts.push(id) };
+    const hub = new PresenceHub(db(), noCompletion, noPace, noLaps, () => 1000, sink);
+    hub.update(1, { screen: 'MAIN_MENU' });   // first frame -> login
+    hub.update(1, { screen: 'RACING' });      // still online -> no second login
+    expect(logins).toEqual([1]);
+    hub.setOffline(1);                         // -> logout
+    hub.setOffline(1);                         // already offline -> no second logout
+    expect(logouts).toEqual([1]);
+  });
+
   it('passes resets through and enriches pb_ms for the current course', () => {
     const d = db();
     d.exec(`INSERT INTO courses(id,slug,display_name) VALUES(7,'rainbow_road','Rainbow Road');
