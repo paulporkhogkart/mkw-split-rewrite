@@ -55,3 +55,51 @@ def crop_chip(img, rect: Rect, chip_px: int):
         raise ValueError(f"empty crop for rect={rect} on frame {W}x{H}")
     out_w = max(1, round(chip_px * w / h))
     return cv2.resize(sub, (out_w, chip_px), interpolation=cv2.INTER_AREA)
+
+
+def generate(crops_path: str, captures_root: str, lang: str, out_root: str,
+             chip_px: Optional[int] = None):
+    """Cut every mapped capture into out_root/<category>/<name>.png. Returns (written, skipped)."""
+    with open(crops_path, encoding="utf-8") as fh:
+        spec = json.load(fh)
+    chip_px = chip_px or int((spec.get("meta") or {}).get("chip_px", 96))
+    written: List[Tuple[str, str]] = []
+    skipped: List[Tuple[str, str]] = []
+    for category in CATEGORIES:
+        src_dir = os.path.join(captures_root, lang, category)
+        if not os.path.isdir(src_dir):
+            continue
+        for fn in sorted(os.listdir(src_dir)):
+            if not fn.lower().endswith(".png"):
+                continue
+            name = fn[:-4]
+            rect = resolve_rect(spec, category, name)
+            img = cv2.imread(os.path.join(src_dir, fn)) if rect is not None else None
+            if rect is None or img is None:
+                skipped.append((category, name))
+                continue
+            out_dir = os.path.join(out_root, category)
+            os.makedirs(out_dir, exist_ok=True)
+            cv2.imwrite(os.path.join(out_dir, fn), crop_chip(img, rect, chip_px))
+            written.append((category, name))
+    return written, skipped
+
+
+def main():
+    p = argparse.ArgumentParser(description="Export activity-feed chips from SDR captures.")
+    p.add_argument("--lang", default="en_uk")
+    p.add_argument("--captures", default="captures_sdr")
+    p.add_argument("--crops", default=os.path.join("tools", "chips.crops.json"))
+    p.add_argument("--out", default=os.path.join("web", "public", "chips"))
+    p.add_argument("--chip-px", type=int, default=None, dest="chip_px")
+    a = p.parse_args()
+    written, skipped = generate(a.crops, a.captures, a.lang, a.out, a.chip_px)
+    print(f"[gen-chips] wrote {len(written)} chips -> {a.out}")
+    if skipped:
+        print(f"[gen-chips] skipped {len(skipped)} unmapped/unreadable:")
+        for cat, name in skipped:
+            print(f"  {cat}/{name}")
+
+
+if __name__ == "__main__":
+    main()

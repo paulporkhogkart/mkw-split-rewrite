@@ -45,3 +45,26 @@ def test_crop_chip_clamps_to_frame_bounds():
     img = np.zeros((100, 100, 3), dtype=np.uint8)
     out = crop_chip(img, (90, 90, 40, 40), 32)     # rect spills past the edge
     assert out.shape[0] == 32 and out.shape[2] == 3
+
+
+def test_generate_writes_mapped_skips_unmapped(tmp_path):
+    import json, cv2, os
+    from scripts.gen_chips import generate
+    cap = tmp_path / "captures_sdr" / "en_uk"
+    (cap / "combos").mkdir(parents=True)
+    (cap / "karts").mkdir(parents=True)
+    cv2.imwrite(str(cap / "combos" / "mario__base.png"),
+                np.full((1080, 1920, 3), 120, dtype=np.uint8))
+    cv2.imwrite(str(cap / "karts" / "unknown_kart.png"),
+                np.full((1080, 1920, 3), 80, dtype=np.uint8))
+    spec = {"meta": {"chip_px": 48},
+            "defaults": {"character": {"mario": {"x": 100, "y": 100, "w": 200, "h": 200}}},
+            "combos": {}, "karts": {}, "courses": {}}
+    crops = tmp_path / "chips.crops.json"
+    crops.write_text(json.dumps(spec))
+    out = tmp_path / "chips"
+    written, skipped = generate(str(crops), str(tmp_path / "captures_sdr"), "en_uk", str(out))
+    assert ("combos", "mario__base") in written
+    assert ("karts", "unknown_kart") in skipped
+    chip = cv2.imread(str(out / "combos" / "mario__base.png"))
+    assert chip is not None and chip.shape[0] == 48
