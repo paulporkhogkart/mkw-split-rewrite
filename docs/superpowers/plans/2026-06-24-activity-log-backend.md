@@ -581,15 +581,17 @@ const post = (app: any, token: string, body: unknown) => app.request('/v1/runs',
   body: JSON.stringify(body) });
 
 describe('run -> activity cascade', () => {
-  it('a PB that takes #1 writes pb + rank + turf_claim, newest-first', async () => {
+  it('a PB that takes #1 writes pb + rank + turf_claim (ascending stream)', async () => {
     const { app, db, seen, gub, paul } = ctx();
     await post(app, paul, { attempt_id: 'p1', course: 'Crown City', status: 'finished', total_time: '1:48.221' });
     seen.length = 0;
     await post(app, gub, { attempt_id: 'g1', course: 'Crown City', status: 'finished', total_time: '1:47.980' });
-    expect(seen.map(e => e.type)).toEqual(['turf_claim', 'rank', 'pb']);
-    expect(seen[0].player!.name).toBe('Gub');
-    expect((seen[0].payload as any).rival.name).toBe('Paul');
-    expect((seen[1].payload as any).place).toBe(1);
+    // commitActivity publishes in ascending id order (pb, rank, turf_claim); the
+    // client prepends each as it arrives, so the newest (turf_claim) ends on top.
+    expect(seen.map(e => e.type)).toEqual(['pb', 'rank', 'turf_claim']);
+    expect(seen[0].player!.name).toBe('Gub');                 // pb actor
+    expect((seen[1].payload as any).place).toBe(1);           // rank: took 1st
+    expect((seen[2].payload as any).rival.name).toBe('Paul'); // turf_claim dethroned Paul
     expect((db.prepare('SELECT COUNT(*) c FROM activity_events').get() as any).c).toBe(3);
   });
 });
