@@ -2,6 +2,7 @@
   import { onDestroy } from "svelte";
   import { presence, serverConnection } from "../../src/lib/stores.js";
   import PlayerCard from "../../src/components/PlayerCard.svelte";
+  import ActivityLog from "./ActivityLog.svelte";
 
   // Render in stable ascending player_id order; the server seeds all roster players
   // (offline), so the wall is populated as soon as the first snapshot lands.
@@ -35,6 +36,8 @@
 {:else}
   <div class="empty">Connecting to the season server…</div>
 {/if}
+
+<ActivityLog {now} />
 
 <style>
   /* One centered row of native ~189px cards; shrink to 170px to hold the row, then
