@@ -3,9 +3,10 @@
 // territory page derives every board from the in-memory timeline event stream (see WorldMap),
 // so there are no per-hover leaderboard/WR fetches here.
 import { isOnFire } from "./fireModel.js";
+import { playerKey } from "../../../src/lib/playerKey.js";
 
 const NEUTRAL = "#888";
-const gifBase = (name) => `/players/${(name || "").toLowerCase()}`;
+const gifBase = (name) => `/players/${playerKey(name)}`;
 
 /** Internal: normalized entries [{name, color, time_ms, time_str?}] + wr (record_ms number|null)
  *  -> popup view-model. Sorts by time, ranks, computes gap-to-#1, on-fire, leader gif urls. */
