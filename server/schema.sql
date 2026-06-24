@@ -167,3 +167,16 @@ CREATE TABLE IF NOT EXISTS screen_intervals (
     UNIQUE(player_id, started_ms)
 );
 CREATE INDEX IF NOT EXISTS idx_screen_intervals ON screen_intervals(season_id, player_id, screen, started_ms);
+
+CREATE TABLE IF NOT EXISTS activity_events (
+    id         INTEGER PRIMARY KEY,
+    ts         INTEGER NOT NULL,
+    type       TEXT NOT NULL,
+    season_id  INTEGER NOT NULL REFERENCES seasons(id),
+    player_id  INTEGER REFERENCES players(id),
+    course_id  INTEGER REFERENCES courses(id),
+    cc         INTEGER,
+    payload    TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_activity_season_id ON activity_events(season_id, id DESC);
