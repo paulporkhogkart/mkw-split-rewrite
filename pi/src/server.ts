@@ -1,6 +1,7 @@
 import { serve } from '@hono/node-server';
 import { openDb, applySchema } from './db/connect';
 import { migrateSeason0Recovered } from './db/season0Recovery';
+import { migratePlayerRenames } from './db/playerRenames';
 import { backfillActivity } from './activity/backfill';
 import { EventHub } from './api/events';
 import { ActivityHub } from './activity/hub';
@@ -21,6 +22,7 @@ const PORT = Number(process.env.PORT ?? 8787);
 const db = openDb(DB_PATH);
 applySchema(db);
 migrateSeason0Recovered(db);   // one-time: real Discord-recovered Season 0 progression
+migratePlayerRenames(db);      // idempotent display-name corrections (e.g. Paul -> Paul Pork)
 try { backfillActivity(db); } catch { /* guard: safe to skip if activity_events absent */ }
 // Purge the legacy emit-at-end session events ('attempts'/'screen') from any pre-redesign DB;
 // sessions are presence-driven now and the new model never writes these types (idempotent).
@@ -29,15 +31,15 @@ const hub = new EventHub();
 const activity = new ActivityHub();
 // Presence-driven activity sessions: presence feeds onFrame/onOffline, runs feed noteRun/notePb.
 // Open/finalised sessions broadcast on the activity stream; finalised ones persist to activity_events.
-// Generic "in the menus" rows are low-value and would be unbounded server storage, so menus
-// sessions are tracked (to bound the racing/setup sessions around them) but not sent or
-// persisted. Flip FEED_MENUS to re-enable.
-const FEED_MENUS = false;
+// Only racing + watching-a-ghost sessions are surfaced. The menus class and the
+// character/kart/track select screens are tracked (to bound the racing/ghost sessions around
+// them) but not sent or stored - low-value + unbounded storage. Edit SURFACED to change.
+const SURFACED = new Set(['racing', 'ghost']);
 const sessionTracker = new SessionTracker({
   now: Date.now,
-  emitOpen: (v) => { if (FEED_MENUS || v.cls !== 'menus') activity.publish({ kind: 'session', session: sessionWire(db, v) }); },
+  emitOpen: (v) => { if (SURFACED.has(v.cls)) activity.publish({ kind: 'session', session: sessionWire(db, v) }); },
   emitFinal: (v) => {
-    if (!FEED_MENUS && v.cls === 'menus') return;
+    if (!SURFACED.has(v.cls)) return;
     insertActivityEvents(db, [sessionInput(activeSeasonId(db), v)]);
     activity.publish({ kind: 'session', session: sessionWire(db, v) });
   },
@@ -55,7 +57,7 @@ const app = createApp(db, hub, (courseId) => {
   presence.refreshOffStats();   // an upload can change offline players' standings
 }, { activity, sessionTracker });
 const sessionsSnapshot = () => sessionTracker.openSessions()
-  .filter(v => FEED_MENUS || v.cls !== 'menus').map(v => sessionWire(db, v));
+  .filter(v => SURFACED.has(v.cls)).map(v => sessionWire(db, v));
 const { injectWebSocket } = makeWs(app, hub, presence, db, activity, sessionsSnapshot);
 const server = serve({ fetch: app.fetch, port: PORT }, (info) => {
   console.log(`[pi] listening on http://127.0.0.1:${info.port}`);

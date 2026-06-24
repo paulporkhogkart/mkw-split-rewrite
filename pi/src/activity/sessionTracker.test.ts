@@ -125,6 +125,28 @@ describe('held screens continue racing', () => {
   });
 });
 
+describe('ghost-watch holds through overlays', () => {
+  it('Home/Gallery during a ghost-watch continue the ghost session (no fragmentation)', () => {
+    at(0); t.onFrame(P, frame('GHOST'));
+    at(STABLE_MS); t.onFrame(P, frame('GHOST'));        // ghost session opens
+    expect(last(opens)).toMatchObject({ cls: 'ghost' });
+    const n = opens.length;
+    at(STABLE_MS + 100); t.onFrame(P, frame('HOME'));
+    at(STABLE_MS + 200); t.onFrame(P, frame('GALLERY'));
+    at(STABLE_MS + 300); t.onFrame(P, frame('GHOST'));
+    expect(opens.length).toBe(n);                        // no new session, no transition
+    expect(finals).toHaveLength(0);
+  });
+
+  it('a real menu ends the ghost-watch', () => {
+    at(0); t.onFrame(P, frame('GHOST'));
+    at(STABLE_MS); t.onFrame(P, frame('GHOST'));        // ghost open
+    at(4000); t.onFrame(P, frame('MAIN_MENU'));
+    at(4000 + STABLE_MS); t.onFrame(P, frame('MAIN_MENU'));   // commit transition -> menus
+    expect(finals.some(f => f.cls === 'ghost')).toBe(true);
+  });
+});
+
 describe('late course fill', () => {
   it('fills a null course from the first run without reopening', () => {
     at(0); t.onFrame(P, frame('RACING', null));

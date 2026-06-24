@@ -5,19 +5,23 @@
 import { parseTime } from "./discordFormat.js";
 
 const SETUP = { CHARACTER_SELECT: "Choosing character…", KART_SELECT: "Choosing kart…", COURSE_SELECT: "Choosing track…",
-                START_TIME_TRIAL: "Starting time trial…",
-                GHOST: "Watching a ghost…", START_REPLAY: "Watching a ghost…", REPLAY_MENU: "Watching a ghost…" };
+                START_TIME_TRIAL: "Starting time trial…" };
+// Ghost-watch screens (the ghost equivalent of RACING; REPLAY_MENU is the ghost's pause menu).
+// Handled like a race: held on screen through the overlays below - see ghostHolds.
+const GHOST_SCREENS = new Set(["GHOST", "START_REPLAY", "REPLAY_MENU"]);
 // Photo mode (+ its exit-confirm dialog) freezes the in-game timer, so it pauses the
 // card exactly like the race menu - hold the frozen readout, show the pause badge.
 const PAUSE_SCREENS = new Set(["RACE_MENU", "HOME", "PHOTO_MODE", "EXIT_PHOTO_MODE"]);
 const RESET_SCREENS = new Set(["RESET", "GHOST_RESET", "UNKNOWN_RESET"]);
-// Screens that sit BETWEEN race contexts (pause menus, reset loaders, mid-race
-// detection blips): the card keeps the last race readout instead of flashing
-// "In the menus". A real menu or the next race drops it.
-const HOLD_SCREENS = new Set(["RACE_MENU", "HOME", "RESET", "GHOST_RESET", "UNKNOWN_RESET", "UNKNOWN_RACE_ACTIVE", "PHOTO_MODE", "EXIT_PHOTO_MODE"]);
+// Screens that sit BETWEEN/OVER an activity (pause menus, reset loaders, mid-activity detection
+// blips, and the universal Home/Gallery/Photo overlays) without ending it: the card keeps the
+// last race readout - or the ghost-watch - instead of flashing "In the menus". A real menu or
+// the next activity drops it. (keep HOLD_SCREENS/GHOST_SCREENS in sync with pi/src/activity/screenClass.ts)
+const HOLD_SCREENS = new Set(["RACE_MENU", "HOME", "RESET", "GHOST_RESET", "UNKNOWN_RESET", "UNKNOWN_RACE_ACTIVE", "PHOTO_MODE", "EXIT_PHOTO_MODE", "GALLERY", "GALLERY_VIEW"]);
 
-const holds = new Map();   // player_id -> last race display payload
-export function clearHolds() { holds.clear(); }
+const holds = new Map();        // player_id -> last race display payload
+const ghostHolds = new Set();   // player_ids currently watching a ghost (held through overlays)
+export function clearHolds() { holds.clear(); ghostHolds.clear(); }
 
 /** Character display name with the costume leading ("Burger Bud Toad"); a bare
  *  character ("Base" or no costume detected) is just the character. */
@@ -95,7 +99,7 @@ export function viewModel(e, now = Date.now, delayed = null, opts = {}) {
   const t = typeof now === "function" ? now() : now;
   const color = e.color || "#888";
   if (opts.stale || !e.online) {
-    holds.delete(e.player_id);
+    holds.delete(e.player_id); ghostHolds.delete(e.player_id);
     const seen = e.updated_at > 0 ? lastSeen(t - e.updated_at) : null;
     // Stale = we lost the server link: show only the non-windowed FIRSTS; the rolling
     // RUNS·7D / PBS·30D would silently age past their windows. Live-offline (server up,
@@ -121,7 +125,7 @@ export function viewModel(e, now = Date.now, delayed = null, opts = {}) {
   // tracked. Show a red "INVALID" where the time would be (like DNF) and an OFFLINE-style
   // bar shell whose label carries the cause - no live readouts, never a finish/PB.
   if (e.invalidated) {
-    holds.delete(e.player_id);
+    holds.delete(e.player_id); ghostHolds.delete(e.player_id);
     const dividers = (Number.isInteger(e.tot_lap) && e.tot_lap >= 2)
       ? Array.from({ length: e.tot_lap - 1 }, (_, i) => (i + 1) / e.tot_lap) : [];
     return {
@@ -137,7 +141,7 @@ export function viewModel(e, now = Date.now, delayed = null, opts = {}) {
   // A timed-out run (the 9:59.999 cap) is terminal but has no finish time: show a red
   // "DNF" while the flag holds - on any screen, never the racing/finished/null path.
   if (e.dnf) {
-    holds.delete(e.player_id);
+    holds.delete(e.player_id); ghostHolds.delete(e.player_id);
     return {
       state: "dnf", ...ident,
       primary: { kind: "time", text: "DNF" },
@@ -184,7 +188,9 @@ export function viewModel(e, now = Date.now, delayed = null, opts = {}) {
       badge: untracked ? null : finished ? "fin" : null,
       bar,
     };
-    // Remember the readout: pause menus + reset loaders keep showing it.
+    // Remember the readout: pause menus + reset loaders keep showing it. A race supersedes any
+    // prior ghost-watch context.
+    ghostHolds.delete(e.player_id);
     holds.set(e.player_id, { primary, delta, bar, pbStr: vm.pbStr, resets: vm.resets,
                              finPb: vm.finPb, finished });
     return vm;
@@ -205,6 +211,18 @@ export function viewModel(e, now = Date.now, delayed = null, opts = {}) {
   }
 
   holds.delete(e.player_id);   // a real menu: the race readout is over
+
+  // A ghost-watch survives the same overlays a race does: remember it on a ghost screen, and keep
+  // showing "Watching a ghost…" while a Home/Gallery/Photo overlay (HOLD_SCREENS) sits on top. A
+  // real menu drops it.
+  const ghostVm = () => ({ state: "setup", ...ident,
+    primary: { kind: "activity", text: "Watching a ghost…" },
+    resets: null, pbStr: null, delta: null, finPb: false, badge: null, bar: null,
+    stats: e.off_stats ?? null });
+  if (GHOST_SCREENS.has(e.screen)) { ghostHolds.add(e.player_id); return ghostVm(); }
+  if (ghostHolds.has(e.player_id) && HOLD_SCREENS.has(e.screen)) return ghostVm();
+  ghostHolds.delete(e.player_id);
+
   const primary = SETUP[e.screen]
     ? { kind: "activity", text: SETUP[e.screen] }
     : { kind: "activity", text: "In the menus" };

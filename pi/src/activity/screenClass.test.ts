@@ -3,52 +3,60 @@ import { classify, HELD_SCREENS, GHOST_SCREENS } from './screenClass';
 
 describe('classify', () => {
   it('RACING is racing', () => {
-    expect(classify('RACING', false)).toBe('racing');
-    expect(classify('RACING', true)).toBe('racing');
+    expect(classify('RACING', null)).toBe('racing');
+    expect(classify('RACING', 'racing')).toBe('racing');
   });
 
   it('the select screens map to their own classes', () => {
-    expect(classify('CHARACTER_SELECT', false)).toBe('character_select');
-    expect(classify('KART_SELECT', false)).toBe('kart_select');
-    expect(classify('COURSE_SELECT', false)).toBe('track_select');
+    expect(classify('CHARACTER_SELECT', null)).toBe('character_select');
+    expect(classify('KART_SELECT', null)).toBe('kart_select');
+    expect(classify('COURSE_SELECT', null)).toBe('track_select');
   });
 
   it('ghost screens map to ghost', () => {
-    expect(classify('GHOST', false)).toBe('ghost');
-    expect(classify('START_REPLAY', false)).toBe('ghost');
-    expect(classify('REPLAY_MENU', false)).toBe('ghost');
+    expect(classify('GHOST', null)).toBe('ghost');
+    expect(classify('START_REPLAY', null)).toBe('ghost');
+    expect(classify('REPLAY_MENU', null)).toBe('ghost');
   });
 
-  it('held screens continue racing only when a racing session is open', () => {
+  it('held screens continue the open activity (racing or ghost), else menus', () => {
     for (const s of HELD_SCREENS) {
-      expect(classify(s, true)).toBe('racing');   // mid-grind pause/reset/results
-      expect(classify(s, false)).toBe('menus');   // reached from a cold menu
+      expect(classify(s, 'racing')).toBe('racing');   // pause/reset/overlay mid-race
+      expect(classify(s, 'ghost')).toBe('ghost');     // overlay mid-ghost-watch
+      expect(classify(s, null)).toBe('menus');        // reached from a cold menu
+      expect(classify(s, 'menus')).toBe('menus');     // not a continuable activity
     }
   });
 
+  it('the Gallery/album overlays are held (they must not interrupt racing or a ghost)', () => {
+    expect(classify('GALLERY', 'racing')).toBe('racing');
+    expect(classify('GALLERY', 'ghost')).toBe('ghost');
+    expect(classify('GALLERY_VIEW', 'ghost')).toBe('ghost');
+  });
+
   it('everything else (incl. START_TIME_TRIAL and unknowns) is menus', () => {
-    expect(classify('MAIN_MENU', false)).toBe('menus');
-    expect(classify('START_TIME_TRIAL', false)).toBe('menus');
-    expect(classify('START_TIME_TRIAL', true)).toBe('menus');   // not a held screen
-    expect(classify('UNKNOWN_SCREEN', false)).toBe('menus');
-    expect(classify('', false)).toBe('menus');
-    expect(classify(null, false)).toBe('menus');
-    expect(classify(undefined, true)).toBe('menus');
+    expect(classify('MAIN_MENU', null)).toBe('menus');
+    expect(classify('START_TIME_TRIAL', null)).toBe('menus');
+    expect(classify('START_TIME_TRIAL', 'racing')).toBe('menus');   // not a held screen
+    expect(classify('UNKNOWN_SCREEN', null)).toBe('menus');
+    expect(classify('', null)).toBe('menus');
+    expect(classify(null, null)).toBe('menus');
+    expect(classify(undefined, 'racing')).toBe('menus');
   });
 });
 
 describe('parity with src/lib/playerCard.js (keep in sync)', () => {
-  // Copied verbatim from src/lib/playerCard.js. If the card changes these, this test fails
-  // and both sides must be reconciled.
+  // Copied verbatim from src/lib/playerCard.js. If the card changes these, this test fails and
+  // both sides must be reconciled.
   const CARD_HOLD_SCREENS = ['RACE_MENU', 'HOME', 'RESET', 'GHOST_RESET', 'UNKNOWN_RESET',
-    'UNKNOWN_RACE_ACTIVE', 'PHOTO_MODE', 'EXIT_PHOTO_MODE'];
-  const CARD_SETUP_KEYS = ['CHARACTER_SELECT', 'KART_SELECT', 'COURSE_SELECT',
-    'START_TIME_TRIAL', 'GHOST', 'START_REPLAY', 'REPLAY_MENU'];
+    'UNKNOWN_RACE_ACTIVE', 'PHOTO_MODE', 'EXIT_PHOTO_MODE', 'GALLERY', 'GALLERY_VIEW'];
+  const CARD_GHOST_SCREENS = ['GHOST', 'START_REPLAY', 'REPLAY_MENU'];
 
-  it('every card HOLD screen continues racing on the server', () => {
+  it('every card HOLD screen continues both racing and a ghost on the server', () => {
     for (const s of CARD_HOLD_SCREENS) {
       expect(HELD_SCREENS.has(s)).toBe(true);
-      expect(classify(s, true)).toBe('racing');
+      expect(classify(s, 'racing')).toBe('racing');
+      expect(classify(s, 'ghost')).toBe('ghost');
     }
   });
 
@@ -56,15 +64,14 @@ describe('parity with src/lib/playerCard.js (keep in sync)', () => {
     expect(HELD_SCREENS.has('POST_TIME_TRIAL')).toBe(true);
   });
 
-  it('the card GHOST setup screens are the server ghost set', () => {
-    expect([...GHOST_SCREENS].sort()).toEqual(['GHOST', 'REPLAY_MENU', 'START_REPLAY']);
+  it('the card GHOST screens are the server ghost set', () => {
+    expect([...GHOST_SCREENS].sort()).toEqual([...CARD_GHOST_SCREENS].sort());
   });
 
-  it('every card SETUP key classifies to a non-menus class, except the documented START_TIME_TRIAL', () => {
-    for (const s of CARD_SETUP_KEYS) {
-      const c = classify(s, false);
-      if (s === 'START_TIME_TRIAL') expect(c).toBe('menus');
-      else expect(c).not.toBe('menus');
-    }
+  it('the card SETUP select screens classify to their classes; START_TIME_TRIAL is menus', () => {
+    expect(classify('CHARACTER_SELECT', null)).toBe('character_select');
+    expect(classify('KART_SELECT', null)).toBe('kart_select');
+    expect(classify('COURSE_SELECT', null)).toBe('track_select');
+    expect(classify('START_TIME_TRIAL', null)).toBe('menus');   // documented: transient lead-in
   });
 });

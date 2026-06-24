@@ -113,8 +113,8 @@ export class SessionTracker {
   onFrame(playerId: number, frame: FrameInput): void {
     const now = this.deps.now();
     const st = this.st(playerId);
-    const racingOpen = st.session?.cls === 'racing';
-    const cls = classify(frame.screen, racingOpen);
+    const openClass = st.session?.cls ?? null;   // lets a held screen continue racing OR a ghost-watch
+    const cls = classify(frame.screen, openClass);
     // A RACING frame uses its own course (falling back to the open session's if the read
     // blipped null); a held screen continuing racing inherits the open session's course.
     const targetCourseId = cls === 'racing'

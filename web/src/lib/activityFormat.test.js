@@ -36,7 +36,7 @@ describe("toRow milestones", () => {
     expect(r.who).toEqual({ text: "Gub", color: "#38bdf8" });
     expect(r.strip).toBe("#38bdf8");
     expect(r.id).toBe("evt:1");
-    expect(r.what.map((s) => s.text).join("")).toBe("PB 1:47.980 (-0.430)");
+    expect(r.what.map((s) => s.text).join("")).toBe("pb 1:47.980 (-0.430)");
   });
   it("rank → system tag, coloured mover+rival, ordinal + gap", () => {
     const r = mrow("rank", { player: { id: 1, name: "Paul", color: "#a78bfa" }, payload: {
@@ -55,7 +55,7 @@ describe("toRow milestones", () => {
   });
   it("wr → grey tag, neutral delta, 'by holder'", () => {
     const r = mrow("wr", { player: null, payload: { time_ms: 89180, time_str: "1:29.180", holder: "Ralph", delta_ms: -220 } });
-    expect(r.who.text).toBe("WR");
+    expect(r.who.text).toBe("wr");
     expect(r.what.map((s) => s.text).join("")).toBe("1:29.180 (-0.220) by Ralph");
   });
 });

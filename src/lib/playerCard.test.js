@@ -278,9 +278,25 @@ describe("viewModel", () => {
 });
 
 describe("ghost activity label", () => {
+  beforeEach(() => clearHolds());
+  const ghost = (screen) => viewModel({ player_id: 99, name: "Paul", online: true, screen, updated_at: 1000 }, () => 2000);
+
   it("labels ghost screens as Watching a ghost", () => {
-    const vm = viewModel({ player_id: 99, name: "Paul", online: true, screen: "GHOST", updated_at: 1000 }, () => 2000);
-    expect(vm.primary).toEqual({ kind: "activity", text: "Watching a ghost…" });
+    expect(ghost("GHOST").primary).toEqual({ kind: "activity", text: "Watching a ghost…" });
+    expect(ghost("REPLAY_MENU").primary).toEqual({ kind: "activity", text: "Watching a ghost…" });
+  });
+
+  it("a Home/Gallery/Photo overlay during a ghost-watch keeps showing it", () => {
+    ghost("GHOST");                                       // enter the ghost context
+    expect(ghost("HOME").primary.text).toBe("Watching a ghost…");
+    expect(ghost("GALLERY").primary.text).toBe("Watching a ghost…");
+    expect(ghost("PHOTO_MODE").primary.text).toBe("Watching a ghost…");
+  });
+
+  it("a real menu ends the ghost-watch (and an overlay can't revive it)", () => {
+    ghost("GHOST");
+    expect(ghost("MAIN_MENU").primary.text).toBe("In the menus");
+    expect(ghost("HOME").primary.text).toBe("In the menus");
   });
 });
 

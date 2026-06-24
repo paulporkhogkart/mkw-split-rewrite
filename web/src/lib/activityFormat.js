@@ -95,23 +95,23 @@ function milestoneRow(row, now) {
   switch (e.type) {
     case "pb":
       return { ...base, sys: false, who: { text: p.name, color: p.color }, where: { text: course }, strip: p.color,
-        what: [{ text: "PB ", cls: "" }, { text: fmtTime(pay.time_ms), cls: "t" }, { text: " " + paren(signedDelta(pay.delta_ms)), cls: "delta" }] };
+        what: [{ text: "pb ", cls: "" }, { text: fmtTime(pay.time_ms), cls: "t" }, { text: " " + paren(signedDelta(pay.delta_ms)), cls: "delta" }] };
     case "rank":
-      return { ...base, sys: true, who: { text: "Rank", color: null }, where: { text: course }, strip: null,
+      return { ...base, sys: true, who: { text: "rank", color: null }, where: { text: course }, strip: null,
         what: [nameSpan(p), { text: ` took ${ordinal(pay.place)} from `, cls: "" }, nameSpan(pay.rival),
                { text: " · ", cls: "dim" }, { text: fmtTime(pay.rival_time_ms), cls: "t" },
                { text: " " + paren(signedDelta(pay.gap_ms)), cls: "delta" }] };
     case "turf_claim":
-      return { ...base, sys: true, who: { text: "Turf", color: null }, where: { text: course }, strip: null,
+      return { ...base, sys: true, who: { text: "turf", color: null }, where: { text: course }, strip: null,
         what: [nameSpan(p), { text: " claimed ", cls: "" }, { text: pay.rival.name + "'s", cls: "name", color: pay.rival.color }, { text: " turf", cls: "" }] };
     case "turf_fire":
-      return { ...base, sys: true, who: { text: "Turf", color: null }, where: { text: course }, strip: null,
+      return { ...base, sys: true, who: { text: "turf", color: null }, where: { text: course }, strip: null,
         what: [{ text: "the people are rallying behind ", cls: "" }, nameSpan(p)] };
     case "turf_waver":
-      return { ...base, sys: true, who: { text: "Turf", color: null }, where: { text: course }, strip: null,
+      return { ...base, sys: true, who: { text: "turf", color: null }, where: { text: course }, strip: null,
         what: [{ text: "the people are losing faith in ", cls: "" }, nameSpan(p)] };
     case "wr":
-      return { ...base, sys: true, who: { text: "WR", color: null }, where: { text: course }, strip: null,
+      return { ...base, sys: true, who: { text: "wr", color: null }, where: { text: course }, strip: null,
         what: [{ text: fmtTime(pay.time_ms), cls: "t" }, { text: " " + paren(signedDelta(pay.delta_ms)), cls: "delta" }, { text: " by " + pay.holder, cls: "dim" }] };
     default:
       return null;
