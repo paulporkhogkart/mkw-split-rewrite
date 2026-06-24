@@ -331,9 +331,9 @@ describe('turfTransitions', () => {
     expect(t[1]).toEqual({ kind: 'fire', leaderId: 1 });
   });
   it('emits waver when the same leader loses fire (e.g. WR raised)', () => {
-    const board = [row(1, 100100), row(1 + 1, 100400)];
-    const before = { board, wr: 100050 }; // far off WR -> low bar -> on fire
-    const after = { board, wr: 100099 };  // WR jumped -> bar rises -> snuffed
+    const board = [row(1, 100100), row(2, 100400)];
+    const before = { board, wr: 100050 }; // lead ~0.30% vs bar ~0.20% -> on fire
+    const after = { board, wr: 98000 };    // faster WR -> bar ~0.34% > lead -> snuffed
     expect(turfTransitions(before, after)).toEqual([{ kind: 'waver', leaderId: 1 }]);
   });
   it('no transition when nothing changes', () => {
@@ -343,7 +343,7 @@ describe('turfTransitions', () => {
 });
 ```
 
-(Tune the exact ms in the fire/waver cases if a boundary is off — the assertions describe the intended behaviour; adjust the numbers so `isOnFire` flips as described, keeping `E0/K` fixed.)
+(These ms are chosen so `isOnFire` flips exactly as asserted with `E0=0.2, K=4`.)
 
 - [ ] **Step 2: Run, expect FAIL.**
 
