@@ -27,15 +27,26 @@ describe('run -> activity cascade', () => {
     await post(app, paul, { attempt_id: 'p1', course: 'Crown City', status: 'finished', total_time: '1:48.221' });
     seen.length = 0;
     await post(app, gub, { attempt_id: 'g1', course: 'Crown City', status: 'finished', total_time: '1:47.980' });
-    // commitActivity publishes in ascending id order; with the grind tracker wired in,
-    // each PB now also emits an 'attempts' row (count=1, the single run in this segment).
-    // client prepends each as it arrives, so the newest (turf_claim) ends on top.
-    expect(seen.map(e => e.type)).toEqual(['attempts', 'pb', 'rank', 'turf_claim']);
-    expect(seen[1].player!.name).toBe('Gub');                 // pb actor
-    expect((seen[2].payload as any).place).toBe(1);           // rank: took 1st
-    expect((seen[3].payload as any).rival.name).toBe('Paul'); // turf_claim dethroned Paul
-    // Paul's first run fires cascade (attempts + pb = 2 rows); Gub's adds 4 more → 6 total
-    expect((db.prepare('SELECT COUNT(*) c FROM activity_events').get() as any).c).toBe(6);
-    expect((db.prepare('SELECT COUNT(*) c FROM activity_events WHERE player_id=1').get() as any).c).toBe(4);
+    // clean first-try PBs emit NO attempts row; burst = pb + rank + turf_claim only
+    expect(seen.map(e => e.type)).toEqual(['pb', 'rank', 'turf_claim']);
+    expect(seen[0].player!.name).toBe('Gub');                 // pb actor
+    expect((seen[1].payload as any).place).toBe(1);           // rank: took 1st
+    expect((seen[2].payload as any).rival.name).toBe('Paul'); // turf_claim dethroned Paul
+    // Paul's first run fires cascade (pb only = 1 row); Gub's adds 3 more → 4 total
+    expect((db.prepare('SELECT COUNT(*) c FROM activity_events').get() as any).c).toBe(4);
+    expect((db.prepare('SELECT COUNT(*) c FROM activity_events WHERE player_id=1').get() as any).c).toBe(3);
+  });
+
+  it('prior resets before a PB emit an attempts row with count = reset count', async () => {
+    const { app, seen, paul } = ctx();
+    // two resets then a PB — resets emit no events themselves
+    await post(app, paul, { attempt_id: 'r1', course: 'Crown City', status: 'reset' });
+    await post(app, paul, { attempt_id: 'r2', course: 'Crown City', status: 'reset' });
+    expect(seen.length).toBe(0);
+    await post(app, paul, { attempt_id: 'p1', course: 'Crown City', status: 'finished', total_time: '1:48.221' });
+    // burst starts with attempts (2 prior resets), then pb
+    expect(seen.map(e => e.type)[0]).toBe('attempts');
+    expect(seen.map(e => e.type)[1]).toBe('pb');
+    expect((seen[0].payload as any).count).toBe(2);
   });
 });

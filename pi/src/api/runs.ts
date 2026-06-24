@@ -113,10 +113,14 @@ export function runsRoutes(db: DatabaseSync, hub: EventHub, activity: ActivityHu
 
     if (isPb) {
       const wrMs = wr ? wr.record_ms : null;
+      const grind = tracker.close(playerId, Date.now());
+      const attempts = grind && grind.count > 1
+        ? { count: grind.count - 1, durationMs: grind.durationMs }
+        : null;
       const inputs = buildRunCascade({
         ts: Date.now(), seasonId, cc, courseId, moverId: playerId, moverName: playerName,
         before: beforeBoard, after: lb, beforeWr: wrMs, afterWr: wrMs,
-        prevPbMs: prevMineMs, attempts: tracker.close(playerId, Date.now()),
+        prevPbMs: prevMineMs, attempts,
       });
       commitActivity(db, activity, inputs);
     }
