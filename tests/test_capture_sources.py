@@ -278,3 +278,55 @@ def test_tone_wav_bytes_is_valid_wav():
     data = _tone_wav_bytes(freq=950, ms=60)
     assert data[:4] == b"RIFF" and data[8:12] == b"WAVE"
     assert len(data) > 44
+
+
+# ---------------------------------------------------------------------------
+# CaptureGate — combo mode (character x costume pairs)
+# ---------------------------------------------------------------------------
+
+def test_combo_fires_for_costumed_pair_after_hold(tmp_path):
+    from mkw_tracker.detection.screen import Screen
+    gate = _gate(tmp_path, {"characters": ["mario"], "costumes": ["pro_racer"]},
+                 min_conf=0.8, hold=2)
+    st = _state(character="Mario", character_conf=0.95, costume="Pro Racer", costume_conf=0.9)
+    assert gate.observe_combo(Screen.CHARACTER_SELECT, st) == []
+    assert gate.observe_combo(Screen.CHARACTER_SELECT, st) == [("combos", "mario__pro_racer")]
+    assert gate.observe_combo(Screen.CHARACTER_SELECT, st) == []   # deduped
+
+
+def test_combo_base_outfit_uses_base_suffix(tmp_path):
+    """Default outfit: costume is None -> '<char>__base' (the fallback asset)."""
+    from mkw_tracker.detection.screen import Screen
+    gate = _gate(tmp_path, {"characters": ["mario"]}, min_conf=0.8, hold=1)
+    st = _state(character="Mario", character_conf=0.95, costume=None)
+    assert gate.observe_combo(Screen.CHARACTER_SELECT, st) == [("combos", "mario__base")]
+
+
+def test_combo_low_costume_conf_does_not_fire(tmp_path):
+    """A costume present but below min_conf is ambiguous: do not capture."""
+    from mkw_tracker.detection.screen import Screen
+    gate = _gate(tmp_path, {"characters": ["mario"], "costumes": ["pro_racer"]},
+                 min_conf=0.8, hold=1)
+    st = _state(character="Mario", character_conf=0.95, costume="Pro Racer", costume_conf=0.4)
+    for _ in range(4):
+        assert gate.observe_combo(Screen.CHARACTER_SELECT, st) == []
+
+
+def test_combo_ignores_non_character_screen_and_low_char_conf(tmp_path):
+    from mkw_tracker.detection.screen import Screen
+    gate = _gate(tmp_path, {"characters": ["mario"]}, min_conf=0.8, hold=1)
+    good = _state(character="Mario", character_conf=0.95, costume=None)
+    assert gate.observe_combo(Screen.KART_SELECT, good) == []
+    weak = _state(character="Mario", character_conf=0.5, costume=None)
+    assert gate.observe_combo(Screen.CHARACTER_SELECT, weak) == []
+
+
+def test_combo_current_and_skip(tmp_path):
+    from mkw_tracker.detection.screen import Screen
+    gate = _gate(tmp_path, {"characters": ["mario"]}, min_conf=0.8, hold=1)
+    st = _state(character="Mario", character_conf=0.9, costume=None)
+    assert gate.current_combo(Screen.CHARACTER_SELECT, st) == ("combos", "mario__base", 0.9, "NEW")
+    gate.skip_combo("mario__base")
+    for _ in range(3):
+        assert gate.observe_combo(Screen.CHARACTER_SELECT, st) == []
+    assert gate.current_combo(Screen.CHARACTER_SELECT, st)[3] == "SKIPPED"

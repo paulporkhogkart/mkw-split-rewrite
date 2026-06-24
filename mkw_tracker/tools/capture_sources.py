@@ -105,6 +105,10 @@ class CaptureGate:
         self.skipped:  Dict[str, Set[str]] = {c: set() for c in CATEGORIES}
         self._last:   Dict[str, Optional[str]] = {c: None for c in CATEGORIES}
         self._streak: Dict[str, int] = {c: 0 for c in CATEGORIES}
+        self.combo_captured: Set[str] = set()
+        self.combo_skipped:  Set[str] = set()
+        self._combo_last:   Optional[str] = None
+        self._combo_streak: int = 0
 
     def _fields(self, screen) -> List[Tuple[str, str, str]]:
         return _SCREEN_FIELDS.get(screen, [])
@@ -171,6 +175,65 @@ class CaptureGate:
             base = self.resolver.resolve(cat, display)
             out.append((cat, base, getattr(state, conf_attr), self.status(cat, base)))
         return out
+
+    def _combo_base(self, state) -> Optional[str]:
+        """Resolve the '<char>__<cost>' base for the current pair, or None if ambiguous.
+
+        Base outfit is reported by the tracker as costume=None -> '<char>__base'. A costume
+        that is present but below min_conf is ambiguous and yields None (do not capture)."""
+        char = getattr(state, "character", None)
+        if not char or getattr(state, "character_conf", 0.0) < self.min_conf:
+            return None
+        cost = getattr(state, "costume", None)
+        if cost is None:
+            cost_base = "base"
+        elif getattr(state, "costume_conf", 0.0) >= self.min_conf:
+            cost_base = self.resolver.resolve("costumes", cost)
+        else:
+            return None
+        return f"{self.resolver.resolve('characters', char)}__{cost_base}"
+
+    def observe_combo(self, screen, state) -> List[Tuple[str, str]]:
+        """Feed one frame on CHARACTER_SELECT; fire once a confident pair holds `hold` scans."""
+        base = self._combo_base(state) if screen == Screen.CHARACTER_SELECT else None
+        if base is None:
+            self._combo_last = None
+            self._combo_streak = 0
+            return []
+        if base == self._combo_last:
+            self._combo_streak += 1
+        else:
+            self._combo_last = base
+            self._combo_streak = 1
+        if (self._combo_streak >= self.hold
+                and base not in self.combo_captured
+                and base not in self.combo_skipped):
+            self.combo_captured.add(base)
+            return [("combos", base)]
+        return []
+
+    def current_combo(self, screen, state) -> Optional[Tuple[str, str, float, str]]:
+        """(category, base, conf, status) for the current pair, read-only; None if not detected."""
+        if screen != Screen.CHARACTER_SELECT:
+            return None
+        base = self._combo_base(state)
+        if base is None:
+            return None
+        conf = getattr(state, "character_conf", 0.0)
+        if getattr(state, "costume", None) is not None:
+            conf = min(conf, getattr(state, "costume_conf", 0.0))
+        status = ("SKIPPED" if base in self.combo_skipped
+                  else "CAPTURED" if base in self.combo_captured else "NEW")
+        return ("combos", base, conf, status)
+
+    def mark_combo_captured(self, base: str) -> None:
+        self.combo_captured.add(base)
+
+    def unmark_combo(self, base: str) -> None:
+        self.combo_captured.discard(base)
+
+    def skip_combo(self, base: str) -> None:
+        self.combo_skipped.add(base)
 
 
 # ---------------------------------------------------------------------------
