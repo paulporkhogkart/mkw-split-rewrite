@@ -17,7 +17,7 @@ and renders the locked duration on finalise. Milestone cascade unchanged (attemp
 
 ## Global Constraints
 
-- `STABLE_MS = 1200`, `MIN_SESSION_MS = 1500` (live in `sessionTracker.ts`).
+- `STABLE_MS = 1200` (lives in `sessionTracker.ts`; no duration floor — the debounce is the floor).
 - Colour is reserved for player names only (carried over from the activity-log spec); no
   em-dashes anywhere in copy.
 - Server classifier sets are pinned to `src/lib/playerCard.js` by a parity test with a
@@ -128,9 +128,8 @@ pendingSince: number }`, plus a module counter `nextSessionId`.
 **`onOffline(playerId)`:** finalise the open session at `now`; clear state.
 
 **Finalise(session, endedTs):**
-- `durationMs = endedTs - startedTs`.
-- **Drop** (emit `emitDrop(session_id)`, do not persist) if `durationMs < MIN_SESSION_MS` AND
-  (cls !== 'racing' OR attempts === 0).
+- **Drop** (emit `emitDrop(session_id)`, do not persist) if `cls === 'racing' && attempts === 0`
+  (the debounce already prevents short-blip fragmentation, so no duration floor is needed).
 - Else build the `final` `SessionView` (ended_ts set) → `emitFinal`. (Task 4's `emitFinal`
   both persists to `activity_events` and broadcasts.)
 
@@ -146,8 +145,8 @@ pendingSince: number }`, plus a module counter `nextSessionId`.
 - `noteRun` with no session opens racing (attempts 1) immediately; a second `noteRun`
   increments; `noteRun` for a new course finalises the old and opens the new.
 - `notePb` sets `pbs`.
-- `MIN_SESSION_MS` drop: a 1s menus session finalised → `emitDrop`, no `emitFinal`; a 1s racing
-  session with attempts ≥ 1 → `emitFinal` (kept).
+- drop rule: a racing session finalised with `attempts === 0` → `emitDrop`, no `emitFinal`; a
+  short menus session is kept (`emitFinal`).
 - `onOffline` finalises.
 - held screen continues racing: RACING(courseA) then RACE_MENU frames keep `racing:A` (no
   transition, no extra open).

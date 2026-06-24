@@ -121,10 +121,11 @@ A session is **finalised** by stamping `endedTs = now` (duration = `endedTs − 
   ended_ts, duration_ms, attempts?, pbs?` and `course_id`/`player_id` columns set;
 - emitting a `final` message (§4).
 
-**Drop rule:** a session shorter than `MIN_SESSION_MS` (≈1.5 s) with no meaningful content
-(`menus`/setup with trivial dwell, or `racing` with `attempts === 0`) is dropped on finalise —
-not persisted, and a `drop` message retracts its open row. This prevents pass-through blips
-from littering the feed. A racing session with ≥1 attempt is always kept.
+**Drop rule:** the `STABLE_MS` debounce already absorbs sub-second blips into the prior session
+(they never open a row), so the only finalise that's dropped is a **racing session with
+`attempts === 0`** — a player who entered `RACING` but completed no attempt (no finish/reset
+POST) before leaving. It has nothing to report, so a `drop` message retracts its open row
+instead of persisting "raced 0 times". Every session that opens is otherwise kept.
 
 ### 4. Live protocol
 
@@ -203,9 +204,8 @@ test are deleted.
 | Name | Value | Meaning |
 |------|-------|---------|
 | `STABLE_MS` | 1200 | a new screen-class must persist this long to commit a transition |
-| `MIN_SESSION_MS` | 1500 | finalised sessions shorter than this with no content are dropped |
 
-(Both live in `sessionTracker.ts`; tune later if needed.)
+(Lives in `sessionTracker.ts`; tune later if needed.)
 
 ---
 
@@ -233,8 +233,8 @@ test are deleted.
   (held continues racing; held from cold = menus).
 - **SessionTracker unit tests** (inject `now`): open-at-start; tick (open emitted before
   finalise); transition finalises + opens; debounce swallows a one-frame blip; `noteRun`
-  increments / opens-on-lag; `notePb` sets outcome; `MIN_SESSION_MS` drop + `drop` message;
-  offline finalises; course-change finalises+opens.
+  increments / opens-on-lag; `notePb` sets outcome; racing `attempts === 0` drop + `drop`
+  message; offline finalises; course-change finalises+opens.
 - **Frontend unit tests:** open row ticks (duration from `now − started_ts`); final locks;
   drop removes; ordering by feed timestamp; the format strings per class.
 - **Runs integration:** a PB no longer carries `attempts` in its cascade; `noteRun`/`notePb`
