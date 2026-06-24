@@ -4,7 +4,6 @@
 // reconnect/backoff of presenceClient.js. WebSocket/timers/fetch are injectable for tests.
 import { activity } from "../../src/lib/stores.js";
 import { mergeActivity } from "./lib/activityMerge.js";
-import { activityUrl, activityStreamWsUrl } from "./lib/api.js";
 
 const MAX_BACKOFF_MS = 30000;
 
