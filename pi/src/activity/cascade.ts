@@ -9,7 +9,6 @@ export interface RunCascadeArgs {
   before: LeaderRow[]; after: LeaderRow[];
   beforeWr: number | null; afterWr: number | null;
   prevPbMs: number | null;
-  attempts: { count: number; durationMs: number } | null;
 }
 
 export function buildRunCascade(a: RunCascadeArgs): ActivityInput[] {
@@ -17,10 +16,6 @@ export function buildRunCascade(a: RunCascadeArgs): ActivityInput[] {
   const mine = a.after.find(r => r.player_id === a.moverId);
   if (!mine) return out;
   const base = { ts: a.ts, season_id: a.seasonId, cc: a.cc, course_id: a.courseId };
-
-  if (a.attempts && a.attempts.count > 0)
-    out.push({ ...base, type: 'attempts', player_id: a.moverId,
-      payload: { count: a.attempts.count, duration_ms: a.attempts.durationMs } });
 
   out.push({ ...base, type: 'pb', player_id: a.moverId,
     payload: { time_ms: mine.total_time_ms, time_str: mine.total_time_str,

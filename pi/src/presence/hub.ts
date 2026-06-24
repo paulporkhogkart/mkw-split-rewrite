@@ -3,10 +3,17 @@ import { activeSeasonId, courseIdBySlug } from '../db/seasons';
 import { slugify } from '../db/slug';
 import { pbRunFor } from '../db/pb';
 import type { CompletionFn } from './completion';
+import type { FrameInput } from '../activity/sessionTracker';
 
 // The engine's _TrackState values (mkw_tracker/minimap/tracker.py) that mean a confident live
 // fix; anything else it emits (e.g. 'reacquire') is treated as stale so completion holds.
 const FRESH_TRACK = new Set(['tracking', 'ring_only']);
+
+/** The activity-feed sink (the SessionTracker) the hub feeds each frame + on disconnect. */
+export interface ActivitySink {
+  onFrame(playerId: number, frame: FrameInput): void;
+  onOffline(playerId: number): void;
+}
 
 /** What an app sends each frame (its identity comes from the token, not the frame). */
 export interface PresenceFrame {
@@ -92,7 +99,8 @@ export class PresenceHub {
 
   constructor(private db: DatabaseSync, private completion: CompletionFn,
               private pace: PaceFn = () => null, private laps: LapFn = () => null,
-              private now: () => number = Date.now) {
+              private now: () => number = Date.now,
+              private activity?: ActivitySink) {
     this.seedRoster();
   }
 
@@ -182,6 +190,12 @@ export class PresenceHub {
     if (!wasOnline) this.writeLastSeen(playerId, now);   // offline -> online: stamp the reconnect
     if (frame.app_version) this.writeAppVersion(playerId, frame.app_version);
     this.broadcast({ type: 'presence_update', player: entry });
+    // Feed the live activity feed: classify this frame's screen into a session (course resolved).
+    this.activity?.onFrame(playerId, {
+      screen: entry.screen,
+      courseId: entry.course ? (courseIdBySlug(this.db, slugify(entry.course)) ?? null) : null,
+      character: entry.character, costume: entry.costume,
+    });
   }
 
   /** The PB for the entry: pinned at race entry, held through RACING/POST_TIME_TRIAL
@@ -216,6 +230,7 @@ export class PresenceHub {
     this.map.set(playerId, off);
     this.writeLastSeen(playerId, now);
     this.broadcast({ type: 'presence_update', player: off });
+    this.activity?.onOffline(playerId);   // finalise their open session
   }
 
   /** Recompute the cached off_stats for every roster player - a finished upload can

@@ -99,7 +99,6 @@ export function backfillActivity(db: DatabaseSync): number {
       beforeWr: null,
       afterWr: null,
       prevPbMs,
-      attempts: null,
     });
 
     if (inputs.length > 0) {

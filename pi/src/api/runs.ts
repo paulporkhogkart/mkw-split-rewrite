@@ -14,12 +14,12 @@ import { rebuildCourseModel } from '../db/courseModels';
 import { buildRunCascade } from '../activity/cascade';
 import { commitActivity } from '../activity/publish';
 import type { ActivityHub } from '../activity/hub';
-import { GrindTracker } from '../activity/grind';
+import type { SessionTracker } from '../activity/sessionTracker';
 
 export function runsRoutes(db: DatabaseSync, hub: EventHub, activity: ActivityHub,
+                           sessionTracker: SessionTracker,
                            invalidateModel?: (courseId: number) => void): Hono<Env> {
   const r = new Hono<Env>();
-  const tracker = new GrindTracker();
 
   r.post('/v1/runs', requireToken(db), async (c) => {
     const playerId = c.get('playerId');
@@ -58,16 +58,8 @@ export function runsRoutes(db: DatabaseSync, hub: EventHub, activity: ActivityHu
     const prevMineMs = prevMine ? prevMine.total_time_ms : null;
     upsertRun(db, p, playerId, seasonId);
 
-    // Track grind attempts on every run (including resets), regardless of status.
-    // note() returns a closed segment if the player switched to a different course.
-    const closedByMove = tracker.note(playerId, courseId, Date.now());
-    if (closedByMove) {
-      commitActivity(db, activity, [{
-        ts: Date.now(), type: 'attempts', season_id: seasonId,
-        player_id: playerId, course_id: closedByMove.courseId, cc,
-        payload: { count: closedByMove.count, duration_ms: closedByMove.durationMs },
-      }]);
-    }
+    // Every attempt (incl. resets) feeds the presence-driven racing session's attempt count.
+    sessionTracker.noteRun(playerId, courseId);
 
     if (p.status !== 'finished') return c.json({ is_pb: false, rank: null, gap_to_leader_ms: null, gap_to_wr_ms: null });
 
@@ -112,15 +104,12 @@ export function runsRoutes(db: DatabaseSync, hub: EventHub, activity: ActivityHu
       hub.publish({ type: 'wr_beaten', player: playerName, course: p.course, cc, total_time: p.total_time, wr_time: wr.record_str });
 
     if (isPb) {
+      sessionTracker.notePb(playerId, courseId);
       const wrMs = wr ? wr.record_ms : null;
-      const grind = tracker.close(playerId, Date.now());
-      const attempts = grind && grind.count > 1
-        ? { count: grind.count - 1, durationMs: grind.durationMs }
-        : null;
       const inputs = buildRunCascade({
         ts: Date.now(), seasonId, cc, courseId, moverId: playerId, moverName: playerName,
         before: beforeBoard, after: lb, beforeWr: wrMs, afterWr: wrMs,
-        prevPbMs: prevMineMs, attempts,
+        prevPbMs: prevMineMs,
       });
       commitActivity(db, activity, inputs);
     }

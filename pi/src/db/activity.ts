@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { ActivityInput, ActivityEvent } from '../activity/types';
 import type { SessionView } from '../activity/sessionTracker';
+import type { SessionWire } from '../activity/hub';
 
 /** Map a finalised session view to a persistable activity_events row (type 'session'). The feed
  *  position is the session's start; the payload carries the session detail the client formats. */
@@ -18,6 +19,19 @@ export function sessionInput(seasonId: number, v: SessionView): ActivityInput {
       duration_ms: v.ended_ts != null ? v.ended_ts - v.started_ts : null,
       attempts: v.attempts, pbs: v.pbs,
     },
+  };
+}
+
+/** Resolve a tracker SessionView (player/course ids) into the wire shape (names attached) for
+ *  broadcast + the connect snapshot. */
+export function sessionWire(db: DatabaseSync, v: SessionView): SessionWire {
+  return {
+    session_id: v.session_id, state: v.state,
+    player: player(db, v.player_id), course: course(db, v.course_id),
+    cls: v.cls, character: v.character, costume: v.costume,
+    started_ts: v.started_ts, ended_ts: v.ended_ts,
+    duration_ms: v.ended_ts != null ? v.ended_ts - v.started_ts : null,
+    attempts: v.attempts, pbs: v.pbs,
   };
 }
 

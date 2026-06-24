@@ -23,7 +23,7 @@ describe('WS /v1/events', () => {
   it('delivers a derived event to a connected subscriber', async () => {
     const c = ctx();
     const presence = new PresenceHub(c.db, makeLiveCompletion(c.db));
-    const { injectWebSocket } = makeWs(c.app, c.hub, presence, c.db, new ActivityHub());
+    const { injectWebSocket } = makeWs(c.app, c.hub, presence, c.db, new ActivityHub(), () => []);
     const server = serve({ fetch: c.app.fetch, port: 0 });
     injectWebSocket(server);
     const addr = server.address() as { port: number };

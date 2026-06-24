@@ -32,7 +32,7 @@ function setup() {
   const hub = new EventHub();
   const activity = new ActivityHub();
   const activityEvents: ActivityEvent[] = [];
-  activity.subscribe((e) => activityEvents.push(e));
+  activity.subscribe((m) => { if (m.kind === 'event') activityEvents.push(m.event); });
 
   return { db, hub, activity, activityEvents };
 }

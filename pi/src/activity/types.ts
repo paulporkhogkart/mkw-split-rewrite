@@ -1,7 +1,7 @@
 export type ActivityType =
-  // 'attempts' + 'screen' are the legacy emit-at-end session events, removed with their
-  // consumers in the sessions redesign; 'session' is the presence-driven replacement.
-  | 'pb' | 'rank' | 'turf_claim' | 'turf_fire' | 'turf_waver' | 'wr' | 'attempts' | 'screen' | 'session';
+  // 'session' is the presence-driven durational activity; the rest are instantaneous milestones.
+  // (Legacy emit-at-end 'attempts'/'screen' events were removed in the sessions redesign.)
+  | 'pb' | 'rank' | 'turf_claim' | 'turf_fire' | 'turf_waver' | 'wr' | 'session';
 
 export interface ActivityInput {
   ts: number;

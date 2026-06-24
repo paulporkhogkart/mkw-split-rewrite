@@ -4,7 +4,8 @@ import type { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { EventHub } from './events';
-import { ActivityHub } from '../activity/hub';
+import { ActivityHub, type SessionWire } from '../activity/hub';
+import { SessionTracker } from '../activity/sessionTracker';
 import { runsRoutes } from './runs';
 import { readsRoutes } from './reads';
 import { activityRoutes } from './activity';
@@ -24,7 +25,7 @@ const EXPLORER_HTML = fileURLToPath(new URL('../../stat-explorer.html', import.m
 
 export function createApp(db: DatabaseSync, hub: EventHub,
                           invalidateModel?: (courseId: number) => void,
-                          opts?: { latest?: LatestFn; activity?: ActivityHub }): Hono<Env> {
+                          opts?: { latest?: LatestFn; activity?: ActivityHub; sessionTracker?: SessionTracker }): Hono<Env> {
   const app = new Hono<Env>();
   app.get('/health', (c) => c.json({ status: 'ok' }));
   // Every HTTP route except /health and the two WebSocket streams needs a token (read or write).
@@ -41,12 +42,16 @@ export function createApp(db: DatabaseSync, hub: EventHub,
   const OPEN = new Set(['/health', '/v1/events', '/v1/presence', '/v1/activity/stream', ...PUBLIC_READS]);
   app.use('*', (c, next) => (OPEN.has(c.req.path) ? next() : requireTokenAny(db)(c, next)));
   const activity = opts?.activity ?? new ActivityHub();
-  app.route('/', runsRoutes(db, hub, activity, invalidateModel));
+  // A default no-op tracker keeps runsRoutes working in tests; server.ts passes the real one
+  // (shared with presence) so attempts land on the presence-opened racing session.
+  const sessionTracker = opts?.sessionTracker
+    ?? new SessionTracker({ now: Date.now, emitOpen() {}, emitFinal() {}, emitDrop() {} });
+  app.route('/', runsRoutes(db, hub, activity, sessionTracker, invalidateModel));
   app.route('/', activityRoutes(db));
   app.route('/', readsRoutes(db));
   app.route('/', versionRoutes(db, { latest: opts?.latest }));
   app.route('/', createStatsApp(db, { porkerPath: process.env.STATS_PORKER_DB ?? 'porker.db' }));
-  app.route('/', screenRoutes(db, activity));
+  app.route('/', screenRoutes(db));
   app.get('/explorer', (c) => {
     try { return c.html(readFileSync(EXPLORER_HTML, 'utf8')); }
     catch { return c.text('stat-explorer.html not found', 404); }
@@ -57,7 +62,8 @@ export function createApp(db: DatabaseSync, hub: EventHub,
 import { createNodeWebSocket } from '@hono/node-ws';
 
 /** Attach the /v1/events + /v1/presence + /v1/activity/stream WebSocket routes. Returns { injectWebSocket }. */
-export function makeWs(app: Hono<Env>, hub: EventHub, presence: PresenceHub, db: DatabaseSync, activity: ActivityHub) {
+export function makeWs(app: Hono<Env>, hub: EventHub, presence: PresenceHub, db: DatabaseSync,
+                       activity: ActivityHub, sessionsSnapshot: () => SessionWire[]) {
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
   app.get('/v1/events', upgradeWebSocket(() => {
     let unsub = () => {};
@@ -80,6 +86,8 @@ export function makeWs(app: Hono<Env>, hub: EventHub, presence: PresenceHub, db:
     let unsub = () => {};
     return {
       onOpen(_e: unknown, ws: { send: (data: string) => void }) {
+        // Snapshot the in-flight open sessions first so a fresh client sees them ticking.
+        ws.send(JSON.stringify({ kind: 'sessions_snapshot', sessions: sessionsSnapshot() }));
         unsub = activity.subscribe((ev) => ws.send(JSON.stringify(ev)));
       },
       onClose() { unsub(); },
