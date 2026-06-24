@@ -21,7 +21,7 @@
         <div class="when">{r.when}</div>
         <div class="who" class:sys={r.sys} style={r.who.color ? `color:${r.who.color}` : ""}>{r.who.text}</div>
         <div class="where" class:dim={r.where.dim}>{r.where.text}</div>
-        <div class="what">{#each r.what as s}<span class={s.cls} style={s.color ? `color:${s.color}` : ""}>{s.text}</span>{/each}</div>
+        <div class="what">{#each r.what as s, i (i)}<span class={s.cls} style={s.color ? `color:${s.color}` : ""}>{s.text}</span>{/each}</div>
       </div>
     {/each}
   </section>
