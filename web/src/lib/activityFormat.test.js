@@ -58,13 +58,13 @@ describe("toRow milestones", () => {
     expect(r.who.text).toBe("wr");
     expect(r.what.map((s) => s.text).join("")).toBe("1:29.180 (-0.220) by Ralph");
   });
-  it("presence -> soft player row, opened/closed pbenguin in the where slot", () => {
+  it("presence -> soft player row, logged in/out in the where slot", () => {
     const open = mrow("presence", { payload: { online: true } });
     expect(open.sys).toBe(false);
     expect(open.soft).toBe(true);
     expect(open.who).toEqual({ text: "Gub", color: "#38bdf8" });
-    expect(open.where).toEqual({ text: "opened pbenguin", dim: true });
-    expect(mrow("presence", { payload: { online: false } }).where.text).toBe("closed pbenguin");
+    expect(open.where).toEqual({ text: "logged in", dim: true });
+    expect(mrow("presence", { payload: { online: false } }).where.text).toBe("logged out");
   });
 });
 
@@ -81,15 +81,13 @@ describe("toRow sessions", () => {
   it("racing live with no attempts yet → just the clock", () => {
     expect(srow({ attempts: 0 }, 1000 + 8000).what.map((s) => s.text).join("")).toBe("racing 0:08");
   });
-  it("racing final → 'as {char} · N runs · dur · outcome'", () => {
-    const r = srow({ state: "final", ended_ts: 1000 + 24 * 60000 + 13000, duration_ms: 24 * 60000 + 13000, attempts: 67, pbs: 0 });
-    expect(r.what.map((s) => s.text).join("")).toBe("as Peach · 67 runs · 24:13 · no PB");
-  });
-  it("racing final with a PB → 'new PB'", () => {
-    expect(srow({ state: "final", duration_ms: 60000, attempts: 5, pbs: 1 }).what.map((s) => s.text).join("")).toContain("new PB");
+  it("racing final → 'N runs · dur' (course in `where`; no character or PB clutter)", () => {
+    const r = srow({ state: "final", ended_ts: 1000 + 24 * 60000 + 13000, duration_ms: 24 * 60000 + 13000, attempts: 67, pbs: 1 });
+    expect(r.where.text).toBe("Choco Mountain");
+    expect(r.what.map((s) => s.text).join("")).toBe("67 runs · 24:13");
   });
   it("a single run is singular", () => {
-    expect(srow({ state: "final", duration_ms: 30000, attempts: 1, pbs: 0 }).what.map((s) => s.text).join("")).toBe("as Peach · 1 run · 0:30 · no PB");
+    expect(srow({ state: "final", duration_ms: 30000, attempts: 1, pbs: 0 }).what.map((s) => s.text).join("")).toBe("1 run · 0:30");
   });
   it("menus → activity phrase in where (dim), duration in what", () => {
     const r = srow({ cls: "menus", character: null, costume: null, course: null, state: "final", duration_ms: 23 * 60000 }, 1000);

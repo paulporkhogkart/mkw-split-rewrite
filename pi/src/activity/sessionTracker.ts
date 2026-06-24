@@ -54,6 +54,7 @@ interface PlayerState {
   session: Session | null;
   pendingKey: string | null;
   pendingSince: number;
+  racingGate: boolean;   // after a PB: ignore the lingering finished-race RACING until they leave it
 }
 
 const keyOf = (cls: ScreenClass, courseId: number | null): string =>
@@ -67,7 +68,7 @@ export class SessionTracker {
 
   private st(playerId: number): PlayerState {
     let s = this.players.get(playerId);
-    if (!s) { s = { session: null, pendingKey: null, pendingSince: 0 }; this.players.set(playerId, s); }
+    if (!s) { s = { session: null, pendingKey: null, pendingSince: 0, racingGate: false }; this.players.set(playerId, s); }
     return s;
   }
 
@@ -115,6 +116,12 @@ export class SessionTracker {
     const st = this.st(playerId);
     const openClass = st.session?.cls ?? null;   // lets a held screen continue racing OR a ghost-watch
     const cls = classify(frame.screen, openClass);
+    // After a PB the grind is finalised; ignore the lingering finished-race RACING screen until the
+    // player leaves to a non-racing screen, so a fresh racing session opens only on the NEXT race.
+    if (st.racingGate) {
+      if (cls === 'racing') return;
+      st.racingGate = false;
+    }
     // A RACING frame uses its own course (falling back to the open session's if the read
     // blipped null); a held screen continuing racing inherits the open session's course.
     const targetCourseId = cls === 'racing'
@@ -178,6 +185,7 @@ export class SessionTracker {
     // racing this very course. A run landing while presence shows a committed non-racing session
     // (or a pending non-racing key) is ignored - otherwise it manufactures a phantom ~0s racing
     // row that the next menu frame finalises, re-introducing the "1 run · 0:00" defect.
+    if (st.racingGate) return;   // a PB just ended the grind; wait for the next real race
     const noPresenceState = !cur && st.pendingKey == null;
     const corroborated = st.pendingKey === `racing:${courseId}`;
     if (noPresenceState || corroborated) {
@@ -196,6 +204,8 @@ export class SessionTracker {
     if (cur && cur.cls === 'racing' && (cur.courseId == null || cur.courseId === courseId)) {
       cur.pbs++;
       this.finalize(playerId, this.deps.now());
+      st.racingGate = true;    // wait for the next race (a non-racing screen first) before reopening
+      st.pendingKey = null;
     }
   }
 

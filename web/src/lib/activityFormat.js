@@ -47,9 +47,7 @@ const OFFTRACK_LABEL = {
   menus: "in the menus", character_select: "choosing a character",
   kart_select: "choosing a kart", track_select: "choosing a track", ghost: "watching a ghost",
 };
-const charLabel = (c, cos) => (!c ? null : cos && cos !== "Base" ? `${cos} ${c}` : c);
 const runsLabel = (n) => `${n} run${n === 1 ? "" : "s"}`;
-const pbLabel = (n) => (!n ? "no PB" : n === 1 ? "new PB" : `${n} new PBs`);
 
 /** A normalized store row -> a structured render row the component draws span-by-span. */
 export function toRow(row, now) {
@@ -65,18 +63,17 @@ function sessionRow(row, now) {
 
   if (row.cls === "racing") {
     const where = { text: row.course?.name ?? "" };
-    const char = charLabel(row.character, row.costume);
     if (row.live) {
       const what = [{ text: "racing ", cls: "" }, { text: fmtClock(dur), cls: "t" }];
       if (row.attempts >= 1) what.push({ text: ` · ${runsLabel(row.attempts)}`, cls: "dim" });
       return { ...base, who, where, what };
     }
-    const what = [];
-    if (char) what.push({ text: `as ${char} · `, cls: "" });
-    what.push({ text: runsLabel(row.attempts ?? 0), cls: "" });
-    what.push({ text: ` · ${fmtClock(dur)}`, cls: "dim" });
-    what.push({ text: ` · ${pbLabel(row.pbs)}`, cls: "dim" });
-    return { ...base, who, where, what };
+    // Finalised grind: just the run count + duration. The course is already in `where`, and the PB
+    // (if any) has its own row, so neither the character nor the PB outcome is repeated here.
+    return { ...base, who, where, what: [
+      { text: runsLabel(row.attempts ?? 0), cls: "" },
+      { text: ` · ${fmtClock(dur)}`, cls: "dim" },
+    ] };
   }
 
   // Off-track: the activity phrase sits in `where` (dim), the duration in `what`.
@@ -116,7 +113,7 @@ function milestoneRow(row, now) {
     case "presence":
       // App open/close: a soft player-name row, the action in the `where` slot like an off-track session.
       return { ...base, sys: false, soft: true, who: { text: p.name, color: p.color }, strip: null,
-        where: { text: pay.online ? "opened pbenguin" : "closed pbenguin", dim: true }, what: [] };
+        where: { text: pay.online ? "logged in" : "logged out", dim: true }, what: [] };
     default:
       return null;
   }
