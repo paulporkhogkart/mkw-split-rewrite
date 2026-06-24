@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>MKW chip cropper</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; font: 13px/1.4 system-ui, sans-serif; background: #0e0f12; color: #ddd;
+         display: grid; grid-template-columns: 1fr 320px; height: 100vh; }
+  #stage { position: relative; overflow: hidden; display: grid; place-items: center; background: #000; }
+  #frame { position: relative; }
+  #frame img { display: block; max-width: 100%; max-height: 100vh; user-select: none; -webkit-user-drag: none; }
+  #box { position: absolute; border: 1.5px solid #5cf; box-shadow: 0 0 0 9999px rgba(0,0,0,.45);
+         cursor: move; }
+  #box .h { position: absolute; right: -7px; bottom: -7px; width: 14px; height: 14px;
+            background: #5cf; border-radius: 2px; cursor: nwse-resize; }
+  aside { padding: 16px; background: #15171c; overflow: auto; }
+  h1 { font-size: 14px; margin: 0 0 10px; }
+  .row { display: flex; gap: 8px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
+  button { background: #23262d; color: #ddd; border: 1px solid #333; border-radius: 6px;
+           padding: 6px 10px; cursor: pointer; }
+  button.primary { background: #2b6; border-color: #2b6; color: #052; font-weight: 600; }
+  .pill { font-size: 11px; color: #8af; }
+  .muted { color: #888; }
+  /* The REAL feed chip CSS, reused so the preview is exact (keep in sync with ActivityLog.svelte). */
+  .chip-wrap { filter: drop-shadow(0 1px 1.5px rgba(0,0,0,.55)); line-height: 0; display: inline-block; }
+  .chip { display: inline-block; height: 48px; aspect-ratio: 1/1; overflow: hidden;
+          clip-path: polygon(16% 0, 100% 0, 84% 100%, 0 100%);
+          box-shadow: inset 0 0 0 1px rgba(255,255,255,.16); background: #15171c; position: relative; }
+  .chip img { position: absolute; left: 0; top: 0; max-width: none; }
+  .preview-bg { background: #1b1d22; padding: 14px; border-radius: 8px; display: grid; place-items: center; }
+</style>
+</head>
+<body>
+  <div id="stage"><div id="frame"><img id="img" alt="" /><div id="box"><div class="h"></div></div></div></div>
+  <aside>
+    <h1>chip cropper</h1>
+    <div class="row"><button id="prev">‹ prev</button><button id="next">next ›</button>
+      <button id="nextUnset">next unset</button></div>
+    <div class="row"><span id="counter" class="muted"></span></div>
+    <div class="row"><strong id="itemName"></strong> <span id="itemCat" class="pill"></span></div>
+    <div class="preview-bg"><span class="chip-wrap"><span class="chip"><img id="pvImg" alt="" /></span></span></div>
+    <div class="row" id="comboControls">
+      <button id="setCharDefault">set as character default</button>
+      <label><input type="checkbox" id="overrideCombo" /> override this combo only</label>
+    </div>
+    <div class="row" id="courseControls" hidden>
+      <button id="setCourseDefault">set as course default</button>
+      <label><input type="checkbox" id="overrideCourse" /> override this course only</label>
+    </div>
+    <div class="row"><button id="save" class="primary">save</button>
+      <span id="saved" class="muted"></span></div>
+    <p class="muted">Drag the box to move, drag the corner to resize (aspect locked).
+       Combos inherit the character default unless overridden.</p>
+  </aside>
+<script>
+const CAP_W = 1920, CAP_H = 1080;
+let items = [], spec = null, idx = 0, scale = 1;
+
+const $ = (id) => document.getElementById(id);
+const img = $("img"), box = $("box"), frame = $("frame");
+
+async function boot() {
+  items = await (await fetch("/api/captures")).json();
+  spec = await (await fetch("/api/crops")).json();
+  spec.defaults = spec.defaults || { character: {}, course: null };
+  spec.defaults.character = spec.defaults.character || {};
+  for (const c of ["combos", "karts", "courses"]) spec[c] = spec[c] || {};
+  if (items.length) show(0);
+}
+
+function aspect() { return (spec.meta && spec.meta.crop_aspect) || 1.0; }
+function charOf(name) { return name.split("__")[0]; }
+function cur() { return items[idx]; }
+
+function effRect(it) {
+  // explicit override -> character/course default -> a centered starting box
+  const ov = spec[it.category][it.name];
+  if (ov) return { ...ov };
+  if (it.category === "combos") {
+    const d = spec.defaults.character[charOf(it.name)];
+    if (d) return { ...d };
+  }
+  if (it.category === "courses" && spec.defaults.course) return { ...spec.defaults.course };
+  const h = 360, w = Math.round(h * aspect());
+  return { x: Math.round((CAP_W - w) / 2), y: Math.round((CAP_H - h) / 2), w, h };
+}
+
+function show(i) {
+  idx = (i + items.length) % items.length;
+  const it = cur();
+  img.src = it.url;
+  img.onload = () => {
+    scale = img.clientWidth / CAP_W;
+    drawBox(effRect(it));
+    layoutForCategory(it);
+    renderPreview();
+  };
+  $("itemName").textContent = it.name;
+  $("itemCat").textContent = it.category;
+  $("counter").textContent = `${idx + 1} / ${items.length}`;
+  $("saved").textContent = "";
+}
+
+let rect = { x: 0, y: 0, w: 0, h: 0 };
+function drawBox(r) {
+  rect = clampRect(r);
+  box.style.left = rect.x * scale + "px";
+  box.style.top = rect.y * scale + "px";
+  box.style.width = rect.w * scale + "px";
+  box.style.height = rect.h * scale + "px";
+  renderPreview();
+}
+function clampRect(r) {
+  const w = Math.max(20, Math.min(r.w, CAP_W));
+  const h = Math.round(w / aspect());
+  const x = Math.max(0, Math.min(r.x, CAP_W - w));
+  const y = Math.max(0, Math.min(r.y, CAP_H - h));
+  return { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
+}
+
+function renderPreview() {
+  const pv = $("pvImg"), chipH = 48, s = chipH / rect.h;
+  pv.src = cur().url;
+  pv.style.width = CAP_W * s + "px";
+  pv.style.height = CAP_H * s + "px";
+  pv.style.transform = `translate(${-rect.x * s}px, ${-rect.y * s}px)`;
+}
+
+function layoutForCategory(it) {
+  $("comboControls").hidden = it.category !== "combos";
+  $("courseControls").hidden = it.category !== "courses";
+  if (it.category === "combos") $("overrideCombo").checked = !!spec.combos[it.name];
+  if (it.category === "courses") $("overrideCourse").checked = !!spec.courses[it.name];
+}
+
+// Persist the current rect into the spec per the category + override toggles.
+function commitCurrent() {
+  const it = cur(), r = { ...rect };
+  if (it.category === "karts") { spec.karts[it.name] = r; return; }
+  if (it.category === "courses") {
+    if ($("overrideCourse").checked) spec.courses[it.name] = r;
+    else { spec.defaults.course = r; delete spec.courses[it.name]; }
+    return;
+  }
+  // combos
+  if ($("overrideCombo").checked) spec.combos[it.name] = r;
+  else delete spec.combos[it.name];   // inherit the character default
+}
+
+// --- drag/resize ---
+let drag = null;
+box.addEventListener("pointerdown", (e) => {
+  e.preventDefault(); box.setPointerCapture(e.pointerId);
+  const resize = e.target.classList.contains("h");
+  drag = { resize, sx: e.clientX, sy: e.clientY, r0: { ...rect } };
+});
+box.addEventListener("pointermove", (e) => {
+  if (!drag) return;
+  const dx = (e.clientX - drag.sx) / scale, dy = (e.clientY - drag.sy) / scale;
+  if (drag.resize) drawBox({ ...drag.r0, w: drag.r0.w + dx });
+  else drawBox({ ...drag.r0, x: drag.r0.x + dx, y: drag.r0.y + dy });
+});
+box.addEventListener("pointerup", () => { drag = null; commitCurrent(); });
+
+$("prev").onclick = () => { commitCurrent(); show(idx - 1); };
+$("next").onclick = () => { commitCurrent(); show(idx + 1); };
+$("nextUnset").onclick = () => {
+  commitCurrent();
+  for (let k = 1; k <= items.length; k++) {
+    const j = (idx + k) % items.length, it = items[j];
+    const has = spec[it.category][it.name]
+      || (it.category === "combos" && spec.defaults.character[charOf(it.name)])
+      || (it.category === "courses" && spec.defaults.course);
+    if (!has) { show(j); return; }
+  }
+  show(idx);
+};
+$("setCharDefault").onclick = () => {
+  spec.defaults.character[charOf(cur().name)] = { ...rect };
+  $("overrideCombo").checked = false; delete spec.combos[cur().name];
+};
+$("setCourseDefault").onclick = () => {
+  spec.defaults.course = { ...rect };
+  $("overrideCourse").checked = false; delete spec.courses[cur().name];
+};
+$("overrideCombo").onchange = commitCurrent;
+$("overrideCourse").onchange = commitCurrent;
+$("save").onclick = async () => {
+  commitCurrent();
+  await fetch("/api/crops", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(spec) });
+  $("saved").textContent = "saved ✓";
+};
+boot();
+</script>
+</body>
+</html>
