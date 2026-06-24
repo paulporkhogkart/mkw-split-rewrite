@@ -25,7 +25,10 @@
     if (!navEl) return;
     const active = navEl.querySelector(".tab.on");
     if (!active) { mk = { ...mk, width: 0 }; return; }
-    mk = { left: active.offsetLeft + 10, width: active.offsetWidth - 20 };
+    // The uppercase tabs carry trailing letter-spacing, which shifts the visible glyphs left of
+    // the box centre; pull the marker left by half of it so it sits under the text, not the box.
+    const ls = parseFloat(getComputedStyle(active).letterSpacing) || 0;
+    mk = { left: active.offsetLeft + 10 - ls / 2, width: active.offsetWidth - 20 };
   }
   // Reposition after the .on class lands in the DOM (tab switch).
   $: view, tick().then(updateMarker);
