@@ -1,5 +1,7 @@
 export type ActivityType =
-  | 'pb' | 'rank' | 'turf_claim' | 'turf_fire' | 'turf_waver' | 'wr' | 'attempts' | 'screen';
+  // 'attempts' + 'screen' are the legacy emit-at-end session events, removed with their
+  // consumers in the sessions redesign; 'session' is the presence-driven replacement.
+  | 'pb' | 'rank' | 'turf_claim' | 'turf_fire' | 'turf_waver' | 'wr' | 'attempts' | 'screen' | 'session';
 
 export interface ActivityInput {
   ts: number;

@@ -1,5 +1,25 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { ActivityInput, ActivityEvent } from '../activity/types';
+import type { SessionView } from '../activity/sessionTracker';
+
+/** Map a finalised session view to a persistable activity_events row (type 'session'). The feed
+ *  position is the session's start; the payload carries the session detail the client formats. */
+export function sessionInput(seasonId: number, v: SessionView): ActivityInput {
+  return {
+    ts: v.started_ts,
+    type: 'session',
+    season_id: seasonId,
+    player_id: v.player_id,
+    course_id: v.course_id,
+    cc: null,
+    payload: {
+      cls: v.cls, character: v.character, costume: v.costume,
+      started_ts: v.started_ts, ended_ts: v.ended_ts,
+      duration_ms: v.ended_ts != null ? v.ended_ts - v.started_ts : null,
+      attempts: v.attempts, pbs: v.pbs,
+    },
+  };
+}
 
 export function insertActivityEvents(db: DatabaseSync, inputs: ActivityInput[]): number[] {
   const stmt = db.prepare(
