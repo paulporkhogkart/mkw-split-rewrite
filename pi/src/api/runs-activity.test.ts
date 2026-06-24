@@ -27,14 +27,15 @@ describe('run -> activity cascade', () => {
     await post(app, paul, { attempt_id: 'p1', course: 'Crown City', status: 'finished', total_time: '1:48.221' });
     seen.length = 0;
     await post(app, gub, { attempt_id: 'g1', course: 'Crown City', status: 'finished', total_time: '1:47.980' });
-    // commitActivity publishes in ascending id order (pb, rank, turf_claim); the
+    // commitActivity publishes in ascending id order; with the grind tracker wired in,
+    // each PB now also emits an 'attempts' row (count=1, the single run in this segment).
     // client prepends each as it arrives, so the newest (turf_claim) ends on top.
-    expect(seen.map(e => e.type)).toEqual(['pb', 'rank', 'turf_claim']);
-    expect(seen[0].player!.name).toBe('Gub');                 // pb actor
-    expect((seen[1].payload as any).place).toBe(1);           // rank: took 1st
-    expect((seen[2].payload as any).rival.name).toBe('Paul'); // turf_claim dethroned Paul
-    // Paul's first run also fires the cascade (1 pb row); Gub's adds 3 more → 4 total
-    expect((db.prepare('SELECT COUNT(*) c FROM activity_events').get() as any).c).toBe(4);
-    expect((db.prepare('SELECT COUNT(*) c FROM activity_events WHERE player_id=1').get() as any).c).toBe(3);
+    expect(seen.map(e => e.type)).toEqual(['attempts', 'pb', 'rank', 'turf_claim']);
+    expect(seen[1].player!.name).toBe('Gub');                 // pb actor
+    expect((seen[2].payload as any).place).toBe(1);           // rank: took 1st
+    expect((seen[3].payload as any).rival.name).toBe('Paul'); // turf_claim dethroned Paul
+    // Paul's first run fires cascade (attempts + pb = 2 rows); Gub's adds 4 more → 6 total
+    expect((db.prepare('SELECT COUNT(*) c FROM activity_events').get() as any).c).toBe(6);
+    expect((db.prepare('SELECT COUNT(*) c FROM activity_events WHERE player_id=1').get() as any).c).toBe(4);
   });
 });
