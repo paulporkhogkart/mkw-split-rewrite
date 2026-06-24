@@ -260,6 +260,16 @@ def prime_gate_from_disk(gate: CaptureGate, out_root: str, lang: str) -> None:
             gate.mark_captured(cat, base)
 
 
+def prime_combos_from_disk(gate: CaptureGate, out_root: str, lang: str) -> None:
+    """Mark every already-saved combo capture as captured so it is not re-grabbed."""
+    directory = os.path.join(out_root, lang, "combos")
+    if not os.path.isdir(directory):
+        return
+    for filename in os.listdir(directory):
+        if filename.lower().endswith(".png"):
+            gate.mark_combo_captured(filename[:-4])
+
+
 # ===========================================================================
 # I/O shell  -  camera loop + OpenCV HUD + beep.  Not unit-tested (hardware);
 # all decision logic lives in the pure units above.
@@ -434,6 +444,10 @@ def _draw_hud(display, screen, score, gate, state, flash_text):
         done, total = len(gate.captured[cat]), len(gate.resolver.known(cat))
         _put(display, f"  {cat:<11} {done:>3}/{total:<3}", (14, y), (200, 220, 200), 0.45)
         y += 22
+    if getattr(gate, "combo_captured", None):
+        _put(display, f"  {'combos':<11} {len(gate.combo_captured):>3} saved", (14, y),
+             (200, 220, 200), 0.45)
+        y += 22
     y += 10
 
     for cat in [c for c, _, _ in _SCREEN_FIELDS.get(screen, [])]:
@@ -461,12 +475,15 @@ def run(args):
     settings = get_settings()
     lang = args.lang or settings.get("switch2_language", "en_uk") or "en_uk"
     device = args.device if args.device is not None else (settings.get("camera_device", "") or None)
-    out_root = args.out or str(data_dir() / "captures")
+    out_root = args.out or str(data_dir() / ("captures_sdr" if args.combos else "captures"))
     images_root = resource_path("images")
 
     resolver = NameResolver(lang, images_root)
     gate = CaptureGate(resolver, min_conf=args.min_conf, hold=args.hold)
     prime_gate_from_disk(gate, out_root, lang)
+    if args.combos:
+        prime_combos_from_disk(gate, out_root, lang)
+        print(f"[capture]   combos      {len(gate.combo_captured)} already on disk")
 
     detector = _build_detector(lang)
     tracker = SelectionTracker(switch2_language=lang)
@@ -508,18 +525,22 @@ def run(args):
 
             if t - last_observe >= _OBSERVE_INTERVAL:
                 last_observe = t
-                for cat, base in gate.observe(screen, state):
+                if args.combos:
+                    fired = gate.observe_combo(screen, state)
+                    if screen in (Screen.KART_SELECT, Screen.COURSE_SELECT):
+                        fired = fired + gate.observe(screen, state)
+                else:
+                    fired = gate.observe(screen, state)
+                for cat, base in fired:
                     try:
                         path = _save_capture(out_root, lang, cat, base, frame)
                         _beep(not args.no_sound)
                         flash_text, flash_until = f"SAVED {cat}/{base}", t + 0.6
                         print(f"[capture] saved {path}")
                     except Exception as e:
-                        gate.unmark(cat, base)   # failed save -> let it retry
+                        (gate.unmark_combo(base) if cat == "combos" else gate.unmark(cat, base))
                         flash_text, flash_until = f"SAVE FAILED {cat}/{base}", t + 1.5
-                        print(f"[capture] SAVE FAILED {cat}/{base} "
-                              f"(shape={getattr(frame, 'shape', None)} "
-                              f"dtype={getattr(frame, 'dtype', None)}): {type(e).__name__}: {e}")
+                        print(f"[capture] SAVE FAILED {cat}/{base}: {type(e).__name__}: {e}")
 
             display = cv2.resize(frame, (1280, 720), interpolation=cv2.INTER_LINEAR)
             if show_hud:
@@ -531,20 +552,38 @@ def run(args):
             if key in (ord("q"), 27):
                 break
             elif key == ord(" "):
-                for cat, base, conf, stat in gate.current_targets(screen, state):
+                combo = gate.current_combo(screen, state) if args.combos else None
+                if combo:
+                    cat, base, _conf, _stat = combo
                     try:
                         path = _save_capture(out_root, lang, cat, base, frame)
-                        gate.mark_captured(cat, base)
+                        gate.mark_combo_captured(base)
                         _beep(not args.no_sound)
                         flash_text, flash_until = f"FORCED {cat}/{base}", time.perf_counter() + 0.6
                         print(f"[capture] forced {path}")
                     except Exception as e:
                         flash_text, flash_until = f"SAVE FAILED {cat}/{base}", time.perf_counter() + 1.5
                         print(f"[capture] FORCE SAVE FAILED {cat}/{base}: {type(e).__name__}: {e}")
+                else:
+                    for cat, base, conf, stat in gate.current_targets(screen, state):
+                        try:
+                            path = _save_capture(out_root, lang, cat, base, frame)
+                            gate.mark_captured(cat, base)
+                            _beep(not args.no_sound)
+                            flash_text, flash_until = f"FORCED {cat}/{base}", time.perf_counter() + 0.6
+                            print(f"[capture] forced {path}")
+                        except Exception as e:
+                            flash_text, flash_until = f"SAVE FAILED {cat}/{base}", time.perf_counter() + 1.5
+                            print(f"[capture] FORCE SAVE FAILED {cat}/{base}: {type(e).__name__}: {e}")
             elif key == ord("s"):
-                for cat, base, conf, stat in gate.current_targets(screen, state):
-                    gate.skip(cat, base)
-                    print(f"[capture] skipped {cat}/{base}")
+                combo = gate.current_combo(screen, state) if args.combos else None
+                if combo:
+                    gate.skip_combo(combo[1])
+                    print(f"[capture] skipped combos/{combo[1]}")
+                else:
+                    for cat, base, conf, stat in gate.current_targets(screen, state):
+                        gate.skip(cat, base)
+                        print(f"[capture] skipped {cat}/{base}")
             elif key == 9:   # Tab
                 show_hud = not show_hud
 
@@ -575,6 +614,9 @@ def main():
     p.add_argument("--hold", type=int, default=3,
                    help="Consecutive stable scans before auto-capture (default 3).")
     p.add_argument("--no-sound", action="store_true", help="Disable the capture beep.")
+    p.add_argument("--combos", action="store_true",
+                   help="Capture character x costume COMBOS (for chips) into combos/; "
+                        "defaults --out to captures_sdr/.")
     run(p.parse_args())
 
 

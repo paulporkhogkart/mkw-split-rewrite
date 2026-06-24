@@ -330,3 +330,16 @@ def test_combo_current_and_skip(tmp_path):
     for _ in range(3):
         assert gate.observe_combo(Screen.CHARACTER_SELECT, st) == []
     assert gate.current_combo(Screen.CHARACTER_SELECT, st)[3] == "SKIPPED"
+
+
+def test_prime_combos_from_disk_prevents_recapture(tmp_path):
+    from mkw_tracker.detection.screen import Screen
+    from mkw_tracker.tools.capture_sources import prime_combos_from_disk
+    gate = _gate(tmp_path, {"characters": ["mario"]}, min_conf=0.8, hold=1)
+    out = tmp_path / "captures_sdr"
+    _touch(str(out / "en_uk" / "combos" / "mario__base.png"))
+    prime_combos_from_disk(gate, str(out), "en_uk")
+    st = _state(character="Mario", character_conf=0.95, costume=None)
+    for _ in range(3):
+        assert gate.observe_combo(Screen.CHARACTER_SELECT, st) == []
+    assert "mario__base" in gate.combo_captured
