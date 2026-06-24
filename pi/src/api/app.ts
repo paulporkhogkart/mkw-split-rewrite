@@ -7,6 +7,7 @@ import { EventHub } from './events';
 import { ActivityHub } from '../activity/hub';
 import { runsRoutes } from './runs';
 import { readsRoutes } from './reads';
+import { activityRoutes } from './activity';
 import { versionRoutes } from './version';
 import type { LatestFn } from '../version/latest';
 import { createStatsApp } from './stats';
@@ -33,14 +34,15 @@ export function createApp(db: DatabaseSync, hub: EventHub,
   // The public website fetches these reads cross-origin. They serve already-public data (same
   // category as the open /v1/presence stream), so they skip the token gate and get permissive
   // CORS (incl. preflight). Everything else (writes, stats, screen, other reads) stays gated.
-  const PUBLIC_READS = ['/v1/leaderboard', '/v1/world-records', '/v1/roster', '/v1/territory', '/v1/territory/timeline', '/v1/version'];
+  const PUBLIC_READS = ['/v1/leaderboard', '/v1/world-records', '/v1/roster', '/v1/territory', '/v1/territory/timeline', '/v1/version', '/v1/activity'];
   const readCors = cors({ origin: '*', allowMethods: ['GET'] });
   for (const p of PUBLIC_READS) app.use(p, readCors);
 
-  const OPEN = new Set(['/health', '/v1/events', '/v1/presence', ...PUBLIC_READS]);
+  const OPEN = new Set(['/health', '/v1/events', '/v1/presence', '/v1/activity/stream', ...PUBLIC_READS]);
   app.use('*', (c, next) => (OPEN.has(c.req.path) ? next() : requireTokenAny(db)(c, next)));
   const activity = opts?.activity ?? new ActivityHub();
   app.route('/', runsRoutes(db, hub, activity, invalidateModel));
+  app.route('/', activityRoutes(db));
   app.route('/', readsRoutes(db));
   app.route('/', versionRoutes(db, { latest: opts?.latest }));
   app.route('/', createStatsApp(db, { porkerPath: process.env.STATS_PORKER_DB ?? 'porker.db' }));
@@ -54,8 +56,8 @@ export function createApp(db: DatabaseSync, hub: EventHub,
 
 import { createNodeWebSocket } from '@hono/node-ws';
 
-/** Attach the /v1/events + /v1/presence WebSocket routes. Returns { injectWebSocket }. */
-export function makeWs(app: Hono<Env>, hub: EventHub, presence: PresenceHub, db: DatabaseSync) {
+/** Attach the /v1/events + /v1/presence + /v1/activity/stream WebSocket routes. Returns { injectWebSocket }. */
+export function makeWs(app: Hono<Env>, hub: EventHub, presence: PresenceHub, db: DatabaseSync, activity: ActivityHub) {
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
   app.get('/v1/events', upgradeWebSocket(() => {
     let unsub = () => {};
@@ -72,6 +74,16 @@ export function makeWs(app: Hono<Env>, hub: EventHub, presence: PresenceHub, db:
     const token = c.req.query('token');
     const player = token ? playerByToken(db, token) : null;
     return presenceHandlers(presence, player ? player.id : null);
+  }));
+  // Live activity stream: open, no token required (matches /v1/activity public reads policy).
+  app.get('/v1/activity/stream', upgradeWebSocket(() => {
+    let unsub = () => {};
+    return {
+      onOpen(_e: unknown, ws: { send: (data: string) => void }) {
+        unsub = activity.subscribe((ev) => ws.send(JSON.stringify(ev)));
+      },
+      onClose() { unsub(); },
+    };
   }));
   return { injectWebSocket };
 }

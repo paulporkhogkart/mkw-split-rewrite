@@ -2,6 +2,7 @@ import { serve } from '@hono/node-server';
 import { openDb, applySchema } from './db/connect';
 import { migrateSeason0Recovered } from './db/season0Recovery';
 import { EventHub } from './api/events';
+import { ActivityHub } from './activity/hub';
 import { createApp, makeWs } from './api/app';
 import { PresenceHub } from './presence/hub';
 import { makeLiveCompletion } from './presence/completion';
@@ -17,6 +18,7 @@ const db = openDb(DB_PATH);
 applySchema(db);
 migrateSeason0Recovered(db);   // one-time: real Discord-recovered Season 0 progression
 const hub = new EventHub();
+const activity = new ActivityHub();
 const live = makeLiveCompletion(db);
 const pace = makePaceDelta(db);
 const laps = makeLapDelta(db);
@@ -27,8 +29,8 @@ const presence = new PresenceHub(db, live, pace, laps);
 const app = createApp(db, hub, (courseId) => {
   live.invalidate(courseId); pace.invalidateCourse(courseId); laps.invalidateCourse(courseId);
   presence.refreshOffStats();   // an upload can change offline players' standings
-});
-const { injectWebSocket } = makeWs(app, hub, presence, db);
+}, { activity });
+const { injectWebSocket } = makeWs(app, hub, presence, db, activity);
 const server = serve({ fetch: app.fetch, port: PORT }, (info) => {
   console.log(`[pi] listening on http://127.0.0.1:${info.port}`);
 });

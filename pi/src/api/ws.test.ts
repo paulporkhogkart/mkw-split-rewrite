@@ -3,6 +3,7 @@ import { serve } from '@hono/node-server';
 import { openDb, applySchema } from '../db/connect';
 import { mintToken } from '../db/players';
 import { EventHub } from './events';
+import { ActivityHub } from '../activity/hub';
 import { createApp, makeWs } from './app';
 import { PresenceHub } from '../presence/hub';
 import { makeLiveCompletion } from '../presence/completion';
@@ -22,7 +23,7 @@ describe('WS /v1/events', () => {
   it('delivers a derived event to a connected subscriber', async () => {
     const c = ctx();
     const presence = new PresenceHub(c.db, makeLiveCompletion(c.db));
-    const { injectWebSocket } = makeWs(c.app, c.hub, presence, c.db);
+    const { injectWebSocket } = makeWs(c.app, c.hub, presence, c.db, new ActivityHub());
     const server = serve({ fetch: c.app.fetch, port: 0 });
     injectWebSocket(server);
     const addr = server.address() as { port: number };
