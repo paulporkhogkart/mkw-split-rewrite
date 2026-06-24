@@ -48,8 +48,8 @@ export function runsRoutes(db: DatabaseSync, hub: EventHub, activity: ActivityHu
       }
     }
 
-    const prevLeader = courseLeaderboard(db, seasonId, courseId, cc)[0] ?? null;
     const beforeBoard = courseLeaderboard(db, seasonId, courseId, cc);
+    const prevLeader = beforeBoard[0] ?? null;
     const prevMine = db.prepare(
       'SELECT total_time_ms FROM runs WHERE season_id=? AND player_id=? AND course_id=? AND cc=? AND is_pb=1'
     ).get(seasonId, playerId, courseId, cc) as { total_time_ms: number } | undefined;
