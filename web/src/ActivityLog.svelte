@@ -7,7 +7,7 @@
 
   export let now = Date.now();   // shared clock from CardWall (for relative "when")
 
-  $: rows = $activity.map((e) => toRow(e, now)).filter(Boolean);
+  $: rows = $activity.map((r) => toRow(r, now)).filter(Boolean);
 
   let stop = () => {};
   onMount(() => { loadActivityHistory(API_BASE); stop = startActivityStream(API_BASE); });

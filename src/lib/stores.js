@@ -31,4 +31,4 @@ export const presence      = writable({});   // {player_id: PresenceEntry} live 
 export const myPlayerId    = writable(null); // this client's roster id (presence snapshot `you`) | null
 export const serverConnection = writable({ connected: false, syncedAt: null }); // season-server link state for the player panel + StatusBar
 export const appVersion    = writable("");   // this desktop build's version (Tauri getVersion); sent in the presence frame
-export const activity      = writable([]);   // ActivityEvent[] newest-first (merged history + live stream)
+export const activity      = writable([]);   // normalized activity rows, newest feed-ts first (web/src/lib/activityMerge.js)

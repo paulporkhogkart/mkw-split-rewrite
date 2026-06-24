@@ -1,4 +1,4 @@
-// Pure: an ActivityEvent -> renderable row spans. No Svelte, no DOM, no fetch. Unit-tested.
+// Pure: a normalized store row (see activityMerge.js) -> renderable row spans. No Svelte/DOM/fetch.
 // Colour is player-identity only; deltas/gaps are neutral; times bright-but-uncoloured.
 
 const ORD = ["", "1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th"];
@@ -13,6 +13,14 @@ export function fmtTime(ms) {
 export function signedDelta(ms) {
   if (ms == null) return null;
   return `${ms < 0 ? "-" : "+"}${(Math.abs(ms) / 1000).toFixed(3)}`;
+}
+
+/** A session duration as a ticking clock: m:ss, or h:mm:ss past an hour (long grinds / menu sits). */
+export function fmtClock(ms) {
+  const t = Math.max(0, Math.floor((ms ?? 0) / 1000));
+  const s = t % 60, m = Math.floor(t / 60) % 60, h = Math.floor(t / 3600);
+  const ss = String(s).padStart(2, "0");
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
 }
 
 export function fmtDuration(ms) {
@@ -35,13 +43,53 @@ export function relTime(ts, now) {
 const paren = (s) => (s == null ? "" : `(${s})`);
 const nameSpan = (n) => ({ text: n.name, cls: "name", color: n.color });
 
-/** ActivityEvent -> a structured row the component renders span-by-span. */
-export function toRow(e, now) {
+const OFFTRACK_LABEL = {
+  menus: "in the menus", character_select: "choosing a character",
+  kart_select: "choosing a kart", track_select: "choosing a track", ghost: "watching a ghost",
+};
+const charLabel = (c, cos) => (!c ? null : cos && cos !== "Base" ? `${cos} ${c}` : c);
+const runsLabel = (n) => `${n} run${n === 1 ? "" : "s"}`;
+const pbLabel = (n) => (!n ? "no PB" : n === 1 ? "new PB" : `${n} new PBs`);
+
+/** A normalized store row -> a structured render row the component draws span-by-span. */
+export function toRow(row, now) {
+  return row.kind === "session" ? sessionRow(row, now) : milestoneRow(row, now);
+}
+
+function sessionRow(row, now) {
+  const base = { id: row.key, when: relTime(row.started_ts, now), sys: false, strip: null };
+  const p = row.player;
+  const who = p ? { text: p.name, color: p.color } : { text: "", color: null };
+  const dur = row.live ? now - row.started_ts : row.duration_ms ?? 0;
+
+  if (row.cls === "racing") {
+    const where = { text: row.course?.name ?? "" };
+    const char = charLabel(row.character, row.costume);
+    if (row.live) {
+      const what = [{ text: "racing ", cls: "" }, { text: fmtClock(dur), cls: "t" }];
+      if (row.attempts >= 1) what.push({ text: ` · ${runsLabel(row.attempts)}`, cls: "dim" });
+      return { ...base, who, where, what };
+    }
+    const what = [];
+    if (char) what.push({ text: `as ${char} · `, cls: "" });
+    what.push({ text: runsLabel(row.attempts ?? 0), cls: "" });
+    what.push({ text: ` · ${fmtClock(dur)}`, cls: "dim" });
+    what.push({ text: ` · ${pbLabel(row.pbs)}`, cls: "dim" });
+    return { ...base, who, where, what };
+  }
+
+  // Off-track: the activity phrase sits in `where` (dim), the duration in `what`.
+  return { ...base, who, where: { text: OFFTRACK_LABEL[row.cls] ?? "in the menus", dim: true },
+    what: [{ text: fmtClock(dur), cls: "dim" }] };
+}
+
+function milestoneRow(row, now) {
+  const e = row.event;
   const when = relTime(e.ts, now);
   const course = e.course?.name ?? "";
   const p = e.player;
   const pay = e.payload || {};
-  const base = { id: e.id, when };
+  const base = { id: row.key, when };
 
   switch (e.type) {
     case "pb":
@@ -64,12 +112,6 @@ export function toRow(e, now) {
     case "wr":
       return { ...base, sys: true, who: { text: "WR", color: null }, where: { text: course }, strip: null,
         what: [{ text: fmtTime(pay.time_ms), cls: "t" }, { text: " " + paren(signedDelta(pay.delta_ms)), cls: "delta" }, { text: " by " + pay.holder, cls: "dim" }] };
-    case "attempts":
-      return { ...base, sys: false, who: { text: p.name, color: p.color }, where: { text: course }, strip: null,
-        what: [{ text: `${pay.count} attempts`, cls: "" }, { text: " · " + fmtDuration(pay.duration_ms), cls: "dim" }] };
-    case "screen":
-      return { ...base, sys: false, who: { text: p.name, color: p.color }, where: { text: pay.screen, dim: true }, strip: null,
-        what: [{ text: fmtDuration(pay.dwell_ms), cls: "dim" }] };
     default:
       return null;
   }
