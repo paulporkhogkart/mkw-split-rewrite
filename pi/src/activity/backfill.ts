@@ -17,6 +17,9 @@ type RunRow = {
   total_time_ms: number;
   total_time_str: string | null;
   ended_at: string;
+  character: string | null;
+  kart: string | null;
+  costume: string | null;
 };
 
 /** Rebuild 1-based ranks on a sorted (ascending) leaderboard array in-place. */
@@ -35,7 +38,8 @@ export function backfillActivity(db: DatabaseSync): number {
 
   // All finished, non-carryover runs with a time, in deterministic order
   const runs = db.prepare(
-    `SELECT id, season_id, player_id, course_id, cc, total_time_ms, total_time_str, ended_at
+    `SELECT id, season_id, player_id, course_id, cc, total_time_ms, total_time_str, ended_at,
+            character, kart, costume
      FROM runs
      WHERE status='finished' AND provenance != 'carryover'
        AND total_time_ms IS NOT NULL AND ended_at IS NOT NULL
@@ -99,6 +103,7 @@ export function backfillActivity(db: DatabaseSync): number {
       beforeWr: null,
       afterWr: null,
       prevPbMs,
+      character: run.character, kart: run.kart, costume: run.costume,
     });
 
     if (inputs.length > 0) {

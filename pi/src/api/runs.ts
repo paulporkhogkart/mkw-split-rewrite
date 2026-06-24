@@ -111,6 +111,7 @@ export function runsRoutes(db: DatabaseSync, hub: EventHub, activity: ActivityHu
         ts: Date.now(), seasonId, cc, courseId, moverId: playerId, moverName: playerName,
         before: beforeBoard, after: lb, beforeWr: wrMs, afterWr: wrMs,
         prevPbMs: prevMineMs,
+        character: p.character ?? null, kart: p.kart ?? null, costume: p.costume ?? null,
       });
       commitActivity(db, activity, inputs);
     }
