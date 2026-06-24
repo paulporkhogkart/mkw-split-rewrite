@@ -246,8 +246,9 @@ grammar + icon placeholders.
 - `menus` → `in the menus · {dur}`.
 - `character_select`/`kart_select`/`track_select` → `choosing a character|kart|track · {dur}`.
 - `ghost` → `watching a ghost · {dur}`.
-- Duration: live rows compute `now - started_ts`; final rows use `duration_ms`. Format `m:ss`
-  (< 1h) with a `Xs` form under 60s, matching the prior feed.
+- Duration: live rows compute `now - started_ts`; final rows use `duration_ms`. Format as a
+  ticking clock `m:ss` (or `h:mm:ss` past an hour) so live rows visibly tick each second and long
+  grinds read naturally (`24:13`).
 - Player name in the player's colour; everything else neutral.
 
 **Tests:** each class's open + final string; the duration formatter; no em-dashes; colour only on
@@ -285,7 +286,8 @@ present for the user's live test via finishing-a-development-branch.
   (T7). All spec sections mapped.
 - Type consistency: `SessionView` defined once in T2, consumed by T4/T5/T6; `ScreenClass` from
   T1 used in T2's view + T6's formatter.
-- Risk: presence/runs ordering (T4) — `noteRun` opens racing without debounce so a run landing
-  before presence flips is covered; a stray post-quit run is a rare, self-correcting flicker
-  (documented in the spec edge cases).
+- presence/runs ordering (T4): `noteRun` opens racing only with presence corroboration (or
+  presence-less / already-racing), so a run landing before presence flips is covered while a
+  stray / late / ghost POST in a menu is ignored (no phantom 0s session). Verified by the
+  noteRun-corroboration tests.
 </content>

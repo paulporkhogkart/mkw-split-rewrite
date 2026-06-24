@@ -54,7 +54,7 @@ one of:
 
 | Class | Screens | Notes |
 |-------|---------|-------|
-| `racing` | `RACING` (not finished) | keyed by **course**; the grind/attempts session |
+| `racing` | `RACING` | keyed by **course**; the grind/attempts session (a finished race continues it via `POST_TIME_TRIAL` until the player leaves) |
 | *(held)* | `RACE_MENU`, `HOME`, `RESET`, `GHOST_RESET`, `UNKNOWN_RESET`, `UNKNOWN_RACE_ACTIVE`, `PHOTO_MODE`, `EXIT_PHOTO_MODE`, `POST_TIME_TRIAL` | **continues** an open racing session; if none is open, classifies as `menus` (mirrors the card's `holds`-gated `HOLD_SCREENS` plus its `inRaceCtx` results state) |
 | `character_select` | `CHARACTER_SELECT` | |
 | `kart_select` | `KART_SELECT` | |
@@ -223,8 +223,12 @@ test are deleted.
 - **Server restart mid-session:** open sessions are in-memory and lost; the next presence
   frames re-open fresh sessions. Finalised sessions already persisted in `activity_events` are
   unaffected. Acceptable.
-- **Run POST before presence flips to RACING:** `noteRun` opens the racing session itself
-  (presence then continues it via the matching key).
+- **Run POST before presence flips to RACING:** `noteRun` opens the racing session only when
+  presence corroborates (it is mid-debounce toward racing this course) or there is no presence
+  state yet; presence then continues it via the matching key. A stray / late / ghost POST that
+  lands while presence shows a committed non-racing session is **ignored**, so it can't
+  manufacture a phantom ~0s racing row. A run while already racing a *different* course switches
+  the session (a course change presence is catching up on).
 
 ## Testing
 

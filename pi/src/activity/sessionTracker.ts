@@ -152,23 +152,39 @@ export class SessionTracker {
     this.openSession(st, playerId, cls, targetCourseId, frame.character, frame.costume, t);
   }
 
-  /** A completed attempt (run POST) for `courseId` - a definitive racing signal (no debounce). */
+  /** A completed attempt (run POST) for `courseId`. Increments the open racing session, switches
+   *  course within racing, or opens one - but never from a non-racing state unless presence
+   *  corroborates, so a stray/late/ghost POST can't manufacture a phantom ~0s racing row. */
   noteRun(playerId: number, courseId: number): void {
-    const now = this.deps.now();
     const st = this.st(playerId);
     const cur = st.session;
-    if (cur && cur.cls === 'racing' && (cur.courseId == null || cur.courseId === courseId)) {
-      if (cur.courseId == null) cur.courseId = courseId;
-      cur.attempts++;
-      this.deps.emitOpen(this.view(cur, 'open', null));
+    // Already racing: the player is demonstrably on a track, so a run is legit even if the course
+    // differs (a course change presence is still catching up on). Increment a match; finalise +
+    // reopen on a real course change.
+    if (cur && cur.cls === 'racing') {
+      if (cur.courseId == null || cur.courseId === courseId) {
+        if (cur.courseId == null) cur.courseId = courseId;
+        cur.attempts++;
+        this.deps.emitOpen(this.view(cur, 'open', null));
+        return;
+      }
+      const now = this.deps.now();
+      this.finalize(playerId, now);
+      this.openSession(st, playerId, 'racing', courseId, null, null, now, 1);
       return;
     }
-    // No matching racing session (presence lag, or a different course): close any open one and
-    // open this course's racing session now, counting this attempt.
-    const char = cur && cur.cls === 'racing' ? cur.character : null;
-    const cos = cur && cur.cls === 'racing' ? cur.costume : null;
-    this.finalize(playerId, now);
-    this.openSession(st, playerId, 'racing', courseId, char, cos, now, 1);
+    // Non-racing or no session: open ONLY when presence doesn't contradict racing this course -
+    // either no presence state yet (a presence-less feed), or presence is mid-debounce toward
+    // racing this very course. A run landing while presence shows a committed non-racing session
+    // (or a pending non-racing key) is ignored - otherwise it manufactures a phantom ~0s racing
+    // row that the next menu frame finalises, re-introducing the "1 run · 0:00" defect.
+    const noPresenceState = !cur && st.pendingKey == null;
+    const corroborated = st.pendingKey === `racing:${courseId}`;
+    if (noPresenceState || corroborated) {
+      const now = this.deps.now();
+      this.finalize(playerId, now);   // no-op when cur is null
+      this.openSession(st, playerId, 'racing', courseId, null, null, now, 1);
+    }
   }
 
   /** That attempt was a PB - records the outcome for the racing session's finalised row. */

@@ -36,7 +36,7 @@ export async function loadActivityHistory(apiBase, { fetchImpl = fetch, limit = 
 }
 
 export function startActivityStream(apiBase, {
-  WebSocketImpl = WebSocket, setTimeoutImpl = setTimeout, clearTimeoutImpl = clearTimeout,
+  WebSocketImpl = WebSocket, setTimeoutImpl = setTimeout, clearTimeoutImpl = clearTimeout, fetchImpl = fetch,
 } = {}) {
   const url = `${apiBase.replace(/\/+$/, "").replace(/^http/, "ws")}/v1/activity/stream`;
   let ws = null, closed = false, backoff = 1000, timer = 0;
@@ -44,7 +44,12 @@ export function startActivityStream(apiBase, {
   function connect() {
     if (closed) return;
     ws = new WebSocketImpl(url);
-    ws.addEventListener("open", () => { backoff = 1000; });
+    ws.addEventListener("open", () => {
+      backoff = 1000;
+      // Reload persisted history on every (re)connect: sessions that finalised (now `evt:*`) must
+      // survive the connect snapshot's `sess:*` replacement. Merge is idempotent by key.
+      loadActivityHistory(apiBase, { fetchImpl });
+    });
     ws.addEventListener("message", (ev) => {
       try { applyStreamMsg(JSON.parse(ev.data)); } catch { /* ignore malformed frame */ }
     });

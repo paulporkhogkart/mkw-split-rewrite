@@ -58,8 +58,9 @@ export function runsRoutes(db: DatabaseSync, hub: EventHub, activity: ActivityHu
     const prevMineMs = prevMine ? prevMine.total_time_ms : null;
     upsertRun(db, p, playerId, seasonId);
 
-    // Every attempt (incl. resets) feeds the presence-driven racing session's attempt count.
-    sessionTracker.noteRun(playerId, courseId);
+    // Every live attempt (incl. resets) feeds the presence-driven racing session's count. Ghost
+    // imports are historical backfills, not live attempts, so they never touch the live session.
+    if (p.source !== 'ghost') sessionTracker.noteRun(playerId, courseId);
 
     if (p.status !== 'finished') return c.json({ is_pb: false, rank: null, gap_to_leader_ms: null, gap_to_wr_ms: null });
 
@@ -104,7 +105,7 @@ export function runsRoutes(db: DatabaseSync, hub: EventHub, activity: ActivityHu
       hub.publish({ type: 'wr_beaten', player: playerName, course: p.course, cc, total_time: p.total_time, wr_time: wr.record_str });
 
     if (isPb) {
-      sessionTracker.notePb(playerId, courseId);
+      if (p.source !== 'ghost') sessionTracker.notePb(playerId, courseId);
       const wrMs = wr ? wr.record_ms : null;
       const inputs = buildRunCascade({
         ts: Date.now(), seasonId, cc, courseId, moverId: playerId, moverName: playerName,

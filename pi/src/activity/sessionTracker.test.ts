@@ -156,3 +156,29 @@ describe('openSessions snapshot', () => {
     expect(snap.every(s => s.state === 'open')).toBe(true);
   });
 });
+
+describe('noteRun corroboration (no phantom 0s sessions)', () => {
+  it('ignores a stray/late run while presence shows a committed non-racing session', () => {
+    at(0); t.onFrame(P, frame('MAIN_MENU'));
+    at(STABLE_MS); t.onFrame(P, frame('MAIN_MENU'));   // menus session committed
+    const n = opens.length;
+    at(STABLE_MS + 100); t.noteRun(P, 5);              // stray run while in the menus
+    expect(opens.length).toBe(n);                       // no phantom racing session
+    expect(finals).toHaveLength(0);
+    expect(drops).toHaveLength(0);
+  });
+
+  it('opens a racing session when presence is mid-debounce toward racing (corroborated)', () => {
+    at(0); t.onFrame(P, frame('MAIN_MENU'));
+    at(STABLE_MS); t.onFrame(P, frame('MAIN_MENU'));   // menus open
+    at(2000); t.onFrame(P, frame('RACING', 5));        // pending racing:5 (not yet committed)
+    at(2100); t.noteRun(P, 5);                          // run lands during the debounce window
+    expect(last(opens)).toMatchObject({ cls: 'racing', course_id: 5, attempts: 1 });
+    expect(finals.some(f => f.cls === 'menus')).toBe(true);   // the menus session finalised
+  });
+
+  it('still opens from a run when there is no presence state at all (presence-less)', () => {
+    at(1000); t.noteRun(P, 9);
+    expect(last(opens)).toMatchObject({ cls: 'racing', course_id: 9, attempts: 1 });
+  });
+});

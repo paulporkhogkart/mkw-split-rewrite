@@ -75,4 +75,14 @@ describe("startActivityStream", () => {
     FakeWS.last.emit("close");
     expect(scheduled).toBeNull();
   });
+  it("reloads persisted history on (re)connect so finalised sessions survive the snapshot", async () => {
+    let fetched = 0;
+    const fetchImpl = async () => { fetched++; return { json: async () => [ev(5, 500)] }; };
+    const stop = startActivityStream("http://localhost:8787", { WebSocketImpl: FakeWS, fetchImpl });
+    FakeWS.last.emit("open");
+    await new Promise((r) => setTimeout(r, 0));   // flush the async loadActivityHistory
+    expect(fetched).toBe(1);
+    expect(get(activity).map((r) => r.key)).toContain("evt:5");
+    stop();
+  });
 });
