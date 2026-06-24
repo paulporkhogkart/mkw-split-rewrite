@@ -1,6 +1,8 @@
 // Pure: a normalized store row (see activityMerge.js) -> renderable row spans. No Svelte/DOM/fetch.
 // Colour is player-identity only; deltas/gaps are neutral; times bright-but-uncoloured.
 
+import { chipsFor } from "./chips.js";
+
 const ORD = ["", "1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th"];
 export const ordinal = (n) => ORD[n] || `${n}th`;
 
@@ -59,7 +61,8 @@ const runsLabel = (n) => `${n} run${n === 1 ? "" : "s"}`;
 
 /** A normalized store row -> a structured render row the component draws span-by-span. */
 export function toRow(row, now) {
-  return row.kind === "session" ? sessionRow(row, now) : milestoneRow(row, now);
+  const out = row.kind === "session" ? sessionRow(row, now) : milestoneRow(row, now);
+  return out ? { ...out, chips: chipsFor(row) } : out;
 }
 
 function sessionRow(row, now) {

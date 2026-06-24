@@ -99,3 +99,23 @@ describe("toRow sessions", () => {
     expect(srow({ cls: "ghost", course: null, state: "final", duration_ms: 40000 }, 1000).where.text).toBe("watching a ghost");
   });
 });
+
+describe("toRow chips", () => {
+  it("attaches pb chips (course, kart, character)", () => {
+    const row = { kind: "event", key: "evt:1",
+      event: { id: 1, ts: 0, type: "pb", course: { slug: "dk_pass", name: "DK Pass" },
+               player: { name: "P", color: null },
+               payload: { time_ms: 1000, delta_ms: null, character: "Mario", kart: "Hot Rod", costume: null } } };
+    const out = toRow(row, 0);
+    expect(out.chips.map(c => c.src)).toEqual([
+      "/chips/courses/dk_pass.png", "/chips/karts/hot_rod.png", "/chips/combos/mario__base.png",
+    ]);
+  });
+
+  it("presence rows carry no chips", () => {
+    const row = { kind: "event", key: "evt:2",
+      event: { id: 2, ts: 0, type: "presence", course: null,
+               player: { name: "P", color: null }, payload: { online: true } } };
+    expect(toRow(row, 0).chips).toEqual([]);
+  });
+});
