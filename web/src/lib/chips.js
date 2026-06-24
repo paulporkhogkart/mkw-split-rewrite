@@ -5,7 +5,7 @@
 export function slugify(name) {
   return String(name ?? "")
     .toLowerCase()
-    .replace(/[''']/g, "")
+    .replace(/[\u2018\u2019']/g, "")
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
 }

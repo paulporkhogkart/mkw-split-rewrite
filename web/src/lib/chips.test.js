@@ -8,6 +8,11 @@ describe("slugify (parity with pi/src/db/slug.ts)", () => {
     expect(slugify("Mario Bros. Circuit")).toBe("mario_bros_circuit");
     expect(slugify("DK Pass")).toBe("dk_pass");
   });
+
+  it("drops curly apostrophes (U+2018/U+2019) identically to straight apostrophe", () => {
+    expect(slugify("Bowser\u2019s Castle")).toBe("bowsers_castle");
+    expect(slugify("Bowser\u2018s Castle")).toBe("bowsers_castle");
+  });
 });
 
 describe("chipUrl", () => {
