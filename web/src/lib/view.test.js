@@ -8,9 +8,10 @@ describe("viewFromHash", () => {
     expect(viewFromHash("#/unknown")).toBe("live");
     expect(viewFromHash("#/map")).toBe("live"); // old route no longer matches
   });
-  it("returns territory for the territory hash", () => {
-    expect(viewFromHash("#/territory")).toBe("territory");
-    expect(viewFromHash("#territory")).toBe("territory");
+  it("returns turf for the turf hash (territory is an old-hash alias)", () => {
+    expect(viewFromHash("#/turf")).toBe("turf");
+    expect(viewFromHash("#turf")).toBe("turf");
+    expect(viewFromHash("#/territory")).toBe("turf");   // old bookmarks still resolve
   });
   it("returns heat for the unlisted heat hash", () => {
     expect(viewFromHash("#/heat")).toBe("heat");

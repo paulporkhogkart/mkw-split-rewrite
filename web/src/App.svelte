@@ -52,12 +52,12 @@
   </a>
   <nav class="nav" bind:this={navEl}>
     <a class="tab" class:on={view === "live"} href="#/">Live</a>
-    <a class="tab" class:on={view === "territory"} href="#/territory">Territory</a>
+    <a class="tab" class:on={view === "turf"} href="#/turf">Turf</a>
     <span class="marker" style="left:{mk.left}px;width:{mk.width}px"></span>
   </nav>
 </header>
 <main>
-  {#if view === "territory"}<WorldMap />
+  {#if view === "turf"}<WorldMap />
   {:else if view === "heat"}<HeatGraph />
   {:else if view === "version"}<VersionPage />
   {:else}<CardWall />{/if}
