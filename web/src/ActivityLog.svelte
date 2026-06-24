@@ -9,6 +9,13 @@
 
   $: rows = $activity.map((r) => toRow(r, now)).filter(Boolean);
 
+  function onChipErr(e, fallback) {
+    const img = e.currentTarget;
+    if (fallback && !img.dataset.fb) { img.dataset.fb = "1"; img.src = fallback; return; }
+    const wrap = img.closest(".chip-wrap");
+    if (wrap) wrap.style.display = "none";
+  }
+
   let stop = () => {};
   onMount(() => { loadActivityHistory(API_BASE); stop = startActivityStream(API_BASE); });
   onDestroy(() => stop());
@@ -22,6 +29,7 @@
         <div class="who" class:sys={r.sys} class:soft={r.soft} style={r.who.color ? `color:${r.who.color}` : ""}>{r.who.text}</div>
         <div class="where" class:dim={r.where.dim}>{r.where.text}</div>
         <div class="what">{#each r.what as s, i (i)}<span class={s.cls} style={s.color ? `color:${s.color}` : ""}>{s.text}</span>{/each}</div>
+        <div class="chips">{#if r.chips?.length}{#each r.chips as c (c.src)}<span class="chip-wrap"><span class="chip"><img src={c.src} alt={c.alt} loading="lazy" on:error={(e) => onChipErr(e, c.fallback)} /></span></span>{/each}{/if}</div>
       </div>
     {/each}
   </section>
@@ -29,7 +37,7 @@
 
 <style>
   .log { max-width: 720px; margin: 22px auto 40px; padding: 0 18px; }
-  .row { display: grid; grid-template-columns: 112px 74px 150px 1fr; align-items: baseline; column-gap: 12px;
+  .row { display: grid; grid-template-columns: 112px 74px 150px 1fr auto; align-items: baseline; column-gap: 12px;
          padding: 7px 14px 7px 12px; border-bottom: 1px solid var(--bd-soft); border-left: 2px solid transparent;
          background: var(--panel); font-size: 12.5px; }
   .row:first-child { border-top: 1px solid var(--bd-soft); border-top-left-radius: var(--r); border-top-right-radius: var(--r); }
@@ -49,4 +57,10 @@
   .what :global(.delta) { color: var(--tx-mut); }
   .what :global(.dim) { color: var(--tx-dim); }
   .what :global(.name) { font-weight: 600; }
+  .chips { align-self: center; display: flex; gap: 4px; flex: none; }
+  .chip-wrap { filter: drop-shadow(0 1px 1.5px rgba(0,0,0,.55)); line-height: 0; display: inline-block; }
+  .chip { display: inline-block; height: 26px; aspect-ratio: 1 / 1; overflow: hidden;
+          clip-path: polygon(16% 0, 100% 0, 84% 100%, 0 100%);
+          box-shadow: inset 0 0 0 1px rgba(255,255,255,.16); background: #15171c; }
+  .chip :global(img) { width: 100%; height: 100%; object-fit: cover; display: block; }
 </style>
