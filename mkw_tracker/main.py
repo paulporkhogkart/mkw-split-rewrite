@@ -844,7 +844,8 @@ def run(args):
         from .ipc.broadcaster import EventBroadcaster
         broadcaster = EventBroadcaster(port=args.ws_port)
 
-    ipc = IpcServer(broadcaster=broadcaster)
+    ipc = IpcServer(broadcaster=broadcaster,
+                    silence_stdout=getattr(args, "clip_capture", False))
     if not args.no_ipc:
         ipc.start()
 

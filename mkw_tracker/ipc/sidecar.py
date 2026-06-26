@@ -23,12 +23,17 @@ class IpcServer:
     - Optionally fans out every emitted event to an EventBroadcaster (WS pub-sub).
     """
 
-    def __init__(self, broadcaster: "Optional[EventBroadcaster]" = None):
+    def __init__(self, broadcaster: "Optional[EventBroadcaster]" = None,
+                 silence_stdout: bool = False):
         self.inbound_queue: queue.SimpleQueue = queue.SimpleQueue()
         self._emit_queue:   queue.SimpleQueue = queue.SimpleQueue()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
         self._broadcaster = broadcaster
+        # In clip-capture mode there's no Tauri sidecar reading stdout (the pilot uses the
+        # WS broadcaster), so the per-frame JSON would just flood the console and bury the
+        # [clip]/[stall] diagnostics. Keep the loop + WS broadcast; skip the stdout writes.
+        self._silence_stdout = silence_stdout
 
     # ── Start / stop ─────────────────────────────────────────────────────────
 
@@ -72,7 +77,8 @@ class IpcServer:
     def emit(self, line: str):
         """Non-blocking: enqueue a JSON line for the writer thread to flush,
         and fan out to any attached WebSocket broadcaster."""
-        self._emit_queue.put_nowait(line)
+        if not self._silence_stdout:
+            self._emit_queue.put_nowait(line)
         if self._broadcaster is not None:
             self._broadcaster.broadcast(line)
 
