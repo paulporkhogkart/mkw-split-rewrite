@@ -90,3 +90,84 @@ def test_kart_discard_and_retry_on_mismatch():
     assert any(m["type"] == "at_record_clip_abort" for m in client.sent)
     # confirm the loop terminated (not hanging) by asserting the flourish was emitted
     assert {"type": "at_record_clip_mark", "event": "flourish"} in client.sent
+
+
+# ── verify_on: costume-awareness tests ───────────────────────────────────────
+
+
+class CostumeFakeClient:
+    """FakeClient that returns name_score and optionally costume_score.
+
+    ``costume_scores`` is a list of (name_score, costume_score|None) tuples
+    returned in sequence on each at_check_asset_match call.  After the list
+    is exhausted every subsequent call returns the last entry.
+    """
+    def __init__(self, scores):
+        self.sent = []
+        self._scores = list(scores)
+        self._idx = 0
+
+    def send(self, msg):
+        self.sent.append(msg)
+        t = msg.get("type", "")
+        if t == "at_check_asset_match":
+            entry = self._scores[min(self._idx, len(self._scores) - 1)]
+            self._idx += 1
+            name_score, costume_score = entry
+            reply = {"type": "at_asset_score", "name_score": name_score}
+            if costume_score is not None:
+                reply["costume_score"] = costume_score
+            return reply
+        if t == "at_clip_exists":
+            return {"type": "exists_result", "done": False}
+        return {"type": {"at_record_clip_begin": "clip_begun",
+                         "at_record_clip_mark": "marked",
+                         "at_record_clip_abort": "clip_aborted"}.get(t, "ok")}
+
+    def wait_for(self, type_):
+        return {"type": "clip_done", "item": "x", "events": {"fps": 60}}
+
+
+def test_verify_on_costume_retries_on_low_costume_score():
+    """When name matches but costume_score is low, verify_on re-presses DPAD_RIGHT
+    until costume_score also clears the 0.65 threshold, then returns."""
+    g = grid.load_grid(YAML)
+    ctrl = FakeController()
+    # First check: name=0.95 OK, costume=0.30 (too low) → must re-press
+    # Second check: name=0.95 OK, costume=0.80 OK → grounds
+    client = CostumeFakeClient([
+        (0.95, 0.30),
+        (0.95, 0.80),
+    ])
+    r = SweepRunner(g, ctrl, client, idle_seconds=0.0, settle_seconds=0.0)
+    r.verify_on("mario__touring", "characters")
+
+    # One DPAD_RIGHT re-press must have happened before grounding
+    dpad_presses = [b for (_, b) in ctrl.log if b == "DPAD_RIGHT"]
+    assert len(dpad_presses) >= 1, "expected at least one DPAD_RIGHT re-press"
+
+    # The second at_check_asset_match must carry the costume field
+    check_msgs = [m for m in client.sent if m.get("type") == "at_check_asset_match"]
+    assert len(check_msgs) == 2
+    assert check_msgs[0].get("costume") == "touring"
+    assert check_msgs[1].get("costume") == "touring"
+
+
+def test_verify_on_base_costume_grounds_on_name_score_only():
+    """For mario__base the costume is 'base' — no 'costume' key sent, grounds purely
+    on name_score >= 0.85 with no costume_score required."""
+    g = grid.load_grid(YAML)
+    ctrl = FakeController()
+    # Single check: name=0.92, no costume_score → should ground immediately
+    client = CostumeFakeClient([(0.92, None)])
+    r = SweepRunner(g, ctrl, client, idle_seconds=0.0, settle_seconds=0.0)
+    r.verify_on("mario__base", "characters")
+
+    # No DPAD_RIGHT re-presses — grounded on the first check
+    dpad_presses = [b for (_, b) in ctrl.log if b == "DPAD_RIGHT"]
+    assert len(dpad_presses) == 0
+
+    # The at_check_asset_match must NOT carry a 'costume' key for base
+    check_msgs = [m for m in client.sent if m.get("type") == "at_check_asset_match"]
+    assert len(check_msgs) == 1
+    assert "costume" not in check_msgs[0]

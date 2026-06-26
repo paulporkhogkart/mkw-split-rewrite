@@ -98,7 +98,10 @@ class SweepRunner:
         """Re-press the last navigation delta until at_check_asset_match >= threshold.
 
         For characters the slug is ``<char>__<costume>`` and we key on the
-        ``name`` field using just the character portion (everything before ``__``).
+        ``name`` field using the character portion (everything before ``__``).
+        When the costume is not ``base`` we also require the costume score to
+        be >= 0.65 so that e.g. ``mario__touring`` never silently grounds on a
+        different costume whose name plate still reads "Mario".
         For karts the slug is the full kart slug directly.
 
         In dry-run (or any situation where _DryClient returns a canned 0.95)
@@ -106,28 +109,41 @@ class SweepRunner:
         DPAD_RIGHT until the tracker confirms the correct item is displayed.
         """
         if category == "characters":
-            # Slug format: "mario__base" or "mario__touring" — use the char portion
-            name = slug.split("__")[0]
+            # Slug format: "mario__base" or "mario__touring"
+            parts = slug.split("__")
+            name = parts[0]
+            costume = parts[1] if len(parts) > 1 else "base"
         else:
             name = slug
+            costume = None
 
         attempts = 0
         while True:
-            r = self.client.send({
+            cmd = {
                 "type": "at_check_asset_match",
                 "category": category,
                 "lang": self.lang,
                 "name": name,
-            })
-            score = r.get("name_score", 0.0)
-            if score >= self.GROUND_THRESHOLD:
+            }
+            if category == "characters" and costume != "base":
+                cmd["costume"] = costume
+            r = self.client.send(cmd)
+            name_score = r.get("name_score", 0.0)
+            costume_score = r.get("costume_score")
+            if category == "characters" and costume != "base" and costume_score is not None:
+                ok = name_score >= self.GROUND_THRESHOLD and costume_score >= 0.65
+            else:
+                ok = name_score >= self.GROUND_THRESHOLD
+            if ok:
                 break
             if attempts >= self.MAX_VERIFY_ATTEMPTS:
                 raise RuntimeError(
                     f"verify_on: {slug!r} never grounded after {self.MAX_VERIFY_ATTEMPTS} presses"
                 )
             attempts += 1
-            print(f"  [verify_on] {slug!r} score={score:.3f} < {self.GROUND_THRESHOLD} — re-pressing DPAD_RIGHT")
+            print(f"  [verify_on] {slug!r} name_score={name_score:.3f}"
+                  + (f" costume_score={costume_score:.3f}" if costume_score is not None else "")
+                  + " — re-pressing DPAD_RIGHT")
             self.ctrl.press("DPAD_RIGHT")
 
 

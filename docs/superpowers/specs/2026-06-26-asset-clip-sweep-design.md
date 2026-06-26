@@ -140,12 +140,14 @@ All messages JSON; the orchestrator owns the recording clock and filesystem.
 
 | From runner | Orchestrator action | Reply |
 |---|---|---|
-| `{type:"exists", item}` | skip-if-exists check | `{type:"exists_result", done:bool}` |
-| `{type:"clip_begin", item, category}` | start 4K60 record + tee clock at t=0 | `{type:"clip_begun"}` |
-| `{type:"mark", event:"swap"\|"flourish"}` | stamp recording-relative time | `{type:"marked"}` |
-| `{type:"ground", category, name}` | run detection on latest tee frame | `{type:"ground_result", matched, score, read_name}` |
-| `{type:"clip_abort"}` | stop ffmpeg, delete `.mkv` | `{type:"clip_aborted"}` |
-| `{type:"is_screen", screen}` | score a screen tell on the tee | `{type:"screen_score", score}` |
+| `{type:"at_clip_exists", item}` | skip-if-exists check | `{type:"exists_result", done:bool}` |
+| `{type:"at_record_clip_begin", item}` | start 4K60 record + tee clock at t=0 | `{type:"clip_begun"}` |
+| `{type:"at_record_clip_mark", event:"swap"\|"flourish"}` | stamp recording-relative time | `{type:"marked"}` |
+| `{type:"at_check_asset_match", category, lang, name[, costume]}` | ground character/kart on latest tee frame (reuses the existing pre-built command) | `{type:"at_asset_score", name_score, [costume_score]}` |
+| `{type:"at_check_tell_score", screen}` | score a screen tell on the tee (reuses the existing pre-built command) | `{type:"tell_score", score}` |
+| `{type:"at_record_clip_abort"}` | stop ffmpeg, delete `.mkv` | `{type:"clip_aborted"}` |
+
+Note: grounding reuses the pre-existing `at_check_asset_match` / `at_check_tell_score` commands — no new protocol entries needed for detection.
 
 Unsolicited: after a `flourish` mark, the orchestrator watches the tee for the select-tell drop; on drop (or backstop) it stamps `flourish_end`, stops ffmpeg, writes `<item>.mkv` + `<item>.events.json`, and sends `{type:"clip_done", item, events}`. The runner waits for `clip_done` before pressing B.
 

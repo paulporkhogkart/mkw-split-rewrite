@@ -974,6 +974,7 @@ def run(args):
     _emitted_splits: dict = {}  # lap → time already sent via split_recorded
 
     clip_done_emitted_for = None  # one-shot guard: item identity of last clip_done sent
+    clip_tell_miss = 0            # consecutive non-want frames since flourish mark
 
     _last_heartbeat = 0.0
 
@@ -1149,16 +1150,26 @@ def run(args):
             _want_screen = (Screen.KART_SELECT
                             if isinstance(_item, str) and _item.count("__") >= 2
                             else Screen.CHARACTER_SELECT)
-            if detector.current_screen is not _want_screen:
-                clip_done_emitted_for = _item
-                clip_mgr.set_duration_end()
-                _clip_ev = clip_mgr.end()
-                if broadcaster is not None:
-                    broadcaster.broadcast(_clip_json.dumps({
-                        "type": "clip_done",
-                        "item": _item,
-                        "events": _clip_ev,
-                    }))
+            if detector.current_screen is _want_screen:
+                # Still on the expected select screen — re-confirmed, reset miss counter
+                clip_tell_miss = 0
+            else:
+                clip_tell_miss += 1
+                if clip_tell_miss >= 3:
+                    # 3 consecutive non-want frames: the flourish is done
+                    clip_done_emitted_for = _item
+                    clip_tell_miss = 0
+                    clip_mgr.set_duration_end()
+                    _clip_ev = clip_mgr.end()
+                    if broadcaster is not None:
+                        broadcaster.broadcast(_clip_json.dumps({
+                            "type": "clip_done",
+                            "item": _item,
+                            "events": _clip_ev,
+                        }))
+        else:
+            # Item changed or no active clip — reset debounce counter
+            clip_tell_miss = 0
 
         _race_complete = ts.total_time is not None
 

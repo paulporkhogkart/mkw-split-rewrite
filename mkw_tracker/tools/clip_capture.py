@@ -80,7 +80,10 @@ class ClipCaptureManager:
         self._t0 = self._clock()
 
     def mark(self, event):
-        key = {"swap": "swap_t", "flourish": "flourish_t"}[event]
+        key = {"swap": "swap_t", "flourish": "flourish_t"}.get(event)
+        if key is None:
+            warnings.warn(f"clip mark: unknown event {event!r}")
+            return
         self._events[key] = self._clock() - self._t0
 
     def set_duration_end(self):

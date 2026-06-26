@@ -60,3 +60,14 @@ def test_abort_warns_if_delete_fails(tmp_path, monkeypatch):
     monkeypatch.setattr(cc.os, "remove", _boom)
     with pytest.warns(UserWarning):
         m.abort()          # must not raise
+
+
+def test_mark_bogus_event_warns_and_does_not_raise(tmp_path):
+    """mark() with an unknown event name must warn, not raise KeyError."""
+    m = ClipCaptureManager(str(tmp_path), "dev", "3840x2160", 60,
+                           frame_ref=[None], _pipe_factory=FakePipe, clock=lambda: 0.0)
+    m.begin("a__b")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        m.mark("bogus")    # must not raise
+    assert any("bogus" in str(w.message) for w in caught)
