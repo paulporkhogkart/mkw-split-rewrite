@@ -124,6 +124,7 @@ class SweepRunner:
 
         attempts = 0
         while True:
+            time.sleep(self.settle)   # let the cursor land + name plate render + tracker frame update BEFORE checking
             cmd = {
                 "type": "at_check_asset_match",
                 "category": category,
