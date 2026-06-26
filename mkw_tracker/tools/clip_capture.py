@@ -7,6 +7,7 @@ from whichever pipe is active are pumped into frame_ref[0] for detection/groundi
 import json
 import os
 import time
+import warnings
 from typing import Optional
 
 from .record_clips import (FramePipe, tee_cmd, preview_cmd, pick_encoder,
@@ -103,6 +104,6 @@ class ClipCaptureManager:
             if os.path.exists(p):
                 try:
                     os.remove(p)
-                except OSError:
-                    pass
+                except OSError as e:
+                    warnings.warn(f"abort: could not delete {p}: {e}")
         self._item = None

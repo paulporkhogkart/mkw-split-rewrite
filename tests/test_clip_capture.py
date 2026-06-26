@@ -2,6 +2,8 @@
 import json
 import os
 import itertools
+import warnings
+import pytest
 from mkw_tracker.tools.clip_capture import ClipCaptureManager
 
 
@@ -45,3 +47,16 @@ def test_exists(tmp_path):
     assert not m.exists("a__b")
     (tmp_path / "a__b.mkv").write_bytes(b"x")
     assert m.exists("a__b")
+
+
+def test_abort_warns_if_delete_fails(tmp_path, monkeypatch):
+    import mkw_tracker.tools.clip_capture as cc
+    m = ClipCaptureManager(str(tmp_path), "dev", "3840x2160", 60,
+                           frame_ref=[None], _pipe_factory=FakePipe, clock=lambda: 0.0)
+    m.begin("x__y")
+    (tmp_path / "x__y.mkv").write_bytes(b"partial")
+    def _boom(_p):
+        raise OSError("file locked")
+    monkeypatch.setattr(cc.os, "remove", _boom)
+    with pytest.warns(UserWarning):
+        m.abort()          # must not raise
