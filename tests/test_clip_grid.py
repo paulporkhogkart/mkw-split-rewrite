@@ -44,6 +44,14 @@ def test_sweep_steps_row_transition(g):
 
 
 def test_horizontal_recovery_delta(g):
-    # overshot by 2 within a row → step LEFT twice to reach target
-    a, b = "plushbuggy", "standard_kart"   # cols 1 and 0, same row
-    assert g.horizontal_delta(a, b) == ["DPAD_LEFT"]
+    # overshot by 2 within a row → step LEFT twice back to target
+    assert g.horizontal_delta("zoom_buggy", "standard_kart") == ["DPAD_LEFT", "DPAD_LEFT"]
+    # undershoot the other way → RIGHT
+    assert g.horizontal_delta("standard_kart", "plushbuggy") == ["DPAD_RIGHT"]
+    # same cell → no presses
+    assert g.horizontal_delta("standard_kart", "standard_kart") == []
+
+
+def test_duplicate_slug_raises():
+    with pytest.raises(ValueError):
+        grid.Grid({"karts": [["Standard Kart", "Standard Kart"]]})

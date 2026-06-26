@@ -32,6 +32,8 @@ class Grid:
                 for c, label in enumerate(row):
                     cell = Cell(slugify(label), label, (r, c))
                     cells.append(cell)
+                    if (cat, cell.slug) in self._by_slug:
+                        raise ValueError(f"duplicate cell slug {cell.slug!r} in {cat!r}")
                     self._by_slug[(cat, cell.slug)] = cell
             self._cells[cat] = cells
 
