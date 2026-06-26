@@ -934,7 +934,7 @@ def run(args):
     from .utils.paths import resource_path as _rp
     base_path = os.path.dirname(_rp("images"))   # repo root (parent of images/); also used by clip-capture
     if broadcaster is not None:
-        broadcaster.enable_autotemplate(current_frame, settings, detector, base_path)
+        broadcaster.enable_autotemplate(current_frame, settings, detector, base_path, tracker=tracker)
     del _rp
 
     # ── Clip-capture mode (asset clip sweep) ─────────────────────────────────

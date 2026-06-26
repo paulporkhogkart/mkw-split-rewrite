@@ -45,20 +45,23 @@ class SweepRunner:
     # ------------------------------------------------------------------
 
     def _ground_kart(self, kart_slug) -> bool:
-        r = self.client.send({"type": "at_check_asset_match", "category": "karts",
-                              "lang": self.lang, "name": kart_slug})
-        return r.get("name_score", 0.0) >= self.GROUND_THRESHOLD
+        from grid import to_filename
+        sel = self.client.send({"type": "at_current_selection"})
+        if sel.get("_dry"):
+            return True
+        return to_filename(sel.get("kart") or "") == kart_slug
 
     def _recover_to(self, kart_slug):
-        """Find the actually-selected kart by scanning the row, then step the horizontal delta."""
-        row = [c.slug for c in self.grid.cells("karts")
-               if c.coord[0] == self.grid.coord_of(kart_slug)[0]]
-        here = next((k for k in row
-                     if self.client.send({"type": "at_check_asset_match", "category": "karts",
-                                         "lang": self.lang, "name": k}).get("name_score", 0.0)
-                     >= self.GROUND_THRESHOLD), None)
-        if here is None:
-            return                                  # next loop's press re-tries blindly
+        """Read the actually-selected kart from the live tracker, then step the delta."""
+        from grid import to_filename
+        sel = self.client.send({"type": "at_current_selection"})
+        if sel.get("_dry"):
+            return
+        here = to_filename(sel.get("kart") or "")
+        same_row = {c.slug for c in self.grid.cells("karts")
+                    if c.coord[0] == self.grid.coord_of(kart_slug)[0]}
+        if here not in same_row:
+            return                                  # unknown / other row: next loop's press re-tries
         for press in self.grid.horizontal_delta(here, kart_slug):
             self.ctrl.press(press)
 
@@ -66,6 +69,7 @@ class SweepRunner:
         item = f"{combo_slug}__{kart_slug}"
         if self._exists(item):
             return None
+        attempts = 0
         while True:
             self._begin(item)
             if first:                               # Standard Kart: off-and-back for spawn-in
@@ -78,6 +82,10 @@ class SweepRunner:
             if self._ground_kart(kart_slug):
                 break
             self.client.send({"type": "at_record_clip_abort"})
+            attempts += 1
+            if attempts >= self.MAX_VERIFY_ATTEMPTS:
+                raise RuntimeError(
+                    f"capture_kart: {item!r} never grounded after {self.MAX_VERIFY_ATTEMPTS} attempts")
             self._recover_to(kart_slug)             # step back; loop re-begins
         time.sleep(self.idle)                       # spawn-in already rolling; capture idle
         self.ctrl.press("A")                        # flourish → kart_select drops
@@ -117,39 +125,30 @@ class SweepRunner:
             name = slug
             costume = None
 
-        # edge-method floor (SelectionTracker SELECTION_CHAR_FLOOR); tune live at bring-up
-        name_floor = 0.60 if category == "characters" else self.GROUND_THRESHOLD
-        # edge-method floor (SelectionTracker SELECTION_COSTUME_RECONFIRM_THRESHOLD); tune live at bring-up
-        costume_floor = 0.50
-
+        from grid import to_filename
         attempts = 0
         while True:
-            time.sleep(self.settle)   # let the cursor land + name plate render + tracker frame update BEFORE checking
-            cmd = {
-                "type": "at_check_asset_match",
-                "category": category,
-                "lang": self.lang,
-                "name": name,
-            }
-            if category == "characters" and costume != "base":
-                cmd["costume"] = costume
-            r = self.client.send(cmd)
-            name_score = r.get("name_score", 0.0)
-            costume_score = r.get("costume_score")
-            if category == "characters" and costume != "base" and costume_score is not None:
-                ok = name_score >= name_floor and costume_score >= costume_floor
+            time.sleep(self.settle)   # let the cursor land + tracker detection update BEFORE checking
+            sel = self.client.send({"type": "at_current_selection"})
+            if sel.get("_dry"):                     # dry-run: no real tracker — treat as grounded
+                break
+            cur_char = to_filename(sel.get("character") or "")
+            cur_cost = to_filename(sel.get("costume") or "")
+            if category == "characters":
+                ok = (cur_char == name) and (costume == "base" or cur_cost == costume)
             else:
-                ok = name_score >= name_floor
+                ok = to_filename(sel.get("kart") or "") == name
             if ok:
                 break
             if attempts >= self.MAX_VERIFY_ATTEMPTS:
                 raise RuntimeError(
-                    f"verify_on: {slug!r} never grounded after {self.MAX_VERIFY_ATTEMPTS} presses"
+                    f"verify_on: {slug!r} never grounded after {self.MAX_VERIFY_ATTEMPTS} presses "
+                    f"(tracker last saw character={sel.get('character')!r} "
+                    f"costume={sel.get('costume')!r} kart={sel.get('kart')!r})"
                 )
             attempts += 1
-            print(f"  [verify_on] {slug!r} name_score={name_score:.3f}"
-                  + (f" costume_score={costume_score:.3f}" if costume_score is not None else "")
-                  + " — re-pressing DPAD_RIGHT")
+            print(f"  [verify_on] {slug!r}: tracker sees character={sel.get('character')!r} "
+                  f"costume={sel.get('costume')!r} kart={sel.get('kart')!r} — re-pressing DPAD_RIGHT")
             self.ctrl.press("DPAD_RIGHT")
 
 
@@ -312,6 +311,7 @@ class _DryClient:
         "at_record_clip_mark":     {"type": "marked"},
         "at_record_clip_abort":    {"type": "clip_aborted"},
         "at_check_asset_match":    {"type": "at_asset_score", "name_score": 0.95},
+        "at_current_selection":    {"type": "current_selection", "_dry": True},
     }
 
     def send(self, msg, timeout=15.0):

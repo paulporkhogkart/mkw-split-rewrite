@@ -119,6 +119,7 @@ class EventBroadcaster:
         self._at_settings                   = None
         self._at_detector                   = None
         self._at_base_path:  str            = ""
+        self._at_tracker                    = None
         self._clip_mgr                      = None
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -135,7 +136,7 @@ class EventBroadcaster:
             self._loop.call_soon_threadsafe(task.cancel)
 
     def enable_autotemplate(self, current_frame: list, settings,
-                            detector, base_path: str) -> None:
+                            detector, base_path: str, tracker=None) -> None:
         """
         Enable inbound autotemplate capture commands.
 
@@ -149,6 +150,7 @@ class EventBroadcaster:
         self._at_settings  = settings
         self._at_detector  = detector
         self._at_base_path = base_path
+        self._at_tracker   = tracker
 
     def set_clip_manager(self, mgr) -> None:
         self._clip_mgr = mgr
@@ -259,6 +261,15 @@ class EventBroadcaster:
         if t == "at_clip_exists":
             return {"type": "exists_result",
                     "done": bool(self._clip_mgr and self._clip_mgr.exists(msg.get("item", "")))}
+        if t == "at_current_selection":
+            # Ground off the LIVE SelectionTracker (the detection the overlay shows),
+            # not a parallel re-match.  Returns the current accepted display names.
+            st = getattr(self._at_tracker, "state", None)
+            return {"type": "current_selection",
+                    "character": getattr(st, "character", None),
+                    "costume":   getattr(st, "costume", None),
+                    "kart":      getattr(st, "kart", None),
+                    "course":    getattr(st, "course", None)}
         return {"type": "at_error", "message": f"Unknown autotemplate command: {t!r}"}
 
     def _current_frame(self) -> Optional[np.ndarray]:
