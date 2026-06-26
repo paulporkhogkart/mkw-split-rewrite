@@ -186,6 +186,22 @@ class BridgeController:
         """Re-assert anti-spin on the agent (idempotent)."""
         self._bridge.rstick_down()
 
+    def get_status(self) -> dict:
+        """{'connected': bool, 'mac': str} from the agent (safe before nxbt is ready)."""
+        return self._bridge.get_status()
+
+    def wait_ready(self, timeout: float = 90.0) -> bool:
+        """Block until the agent reports the Switch is connected (or timeout)."""
+        import time as _t
+        deadline = _t.monotonic() + timeout
+        while _t.monotonic() < deadline:
+            st = self._bridge.get_status()
+            if st.get("connected"):
+                print(f"  controller ready (Switch MAC={st.get('mac') or '?'})")
+                return True
+            _t.sleep(1.0)
+        return False
+
     def stop(self) -> None:
         """Close the TCP connection to the agent."""
         self._bridge.close()
@@ -312,6 +328,35 @@ class _DryClient:
 
 # ── CLI entry point ───────────────────────────────────────────────────────────
 
+def _pilot(ctrl) -> bool:
+    """Keyboard-drive the Switch via the emulated controller until the operator presses
+    Enter (start the sweep from the current screen) or q (quit). Windows-only (msvcrt)."""
+    import msvcrt
+    KEYS = {"a": "A", "b": "B", "x": "X", "y": "Y", "l": "L", "r": "R",
+            "+": "PLUS", "-": "MINUS", "h": "HOME"}
+    ARROWS = {"H": "DPAD_UP", "P": "DPAD_DOWN", "K": "DPAD_LEFT", "M": "DPAD_RIGHT"}
+    print("\n== PILOT — drive to character-select, then start ==")
+    print("  arrow keys -> D-pad    .    a b x y l r  + - (plus/minus)  h (HOME) -> buttons")
+    print("  ENTER -> start the sweep from the current screen    .    q -> quit\n", flush=True)
+    while True:
+        ch = msvcrt.getwch()
+        if ch in ("\r", "\n"):
+            print("  -> starting sweep from here\n", flush=True)
+            return True
+        if ch in ("q", "Q", "\x03"):
+            return False
+        if ch in ("\x00", "\xe0"):                 # arrow / function-key prefix
+            btn = ARROWS.get(msvcrt.getwch())
+            if btn:
+                ctrl.press(btn)
+                print(f"  {btn}", flush=True)
+            continue
+        btn = KEYS.get(ch.lower())
+        if btn:
+            ctrl.press(btn)
+            print(f"  {btn}", flush=True)
+
+
 def main():
     import argparse
     import os
@@ -333,6 +378,9 @@ def main():
                    help="Resume from this character slug (skip earlier cells)")
     p.add_argument("--dry-run", action="store_true",
                    help="Print all steps without opening controller or capture WS")
+    p.add_argument("--pilot", action="store_true",
+                   help="Drive the Switch to character-select yourself with the keyboard, then press "
+                        "Enter to start the sweep from there (skips the blind HOME preamble).")
     a = p.parse_args()
 
     yaml_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "clip_sweep.yaml")
@@ -354,21 +402,28 @@ def main():
         runner = SweepRunner(g, ctrl, client)
 
     try:
-        # Preamble: HOME -> Time Trials -> character select
-        # Mirror the nav from full_capture.yaml: wake the Switch, open game,
-        # navigate into the character select screen.  In dry-run the exact timings
-        # are irrelevant -- the button sequence just needs to be present.
-        print("-- Preamble: HOME -> Time Trials -> character select --")
-        for btn in ["HOME", "A", "A", "A"]:         # wake + title screen
-            ctrl.press(btn)
-        if not a.dry_run:
-            time.sleep(3.0)                           # wait for menu to load
-        ctrl.press("A")                               # single player
-        if not a.dry_run:
-            time.sleep(1.5)
-        ctrl.press("A")                               # Time Trials
-        if not a.dry_run:
-            time.sleep(2.0)                           # wait for character select
+        if a.pilot and not a.dry_run:
+            print("Waiting for the controller agent to connect to the Switch...", flush=True)
+            if hasattr(ctrl, "wait_ready") and not ctrl.wait_ready():
+                print("Controller never became ready — is start_agent.py running and the Switch on? Aborting.")
+                return
+            if not _pilot(ctrl):
+                print("Pilot aborted; sweep not started.")
+                return
+        else:
+            # Blind preamble: HOME -> Time Trials -> character select.  Assumes you START at
+            # HOME with MKW hovered; use --pilot if you're not in that exact state.
+            print("-- Preamble: HOME -> Time Trials -> character select --")
+            for btn in ["HOME", "A", "A", "A"]:         # wake + title screen
+                ctrl.press(btn)
+            if not a.dry_run:
+                time.sleep(3.0)                           # wait for menu to load
+            ctrl.press("A")                               # single player
+            if not a.dry_run:
+                time.sleep(1.5)
+            ctrl.press("A")                               # Time Trials
+            if not a.dry_run:
+                time.sleep(2.0)                           # wait for character select
 
         # Main sweep: characters
         skipping = bool(a.start_from)

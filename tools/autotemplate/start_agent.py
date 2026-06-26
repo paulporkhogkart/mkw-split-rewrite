@@ -134,7 +134,7 @@ def sudo_password() -> str:
 
 def run(args) -> int:
     distro = args.distro or nxauto_cfg("wsl_distro") or detect_distro()
-    busid = args.busid or nxauto_cfg("bt_busid") or detect_busid()
+    busid = args.busid or detect_busid() or nxauto_cfg("bt_busid")   # prefer the CURRENT busid; usb ids drift
     mac = args.mac or nxauto_cfg("switch_mac")
     agent_dir_wsl = win_to_wsl_path(os.path.dirname(os.path.abspath(__file__)))
 
