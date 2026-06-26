@@ -321,8 +321,10 @@ def main():
         description="Clip sweep: walk the character/kart grid, record one clip per item. "
                     "Runs on Windows; delegates controller to the WSL2 controller_agent via TCP."
     )
-    p.add_argument("--capture-ws", default="ws://localhost:8766",
-                   help="WebSocket URL of the clip-recorder broadcaster (default: ws://localhost:8766)")
+    p.add_argument("--capture-ws", default="ws://127.0.0.1:8766",
+                   help="WebSocket URL of the clip-recorder broadcaster (default: ws://127.0.0.1:8766). "
+                        "Use 127.0.0.1, NOT 'localhost' — the broadcaster binds IPv4 (0.0.0.0); localhost can "
+                        "resolve to IPv6 (::1) on Windows and the connection is refused (WinError 1225).")
     p.add_argument("--agent-host", default="127.0.0.1",
                    help="Host where controller_agent.py is listening (default: 127.0.0.1)")
     p.add_argument("--agent-port", type=int, default=7878,

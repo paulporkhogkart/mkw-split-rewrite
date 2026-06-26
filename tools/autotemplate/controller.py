@@ -40,6 +40,7 @@ class ProController:
         self._adapter_path = f"/org/bluez/{adapter}"
         self._nx = nxbt.Nxbt()
         self._idx = None
+        self.switch_mac = None   # set on connect; returned by get_mac()
 
     # ── Connection ──────────────────────────────────────────────────────────
 
@@ -62,7 +63,8 @@ class ProController:
         self._idx = self._nx.create_controller(**kwargs)
         print("Waiting for Switch to connect… (open Change Grip/Order on Switch)")
         self._nx.wait_for_connection(self._idx)
-        print("Switch connected.")
+        self.switch_mac = reconnect_addr
+        print(f"Switch connected. MAC={self.switch_mac or 'unknown'}")
         # Short settle time so the Switch registers the controller fully
         time.sleep(1.0)
 
@@ -70,6 +72,10 @@ class ProController:
         if self._idx is not None:
             self._nx.remove_controller(self._idx)
             self._idx = None
+
+    def get_mac(self):
+        """The Switch MAC we connected to (the reconnect address), or None."""
+        return self.switch_mac
 
     # ── Inputs ─────────────────────────────────────────────────────────────
 
