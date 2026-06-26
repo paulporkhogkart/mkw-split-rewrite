@@ -1,0 +1,195 @@
+characters:
+- - Mario
+  - Luigi
+  - Peach
+  - Daisy
+  - Baby Mario
+  - Baby Luigi
+  - Baby Peach
+  - Baby Daisy
+  - Nabbit
+  - Piranha Plant
+  - Hammer Bro
+  - Monty Mole
+  - Mario (Touring)
+  - Luigi (Touring)
+  - Peach (Touring)
+  - Daisy (Touring)
+  - Mario (Pro Racer)
+  - Luigi (Pro Racer)
+  - Peach (Pro Racer)
+  - Daisy (Pro Racer)
+  - Baby Mario (Pro Racer)
+  - Baby Luigi (Pro Racer)
+  - Baby Peach (Pro Racer)
+  - Baby Daisy (Pro Racer)
+  - Mario (Dune Rider)
+  - Luigi (Oasis)
+  - Daisy (Oasis)
+  - Pokey
+  - Mario (Cowboy)
+  - Luigi (Farmer)
+  - Peach (Farmer)
+  - Cow
+  - Mario (Sightseeing)
+  - Peach (Sightseeing)
+  - Toad (Burger Bud)
+  - Yoshi (Biker)
+  - Mario (Aviator)
+  - Peach (Aviator)
+  - Wario (Pirate)
+  - King Boo (Pirate)
+  - Mario (Happi)
+  - Luigi (Happi)
+  - Peach (Yukata)
+  - Yoshi (Matsuri)
+  - Mario (All-Terrain)
+  - Luigi (All-Terrain)
+  - Peach (Aero)
+  - Daisy (Aero)
+  - Luigi (Gondolier)
+  - Peach (Vacation)
+  - Daisy (Vacation)
+- - Yoshi
+  - Toad
+  - Koopa Troopa
+  - Bowser
+  - Lakitu
+  - Toadette
+  - Bowser Jr.
+  - Baby Rosalina
+  - Goomba
+  - Spike
+  - Sidestepper
+  - Cheep Cheep
+  - Yoshi (Touring)
+  - Baby Peach (Touring)
+  - Baby Daisy (Touring)
+  - Baby Rosalina (Touring)
+  - Yoshi (Pro Racer)
+  - Toad (Pro Racer)
+  - Toadette (Pro Racer)
+  - Koopa Troopa (Pro Racer)
+  - Baby Rosalina (Pro Racer)
+  - Bowser Jr. (Pro Racer)
+  - Birdo (Pro Racer)
+  - King Boo (Pro Racer)
+  - Wario (Oasis)
+  - Yoshi (Aristocrat)
+  - King Boo (Aristocrat)
+  - Peepa
+  - Wario (Wicked Wasp)
+  - Stingby
+  - Toadette (Soft Server)
+  - Yoshi (Soft Server)
+  - Wario (Biker)
+  - Waluigi (Biker)
+  - Bowser (Biker)
+  - Bowser Jr. (Biker Jr.)
+  - Baby Peach (Sailor)
+  - Baby Daisy (Sailor)
+  - Baby Rosalina (Sailor)
+  - Koopa Troopa (Sailor)
+  - Lakitu (Fisherman)
+  - Para-Biddybud
+  - Toad (Explorer)
+  - Toadette (Explorer)
+  - Donkey Kong (All-Terrain)
+  - Bowser (All-Terrain)
+  - Pauline (Aero)
+  - Rosalina (Aero)
+  - Baby Mario (Work Crew)
+  - Baby Luigi (Work Crew)
+  - Birdo (Vacation)
+- - Wario
+  - Waluigi
+  - Rosalina
+  - Pauline
+  - Birdo
+  - King Boo
+  - Shy Guy
+  - Donkey Kong
+  - Dry Bones
+  - Wiggler
+  - Cataquack
+  - Pianta
+  - Rosalina (Touring)
+  - Koopa Troopa (Runner)
+  - Rocky Wrench
+  - Conkdor
+  - Wario (Pro Racer)
+  - Waluigi (Pro Racer)
+  - Rosalina (Pro Racer)
+  - Bowser (Pro Racer)
+  - Shy Guy (Pit Crew)
+  - Lakitu (Pit Crew)
+  - Mario (Mechanic)
+  - Luigi (Mechanic)
+  - Waluigi (Wampire)
+  - Swoop
+  - Toadette (Conductor)
+  - Toad (Engineer)
+  - Waluigi (Mariachi)
+  - Fish Bone
+  - Coin Coffer
+  - Bowser (Supercharged)
+  - Rosalina (Aurora)
+  - Shy Guy (Slope Styler)
+  - Snowman
+  - Penguin
+  - Daisy (Swimwear)
+  - Yoshi (Swimwear)
+  - Baby Mario (Swimwear)
+  - Dolphin
+  - Baby Peach (Explorer)
+  - Baby Daisy (Explorer)
+  - Baby Rosalina (Explorer)
+  - Bowser Jr. (Explorer)
+  - Koopa Troopa (All-Terrain)
+  - Wario (Road Ruffian)
+  - Waluigi (Road Ruffian)
+  - Chargin' Chuck
+  - Wario (Work Crew)
+  - Koopa Troopa (Work Crew)
+  - Yoshi (Food Slinger)
+karts:
+- - Standard Kart
+  - Plushbuggy
+  - Zoom Buggy
+  - Hot Rod
+  - Roadster Royale
+  - Buggybud
+  - Reel Racer
+  - Carpet Flyer
+  - Big Horn
+  - Pipe Frame
+- - Rally Kart
+  - Baby Blooper
+  - Chargin' Truck
+  - Ribbit Revster
+  - B Dasher
+  - Rally Romper
+  - Bumble V
+  - Cloud 9
+  - Li'l Dumpy
+  - Billdozer
+- - Standard Bike
+  - Cute Scoot
+  - Hyper Pipe
+  - Tune Thumper
+  - W-Twin Chopper
+  - Dread Sled
+  - Fin Twin
+  - Dolphin Dasher
+  - Loco Moto
+  - Rallygator
+- - Rally Bike
+  - Mach Rocket
+  - Funky Dorrie
+  - Junkyard Hog
+  - Lobster Roller
+  - Stellar Sled
+  - R.O.B. H.O.G.
+  - Blastronaut III
+  - Mecha Trike
+  - Bowser Bruiser
