@@ -73,7 +73,8 @@ def test_kart_keep_on_match():
     g = grid.load_grid(YAML)
     ctrl = FakeController()
     client = FakeClient(selection={"kart": "Plushbuggy"})              # tracker already shows the right kart
-    SweepRunner(g, ctrl, client, idle_seconds=0.0, settle_seconds=0.0).capture_kart("mario__base", "plushbuggy")
+    SweepRunner(g, ctrl, client, idle_seconds=0.0, settle_seconds=0.0,
+                ground_timeout=0.0).capture_kart("mario__base", "plushbuggy")
     assert {"type": "at_record_clip_mark", "event": "swap"} in client.sent
     assert not any(m["type"] == "at_record_clip_abort" for m in client.sent)
     assert ("press", "DPAD_RIGHT") in ctrl.log                         # the swap-on press
@@ -87,7 +88,8 @@ def test_kart_discard_and_retry_on_mismatch():
     client = FakeClient(selection=[{"kart": "Standard Kart"},
                                    {"kart": "Standard Kart"},
                                    {"kart": "Plushbuggy"}])
-    SweepRunner(g, ctrl, client, idle_seconds=0.0, settle_seconds=0.0).capture_kart("mario__base", "plushbuggy")
+    SweepRunner(g, ctrl, client, idle_seconds=0.0, settle_seconds=0.0,
+                ground_timeout=0.0).capture_kart("mario__base", "plushbuggy")
     assert any(m["type"] == "at_record_clip_abort" for m in client.sent)
     assert {"type": "at_record_clip_mark", "event": "flourish"} in client.sent   # proves it terminated
 

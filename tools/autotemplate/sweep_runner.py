@@ -14,12 +14,14 @@ class SweepRunner:
     GROUND_THRESHOLD = 0.70   # edge-method floor (SelectionTracker SELECTION_KART_FLOOR); tune live at bring-up
     MAX_VERIFY_ATTEMPTS = 30
 
-    def __init__(self, grid, controller, client, *, idle_seconds=10.0, settle_seconds=0.8, lang="en_uk"):
+    def __init__(self, grid, controller, client, *, idle_seconds=10.0, settle_seconds=0.8,
+                 ground_timeout=4.0, lang="en_uk"):
         self.grid = grid
         self.ctrl = controller
         self.client = client
         self.idle = idle_seconds
         self.settle = settle_seconds
+        self.ground_timeout = ground_timeout   # how long to POLL for the kart to settle (0 == one read)
         self.lang = lang
 
     def _begin(self, item):
@@ -63,20 +65,41 @@ class SweepRunner:
                 "tracker window and relaunch it (or run_sweep.bat) so it has the latest code, then retry.")
         return sel
 
-    def _ground_kart(self, kart_slug) -> bool:
+    def _poll_grounded(self, kart_slug):
+        """Poll the live tracker until the committed kart settles to kart_slug, or
+        ground_timeout elapses. The pipe-swap + spawn-in animation briefly drops the match
+        score (a frozen/transition frame reads ~0.58 even though the kart is right), so a
+        single read straight after the swap is unreliable. Returns (grounded, last_sel)."""
         from grid import to_filename
-        sel = self._live_selection()
-        if sel.get("_dry"):
-            return True
-        return to_filename(sel.get("kart") or "") == kart_slug
+        deadline = time.monotonic() + self.ground_timeout
+        sel: dict = {}
+        while True:
+            sel = self._live_selection()
+            if sel.get("_dry") or to_filename(sel.get("kart") or "") == kart_slug:
+                return True, sel
+            if time.monotonic() >= deadline:
+                return False, sel
+            time.sleep(0.15)
+
+    def _settled_kart(self) -> str:
+        """The committed kart filename once it settles (polls past the swap/spawn-in dip);
+        '' if nothing settles within ground_timeout."""
+        from grid import to_filename
+        deadline = time.monotonic() + self.ground_timeout
+        while True:
+            sel = self._live_selection()
+            if sel.get("_dry"):
+                return ""
+            here = to_filename(sel.get("kart") or "")
+            if here or time.monotonic() >= deadline:
+                return here
+            time.sleep(0.15)
 
     def _recover_to(self, kart_slug):
-        """Read the actually-selected kart from the live tracker, then step the delta."""
-        from grid import to_filename
-        sel = self._live_selection()
-        if sel.get("_dry"):
+        """Read the actually-selected kart from the live tracker (settled), then step the delta."""
+        here = self._settled_kart()
+        if not here:
             return
-        here = to_filename(sel.get("kart") or "")
         same_row = {c.slug for c in self.grid.cells("karts")
                     if c.coord[0] == self.grid.coord_of(kart_slug)[0]}
         if here not in same_row:
@@ -98,9 +121,8 @@ class SweepRunner:
             else:
                 self.ctrl.press("DPAD_RIGHT")       # swap onto this kart
             self._mark("swap")
-            time.sleep(self.settle)                 # name plate settles
-            sel = self._live_selection()
-            if sel.get("_dry") or to_filename(sel.get("kart") or "") == kart_slug:
+            grounded, sel = self._poll_grounded(kart_slug)   # wait for the score to settle
+            if grounded:
                 break
             self.client.send({"type": "at_record_clip_abort"})
             attempts += 1
