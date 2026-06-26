@@ -247,11 +247,16 @@ def test_antispin_state_holds_down_only_when_active():
     assert s.snapshot()["ry"] == 0
 
 
-def test_antispin_rx_wiggles_left_then_right():
-    """antispin_rx nudges the R-stick slightly LEFT then RIGHT each period."""
-    from controller_agent import antispin_rx, _ANTISPIN_WIGGLE, _ANTISPIN_WIGGLE_PERIOD
-    assert antispin_rx(0.0) == -_ANTISPIN_WIGGLE                          # first half: LEFT
-    assert antispin_rx(_ANTISPIN_WIGGLE_PERIOD * 0.75) == _ANTISPIN_WIGGLE  # second half: RIGHT
+def test_antispin_rx_blips_then_returns_to_center():
+    """antispin_rx gives a brief LEFT nudge, returns to straight-down (0) between nudges,
+    then a brief RIGHT nudge one interval later."""
+    from controller_agent import (antispin_rx, _ANTISPIN_BLIP,
+                                   _ANTISPIN_BLIP_INTERVAL, _ANTISPIN_BLIP_DURATION)
+    assert antispin_rx(0.0) == -_ANTISPIN_BLIP                                   # left nudge
+    assert antispin_rx(_ANTISPIN_BLIP_DURATION + 0.001) == 0                     # snaps back to center
+    assert antispin_rx(_ANTISPIN_BLIP_INTERVAL * 0.5) == 0                       # mid-gap: straight down
+    assert antispin_rx(_ANTISPIN_BLIP_INTERVAL) == _ANTISPIN_BLIP                # right nudge
+    assert antispin_rx(_ANTISPIN_BLIP_INTERVAL + _ANTISPIN_BLIP_DURATION + 0.001) == 0  # center again
 
 
 def test_dispatch_antispin_toggles_state_flag():

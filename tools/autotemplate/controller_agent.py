@@ -24,26 +24,33 @@ from switch_bridge import ControllerState
 
 # ── Anti-spin ControllerState subclass ───────────────────────────────────────
 
-# Anti-spin R-stick wiggle: a perfectly still straight-DOWN hold let the spin resume, so
-# while active we keep ry=DOWN but nudge rx a teeny bit LEFT/RIGHT each cycle — the flip
-# registers as fresh stick input (the way a hand never holds perfectly still). Tune here.
-_ANTISPIN_WIGGLE        = 22     # rx magnitude of the L/R nudge (out of 127); "teeny tiny"
-_ANTISPIN_WIGGLE_PERIOD = 0.20   # seconds for one left+right wiggle cycle
+# Anti-spin R-stick blip: hold straight DOWN (rx=0), with a TINY, BRIEF nudge left/right
+# every BLIP_INTERVAL — just a fresh-input blip to stop the spin without moving the camera.
+# The nudge lasts only BLIP_DURATION, then snaps back to straight-down. Tune here.
+_ANTISPIN_BLIP          = 1      # rx magnitude of the nudge (out of 127); "teeny tiny"
+_ANTISPIN_BLIP_INTERVAL = 0.5    # seconds between nudges (alternating left / right)
+_ANTISPIN_BLIP_DURATION = 0.04   # how long each nudge lasts before returning to straight-down
 
 
 def antispin_rx(t: float) -> int:
-    """Tiny L/R wiggle of the R-stick around straight-down at time `t` (s): slightly LEFT
-    for the first half of each period, slightly RIGHT for the second. Pure + testable."""
-    phase = t % _ANTISPIN_WIGGLE_PERIOD
-    return -_ANTISPIN_WIGGLE if phase < (_ANTISPIN_WIGGLE_PERIOD / 2) else _ANTISPIN_WIGGLE
+    """R-stick X for the anti-spin nudge at time `t` (s): a brief LEFT nudge, then straight
+    DOWN (0), then a brief RIGHT nudge one interval later, then DOWN — alternating. Pure +
+    testable."""
+    pos = t % (_ANTISPIN_BLIP_INTERVAL * 2)
+    if pos < _ANTISPIN_BLIP_DURATION:
+        return -_ANTISPIN_BLIP                                  # brief left nudge
+    if _ANTISPIN_BLIP_INTERVAL <= pos < _ANTISPIN_BLIP_INTERVAL + _ANTISPIN_BLIP_DURATION:
+        return _ANTISPIN_BLIP                                   # brief right nudge
+    return 0                                                    # straight down between nudges
 
 
 class _AntiSpinState(ControllerState):
-    """ControllerState that, while `antispin_active`, holds the R-stick DOWN (ry=-127) and
-    nudges it a teeny bit LEFT/RIGHT each cycle (rx wiggle) — a perfectly still down-hold let
-    the kart spin resume, so the wiggle keeps it reading as fresh input. The pilot toggles
-    antispin_active via the 'antispin' command so this is on ONLY while the kart screen is
-    active. Forcing the stick in snapshot() keeps it immune to button presses (which zero it)."""
+    """ControllerState that, while `antispin_active`, holds the R-stick straight DOWN (ry=-127,
+    rx=0) and gives a TINY brief left/right nudge every interval (antispin_rx) — a perfectly
+    still down-hold let the kart spin resume, so the occasional blip keeps it reading as fresh
+    input without moving the camera. The pilot toggles antispin_active via the 'antispin'
+    command so this is on ONLY while the kart screen is active. Forcing the stick in snapshot()
+    keeps it immune to button presses (which zero it)."""
     antispin_active = False     # set per-instance by the 'antispin' command
 
     def snapshot(self):
