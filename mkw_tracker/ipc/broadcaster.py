@@ -520,8 +520,13 @@ class EventBroadcaster:
             return {"type": "at_error", "message": f"Failed to load template: {tmpl_path}"}
         tmpl = prepare_text_edges(tmpl_bgr)
 
+        # Pad the live crop so matchTemplate can SLIDE the template to its best alignment
+        # (mirrors the live SelectionTracker's SELECTION_SEARCH_PAD). Without this, the
+        # exact-ROI match scores low on any minor shift and grounding fails on the right item.
+        _PAD = 8   # = detection.selection.SELECTION_SEARCH_PAD
         x1, y1, x2, y2 = [int(v) for v in roi]
-        crop = frame[y1:y2, x1:x2]
+        fh, fw = frame.shape[:2]
+        crop = frame[max(0, y1 - _PAD):min(fh, y2 + _PAD), max(0, x1 - _PAD):min(fw, x2 + _PAD)]
         live = prepare_text_edges(crop)
 
         if tmpl.shape[0] > live.shape[0] or tmpl.shape[1] > live.shape[1]:
@@ -542,7 +547,8 @@ class EventBroadcaster:
                     from ..detection.templates import prepare_text_edges
                     ctmpl = prepare_text_edges(ctmpl_bgr)
                     cx1, cy1, cx2, cy2 = [int(v) for v in costume_roi]
-                    ccrop = frame[cy1:cy2, cx1:cx2]
+                    fh, fw = frame.shape[:2]
+                    ccrop = frame[max(0, cy1 - 8):min(fh, cy2 + 8), max(0, cx1 - 8):min(fw, cx2 + 8)]
                     clive = prepare_text_edges(ccrop)
                     if ctmpl.shape[0] <= clive.shape[0] and ctmpl.shape[1] <= clive.shape[1]:
                         result = cv2.matchTemplate(clive, ctmpl, cv2.TM_CCOEFF_NORMED)
