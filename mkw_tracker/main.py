@@ -937,6 +937,28 @@ def run(args):
                                         os.path.dirname(_rp("images")))
     del _rp
 
+    # ── Clip-capture mode (asset clip sweep) ─────────────────────────────────
+    # When --clip-capture is set, ffmpeg owns the capture card exclusively via
+    # ClipCaptureManager.  OpenCV (cap) is never opened; detection runs on the
+    # tee'd preview frames pumped into current_frame each tick.  setup_mode is
+    # bypassed so the main loop runs immediately without a camera wizard.
+    clip_mgr = None
+    if getattr(args, "clip_capture", False):
+        from .tools.clip_capture import ClipCaptureManager
+        from .tools.record_clips import _resolve_device
+        _clip_dev = _resolve_device(None)
+        clip_mgr = ClipCaptureManager(
+            out_dir=os.path.join(base_path, "captures_sdr", "en_uk", "clips"),
+            device=_clip_dev,
+            size="3840x2160",
+            fps=60,
+            frame_ref=current_frame,
+        )
+        clip_mgr.start_preview()
+        if broadcaster is not None:
+            broadcaster.set_clip_manager(clip_mgr)
+        setup_mode[0] = False   # skip wizard; ffmpeg feeds the frame source
+
     # Previous-state snapshots for on-change IPC emission
     _prev_sel    = (None, None, None, None)   # (character, costume, kart, course)
     _prev_lap    = (None, None)               # (current_lap, total_laps)
@@ -999,7 +1021,22 @@ def run(args):
                                          current_frame, setup_mode, tracker)
 
         # ── Read frame ───────────────────────────────────────────────────────
-        if cap is not None:
+        if clip_mgr is not None:
+            # Clip-capture mode: ffmpeg owns the card; pump its latest preview
+            # frame into current_frame[0].  Normalise to 1920×1080 so all
+            # downstream detection ROIs stay valid (preview pipe is 960×540).
+            clip_mgr.pump()
+            _clipped = current_frame[0]
+            if _clipped is not None:
+                frame = _norm(_clipped)
+                current_frame[0] = frame
+                lifecycle.current_frame = frame
+                t_frame = time.perf_counter()
+                frame_times.append(t_frame)
+            else:
+                time.sleep(0.033)
+                t_frame = time.perf_counter()
+        elif cap is not None:
             ret, frame = cap.read()
             if ret:
                 frame = _norm(frame)
@@ -1092,6 +1129,30 @@ def run(args):
         if lifecycle.run_invalidated or lifecycle.timed_out:
             eff_screen = Screen.UNKNOWN
         selection     = tracker.update(frame, screen, perf.current_score)
+
+        # ── Clip-capture: emit clip_done on tell-drop after flourish ──────────
+        # After the flourish mark, we wait for the select screen to change (the
+        # player navigated away), then seal the clip and broadcast clip_done.
+        # Kart combos have two "__" separators (char__kart__costume); characters
+        # have none or one.  CHARACTER_SELECT and KART_SELECT are the two select
+        # screens that host the grounding we record.
+        if (clip_mgr is not None
+                and getattr(clip_mgr, "_item", None) is not None
+                and clip_mgr._events.get("flourish_t") is not None):
+            import json as _json
+            _item = clip_mgr._item
+            _want_screen = (Screen.KART_SELECT
+                            if isinstance(_item, str) and _item.count("__") >= 2
+                            else Screen.CHARACTER_SELECT)
+            if detector.current_screen is not _want_screen:
+                clip_mgr.set_duration_end()
+                _clip_ev = clip_mgr.end()
+                if broadcaster is not None:
+                    broadcaster.broadcast(_json.dumps({
+                        "type": "clip_done",
+                        "item": _item,
+                        "events": _clip_ev,
+                    }))
 
         _race_complete = ts.total_time is not None
 
@@ -1425,6 +1486,9 @@ def main():
                              "0 = as fast as possible (no real-time pacing).")
     parser.add_argument("--video-once", action="store_true",
                         help="With --video, stop at end of file instead of looping.")
+    parser.add_argument("--clip-capture", action="store_true",
+                        help="Asset clip sweep: ffmpeg owns the card, detection runs on the "
+                             "tee, record-clip commands enabled. Requires --ws-port.")
     args = parser.parse_args()
     run(args)
 
