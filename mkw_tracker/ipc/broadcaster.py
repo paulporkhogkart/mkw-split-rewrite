@@ -247,9 +247,13 @@ class EventBroadcaster:
             self._clip_mgr.begin(msg.get("item", ""))
             return {"type": "clip_begun"}
         if t == "at_record_clip_mark":
+            if self._clip_mgr is None:
+                return {"type": "at_error", "message": "clip manager not set"}
             self._clip_mgr.mark(msg.get("event", ""))
             return {"type": "marked"}
         if t == "at_record_clip_abort":
+            if self._clip_mgr is None:
+                return {"type": "at_error", "message": "clip manager not set"}
             self._clip_mgr.abort()
             return {"type": "clip_aborted"}
         if t == "at_clip_exists":
