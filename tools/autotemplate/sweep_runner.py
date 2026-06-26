@@ -231,6 +231,14 @@ class WsClient:
     the reply queue used by send().
     """
 
+    # Command-reply types (responses to send()). EVERYTHING else the broadcaster
+    # pushes — heartbeat, selection_update, screen_change, lap_update, … — is an
+    # UNSOLICITED broadcast and must NOT be mistaken for a reply.
+    _REPLY_TYPES = frozenset({
+        "at_done", "at_error", "at_tell_score", "at_asset_score",
+        "clip_begun", "marked", "clip_aborted", "exists_result", "current_selection",
+    })
+
     def __init__(self, url):
         import asyncio
         import threading
@@ -271,10 +279,12 @@ class WsClient:
                         msg = self._json.loads(raw)
                     except Exception:
                         continue
-                    if isinstance(msg, dict) and msg.get("type") == "clip_done":
+                    t = msg.get("type") if isinstance(msg, dict) else None
+                    if t == "clip_done":
                         self._unsolicited.put(msg)
-                    else:
+                    elif t in self._REPLY_TYPES:
                         self._reply_q.put(msg)
+                    # else: unsolicited broadcast (heartbeat/selection_update/screen_change/…) — ignore
         except Exception as exc:
             self._err = str(exc)
             self._ready.set()
