@@ -298,10 +298,17 @@ class WsClient:
         except Exception:
             return {"type": "error", "message": f"Timeout waiting for reply to {cmd.get('type')}"}
 
-    def wait_for(self, type_):
-        """Block until an unsolicited message of the given type arrives."""
+    def wait_for(self, type_, timeout=60.0):
+        """Block until an unsolicited message of the given type arrives (or timeout).
+        The tracker's record watchdog normally emits clip_done (with an error field) within
+        seconds of a failed record; this timeout is only a backstop against an infinite hang."""
         assert type_ == "clip_done", f"wait_for: only clip_done supported, got {type_!r}"
-        return self._unsolicited.get()
+        try:
+            return self._unsolicited.get(timeout=timeout)
+        except Exception:
+            print(f"  [wait_for] no clip_done in {timeout:.0f}s — tracker may not be recording; continuing.",
+                  flush=True)
+            return {"type": "clip_done", "_timeout": True, "events": {}}
 
     def close(self):
         """Stop the asyncio loop (disconnects the WebSocket)."""

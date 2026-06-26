@@ -70,20 +70,47 @@ class ClipCaptureManager:
         return os.path.exists(p) and os.path.getsize(p) > 0
 
     def begin(self, item):
+        print(f"[clip] begin({item!r}): swapping preview -> 4K record (encoder={self._enc})", flush=True)
         self._stop_pipe()
-        time.sleep(0.6)                       # let the card fully release before the tee re-opens it
         self._item = item
         self._events = {"item": item, "fps": self.fps,
                         "swap_t": None, "flourish_t": None,
                         "flourish_end_t": None, "duration_t": None}
+        out_path = self._path(item, "mkv")
         cmd = tee_cmd(self._ffmpeg, self.device, self.size, self.fps,
-                      duration=10_000, out_path=self._path(item, "mkv"),
+                      duration=10_000, out_path=out_path,
                       enc=self._enc, enc_args=self._enc_args,
                       scale_w=1920, scale_h=1080)
-        # quiet=True captures the record ffmpeg's stderr — a 4K-encode/device failure is
-        # otherwise silent (the feed just freezes); record_error() surfaces it.
-        self._pipe = self._pf(cmd, quiet=True, w=1920, h=1080)
-        self._t0 = self._clock()
+        # The capture card can take a moment to release after the preview ffmpeg is
+        # killed, so the tee may fail to open it on the first try. Retry, and CONFIRM the
+        # first frame before returning — so a return means recording is genuinely live,
+        # and a failure prints the real ffmpeg error instead of silently freezing the feed.
+        for attempt, gap in enumerate((0.6, 1.2), start=1):
+            time.sleep(gap)
+            self._pipe = self._pf(cmd, quiet=True, w=1920, h=1080)
+            self._t0 = self._clock()
+            has = getattr(self._pipe, "has_frame", None)
+            if has is None:
+                return                         # pipe can't report readiness (test fake) — assume live
+            alive = getattr(self._pipe, "alive", None)
+            t0 = time.monotonic()
+            while time.monotonic() - t0 < 4.0:
+                if has():
+                    print(f"[clip]   recording (frames after {time.monotonic() - t0:.1f}s, "
+                          f"attempt {attempt}) -> {out_path}", flush=True)
+                    return
+                if alive is not None and not alive():
+                    break
+                time.sleep(0.05)
+            err = (getattr(self._pipe, "error_tail", lambda n=8: "")() or "(no ffmpeg stderr)")
+            why = "ffmpeg exited" if (alive is not None and not alive()) else "alive but no frames in 4s"
+            print(f"[clip]   attempt {attempt} FAILED — {why}:\n        "
+                  + err.replace("\n", "\n        "), flush=True)
+            if attempt == 1:
+                self._stop_pipe()              # clean retry; keep the LAST dead pipe for the watchdog
+        # Both attempts failed: leave _item + the dead pipe so the main-loop watchdog
+        # surfaces it, aborts (restoring preview), and emits clip_done{error}.
+        print(f"[clip] begin({item!r}): RECORD PIPE WOULD NOT START — see ffmpeg error(s) above.", flush=True)
 
     # ── record health (main-loop watchdog) ──────────────────────────────────────
     def recording(self) -> bool:
