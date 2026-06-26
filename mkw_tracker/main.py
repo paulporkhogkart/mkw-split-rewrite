@@ -932,9 +932,9 @@ def run(args):
     cam_paused    = [False]  # True while setup wizard holds the camera
 
     from .utils.paths import resource_path as _rp
+    base_path = os.path.dirname(_rp("images"))   # repo root (parent of images/); also used by clip-capture
     if broadcaster is not None:
-        broadcaster.enable_autotemplate(current_frame, settings, detector,
-                                        os.path.dirname(_rp("images")))
+        broadcaster.enable_autotemplate(current_frame, settings, detector, base_path)
     del _rp
 
     # ── Clip-capture mode (asset clip sweep) ─────────────────────────────────
