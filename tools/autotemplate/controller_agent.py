@@ -24,18 +24,33 @@ from switch_bridge import ControllerState
 
 # ── Anti-spin ControllerState subclass ───────────────────────────────────────
 
+# Anti-spin R-stick wiggle: a perfectly still straight-DOWN hold let the spin resume, so
+# while active we keep ry=DOWN but nudge rx a teeny bit LEFT/RIGHT each cycle — the flip
+# registers as fresh stick input (the way a hand never holds perfectly still). Tune here.
+_ANTISPIN_WIGGLE        = 22     # rx magnitude of the L/R nudge (out of 127); "teeny tiny"
+_ANTISPIN_WIGGLE_PERIOD = 0.20   # seconds for one left+right wiggle cycle
+
+
+def antispin_rx(t: float) -> int:
+    """Tiny L/R wiggle of the R-stick around straight-down at time `t` (s): slightly LEFT
+    for the first half of each period, slightly RIGHT for the second. Pure + testable."""
+    phase = t % _ANTISPIN_WIGGLE_PERIOD
+    return -_ANTISPIN_WIGGLE if phase < (_ANTISPIN_WIGGLE_PERIOD / 2) else _ANTISPIN_WIGGLE
+
+
 class _AntiSpinState(ControllerState):
-    """ControllerState that holds the R-stick DOWN (ry=-127) on the wire WHILE
-    `antispin_active` is set — so the kart never spins on kart-select, even while _press
-    zeros the sticks to toggle a button bit. The pilot toggles it via the 'antispin'
-    command so the hold is on ONLY while the kart screen is active (an always-on hold
-    interfered elsewhere). Forcing ry in snapshot() keeps it immune to button presses."""
+    """ControllerState that, while `antispin_active`, holds the R-stick DOWN (ry=-127) and
+    nudges it a teeny bit LEFT/RIGHT each cycle (rx wiggle) — a perfectly still down-hold let
+    the kart spin resume, so the wiggle keeps it reading as fresh input. The pilot toggles
+    antispin_active via the 'antispin' command so this is on ONLY while the kart screen is
+    active. Forcing the stick in snapshot() keeps it immune to button presses (which zero it)."""
     antispin_active = False     # set per-instance by the 'antispin' command
 
     def snapshot(self):
         snap = super().snapshot()
         if self.antispin_active:
             snap["ry"] = -127
+            snap["rx"] = antispin_rx(time.monotonic())
         return snap
 
 

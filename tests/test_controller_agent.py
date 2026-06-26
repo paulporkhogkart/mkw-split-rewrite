@@ -247,6 +247,13 @@ def test_antispin_state_holds_down_only_when_active():
     assert s.snapshot()["ry"] == 0
 
 
+def test_antispin_rx_wiggles_left_then_right():
+    """antispin_rx nudges the R-stick slightly LEFT then RIGHT each period."""
+    from controller_agent import antispin_rx, _ANTISPIN_WIGGLE, _ANTISPIN_WIGGLE_PERIOD
+    assert antispin_rx(0.0) == -_ANTISPIN_WIGGLE                          # first half: LEFT
+    assert antispin_rx(_ANTISPIN_WIGGLE_PERIOD * 0.75) == _ANTISPIN_WIGGLE  # second half: RIGHT
+
+
 def test_dispatch_antispin_toggles_state_flag():
     """The 'antispin' command toggles the state's antispin_active flag."""
     s = _AntiSpinState()
