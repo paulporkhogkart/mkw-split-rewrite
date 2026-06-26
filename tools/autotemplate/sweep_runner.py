@@ -155,6 +155,7 @@ class SweepRunner:
             self._park_on_kart(kart_slug)           # park ON the target first
             self._begin(item)                       # record from before the spawn-in swap
             self.ctrl.press(off)                    # step OFF to a neighbour...
+            self._await_kart_change(kart_slug)      # wait for the OFF to land (detection lags the press)
             self._park_on_kart(kart_slug)           # ...closed-loop BACK onto the target -> spawn-in
             self._mark("swap")
             sel = self._poll_until_stable(self._kart_key)   # confirm we're PARKED back on the target
