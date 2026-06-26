@@ -1,7 +1,7 @@
 """TCP server (WSL2): receives newline-delimited JSON commands, drives the Switch.
 
 Modelled on nxauto's agent.py but drives the controller via switch_bridge.sender_thread
-so the RIGHT STICK is PULSED down/neutral at 120 Hz (anti-spin) for the whole session.
+so the RIGHT STICK can be held DOWN at 120 Hz (anti-spin) while the kart screen is active.
 
 Usage (in WSL2, with sudo if nxbt needs root):
     sudo python3 controller_agent.py [--port 7878] [--adapter hci0] [--reconnect-addr AA:BB:CC:DD:EE:FF]
@@ -24,27 +24,18 @@ from switch_bridge import ControllerState
 
 # ── Anti-spin ControllerState subclass ───────────────────────────────────────
 
-# Anti-spin cadence: a CONSTANT R-stick hold did NOT stop the kart-select spin, so we
-# PULSE it instead — alternate full DOWN (ry=-127) and neutral (ry=0). Tune here.
-_ANTISPIN_PERIOD = 0.30   # seconds for one DOWN+neutral cycle
-_ANTISPIN_DUTY   = 0.5    # fraction of each cycle held DOWN (the rest is neutral)
-
-
-def antispin_ry(t: float) -> int:
-    """R-stick Y for the anti-spin pulse at time `t` (seconds): full DOWN (-127) for the
-    first DUTY of each PERIOD, neutral (0) after. Pure + deterministic so it's testable."""
-    phase = t % _ANTISPIN_PERIOD
-    return -127 if phase < (_ANTISPIN_PERIOD * _ANTISPIN_DUTY) else 0
-
-
 class _AntiSpinState(ControllerState):
-    """ControllerState that PULSES the R-stick between full DOWN (ry=-127) and neutral
-    (ry=0) on each snapshot() call, so the kart never settles into a spin on kart-select.
-    A constant hold didn't stop it; oscillating re-asserts DOWN every cycle. Forcing ry in
-    snapshot() keeps anti-spin immune to button presses (which zero the sticks)."""
+    """ControllerState that holds the R-stick DOWN (ry=-127) on the wire WHILE
+    `antispin_active` is set — so the kart never spins on kart-select, even while _press
+    zeros the sticks to toggle a button bit. The pilot toggles it via the 'antispin'
+    command so the hold is on ONLY while the kart screen is active (an always-on hold
+    interfered elsewhere). Forcing ry in snapshot() keeps it immune to button presses."""
+    antispin_active = False     # set per-instance by the 'antispin' command
+
     def snapshot(self):
         snap = super().snapshot()
-        snap["ry"] = antispin_ry(time.monotonic())
+        if self.antispin_active:
+            snap["ry"] = -127
         return snap
 
 
@@ -144,6 +135,15 @@ def dispatch(msg: dict, holder: _CtrlStateHolder) -> dict:
             return {"ok": False, "error": "controller not connected"}
         state.replay_update(0, 0, 0, 0, -127)
         return {"ok": True, "error": ""}
+
+    if t == "antispin":
+        # Hold the R-stick DOWN only while `on` — the pilot turns this on for the kart
+        # screen and off otherwise. The hold is immune to button presses (forced in
+        # snapshot()), so navigation still works while it's active.
+        if state is None:
+            return {"ok": False, "error": "controller not connected"}
+        state.antispin_active = bool(msg.get("on", False))
+        return {"ok": True, "error": "", "antispin": state.antispin_active}
 
     if t == "macro":
         if ctrl is None:

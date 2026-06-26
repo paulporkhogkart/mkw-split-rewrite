@@ -145,11 +145,22 @@ class SweepRunner:
         self.ctrl.press("B")                        # back to kart select (same kart, confirmed)
         return ev
 
+    def _antispin(self, on: bool):
+        """Hold the R-stick DOWN on the agent while `on` (anti-spin), if the controller
+        supports it (the dry/fake controllers may not)."""
+        fn = getattr(self.ctrl, "antispin", None)
+        if fn:
+            fn(on)
+
     def sweep_karts(self, combo_slug):
         karts = [c.slug for c in self.grid.cells("karts")]
         out = []
-        for i, kart in enumerate(karts):
-            out.append(self.capture_kart(combo_slug, kart, first=(i == 0)))
+        self._antispin(True)                        # hold R-stick DOWN while on the kart screen
+        try:
+            for i, kart in enumerate(karts):
+                out.append(self.capture_kart(combo_slug, kart, first=(i == 0)))
+        finally:
+            self._antispin(False)                   # release before leaving the kart screen
         self.ctrl.press("B")                        # kart select → character select
         return out
 
@@ -236,6 +247,10 @@ class BridgeController:
     def rstick_down(self) -> None:
         """Re-assert anti-spin on the agent (idempotent)."""
         self._bridge.rstick_down()
+
+    def antispin(self, on: bool) -> None:
+        """Hold the R-stick DOWN on the agent while `on` (kart-screen anti-spin)."""
+        self._bridge.antispin(on)
 
     def get_status(self) -> dict:
         """{'connected': bool, 'mac': str} from the agent (safe before nxbt is ready)."""
@@ -365,6 +380,9 @@ class _DryController:
 
     def rstick_down(self):
         print("  [DRY] rstick_down")
+
+    def antispin(self, on):
+        print(f"  [DRY] antispin {'ON' if on else 'OFF'}")
 
     def stop(self):
         print("  [DRY] controller stop (no-op)")

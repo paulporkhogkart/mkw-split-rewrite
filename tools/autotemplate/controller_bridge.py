@@ -126,6 +126,10 @@ class ControllerBridge:
         """Re-assert R-stick DOWN on the agent (idempotent anti-spin reset)."""
         return self._send_command({"type": "rstick_down"})
 
+    def antispin(self, on: bool) -> bool:
+        """Hold the R-stick DOWN on the agent while `on` (kart-select anti-spin); release otherwise."""
+        return self._send_command({"type": "antispin", "on": bool(on)})
+
     def wait(self, seconds: float) -> bool:
         return self._send_command({"type": "wait", "seconds": seconds})
 

@@ -229,27 +229,32 @@ def test_missing_type_returns_error():
 
 # ── _AntiSpinState ────────────────────────────────────────────────────────────
 
-def test_antispin_ry_pulses_down_then_neutral():
-    """antispin_ry pulses: full DOWN for the first DUTY of each PERIOD, neutral after."""
-    from controller_agent import antispin_ry, _ANTISPIN_PERIOD, _ANTISPIN_DUTY
-    down_end = _ANTISPIN_PERIOD * _ANTISPIN_DUTY
-    assert antispin_ry(0.0) == -127                       # start of cycle: DOWN
-    assert antispin_ry(down_end - 1e-6) == -127           # just before the switch: DOWN
-    assert antispin_ry(down_end + 1e-6) == 0              # after the switch: neutral
-    assert antispin_ry(_ANTISPIN_PERIOD) == -127          # next cycle: DOWN again
-
-
-def test_antispin_state_forces_pulse_over_replay_and_passes_buttons():
-    """_AntiSpinState.snapshot() forces the anti-spin pulse value regardless of what
-    replay_update writes (so _press zeroing the sticks never reaches the wire), while
-    buttons still go through."""
+def test_antispin_state_holds_down_only_when_active():
+    """_AntiSpinState forces R-stick DOWN on the wire ONLY while antispin_active is set;
+    otherwise snapshot() leaves ry untouched."""
     from switch_bridge import BIT_A
     s = _AntiSpinState()
-    s.replay_update(0, 0, 0, 0, 99)              # replay writes a sentinel ry the pulse never uses
-    assert s.snapshot()["ry"] in (-127, 0)        # snapshot overrides it with the pulse value
-    s.replay_update(BIT_A, 0, 0, 0, 99)          # a press zeros the sticks in state
-    assert s.snapshot()["ry"] in (-127, 0)        # wire still carries the anti-spin pulse, not 99
+    # inactive (default): no override — neutral as replay_update set it
+    s.replay_update(0, 0, 0, 0, 0)
+    assert s.snapshot()["ry"] == 0
+    # active: force DOWN regardless of replay_update (a press zeros the sticks in state)
+    s.antispin_active = True
+    s.replay_update(BIT_A, 0, 0, 0, 0)
+    assert s.snapshot()["ry"] == -127             # held DOWN on the wire
     assert s.snapshot()["buttons"] == BIT_A        # button still goes through
+    # back to inactive: no override again
+    s.antispin_active = False
+    assert s.snapshot()["ry"] == 0
+
+
+def test_dispatch_antispin_toggles_state_flag():
+    """The 'antispin' command toggles the state's antispin_active flag."""
+    s = _AntiSpinState()
+    holder = _make_holder(state=s)               # connected, with our anti-spin state
+    assert dispatch({"type": "antispin", "on": True}, holder)["ok"] is True
+    assert s.antispin_active is True
+    dispatch({"type": "antispin", "on": False}, holder)
+    assert s.antispin_active is False
 
 
 # ── Import clean on Windows (no nxbt) ────────────────────────────────────────
