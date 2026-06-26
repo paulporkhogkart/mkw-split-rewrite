@@ -944,6 +944,9 @@ def run(args):
     # bypassed so the main loop runs immediately without a camera wizard.
     clip_mgr = None
     if getattr(args, "clip_capture", False):
+        if broadcaster is None:
+            raise SystemExit("--clip-capture requires --ws-port (the sweep runner drives the broadcaster).")
+        import json as _clip_json
         from .tools.clip_capture import ClipCaptureManager
         from .tools.record_clips import _resolve_device
         _clip_dev = _resolve_device(None)
@@ -969,6 +972,8 @@ def run(args):
     _finish_result    = None    # cached result string while waiting for ts burst
     _finish_wait      = 0       # frames waited (timeout fallback)
     _emitted_splits: dict = {}  # lap → time already sent via split_recorded
+
+    clip_done_emitted_for = None  # one-shot guard: item identity of last clip_done sent
 
     _last_heartbeat = 0.0
 
@@ -1138,17 +1143,18 @@ def run(args):
         # screens that host the grounding we record.
         if (clip_mgr is not None
                 and getattr(clip_mgr, "_item", None) is not None
-                and clip_mgr._events.get("flourish_t") is not None):
-            import json as _json
+                and clip_mgr._events.get("flourish_t") is not None
+                and clip_mgr._item != clip_done_emitted_for):
             _item = clip_mgr._item
             _want_screen = (Screen.KART_SELECT
                             if isinstance(_item, str) and _item.count("__") >= 2
                             else Screen.CHARACTER_SELECT)
             if detector.current_screen is not _want_screen:
+                clip_done_emitted_for = _item
                 clip_mgr.set_duration_end()
                 _clip_ev = clip_mgr.end()
                 if broadcaster is not None:
-                    broadcaster.broadcast(_json.dumps({
+                    broadcaster.broadcast(_clip_json.dumps({
                         "type": "clip_done",
                         "item": _item,
                         "events": _clip_ev,
