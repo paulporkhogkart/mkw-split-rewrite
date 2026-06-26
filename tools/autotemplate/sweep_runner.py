@@ -152,90 +152,43 @@ class SweepRunner:
             self.ctrl.press("DPAD_RIGHT")
 
 
-# ── Real hardware controller (nxbt) ──────────────────────────────────────────
+# ── Bridge controller (Windows → WSL2 agent) ─────────────────────────────────
 
-class NxbtController:
-    """Real controller: nxbt sender holds the right-stick down for anti-spin.
+class BridgeController:
+    """Windows-side controller that delegates all button presses to the WSL2
+    controller_agent via TCP (controller_bridge.ControllerBridge).
 
-    All nxbt imports are lazy so this class can be defined on Windows even
-    though nxbt is only available in WSL2/Linux.
+    The agent holds the R-stick DOWN continuously (anti-spin) for the whole
+    session — BridgeController doesn't need to manage that itself.
+
+    The import of ControllerBridge is lazy (inside __init__) so this class
+    can be defined even before controller_bridge.py is on sys.path.
     """
 
-    def __init__(self, mac, adapter="hci0"):
-        import threading
-        from controller import ProController
-        from switch_bridge import ControllerState, sender_thread
-        from full_runner import _press as _press_fn
-        self._press_fn = _press_fn
-        self._threading = threading
-        self.mac = mac
-        self.adapter = adapter
-        self.ctrl = ProController(adapter=adapter)
-        self._connect_with_retry()
-        self.state = ControllerState()
-        # Hold right-stick down continuously for anti-spin before sender starts
-        self.state.replay_update(0, 0, 0, 0, -127)
-        self._stop = threading.Event()
-        threading.Thread(
-            target=sender_thread,
-            args=(self.ctrl, self.state, self._stop),
-            daemon=True,
-        ).start()
+    def __init__(self, host: str = "127.0.0.1", port: int = 7878):
+        import sys
+        import os
+        # Ensure tools/autotemplate is on sys.path so controller_bridge is importable.
+        _here = os.path.dirname(os.path.abspath(__file__))
+        if _here not in sys.path:
+            sys.path.insert(0, _here)
+        from controller_bridge import ControllerBridge
+        self._bridge = ControllerBridge(host=host, port=port)
+        self._bridge.connect()
 
-    def _connect_with_retry(self):
-        """Connect to the Switch with retry — mirrors full_runner._ctrl_connect_with_retry.
+    def press(self, button: str, duration: float = 0.1) -> None:
+        self._bridge.press(button, duration=duration)
 
-        Calls self.ctrl.connect() in a thread; if it hasn't succeeded in ~10 s,
-        abandon it, create a FRESH ProController, and retry — looping until connected.
-        """
-        from controller import ProController
-        threading = self._threading
-        attempt = 0
-        while True:
-            attempt += 1
-            print(f"  Connecting to Switch ({self.mac}) — attempt {attempt}…")
-            success = threading.Event()
-            error = [None]
+    def hold(self, button: str, dur: float = 1.0) -> None:
+        self._bridge.hold(button, duration=dur)
 
-            def _try(ctrl=self.ctrl):
-                try:
-                    ctrl.connect(reconnect_addr=self.mac)
-                    success.set()
-                except Exception as exc:
-                    error[0] = exc
-                    success.set()  # unblock the wait so we can check error[0]
+    def rstick_down(self, dur: float = 0) -> None:
+        """Re-assert anti-spin on the agent (idempotent)."""
+        self._bridge.rstick_down(dur=dur)
 
-            threading.Thread(target=_try, daemon=True).start()
-            if success.wait(timeout=10.0) and error[0] is None:
-                print("  Switch connected.")
-                return
-
-            reason = f"error: {error[0]}" if error[0] else "timed out after 10s"
-            print(f"  Connection {reason} — retrying with fresh controller…")
-            try:
-                self.ctrl.disconnect()
-            except Exception:
-                pass
-            self.ctrl = ProController(adapter=self.adapter)
-
-    def stop(self):
-        """Teardown: stop the sender thread and disconnect the controller."""
-        self._stop.set()
-        try:
-            self.ctrl.disconnect()
-        except Exception:
-            pass
-
-    def press(self, b, duration=0.1):
-        self._press_fn(self.state, b, duration=duration, dry_run=False)
-
-    def hold(self, b, dur):
-        from full_runner import _hold
-        _hold(self.state, b, dur)
-
-    def rstick_down(self, dur):
-        # Already held continuously — no-op for explicit calls
-        pass
+    def stop(self) -> None:
+        """Close the TCP connection to the agent."""
+        self._bridge.close()
 
 
 # ── Real WS client ────────────────────────────────────────────────────────────
@@ -365,12 +318,15 @@ def main():
     from grid import load_grid
 
     p = argparse.ArgumentParser(
-        description="WSL2 clip sweep: walk the character/kart grid, record one clip per item."
+        description="Clip sweep: walk the character/kart grid, record one clip per item. "
+                    "Runs on Windows; delegates controller to the WSL2 controller_agent via TCP."
     )
-    p.add_argument("--mac", required=True,
-                   help="Switch Bluetooth MAC address (e.g. E0:EF:BF:03:74:19)")
     p.add_argument("--capture-ws", default="ws://localhost:8766",
                    help="WebSocket URL of the clip-recorder broadcaster (default: ws://localhost:8766)")
+    p.add_argument("--agent-host", default="127.0.0.1",
+                   help="Host where controller_agent.py is listening (default: 127.0.0.1)")
+    p.add_argument("--agent-port", type=int, default=7878,
+                   help="Port where controller_agent.py is listening (default: 7878)")
     p.add_argument("--start-from", default=None, metavar="SLUG",
                    help="Resume from this character slug (skip earlier cells)")
     p.add_argument("--dry-run", action="store_true",
@@ -380,7 +336,7 @@ def main():
     yaml_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "clip_sweep.yaml")
     g = load_grid(yaml_path)
 
-    print(f"MAC:         {a.mac}")
+    print(f"Agent:       {a.agent_host}:{a.agent_port}")
     print(f"Capture WS:  {a.capture_ws}")
     print(f"Grid YAML:   {yaml_path}")
     print(f"Start from:  {a.start_from or '(beginning)'}")
@@ -391,7 +347,7 @@ def main():
         client = _DryClient()
         runner = SweepRunner(g, ctrl, client, idle_seconds=0.0, settle_seconds=0.0)
     else:
-        ctrl = NxbtController(a.mac)
+        ctrl = BridgeController(host=a.agent_host, port=a.agent_port)
         client = WsClient(a.capture_ws)
         runner = SweepRunner(g, ctrl, client)
 
