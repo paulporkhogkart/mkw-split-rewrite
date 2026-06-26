@@ -974,7 +974,15 @@ def run(args):
     _emitted_splits: dict = {}  # lap → time already sent via split_recorded
 
     clip_done_emitted_for = None  # one-shot guard: item identity of last clip_done sent
-    clip_tell_miss = 0            # consecutive non-want frames since flourish mark
+    clip_tell_miss = 0            # consecutive non-want frames since flourish mark (character path)
+    clip_flourish_drop_t = None   # wall-clock when the kart flourish first collapsed the tell score
+    # The kart flourish does NOT leave kart_select — it holds on the screen (label lingers,
+    # nothing scores higher) while the tell score collapses to ~0. So the seal cue is the
+    # SCORE dropping, not the label changing. Seal once it has stayed low this long (long
+    # enough to have captured the flourish); the sweep then presses B. Tunable — eyeball the
+    # first kart clip and raise CLIP_FLOURISH_HOLD_SECS if the flourish gets clipped.
+    CLIP_FLOURISH_DROP = 0.30       # tell score below this == flourish covering the select screen
+    CLIP_FLOURISH_HOLD_SECS = 3.0   # seal the kart clip after the score stays below DROP this long
 
     _last_heartbeat = 0.0
 
@@ -1136,40 +1144,55 @@ def run(args):
             eff_screen = Screen.UNKNOWN
         selection     = tracker.update(frame, screen, perf.current_score)
 
-        # ── Clip-capture: emit clip_done on tell-drop after flourish ──────────
-        # After the flourish mark, we wait for the select screen to change (the
-        # player navigated away), then seal the clip and broadcast clip_done.
-        # Kart combos have two "__" separators (char__kart__costume); characters
-        # have none or one.  CHARACTER_SELECT and KART_SELECT are the two select
-        # screens that host the grounding we record.
+        # ── Clip-capture: seal the clip + emit clip_done once the flourish is done ──
+        # Kart combos have two "__" separators (char__kart__costume); characters have
+        # none or one. The two flourishes behave DIFFERENTLY:
+        #   • Character flourish ADVANCES character_select -> kart_select, so the screen
+        #     genuinely changes — seal once we've left CHARACTER_SELECT (label-based).
+        #   • Kart flourish HOLDS on kart_select (label lingers because nothing scores
+        #     higher) while the tell score collapses to ~0 — there is no screen change to
+        #     wait for, so seal once the SCORE has stayed below CLIP_FLOURISH_DROP for
+        #     CLIP_FLOURISH_HOLD_SECS. The sweep then presses B to return to kart_select.
         if (clip_mgr is not None
                 and getattr(clip_mgr, "_item", None) is not None
                 and clip_mgr._events.get("flourish_t") is not None
                 and clip_mgr._item != clip_done_emitted_for):
             _item = clip_mgr._item
-            _want_screen = (Screen.KART_SELECT
-                            if isinstance(_item, str) and _item.count("__") >= 2
-                            else Screen.CHARACTER_SELECT)
-            if detector.current_screen is _want_screen:
-                # Still on the expected select screen — re-confirmed, reset miss counter
-                clip_tell_miss = 0
+            _is_kart = isinstance(_item, str) and _item.count("__") >= 2
+            _seal = False
+            if _is_kart:
+                _clean_kart = (detector.current_screen is Screen.KART_SELECT
+                               and perf.current_score >= CLIP_FLOURISH_DROP)
+                if _clean_kart:
+                    clip_flourish_drop_t = None          # still clean kart_select (pre-flourish)
+                else:
+                    if clip_flourish_drop_t is None:
+                        clip_flourish_drop_t = time.monotonic()   # flourish just collapsed the score
+                    elif (time.monotonic() - clip_flourish_drop_t) >= CLIP_FLOURISH_HOLD_SECS:
+                        _seal = True                     # captured enough flourish
             else:
-                clip_tell_miss += 1
-                if clip_tell_miss >= 3:
-                    # 3 consecutive non-want frames: the flourish is done
-                    clip_done_emitted_for = _item
-                    clip_tell_miss = 0
-                    clip_mgr.set_duration_end()
-                    _clip_ev = clip_mgr.end()
-                    if broadcaster is not None:
-                        broadcaster.broadcast(_clip_json.dumps({
-                            "type": "clip_done",
-                            "item": _item,
-                            "events": _clip_ev,
-                        }))
+                if detector.current_screen is Screen.CHARACTER_SELECT:
+                    clip_tell_miss = 0                   # still on character_select — re-confirmed
+                else:
+                    clip_tell_miss += 1
+                    if clip_tell_miss >= 3:              # 3 frames off character_select: flourish done
+                        _seal = True
+            if _seal:
+                clip_done_emitted_for = _item
+                clip_tell_miss = 0
+                clip_flourish_drop_t = None
+                clip_mgr.set_duration_end()
+                _clip_ev = clip_mgr.end()
+                if broadcaster is not None:
+                    broadcaster.broadcast(_clip_json.dumps({
+                        "type": "clip_done",
+                        "item": _item,
+                        "events": _clip_ev,
+                    }))
         else:
-            # Item changed or no active clip — reset debounce counter
+            # Item changed or no active clip — reset debounce state
             clip_tell_miss = 0
+            clip_flourish_drop_t = None
 
         _race_complete = ts.total_time is not None
 
