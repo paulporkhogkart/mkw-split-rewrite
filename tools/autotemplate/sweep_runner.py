@@ -15,13 +15,14 @@ class SweepRunner:
     MAX_VERIFY_ATTEMPTS = 30
 
     def __init__(self, grid, controller, client, *, idle_seconds=10.0, settle_seconds=0.8,
-                 ground_timeout=4.0, lang="en_uk"):
+                 ground_timeout=4.0, ground_stable_reads=3, lang="en_uk"):
         self.grid = grid
         self.ctrl = controller
         self.client = client
         self.idle = idle_seconds
         self.settle = settle_seconds
-        self.ground_timeout = ground_timeout   # how long to POLL for the kart to settle (0 == one read)
+        self.ground_timeout = ground_timeout            # how long to POLL for a parked read (0 == one read)
+        self.ground_stable_reads = ground_stable_reads  # consecutive identical reads == parked (not scrolling)
         self.lang = lang
 
     def _begin(self, item):
@@ -65,80 +66,86 @@ class SweepRunner:
                 "tracker window and relaunch it (or run_sweep.bat) so it has the latest code, then retry.")
         return sel
 
-    def _poll_grounded(self, kart_slug):
-        """Poll the live tracker until the committed kart settles to kart_slug, or
-        ground_timeout elapses. The pipe-swap + spawn-in animation briefly drops the match
-        score (a frozen/transition frame reads ~0.58 even though the kart is right), so a
-        single read straight after the swap is unreliable. Returns (grounded, last_sel)."""
+    def _kart_key(self, sel):
         from grid import to_filename
-        deadline = time.monotonic() + self.ground_timeout
-        sel: dict = {}
-        while True:
-            sel = self._live_selection()
-            if sel.get("_dry") or to_filename(sel.get("kart") or "") == kart_slug:
-                return True, sel
-            if time.monotonic() >= deadline:
-                return False, sel
-            time.sleep(0.15)
+        return to_filename(sel.get("kart") or "")
 
-    def _settled_kart(self) -> str:
-        """The committed kart filename once it settles (polls past the swap/spawn-in dip);
-        '' if nothing settles within ground_timeout."""
+    def _char_key(self, sel):
         from grid import to_filename
+        c = to_filename(sel.get("character") or "")
+        return (c, to_filename(sel.get("costume") or "")) if c else None
+
+    def _poll_until_stable(self, key_fn):
+        """Poll the live tracker until key_fn(sel) is non-empty and UNCHANGED for
+        ground_stable_reads consecutive reads — i.e. the cursor is PARKED on an item, not
+        scrolling past it. An item seen only 'on the way' (one transient read) never
+        satisfies this, so we never ground on something we're scrolling through. Returns
+        the last selection dict (the caller checks whether it's the wanted item)."""
         deadline = time.monotonic() + self.ground_timeout
+        prev, streak, sel = None, 0, {}
         while True:
             sel = self._live_selection()
             if sel.get("_dry"):
-                return ""
-            here = to_filename(sel.get("kart") or "")
-            if here or time.monotonic() >= deadline:
-                return here
+                return sel
+            cur = key_fn(sel)
+            if cur and cur == prev:
+                streak += 1
+                if streak >= self.ground_stable_reads:
+                    return sel                      # parked
+            else:
+                prev, streak = cur, (1 if cur else 0)
+            if time.monotonic() >= deadline:
+                return sel                          # timeout: best-effort last read
             time.sleep(0.15)
 
-    def _recover_to(self, kart_slug):
-        """Read the actually-selected kart from the live tracker (settled), then step the delta."""
-        here = self._settled_kart()
-        if not here:
-            return
-        same_row = {c.slug for c in self.grid.cells("karts")
-                    if c.coord[0] == self.grid.coord_of(kart_slug)[0]}
-        if here not in same_row:
-            return                                  # unknown / other row: next loop's press re-tries
-        for press in self.grid.horizontal_delta(here, kart_slug):
-            self.ctrl.press(press)
+    def _park_on_kart(self, kart_slug):
+        """Closed-loop: step ONE press at a time toward kart_slug, re-reading a PARKED
+        (stable) selection after EACH step — one step per parked read means the cursor
+        can't fly past the target. Raises if it never arrives; no-op in dry-run."""
+        here = ""
+        for _ in range(self.MAX_VERIFY_ATTEMPTS):
+            sel = self._poll_until_stable(self._kart_key)
+            if sel.get("_dry"):
+                return
+            here = self._kart_key(sel)
+            if here == kart_slug:
+                return                              # parked on the target
+            if not here and sel.get("character"):   # a character but no kart -> not on KART_SELECT
+                raise RuntimeError(
+                    f"_park_on_kart({kart_slug!r}): not on KART_SELECT — tracker shows "
+                    f"character={sel.get('character')!r}, kart=None. capture_char must advance (press A) first.")
+            same_row = {c.slug for c in self.grid.cells("karts")
+                        if c.coord[0] == self.grid.coord_of(kart_slug)[0]}
+            if here in same_row:
+                self.ctrl.press(self.grid.horizontal_delta(here, kart_slug)[0])   # ONE step toward it
+            else:
+                self.ctrl.press("DPAD_RIGHT")       # other row / unknown: nudge right
+        raise RuntimeError(f"_park_on_kart: never reached {kart_slug!r} (last parked on {here!r})")
 
     def capture_kart(self, combo_slug, kart_slug, *, first=False):
-        from grid import to_filename
         item = f"{combo_slug}__{kart_slug}"
         if self._exists(item):
             return None
+        # Step off the target and back on (while recording) to capture the spawn-in. The
+        # leftmost kart (first) has no left neighbour, so go right-then-back; others go
+        # left-then-back. Either way the net move is zero — we end on the same kart.
+        off, back = ("DPAD_RIGHT", "DPAD_LEFT") if first else ("DPAD_LEFT", "DPAD_RIGHT")
         attempts = 0
         while True:
-            self._begin(item)
-            if first:                               # Standard Kart: off-and-back for spawn-in
-                self.ctrl.press("DPAD_RIGHT")
-                self.ctrl.press("DPAD_LEFT")
-            else:
-                self.ctrl.press("DPAD_RIGHT")       # swap onto this kart
+            self._park_on_kart(kart_slug)           # park ON the target first (no overshoot)
+            self._begin(item)                       # record from before the spawn-in swap
+            self.ctrl.press(off)                    # step off the target...
+            self.ctrl.press(back)                   # ...and back onto it -> spawn-in captured
             self._mark("swap")
-            grounded, sel = self._poll_grounded(kart_slug)   # wait for the score to settle
-            if grounded:
+            sel = self._poll_until_stable(self._kart_key)   # confirm we're PARKED back on the target
+            if sel.get("_dry") or self._kart_key(sel) == kart_slug:
                 break
             self.client.send({"type": "at_record_clip_abort"})
             attempts += 1
-            # Wrong screen? On KART_SELECT a kart is always detected. If the tracker keeps
-            # reporting a character with no kart, capture_char never advanced — bail loudly
-            # instead of DPAD_RIGHT-ing across the character grid, re-beginning each time.
-            if attempts >= 3 and not sel.get("kart") and sel.get("character"):
-                raise RuntimeError(
-                    f"capture_kart({item!r}): not on KART_SELECT after {attempts} tries — tracker "
-                    f"shows character={sel.get('character')!r}, kart=None. capture_char must press "
-                    "A to advance to kart select first.")
             if attempts >= self.MAX_VERIFY_ATTEMPTS:
                 raise RuntimeError(
                     f"capture_kart: {item!r} never grounded after {self.MAX_VERIFY_ATTEMPTS} attempts")
-            self._recover_to(kart_slug)             # step back; loop re-begins
-        time.sleep(self.idle)                       # spawn-in already rolling; capture idle
+        time.sleep(self.idle)                       # capture idle (spawn-in already recorded)
         self.ctrl.press("A")                        # flourish → kart_select drops
         self._mark("flourish")
         ev = self.client.wait_for("clip_done").get("events")
@@ -188,29 +195,30 @@ class SweepRunner:
             costume = None
 
         from grid import to_filename
+        key = self._char_key if category == "characters" else self._kart_key
+
+        def matches(s):
+            if category == "characters":
+                return (to_filename(s.get("character") or "") == name
+                        and (costume == "base" or to_filename(s.get("costume") or "") == costume))
+            return to_filename(s.get("kart") or "") == name
+
         attempts = 0
         while True:
-            time.sleep(self.settle)   # let the cursor land + tracker detection update BEFORE checking
-            sel = self._live_selection()
-            if sel.get("_dry"):                     # dry-run: no real tracker — treat as grounded
-                break
-            cur_char = to_filename(sel.get("character") or "")
-            cur_cost = to_filename(sel.get("costume") or "")
-            if category == "characters":
-                ok = (cur_char == name) and (costume == "base" or cur_cost == costume)
-            else:
-                ok = to_filename(sel.get("kart") or "") == name
-            if ok:
-                break
+            # Wait for the cursor to PARK (held stable, not scrolling), THEN check — so we
+            # never ground on an item that's only flashing past on the way.
+            sel = self._poll_until_stable(key)
+            if sel.get("_dry") or matches(sel):
+                break                               # parked on the target (dry-run grounds at once)
             if attempts >= self.MAX_VERIFY_ATTEMPTS:
                 raise RuntimeError(
                     f"verify_on: {slug!r} never grounded after {self.MAX_VERIFY_ATTEMPTS} presses "
-                    f"(tracker last saw character={sel.get('character')!r} "
+                    f"(tracker last parked on character={sel.get('character')!r} "
                     f"costume={sel.get('costume')!r} kart={sel.get('kart')!r})"
                 )
             attempts += 1
-            print(f"  [verify_on] {slug!r}: tracker sees character={sel.get('character')!r} "
-                  f"costume={sel.get('costume')!r} kart={sel.get('kart')!r} — re-pressing DPAD_RIGHT")
+            print(f"  [verify_on] {slug!r}: parked on character={sel.get('character')!r} "
+                  f"costume={sel.get('costume')!r} kart={sel.get('kart')!r} — pressing DPAD_RIGHT")
             self.ctrl.press("DPAD_RIGHT")
 
 
