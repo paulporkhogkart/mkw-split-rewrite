@@ -18,7 +18,7 @@ The navigation, controller emulation, and screen-detection grounding already exi
 |---|---|---|
 | nxbt Pro Controller emulation | `tools/autotemplate/controller.py` | as-is |
 | Continuous 120 Hz sender + held right-stick (anti-spin) | `tools/autotemplate/switch_bridge.py` (`sender_thread`, `rstick_down`) | as-is |
-| Grid + per-item navigation (chars, costumes, karts) | `tools/autotemplate/scripts/full_capture.yaml` | grid data reused; flow re-derived |
+| Grid layout (chars, costumes, karts) | `full_capture.yaml` / `prompt.md` ordered cell lists | **parsed into a 2D grid model** (cell→row,col); nav + recovery computed, not path-replayed |
 | Per-item grounding ("did the cursor reach the target?") | `full_runner._retry_if_nav_unchanged`, `at_check_asset_match` | extended: target-ID + keep/discard |
 | Transition detection by tell-score | `full_runner.exit_course_select`, `_check_course_select` | reused; flourish uses "tell drops" |
 | Bluetooth reconnect-with-retry | `full_runner._ctrl_connect_with_retry` | as-is |
@@ -70,13 +70,15 @@ This is the **same process split** as the existing `full_runner` ↔ tracker set
 ### 5.2 Sweep runner (WSL2, new — `tools/autotemplate/sweep_runner.py`)
 
 - **Purpose:** drive the controller through the grid and orchestrate each item's record/ground/keep-or-discard.
-- **Built on:** `full_runner.py` (control helpers, reconnect, skip logic) with a new per-item recording loop. Grid from a new `scripts/clip_sweep.yaml` carrying the same cells as `full_capture.yaml` (single language, no course/replay tail).
+- **Grid model:** the ordered char×costume and kart cell lists (from `full_capture.yaml` / `prompt.md`, trimmed into `scripts/clip_sweep.yaml`) are parsed into a 2D map — each cell → `(row, col)` (rights advance col, downs advance row, trailing blanks end a row). Navigation between any two cells is a **computed D-pad delta, not a replay** of the fixed path; this is what makes recovery cheap (§6.0).
+- **Built on:** `full_runner.py` (control helpers, reconnect, skip logic) with a new per-item recording loop.
 - **Interface:** CLI mirroring `full_runner` (`--mac`, `--capture-ws ws://<win-host>:8766`, `--start-from`, `--dry-run`).
 - **Depends on:** `controller.py`, `switch_bridge.py` (held right-stick), the orchestrator WS.
 
 ### 5.3 Segmentation (post, new — `tools/asset_matte/segment_clip.py`)
 
 - **Purpose:** read `<item>.mkv` + `<item>.events.json`, run `loop_probe` over the idle span, emit the 2–3 sub-clips (spawn-in, idle-loop, flourish) ready for `matte_loop`.
+- **Hero ROI:** `loop_probe`/`extract_loop` crop a hero region to score the loop seam. Char-select uses the existing `HERO_ROI (1075,30,1800,845)`; kart-select sits differently and needs its own crop. Recording is full-frame, so this is a **segmentation-stage constant to measure once**, never a capture concern.
 - **Depends on:** `loop_probe`, `extract_loop`.
 
 ## 6. Capture sequence
@@ -84,6 +86,15 @@ This is the **same process split** as the existing `full_runner` ↔ tracker set
 **Preconditions (operational):** HDR **off** on the Switch; Windows **camera-sharing off** (frame server otherwise steals exclusive DirectShow access); right-stick held down for the whole session (anti-spin); start on HOME with MKW hovered (as `full_capture.yaml`).
 
 **Per language pass (one: `en_uk`):** preamble HOME → Time Trials → character select (reused from `full_capture.yaml`).
+
+### 6.0 Navigation & recovery (grid model)
+
+Every move is a computed D-pad delta over the §5.2 grid model, grounded after it lands. `ground` returns `read_name`, so the runner always knows its *actual* cell, not just "did it move":
+
+- **On target** → proceed (keep the recording, for karts).
+- **Mis-nav** (over/undershoot) → for karts `clip_abort`; then map `read_name → (row, col)`, compute the delta to the target, step there, and re-try. No corner-reset, no path replay.
+
+Horizontal deltas (within a row) are fully exercised by the existing nav. Vertical moves only ever happen at row boundaries in the source path, so arbitrary-column up/down is the one grid behaviour to confirm at live bring-up (§12); until confirmed, cross-row recovery routes via a row end.
 
 ### 6.1 Character×costume item (no spawn-in)
 
@@ -106,7 +117,7 @@ press right (off) ; press left (back on → spawn-in) ; mark swap
 ground karts standard_kart →  matched? keep : (clip_abort, recover, retry)
 sleep idle_seconds ; press A ; mark flourish
 orchestrator detects kart_select drop → clip_done
-press B → kart select ; confirm via is_screen kart_select (recover if not)
+press B → returns to Standard Kart (confirmed) ; is_screen kart_select sanity-check
 
 # Each subsequent kart
 clip_begin kart=<combo>__<kart>
@@ -114,7 +125,7 @@ press right (→ spawn-in onto this kart) ; mark swap
 ground karts <kart> →  matched? keep : (clip_abort, recover, retry)
 sleep idle_seconds ; press A ; mark flourish
 orchestrator detects kart_select drop → clip_done
-press B → kart select ; confirm ; (loop)
+press B → returns to the same kart (confirmed) ; right to next  (loop)
 
 # After the 40th kart: B → character select ; navigate to next cell
 ```
@@ -189,12 +200,13 @@ Matting is separable and comparable-scale (~100 GPU-hr at ~30 s/clip on the RTX 
 
 ## 12. Risks & open questions
 
-1. **B-from-kart-flourish cursor position** — does B from the intermediary return to the *same* kart cell, or reset? Mitigation: `is_screen kart_select` + a target-ID after B; recover if displaced. **Validate live on 2–3 karts before the full run.**
-2. **Intermediary needs >1 B** — `exit_course_select` already loops B until the tell clears; reuse that pattern for the post-flourish return.
-3. **Kart-select hero ROI** — `extract_loop` uses the *character*-select HERO_ROI `(1075,30,1800,845)`; the kart-select render sits differently. **Measure a `KART_HERO_ROI` constant** (recording is full-frame, so this only affects the extraction crop).
-4. **Tee resolution adequacy** — confirm 1080p@15fps grounding reads kart/char names reliably; bump fps/res if marginal.
-5. **40 hr runtime stability** — Bluetooth *will* drop; survivability rests on reconnect-retry + skip-if-exists. Run in resumable chunks.
-6. **Matte scale** — ~100 GPU-hr; out of scope here but plan the batch.
+1. **Tee resolution adequacy** — confirm 1080p@15fps grounding reads kart/char name plates reliably; bump fps/res if marginal. *The one thing that could force an architecture tweak — validate first.*
+2. **Arbitrary-column vertical nav** — the grid model's horizontal moves are proven; confirm down/up preserve the column from mid-row (else cross-row recovery routes via a row end). Cheap to check at bring-up.
+3. **Intermediary needs >1 B** — `exit_course_select` already loops B until the tell clears; reuse that pattern for the post-flourish return.
+4. **40 hr runtime stability** — Bluetooth *will* drop; survivability rests on reconnect-retry + skip-if-exists. Run in resumable chunks.
+5. **Matte scale** — ~100 GPU-hr; out of scope here but plan the batch.
+
+**Resolved:** B from a post-kart-flourish returns to the *same* kart (confirmed) → `is_screen kart_select` sanity only. Kart-select hero ROI is a segmentation-stage constant (§5.3), not a capture risk — recording is full-frame.
 
 ## 13. Testing strategy
 
@@ -210,6 +222,6 @@ Matting is separable and comparable-scale (~100 GPU-hr at ~30 s/clip on the RTX 
 
 1. **Orchestrator** — ffmpeg card-owner + 1080p tee + `detection` on tee + WS server + record-on-command + events.json. Validate tee-grounding reads names (risk 4).
 2. **Sweep runner** — `clip_sweep.yaml` grid (single language) + per-item record/ground/keep-discard loop + reconnect + skip-exists. Dry-run first.
-3. **Live bring-up** — one combo + few karts; resolve risks 1–3 (B-return, kart hero ROI) on real hardware.
+3. **Live bring-up** — one combo + few karts on real hardware; confirm tee-grounding sharpness (risk 1) and arbitrary-column vertical nav (risk 2).
 4. **Segmentation** — `segment_clip.py` + tests.
 5. **Full run** — resumable chunks; then batch matte (separate).
