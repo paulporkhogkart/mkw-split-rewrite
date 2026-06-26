@@ -280,6 +280,12 @@ class EventBroadcaster:
                     "costume":   getattr(st, "costume", None)   or _best("costume", 0.30),
                     "kart":      getattr(st, "kart", None)      or _best("kart", 0.60),
                     "course":    getattr(st, "course", None)    or _best("course", 0.60)}
+        if t == "at_current_screen":
+            # The live detector's screen — reliable for "are we on KART_SELECT / CHARACTER_SELECT"
+            # (committed kart/character persist across screens, so the selection can't tell them apart).
+            det = self._at_detector
+            scr = getattr(getattr(det, "current_screen", None), "name", "") if det is not None else ""
+            return {"type": "current_screen", "screen": scr}
         return {"type": "at_error", "message": f"Unknown autotemplate command: {t!r}"}
 
     def _current_frame(self) -> Optional[np.ndarray]:

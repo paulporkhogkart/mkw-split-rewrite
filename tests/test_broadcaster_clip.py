@@ -49,6 +49,24 @@ def test_mutating_commands_error_without_manager():
         assert b._handle_at_command(cmd)["type"] == "at_error"
 
 
+def test_current_screen():
+    b, _ = make()
+
+    class _Det:
+        class current_screen:
+            name = "KART_SELECT"
+    b._at_detector = _Det()
+    assert b._handle_at_command({"type": "at_current_screen"}) == {
+        "type": "current_screen", "screen": "KART_SELECT"}
+
+
+def test_current_screen_no_detector():
+    b, _ = make()
+    b._at_detector = None
+    assert b._handle_at_command({"type": "at_current_screen"}) == {
+        "type": "current_screen", "screen": ""}
+
+
 def test_exists_false_path():
     b, mgr = make()
     mgr._exists = False

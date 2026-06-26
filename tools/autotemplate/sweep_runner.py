@@ -170,35 +170,43 @@ class SweepRunner:
         self.ctrl.press("A")                        # flourish → kart_select drops
         self._mark("flourish")
         ev = self.client.wait_for("clip_done").get("events")
-        self._return_to_kart_select()               # B back to KART_SELECT — verify it actually lands
+        self._return_to("KART_SELECT", "after kart flourish")   # B back — verify it lands
         return ev
 
-    def _on_kart_select(self, timeout=2.5) -> bool:
-        """True once a kart is detected within `timeout` (= we're on KART_SELECT). Dry-run True."""
+    def _screen(self) -> str:
+        """The live detector's screen name (e.g. 'KART_SELECT'); '__dry__' in dry-run, '' if
+        unavailable. Reliable for telling KART_SELECT from CHARACTER_SELECT / course select —
+        the committed kart/character persist across screens, so the selection can't."""
+        rep = self.client.send({"type": "at_current_screen"})
+        if rep.get("_dry"):
+            return "__dry__"
+        return rep.get("screen", "") if rep.get("type") == "current_screen" else ""
+
+    def _wait_screen(self, name, timeout=3.0) -> bool:
+        """True once the detector reports screen `name` within `timeout`. Dry-run True."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            sel = self._live_selection()
-            if sel.get("_dry") or self._kart_key(sel):
+            scr = self._screen()
+            if scr == "__dry__" or scr == name:
                 return True
             time.sleep(0.1)
         return False
 
-    def _return_to_kart_select(self):
-        """The kart flourish (A) advances OFF kart_select to a post-select screen (course
-        select). Press B until a kart is detected again — a single B can be eaten by the
-        transition animation, so verify the return rather than assuming it."""
+    def _return_to(self, screen_name, what):
+        """Press B until the detector reports `screen_name` — a B can be eaten by a transition
+        animation, so VERIFY the return rather than assuming a single press lands."""
         for _ in range(6):
             self.ctrl.press("B")
-            if self._on_kart_select():
+            if self._wait_screen(screen_name):
                 return
-        raise RuntimeError("_return_to_kart_select: never got back to KART_SELECT after 6 B presses")
+        raise RuntimeError(f"_return_to: never reached {screen_name} after 6 B presses ({what})")
 
     def sweep_karts(self, combo_slug):
         # Anti-spin runs all the time now (the agent holds it on by default), so no per-screen
         # gating here.
         karts = [c.slug for c in self.grid.cells("karts")]
         out = [self.capture_kart(combo_slug, kart) for kart in karts]
-        self.ctrl.press("B")                        # kart select → character select
+        self._return_to("CHARACTER_SELECT", "after kart row")   # B back — verify it lands
         return out
 
     def verify_on(self, slug, category):
@@ -327,6 +335,7 @@ class WsClient:
     _REPLY_TYPES = frozenset({
         "at_done", "at_error", "at_tell_score", "at_asset_score",
         "clip_begun", "marked", "clip_aborted", "exists_result", "current_selection",
+        "current_screen",
     })
 
     def __init__(self, url):
@@ -436,6 +445,7 @@ class _DryClient:
         "at_record_clip_abort":    {"type": "clip_aborted"},
         "at_check_asset_match":    {"type": "at_asset_score", "name_score": 0.95},
         "at_current_selection":    {"type": "current_selection", "_dry": True},
+        "at_current_screen":       {"type": "current_screen", "_dry": True},
     }
 
     def send(self, msg, timeout=15.0):

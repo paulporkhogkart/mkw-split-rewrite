@@ -43,6 +43,8 @@ class FakeClient:
         t = msg["type"]
         if t == "at_current_selection":
             return self._current()
+        if t == "at_current_screen":
+            return {"type": "current_screen", "screen": "KART_SELECT"}
         if t == "at_clip_exists":
             return {"type": "exists_result", "done": False}
         return {"type": {"at_record_clip_begin": "clip_begun",
