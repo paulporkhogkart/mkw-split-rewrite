@@ -234,7 +234,8 @@ def test_antispin_state_holds_down_only_when_active():
     otherwise snapshot() leaves ry untouched."""
     from switch_bridge import BIT_A
     s = _AntiSpinState()
-    # inactive (default): no override — neutral as replay_update set it
+    # inactive: no override — neutral as replay_update set it
+    s.antispin_active = False                     # (on by default now, so disable explicitly)
     s.replay_update(0, 0, 0, 0, 0)
     assert s.snapshot()["ry"] == 0
     # active: force DOWN regardless of replay_update (a press zeros the sticks in state)

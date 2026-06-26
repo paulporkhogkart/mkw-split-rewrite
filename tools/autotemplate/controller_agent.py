@@ -48,10 +48,10 @@ class _AntiSpinState(ControllerState):
     """ControllerState that, while `antispin_active`, holds the R-stick straight DOWN (ry=-127,
     rx=0) and gives a TINY brief left/right nudge every interval (antispin_rx) — a perfectly
     still down-hold let the kart spin resume, so the occasional blip keeps it reading as fresh
-    input without moving the camera. The pilot toggles antispin_active via the 'antispin'
-    command so this is on ONLY while the kart screen is active. Forcing the stick in snapshot()
-    keeps it immune to button presses (which zero it)."""
-    antispin_active = False     # set per-instance by the 'antispin' command
+    input without moving the camera. ON BY DEFAULT (it's harmless off the kart screen and the
+    spin can start any time); the 'antispin' command can still toggle it. Forcing the stick in
+    snapshot() keeps it immune to button presses (which zero it)."""
+    antispin_active = True      # on by default; the 'antispin' command can toggle it
 
     def snapshot(self):
         snap = super().snapshot()

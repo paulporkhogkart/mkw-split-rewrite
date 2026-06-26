@@ -98,11 +98,22 @@ class SweepRunner:
                 return sel                          # timeout: best-effort last read
             time.sleep(0.15)
 
+    def _await_kart_change(self, prev):
+        """After a nav press, wait until the detected kart LEAVES `prev`. Detection lags a press
+        by a few frames, so re-reading immediately would show the stale pre-press kart — we'd
+        think the step didn't land and press AGAIN, overshooting. No-op in dry-run / on timeout."""
+        deadline = time.monotonic() + self.ground_timeout
+        while time.monotonic() < deadline:
+            sel = self._live_selection()
+            if sel.get("_dry") or self._kart_key(sel) != prev:
+                return
+            time.sleep(0.05)
+
     def _park_on_kart(self, kart_slug):
         """Closed-loop: step ONE press at a time toward kart_slug (row first, then column),
-        re-reading a PARKED (stable) selection after EACH step — one step per parked read
-        means the cursor can't fly past the target, and re-reading self-corrects even if a
-        DPAD_DOWN doesn't land on the same column. Raises if it never arrives; dry-run no-op."""
+        WAITING for each step to register (detection lags a press) before re-reading a PARKED
+        selection — so the cursor can't fly past the target, and re-reading self-corrects even
+        if a DPAD_DOWN doesn't land on the same column. Raises if it never arrives; dry-run no-op."""
         trow, tcol = self.grid.coord_of(kart_slug)
         here = ""
         for _ in range(self.MAX_VERIFY_ATTEMPTS):
@@ -119,12 +130,14 @@ class SweepRunner:
             try:
                 hrow, hcol = self.grid.coord_of(here)
             except KeyError:
-                self.ctrl.press("DPAD_RIGHT")       # unrecognised kart name: nudge and re-read
+                self.ctrl.press("DPAD_RIGHT")       # unrecognised kart name: nudge
+                self._await_kart_change(here)
                 continue
             if hrow != trow:
                 self.ctrl.press("DPAD_DOWN" if trow > hrow else "DPAD_UP")
             elif hcol != tcol:
                 self.ctrl.press("DPAD_RIGHT" if tcol > hcol else "DPAD_LEFT")
+            self._await_kart_change(here)           # let the step register before re-reading
         raise RuntimeError(f"_park_on_kart: never reached {kart_slug!r} (last parked on {here!r})")
 
     def capture_kart(self, combo_slug, kart_slug):
@@ -159,22 +172,11 @@ class SweepRunner:
         self.ctrl.press("B")                        # back to kart select (same kart, confirmed)
         return ev
 
-    def _antispin(self, on: bool):
-        """Hold the R-stick DOWN on the agent while `on` (anti-spin), if the controller
-        supports it (the dry/fake controllers may not)."""
-        fn = getattr(self.ctrl, "antispin", None)
-        if fn:
-            fn(on)
-
     def sweep_karts(self, combo_slug):
+        # Anti-spin runs all the time now (the agent holds it on by default), so no per-screen
+        # gating here.
         karts = [c.slug for c in self.grid.cells("karts")]
-        out = []
-        self._antispin(True)                        # hold R-stick DOWN while on the kart screen
-        try:
-            for kart in karts:
-                out.append(self.capture_kart(combo_slug, kart))
-        finally:
-            self._antispin(False)                   # release before leaving the kart screen
+        out = [self.capture_kart(combo_slug, kart) for kart in karts]
         self.ctrl.press("B")                        # kart select → character select
         return out
 
