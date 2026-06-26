@@ -19,6 +19,21 @@ import threading
 import time
 from typing import Optional
 
+from switch_bridge import ControllerState
+
+
+# ── Anti-spin ControllerState subclass ───────────────────────────────────────
+
+class _AntiSpinState(ControllerState):
+    """ControllerState that always reports R-stick DOWN (ry=-127) on the wire,
+    so the kart never spins on kart-select even while _press zeros the sticks
+    to toggle a button bit. The sender reads snapshot(); forcing ry here makes
+    anti-spin immune to button presses."""
+    def snapshot(self):
+        snap = super().snapshot()
+        snap["ry"] = -127
+        return snap
+
 
 # ── ctrl_state_holder ────────────────────────────────────────────────────────
 # A simple container holding (ctrl, state) once the controller is connected,
@@ -168,14 +183,14 @@ def _init_ctrl(holder: _CtrlStateHolder, adapter: str,
         try:
             # ALL nxbt/ProController imports are lazy — this is the only place.
             from controller import ProController
-            from switch_bridge import ControllerState, sender_thread as _sender
+            from switch_bridge import sender_thread as _sender
 
             ctrl  = ProController(adapter=adapter)
             ctrl.connect(reconnect_addr=reconnect_addr)
 
-            state = ControllerState()
-            # Assert R-stick DOWN before the sender starts — anti-spin from frame 1.
-            state.replay_update(0, 0, 0, 0, -127)
+            # _AntiSpinState forces ry=-127 on every snapshot() call,
+            # so the sender always sends R-stick DOWN even during _press.
+            state = _AntiSpinState()
 
             sender_stop = threading.Event()
             threading.Thread(

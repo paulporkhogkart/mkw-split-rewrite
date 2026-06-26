@@ -122,7 +122,7 @@ class ControllerBridge:
             "type": "hold", "button": button, "duration": duration,
         })
 
-    def rstick_down(self, dur: float = 0) -> bool:
+    def rstick_down(self) -> bool:
         """Re-assert R-stick DOWN on the agent (idempotent anti-spin reset)."""
         return self._send_command({"type": "rstick_down"})
 

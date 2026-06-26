@@ -182,9 +182,9 @@ class BridgeController:
     def hold(self, button: str, dur: float = 1.0) -> None:
         self._bridge.hold(button, duration=dur)
 
-    def rstick_down(self, dur: float = 0) -> None:
+    def rstick_down(self) -> None:
         """Re-assert anti-spin on the agent (idempotent)."""
-        self._bridge.rstick_down(dur=dur)
+        self._bridge.rstick_down()
 
     def stop(self) -> None:
         """Close the TCP connection to the agent."""
@@ -279,8 +279,8 @@ class _DryController:
     def hold(self, b, dur):
         print(f"  [DRY] hold {b} {dur}s")
 
-    def rstick_down(self, dur):
-        print(f"  [DRY] rstick_down {dur}s")
+    def rstick_down(self):
+        print("  [DRY] rstick_down")
 
     def stop(self):
         print("  [DRY] controller stop (no-op)")
