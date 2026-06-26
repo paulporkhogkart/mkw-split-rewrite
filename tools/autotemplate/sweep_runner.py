@@ -127,14 +127,15 @@ class SweepRunner:
                 self.ctrl.press("DPAD_RIGHT" if tcol > hcol else "DPAD_LEFT")
         raise RuntimeError(f"_park_on_kart: never reached {kart_slug!r} (last parked on {here!r})")
 
-    def capture_kart(self, combo_slug, kart_slug, *, first=False):
+    def capture_kart(self, combo_slug, kart_slug):
         item = f"{combo_slug}__{kart_slug}"
         if self._exists(item):
             return None
-        # Step off the target and back on (while recording) to capture the spawn-in. The
-        # leftmost kart (first) has no left neighbour, so go right-then-back; others go
-        # left-then-back. Either way the net move is zero — we end on the same kart.
-        off, back = ("DPAD_RIGHT", "DPAD_LEFT") if first else ("DPAD_LEFT", "DPAD_RIGHT")
+        # Step off the target and back on (while recording) to capture the spawn-in. A kart
+        # at column 0 has no left neighbour (DPAD_LEFT could wrap rows), so go right-then-back;
+        # others go left-then-back. Either way the net move is zero — we end on the same kart.
+        _, tcol = self.grid.coord_of(kart_slug)
+        off, back = ("DPAD_RIGHT", "DPAD_LEFT") if tcol == 0 else ("DPAD_LEFT", "DPAD_RIGHT")
         attempts = 0
         while True:
             self._park_on_kart(kart_slug)           # park ON the target first (no overshoot)
@@ -169,8 +170,8 @@ class SweepRunner:
         out = []
         self._antispin(True)                        # hold R-stick DOWN while on the kart screen
         try:
-            for i, kart in enumerate(karts):
-                out.append(self.capture_kart(combo_slug, kart, first=(i == 0)))
+            for kart in karts:
+                out.append(self.capture_kart(combo_slug, kart))
         finally:
             self._antispin(False)                   # release before leaving the kart screen
         self.ctrl.press("B")                        # kart select → character select
