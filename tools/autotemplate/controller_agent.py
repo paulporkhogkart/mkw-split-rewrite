@@ -1,7 +1,7 @@
 """TCP server (WSL2): receives newline-delimited JSON commands, drives the Switch.
 
 Modelled on nxauto's agent.py but drives the controller via switch_bridge.sender_thread
-so the RIGHT STICK is held DOWN continuously at 120 Hz (anti-spin) for the whole session.
+so the RIGHT STICK is PULSED down/neutral at 120 Hz (anti-spin) for the whole session.
 
 Usage (in WSL2, with sudo if nxbt needs root):
     sudo python3 controller_agent.py [--port 7878] [--adapter hci0] [--reconnect-addr AA:BB:CC:DD:EE:FF]
@@ -24,14 +24,21 @@ from switch_bridge import ControllerState
 
 # ── Anti-spin ControllerState subclass ───────────────────────────────────────
 
+# Anti-spin cadence: a CONSTANT R-stick hold did NOT stop the kart-select spin, so we
+# PULSE it instead — alternate full DOWN (ry=-127) and neutral (ry=0). Tune here.
+_ANTISPIN_PERIOD = 0.30   # seconds for one DOWN+neutral cycle
+_ANTISPIN_DUTY   = 0.5    # fraction of each cycle held DOWN (the rest is neutral)
+
+
 class _AntiSpinState(ControllerState):
-    """ControllerState that always reports R-stick DOWN (ry=-127) on the wire,
-    so the kart never spins on kart-select even while _press zeros the sticks
-    to toggle a button bit. The sender reads snapshot(); forcing ry here makes
-    anti-spin immune to button presses."""
+    """ControllerState that PULSES the R-stick between full DOWN (ry=-127) and neutral
+    (ry=0) on each snapshot() call, so the kart never settles into a spin on kart-select.
+    A constant hold didn't stop it; oscillating re-asserts DOWN every cycle. Forcing ry in
+    snapshot() keeps anti-spin immune to button presses (which zero the sticks)."""
     def snapshot(self):
         snap = super().snapshot()
-        snap["ry"] = -127
+        phase = time.monotonic() % _ANTISPIN_PERIOD
+        snap["ry"] = -127 if phase < (_ANTISPIN_PERIOD * _ANTISPIN_DUTY) else 0
         return snap
 
 
