@@ -99,9 +99,11 @@ class SweepRunner:
             time.sleep(0.15)
 
     def _park_on_kart(self, kart_slug):
-        """Closed-loop: step ONE press at a time toward kart_slug, re-reading a PARKED
-        (stable) selection after EACH step — one step per parked read means the cursor
-        can't fly past the target. Raises if it never arrives; no-op in dry-run."""
+        """Closed-loop: step ONE press at a time toward kart_slug (row first, then column),
+        re-reading a PARKED (stable) selection after EACH step — one step per parked read
+        means the cursor can't fly past the target, and re-reading self-corrects even if a
+        DPAD_DOWN doesn't land on the same column. Raises if it never arrives; dry-run no-op."""
+        trow, tcol = self.grid.coord_of(kart_slug)
         here = ""
         for _ in range(self.MAX_VERIFY_ATTEMPTS):
             sel = self._poll_until_stable(self._kart_key)
@@ -114,12 +116,15 @@ class SweepRunner:
                 raise RuntimeError(
                     f"_park_on_kart({kart_slug!r}): not on KART_SELECT — tracker shows "
                     f"character={sel.get('character')!r}, kart=None. capture_char must advance (press A) first.")
-            same_row = {c.slug for c in self.grid.cells("karts")
-                        if c.coord[0] == self.grid.coord_of(kart_slug)[0]}
-            if here in same_row:
-                self.ctrl.press(self.grid.horizontal_delta(here, kart_slug)[0])   # ONE step toward it
-            else:
-                self.ctrl.press("DPAD_RIGHT")       # other row / unknown: nudge right
+            try:
+                hrow, hcol = self.grid.coord_of(here)
+            except KeyError:
+                self.ctrl.press("DPAD_RIGHT")       # unrecognised kart name: nudge and re-read
+                continue
+            if hrow != trow:
+                self.ctrl.press("DPAD_DOWN" if trow > hrow else "DPAD_UP")
+            elif hcol != tcol:
+                self.ctrl.press("DPAD_RIGHT" if tcol > hcol else "DPAD_LEFT")
         raise RuntimeError(f"_park_on_kart: never reached {kart_slug!r} (last parked on {here!r})")
 
     def capture_kart(self, combo_slug, kart_slug, *, first=False):
