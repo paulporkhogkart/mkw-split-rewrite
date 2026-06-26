@@ -66,3 +66,6 @@ old_assets/
 *.mp4
 temp/
 .superpowers/
+
+# Asset capture data (large binary; local only — clips/PNGs written by the sweep)
+captures_sdr/
