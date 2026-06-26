@@ -67,7 +67,5 @@ old_assets/
 temp/
 .superpowers/
 
-# Asset capture data (large binary; local only — source PNGs / clips written by the
-# capture tools; regenerate templates from them locally, keep them out of git)
-captures/
+# Asset capture data (large binary; local only — clips/PNGs written by the sweep)
 captures_sdr/
