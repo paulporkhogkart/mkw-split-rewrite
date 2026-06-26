@@ -119,6 +119,7 @@ class EventBroadcaster:
         self._at_settings                   = None
         self._at_detector                   = None
         self._at_base_path:  str            = ""
+        self._clip_mgr                      = None
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -148,6 +149,9 @@ class EventBroadcaster:
         self._at_settings  = settings
         self._at_detector  = detector
         self._at_base_path = base_path
+
+    def set_clip_manager(self, mgr) -> None:
+        self._clip_mgr = mgr
 
     # ── Outbound broadcast ────────────────────────────────────────────────────
 
@@ -237,6 +241,20 @@ class EventBroadcaster:
             return self._at_check_asset_match(
                 msg.get("category", ""), msg.get("lang", ""),
                 msg.get("name", ""), msg.get("costume"))
+        if t == "at_record_clip_begin":
+            if self._clip_mgr is None:
+                return {"type": "at_error", "message": "clip manager not set"}
+            self._clip_mgr.begin(msg.get("item", ""))
+            return {"type": "clip_begun"}
+        if t == "at_record_clip_mark":
+            self._clip_mgr.mark(msg.get("event", ""))
+            return {"type": "marked"}
+        if t == "at_record_clip_abort":
+            self._clip_mgr.abort()
+            return {"type": "clip_aborted"}
+        if t == "at_clip_exists":
+            return {"type": "exists_result",
+                    "done": bool(self._clip_mgr and self._clip_mgr.exists(msg.get("item", "")))}
         return {"type": "at_error", "message": f"Unknown autotemplate command: {t!r}"}
 
     def _current_frame(self) -> Optional[np.ndarray]:
