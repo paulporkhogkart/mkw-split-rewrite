@@ -71,7 +71,7 @@ class ClipCaptureManager:
 
     def begin(self, item):
         self._stop_pipe()
-        time.sleep(0.3)                       # let the device free before re-opening
+        time.sleep(0.6)                       # let the card fully release before the tee re-opens it
         self._item = item
         self._events = {"item": item, "fps": self.fps,
                         "swap_t": None, "flourish_t": None,
@@ -80,8 +80,31 @@ class ClipCaptureManager:
                       duration=10_000, out_path=self._path(item, "mkv"),
                       enc=self._enc, enc_args=self._enc_args,
                       scale_w=1920, scale_h=1080)
-        self._pipe = self._pf(cmd, quiet=False, w=1920, h=1080)
+        # quiet=True captures the record ffmpeg's stderr — a 4K-encode/device failure is
+        # otherwise silent (the feed just freezes); record_error() surfaces it.
+        self._pipe = self._pf(cmd, quiet=True, w=1920, h=1080)
         self._t0 = self._clock()
+
+    # ── record health (main-loop watchdog) ──────────────────────────────────────
+    def recording(self) -> bool:
+        return self._item is not None
+
+    def record_age(self) -> float:
+        """Seconds since begin() (0 if not recording)."""
+        return (self._clock() - self._t0) if self._item is not None else 0.0
+
+    def record_alive(self) -> bool:
+        """False once the record ffmpeg has exited (encoder/device failure)."""
+        alive = getattr(self._pipe, "alive", None)
+        return bool(alive()) if alive else (self._pipe is not None)
+
+    def record_has_frame(self) -> bool:
+        has = getattr(self._pipe, "has_frame", None)
+        return bool(has()) if has else (self._pipe is not None)
+
+    def record_error(self, n: int = 10) -> str:
+        et = getattr(self._pipe, "error_tail", None)
+        return et(n) if et else ""
 
     def mark(self, event):
         key = {"swap": "swap_t", "flourish": "flourish_t"}.get(event)

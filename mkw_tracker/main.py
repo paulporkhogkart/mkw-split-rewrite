@@ -975,14 +975,16 @@ def run(args):
 
     clip_done_emitted_for = None  # one-shot guard: item identity of last clip_done sent
     clip_tell_miss = 0            # consecutive non-want frames since flourish mark (character path)
-    clip_flourish_drop_t = None   # wall-clock when the kart flourish first collapsed the tell score
-    # The kart flourish does NOT leave kart_select — it holds on the screen (label lingers,
-    # nothing scores higher) while the tell score collapses to ~0. So the seal cue is the
-    # SCORE dropping, not the label changing. Seal once it has stayed low this long (long
-    # enough to have captured the flourish); the sweep then presses B. Tunable — eyeball the
-    # first kart clip and raise CLIP_FLOURISH_HOLD_SECS if the flourish gets clipped.
-    CLIP_FLOURISH_DROP = 0.30       # tell score below this == flourish covering the select screen
-    CLIP_FLOURISH_HOLD_SECS = 3.0   # seal the kart clip after the score stays below DROP this long
+    clip_flourish_mark_t = None   # wall-clock when the kart flourish hold began
+    # Kart flourish: the kart flourish does NOT leave kart_select — it holds on the screen
+    # (label lingers, nothing scores higher) while the tell score collapses to ~0. So we
+    # can't wait for a screen change. Instead: hold a fixed window from the flourish (A
+    # press) to capture it, then seal — the sweep presses B back to kart_select. The held
+    # flourish should drive the kart_select tell below CLIP_FLOURISH_DROP; if it's still
+    # high after the hold, the A press probably didn't register (warn). Both tunable.
+    CLIP_FLOURISH_DROP = 0.40       # kart_select tell below this == flourish covering the screen
+    CLIP_FLOURISH_HOLD_SECS = 4.0   # capture this many seconds of flourish, then seal + B
+    CLIP_RECORD_TIMEOUT_SECS = 6.0  # if the 4K record pipe yields no frame in this long, it failed
 
     _last_heartbeat = 0.0
 
@@ -1040,6 +1042,30 @@ def run(args):
             # frame into current_frame[0].  Normalise to 1920×1080 so all
             # downstream detection ROIs stay valid (preview pipe is 960×540).
             clip_mgr.pump()
+            # Record-pipe watchdog: the 4K tee can fail to open the card or start the
+            # encoder, which silently freezes the feed (pump just keeps the last preview
+            # frame) and hangs the sweep on wait_for(clip_done). Detect a dead/frameless
+            # record pipe, surface the ffmpeg error, and abort so the sweep is unblocked.
+            if clip_mgr.recording() and clip_mgr._item != clip_done_emitted_for:
+                _rec_dead = not clip_mgr.record_alive()
+                _rec_stalled = (not clip_mgr.record_has_frame()
+                                and clip_mgr.record_age() > CLIP_RECORD_TIMEOUT_SECS)
+                if _rec_dead or _rec_stalled:
+                    _bad_item = clip_mgr._item
+                    _why = ("record ffmpeg exited" if _rec_dead
+                            else f"no frame after {CLIP_RECORD_TIMEOUT_SECS:.0f}s")
+                    _err = clip_mgr.record_error() or "(no ffmpeg stderr captured)"
+                    print(f"\n[clip] RECORD FAILED for {_bad_item!r}: {_why}.\n"
+                          "[clip] ffmpeg said:\n    " + _err.replace("\n", "\n    ") +
+                          "\n[clip] -> aborting this clip. Check the 4K60 encoder/capture device; "
+                          "if Windows camera sharing is ON, turn it OFF.\n", flush=True)
+                    clip_mgr.abort()                       # delete the partial file + restart preview
+                    clip_done_emitted_for = _bad_item
+                    clip_flourish_mark_t = None
+                    clip_tell_miss = 0
+                    if broadcaster is not None:
+                        broadcaster.broadcast(_clip_json.dumps({
+                            "type": "clip_done", "item": _bad_item, "error": _why, "events": {}}))
             _clipped = current_frame[0]
             if _clipped is not None:
                 frame = _norm(_clipped)
@@ -1161,15 +1187,17 @@ def run(args):
             _is_kart = isinstance(_item, str) and _item.count("__") >= 2
             _seal = False
             if _is_kart:
-                _clean_kart = (detector.current_screen is Screen.KART_SELECT
-                               and perf.current_score >= CLIP_FLOURISH_DROP)
-                if _clean_kart:
-                    clip_flourish_drop_t = None          # still clean kart_select (pre-flourish)
-                else:
-                    if clip_flourish_drop_t is None:
-                        clip_flourish_drop_t = time.monotonic()   # flourish just collapsed the score
-                    elif (time.monotonic() - clip_flourish_drop_t) >= CLIP_FLOURISH_HOLD_SECS:
-                        _seal = True                     # captured enough flourish
+                # Hold a fixed window from the flourish mark to capture the kart flourish,
+                # then seal — the sweep presses B back to kart_select. The held flourish
+                # suppresses the kart_select tell; warn if it's still high (A likely missed).
+                if clip_flourish_mark_t is None:
+                    clip_flourish_mark_t = time.monotonic()
+                if (time.monotonic() - clip_flourish_mark_t) >= CLIP_FLOURISH_HOLD_SECS:
+                    if perf.current_score >= CLIP_FLOURISH_DROP:
+                        print(f"[clip] note: kart_select score {perf.current_score:.2f} still "
+                              f">= {CLIP_FLOURISH_DROP:.2f} after {CLIP_FLOURISH_HOLD_SECS:.0f}s "
+                              "flourish hold — A press may not have registered", flush=True)
+                    _seal = True
             else:
                 if detector.current_screen is Screen.CHARACTER_SELECT:
                     clip_tell_miss = 0                   # still on character_select — re-confirmed
@@ -1180,7 +1208,7 @@ def run(args):
             if _seal:
                 clip_done_emitted_for = _item
                 clip_tell_miss = 0
-                clip_flourish_drop_t = None
+                clip_flourish_mark_t = None
                 clip_mgr.set_duration_end()
                 _clip_ev = clip_mgr.end()
                 if broadcaster is not None:
@@ -1192,7 +1220,7 @@ def run(args):
         else:
             # Item changed or no active clip — reset debounce state
             clip_tell_miss = 0
-            clip_flourish_drop_t = None
+            clip_flourish_mark_t = None
 
         _race_complete = ts.total_time is not None
 
