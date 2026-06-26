@@ -170,8 +170,28 @@ class SweepRunner:
         self.ctrl.press("A")                        # flourish → kart_select drops
         self._mark("flourish")
         ev = self.client.wait_for("clip_done").get("events")
-        self.ctrl.press("B")                        # back to kart select (same kart, confirmed)
+        self._return_to_kart_select()               # B back to KART_SELECT — verify it actually lands
         return ev
+
+    def _on_kart_select(self, timeout=2.5) -> bool:
+        """True once a kart is detected within `timeout` (= we're on KART_SELECT). Dry-run True."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            sel = self._live_selection()
+            if sel.get("_dry") or self._kart_key(sel):
+                return True
+            time.sleep(0.1)
+        return False
+
+    def _return_to_kart_select(self):
+        """The kart flourish (A) advances OFF kart_select to a post-select screen (course
+        select). Press B until a kart is detected again — a single B can be eaten by the
+        transition animation, so verify the return rather than assuming it."""
+        for _ in range(6):
+            self.ctrl.press("B")
+            if self._on_kart_select():
+                return
+        raise RuntimeError("_return_to_kart_select: never got back to KART_SELECT after 6 B presses")
 
     def sweep_karts(self, combo_slug):
         # Anti-spin runs all the time now (the agent holds it on by default), so no per-screen
