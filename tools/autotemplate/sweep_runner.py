@@ -32,11 +32,16 @@ class SweepRunner:
         return self.client.send({"type": "at_clip_exists", "item": item}).get("done", False)
 
     def capture_char(self, slug):
+        # ALWAYS press A to advance CHARACTER_SELECT -> KART_SELECT, even when the clip
+        # already exists — otherwise sweep_karts runs on the character screen, DPAD_RIGHT
+        # just slides the character cursor (Mario->Luigi->...), and grounding never finds
+        # a kart (it re-begins the clip forever).
         if self._exists(slug):
+            self.ctrl.press("A")                 # already captured; still advance to KART_SELECT
             return None
         self._begin(slug)
         time.sleep(self.idle)                    # settled idle (no spawn-in)
-        self.ctrl.press("A")                     # flourish → character_select drops
+        self.ctrl.press("A")                     # flourish → advance to KART_SELECT
         self._mark("flourish")
         return self.client.wait_for("clip_done").get("events")
 
@@ -80,6 +85,7 @@ class SweepRunner:
             self.ctrl.press(press)
 
     def capture_kart(self, combo_slug, kart_slug, *, first=False):
+        from grid import to_filename
         item = f"{combo_slug}__{kart_slug}"
         if self._exists(item):
             return None
@@ -93,10 +99,19 @@ class SweepRunner:
                 self.ctrl.press("DPAD_RIGHT")       # swap onto this kart
             self._mark("swap")
             time.sleep(self.settle)                 # name plate settles
-            if self._ground_kart(kart_slug):
+            sel = self._live_selection()
+            if sel.get("_dry") or to_filename(sel.get("kart") or "") == kart_slug:
                 break
             self.client.send({"type": "at_record_clip_abort"})
             attempts += 1
+            # Wrong screen? On KART_SELECT a kart is always detected. If the tracker keeps
+            # reporting a character with no kart, capture_char never advanced — bail loudly
+            # instead of DPAD_RIGHT-ing across the character grid, re-beginning each time.
+            if attempts >= 3 and not sel.get("kart") and sel.get("character"):
+                raise RuntimeError(
+                    f"capture_kart({item!r}): not on KART_SELECT after {attempts} tries — tracker "
+                    f"shows character={sel.get('character')!r}, kart=None. capture_char must press "
+                    "A to advance to kart select first.")
             if attempts >= self.MAX_VERIFY_ATTEMPTS:
                 raise RuntimeError(
                     f"capture_kart: {item!r} never grounded after {self.MAX_VERIFY_ATTEMPTS} attempts")
