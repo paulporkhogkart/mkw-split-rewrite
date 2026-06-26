@@ -27,7 +27,7 @@ def _find_idle_loop(mkv_path, roi, fps, idle_end_t):
     loop_start is always 0 within the idle span (seam-search refinement out of scope).
     """
     f_eff, F = loop_probe.load_features(mkv_path, roi_1080=roi, settle=0.0,
-                                        max_seconds=idle_end_t)
+                                        max_seconds=idle_end_t, progress=False)
     lags, scores = loop_probe.autocorr_by_lag(F, max(1, int(0.5 * f_eff)), int(8 * f_eff))
     best, _conf, _top = loop_probe.find_period(lags, scores)
     loop_len = best or int(1.3 * f_eff)
@@ -37,20 +37,24 @@ def _find_idle_loop(mkv_path, roi, fps, idle_end_t):
 def _write_span(mkv_path, start, end, out_path):
     """Extract frames [start, end) from mkv_path and write them to out_path (mp4)."""
     cap = cv2.VideoCapture(mkv_path)
-    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = cap.get(cv2.CAP_PROP_FPS) or 60.0
-    vw = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
-    i = 0
-    while True:
-        ok, fr = cap.read()
-        if not ok:
-            break
-        if start <= i < end:
-            vw.write(fr)
-        i += 1
-    cap.release()
-    vw.release()
+    try:
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = cap.get(cv2.CAP_PROP_FPS) or 60.0
+        vw = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+        try:
+            i = 0
+            while True:
+                ok, fr = cap.read()
+                if not ok:
+                    break
+                if start <= i < end:
+                    vw.write(fr)
+                i += 1
+        finally:
+            vw.release()
+    finally:
+        cap.release()
     return out_path
 
 
@@ -67,7 +71,8 @@ def segment_file(mkv_path, events_path, out_dir):
         dict mapping segment names ("spawn_in", "idle_loop", "flourish") to
         absolute file paths of the written mp4 sub-clips.
     """
-    ev = json.loads(open(events_path, encoding="utf-8").read())
+    with open(events_path, encoding="utf-8") as f:
+        ev = json.load(f)
     item = ev.get("item") or os.path.splitext(os.path.basename(mkv_path))[0]
     roi = KART_HERO_ROI if _is_kart(item) else HERO_ROI
     ls, ll = _find_idle_loop(mkv_path, roi, ev["fps"], ev["flourish_t"])

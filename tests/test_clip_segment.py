@@ -40,3 +40,27 @@ def test_character_has_no_spawn_in():
     assert "spawn_in" not in spans
     assert spans["idle_loop"] == (60, 140)
     assert spans["flourish"] == (600, 720)
+
+
+def test_segment_file_character_path(tmp_path):
+    import json, numpy as np, cv2, os
+    # 4s @ 30fps synthetic clip for a character item (one __ → _is_kart False)
+    path = tmp_path / "mario__base.avi"
+    vw = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"MJPG"), 30, (320, 180))
+    assert vw.isOpened(), "VideoWriter failed to open — codec or container mismatch"
+    for i in range(120):
+        f = np.zeros((180, 320, 3), np.uint8)
+        x = (i * 8) % 300
+        cv2.rectangle(f, (x, 40), (x + 20, 140), (200, 200, 200), -1)
+        vw.write(f)
+    vw.release()
+    ev = {"fps": 30, "swap_t": None, "flourish_t": 3.0,
+          "flourish_end_t": 3.6, "duration_t": 3.6, "item": "mario__base"}
+    (tmp_path / "ev.json").write_text(json.dumps(ev))
+    from clip_segment import segment_file
+    out = segment_file(str(path), str(tmp_path / "ev.json"), str(tmp_path))
+    assert "spawn_in" not in out, "character path must not produce spawn_in"
+    assert "idle_loop" in out
+    assert "flourish" in out
+    for p in out.values():
+        assert os.path.exists(p)
