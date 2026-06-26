@@ -120,6 +120,12 @@ class ClipCaptureManager:
         """Seconds since begin() (0 if not recording)."""
         return (self._clock() - self._t0) if self._item is not None else 0.0
 
+    def pipe_seq(self) -> int:
+        """Frame counter of whatever pipe is active (preview OR record); -1 if unknown.
+        A frozen value means the active ffmpeg has stopped delivering frames."""
+        fn = getattr(self._pipe, "frames_seen", None)
+        return fn() if fn else -1
+
     def record_alive(self) -> bool:
         """False once the record ffmpeg has exited (encoder/device failure)."""
         alive = getattr(self._pipe, "alive", None)

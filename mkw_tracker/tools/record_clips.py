@@ -174,6 +174,7 @@ class FramePipe:
         self._n = w * h * 3
         self._buf = np.zeros((h, w, 3), np.uint8)
         self._have = False
+        self._seq = 0                 # increments per stored frame; lets callers spot a stalled pipe
         self._lock = threading.Lock()
         self._run = True
         self._errtail: "collections.deque" = collections.deque(maxlen=40)
@@ -213,6 +214,11 @@ class FramePipe:
             with self._lock:
                 self._buf[:] = frame
                 self._have = True
+                self._seq += 1
+
+    def frames_seen(self) -> int:
+        """Total frames delivered so far (stalls when the pipe stops producing)."""
+        return self._seq
 
     def latest(self) -> Optional[np.ndarray]:
         with self._lock:

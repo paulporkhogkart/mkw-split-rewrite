@@ -984,7 +984,9 @@ def run(args):
     # high after the hold, the A press probably didn't register (warn). Both tunable.
     CLIP_FLOURISH_DROP = 0.40       # kart_select tell below this == flourish covering the screen
     CLIP_FLOURISH_HOLD_SECS = 4.0   # capture this many seconds of flourish, then seal + B
-    CLIP_RECORD_TIMEOUT_SECS = 6.0  # if the 4K record pipe yields no frame in this long, it failed
+    CLIP_FEED_STALL_SECS = 3.0      # active pipe (preview OR record) yields no new frame this long == stalled
+    _clip_pipe_seq = -2             # last seen pipe frame counter (feed-stall watchdog)
+    _clip_pipe_seq_t = time.monotonic()   # wall-clock when that counter last advanced
 
     _last_heartbeat = 0.0
 
@@ -993,9 +995,32 @@ def run(args):
     _last_mm_emit        = 0.0
     _prev_mm_payload_key = None          # (cx, cy, radius, track_state) dedup tuple
 
+    # ── Stall watchdog (clip-capture only): if the main loop stops progressing,
+    # dump every thread's stack so the exact blocking line is visible. ───────────
+    _loop_hb = [time.monotonic()]
+    if clip_mgr is not None:
+        import faulthandler as _fh
+        import threading as _thr
+
+        def _stall_watchdog():
+            dumped = False
+            while True:
+                time.sleep(1.0)
+                stalled = time.monotonic() - _loop_hb[0]
+                if stalled > 3.0 and not dumped:
+                    print(f"\n[stall] main loop stuck {stalled:.1f}s — thread stacks follow "
+                          "(top of the main-thread stack = the frozen line):\n", flush=True)
+                    _fh.dump_traceback(all_threads=True)
+                    dumped = True
+                elif stalled < 1.0:
+                    dumped = False     # recovered — re-arm for the next stall
+
+        _thr.Thread(target=_stall_watchdog, daemon=True).start()
+
     # ── Main capture loop ────────────────────────────────────────────────────
     frame = None
     while True:
+        _loop_hb[0] = time.monotonic()
         # ── Camera-paused state (setup wizard holds the device) ───────────────
         while cam_paused[0]:
             time.sleep(0.02)
@@ -1042,30 +1067,39 @@ def run(args):
             # frame into current_frame[0].  Normalise to 1920×1080 so all
             # downstream detection ROIs stay valid (preview pipe is 960×540).
             clip_mgr.pump()
-            # Record-pipe watchdog: the 4K tee can fail to open the card or start the
-            # encoder, which silently freezes the feed (pump just keeps the last preview
-            # frame) and hangs the sweep on wait_for(clip_done). Detect a dead/frameless
-            # record pipe, surface the ffmpeg error, and abort so the sweep is unblocked.
-            if clip_mgr.recording() and clip_mgr._item != clip_done_emitted_for:
-                _rec_dead = not clip_mgr.record_alive()
-                _rec_stalled = (not clip_mgr.record_has_frame()
-                                and clip_mgr.record_age() > CLIP_RECORD_TIMEOUT_SECS)
-                if _rec_dead or _rec_stalled:
+            # Feed watchdog: detect when the ACTIVE pipe (the preview while piloting, or the
+            # 4K record pipe during a clip) STOPS delivering new frames — that is the frozen
+            # feed (the loop keeps spinning on a stale frame, so the loop-stall watchdog would
+            # not catch it). Surface the ffmpeg error, then recover: restart the preview while
+            # piloting, or abort the clip + unblock the sweep while recording.
+            _seq = clip_mgr.pipe_seq()
+            if _seq != _clip_pipe_seq:
+                _clip_pipe_seq = _seq
+                _clip_pipe_seq_t = time.monotonic()
+            elif _seq >= 0 and (time.monotonic() - _clip_pipe_seq_t) > CLIP_FEED_STALL_SECS:
+                _rec = clip_mgr.recording()
+                _alive = clip_mgr.record_alive()
+                _err = clip_mgr.record_error() or "(no ffmpeg stderr captured)"
+                _src = f"recording {clip_mgr._item!r}" if _rec else "preview"
+                print(f"\n[clip] FEED STALLED ({_src}): no new frame in "
+                      f"{time.monotonic() - _clip_pipe_seq_t:.1f}s; ffmpeg "
+                      f"{'alive' if _alive else 'EXITED'}.\n[clip] ffmpeg said:\n    "
+                      + _err.replace("\n", "\n    ") + "\n", flush=True)
+                if _rec and clip_mgr._item != clip_done_emitted_for:
                     _bad_item = clip_mgr._item
-                    _why = ("record ffmpeg exited" if _rec_dead
-                            else f"no frame after {CLIP_RECORD_TIMEOUT_SECS:.0f}s")
-                    _err = clip_mgr.record_error() or "(no ffmpeg stderr captured)"
-                    print(f"\n[clip] RECORD FAILED for {_bad_item!r}: {_why}.\n"
-                          "[clip] ffmpeg said:\n    " + _err.replace("\n", "\n    ") +
-                          "\n[clip] -> aborting this clip. Check the 4K60 encoder/capture device; "
-                          "if Windows camera sharing is ON, turn it OFF.\n", flush=True)
                     clip_mgr.abort()                       # delete the partial file + restart preview
                     clip_done_emitted_for = _bad_item
                     clip_flourish_mark_t = None
                     clip_tell_miss = 0
                     if broadcaster is not None:
                         broadcaster.broadcast(_clip_json.dumps({
-                            "type": "clip_done", "item": _bad_item, "error": _why, "events": {}}))
+                            "type": "clip_done", "item": _bad_item,
+                            "error": "feed stalled", "events": {}}))
+                    print("[clip] -> aborted the clip; sweep unblocked.", flush=True)
+                else:
+                    clip_mgr.start_preview()               # piloting: bring the live feed back
+                    print("[clip] -> restarted preview (check ffmpeg/camera-sharing above).", flush=True)
+                _clip_pipe_seq_t = time.monotonic()        # re-arm
             _clipped = current_frame[0]
             if _clipped is not None:
                 frame = _norm(_clipped)
