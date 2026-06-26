@@ -30,6 +30,13 @@ _ANTISPIN_PERIOD = 0.30   # seconds for one DOWN+neutral cycle
 _ANTISPIN_DUTY   = 0.5    # fraction of each cycle held DOWN (the rest is neutral)
 
 
+def antispin_ry(t: float) -> int:
+    """R-stick Y for the anti-spin pulse at time `t` (seconds): full DOWN (-127) for the
+    first DUTY of each PERIOD, neutral (0) after. Pure + deterministic so it's testable."""
+    phase = t % _ANTISPIN_PERIOD
+    return -127 if phase < (_ANTISPIN_PERIOD * _ANTISPIN_DUTY) else 0
+
+
 class _AntiSpinState(ControllerState):
     """ControllerState that PULSES the R-stick between full DOWN (ry=-127) and neutral
     (ry=0) on each snapshot() call, so the kart never settles into a spin on kart-select.
@@ -37,8 +44,7 @@ class _AntiSpinState(ControllerState):
     snapshot() keeps anti-spin immune to button presses (which zero the sticks)."""
     def snapshot(self):
         snap = super().snapshot()
-        phase = time.monotonic() % _ANTISPIN_PERIOD
-        snap["ry"] = -127 if phase < (_ANTISPIN_PERIOD * _ANTISPIN_DUTY) else 0
+        snap["ry"] = antispin_ry(time.monotonic())
         return snap
 
 

@@ -229,15 +229,26 @@ def test_missing_type_returns_error():
 
 # ── _AntiSpinState ────────────────────────────────────────────────────────────
 
-def test_antispin_state_forces_rstick_down_even_after_button_update():
-    """_AntiSpinState.snapshot() must always return ry=-127 regardless of what
-    replay_update writes — so _press zeroing the sticks never reaches the wire."""
+def test_antispin_ry_pulses_down_then_neutral():
+    """antispin_ry pulses: full DOWN for the first DUTY of each PERIOD, neutral after."""
+    from controller_agent import antispin_ry, _ANTISPIN_PERIOD, _ANTISPIN_DUTY
+    down_end = _ANTISPIN_PERIOD * _ANTISPIN_DUTY
+    assert antispin_ry(0.0) == -127                       # start of cycle: DOWN
+    assert antispin_ry(down_end - 1e-6) == -127           # just before the switch: DOWN
+    assert antispin_ry(down_end + 1e-6) == 0              # after the switch: neutral
+    assert antispin_ry(_ANTISPIN_PERIOD) == -127          # next cycle: DOWN again
+
+
+def test_antispin_state_forces_pulse_over_replay_and_passes_buttons():
+    """_AntiSpinState.snapshot() forces the anti-spin pulse value regardless of what
+    replay_update writes (so _press zeroing the sticks never reaches the wire), while
+    buttons still go through."""
     from switch_bridge import BIT_A
     s = _AntiSpinState()
-    s.replay_update(0, 0, 0, 0, 0)                # neutral (e.g. release)
-    assert s.snapshot()["ry"] == -127
-    s.replay_update(BIT_A, 0, 0, 0, 0)            # a press zeros the sticks in state
-    assert s.snapshot()["ry"] == -127             # but the wire still has R-stick DOWN
+    s.replay_update(0, 0, 0, 0, 99)              # replay writes a sentinel ry the pulse never uses
+    assert s.snapshot()["ry"] in (-127, 0)        # snapshot overrides it with the pulse value
+    s.replay_update(BIT_A, 0, 0, 0, 99)          # a press zeros the sticks in state
+    assert s.snapshot()["ry"] in (-127, 0)        # wire still carries the anti-spin pulse, not 99
     assert s.snapshot()["buttons"] == BIT_A        # button still goes through
 
 
