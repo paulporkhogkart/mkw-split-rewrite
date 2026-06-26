@@ -263,13 +263,23 @@ class EventBroadcaster:
                     "done": bool(self._clip_mgr and self._clip_mgr.exists(msg.get("item", "")))}
         if t == "at_current_selection":
             # Ground off the LIVE SelectionTracker (the detection the overlay shows),
-            # not a parallel re-match.  Returns the current accepted display names.
-            st = getattr(self._at_tracker, "state", None)
+            # not a parallel re-match.  Prefer the committed state; fall back to the top
+            # score-map candidate (the exact list the overlay/readout displays).
+            tr = self._at_tracker
+            st = getattr(tr, "state", None)
+            maps = getattr(tr, "score_maps", None) or {}
+
+            def _best(cat, floor):
+                cands = maps.get(cat) or []
+                if cands and cands[0].get("score", 0.0) >= floor:
+                    return cands[0].get("name")
+                return None
+
             return {"type": "current_selection",
-                    "character": getattr(st, "character", None),
-                    "costume":   getattr(st, "costume", None),
-                    "kart":      getattr(st, "kart", None),
-                    "course":    getattr(st, "course", None)}
+                    "character": getattr(st, "character", None) or _best("char", 0.55),
+                    "costume":   getattr(st, "costume", None)   or _best("costume", 0.30),
+                    "kart":      getattr(st, "kart", None)      or _best("kart", 0.60),
+                    "course":    getattr(st, "course", None)    or _best("course", 0.60)}
         return {"type": "at_error", "message": f"Unknown autotemplate command: {t!r}"}
 
     def _current_frame(self) -> Optional[np.ndarray]:

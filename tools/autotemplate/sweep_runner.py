@@ -44,9 +44,23 @@ class SweepRunner:
     # Kart capture
     # ------------------------------------------------------------------
 
+    def _live_selection(self) -> dict:
+        """Current detected character/costume/kart from the live tracker. Raises a clear
+        error if the tracker is an OLD build without the at_current_selection handler,
+        so we don't silently read None and stampede DPAD_RIGHT."""
+        sel = self.client.send({"type": "at_current_selection"})
+        if sel.get("_dry"):
+            return sel
+        if sel.get("type") != "current_selection":
+            raise RuntimeError(
+                f"Tracker did not answer at_current_selection (got {sel.get('type')!r}: "
+                f"{sel.get('message', '')}). You're running an OLD tracker build — close the "
+                "tracker window and relaunch it (or run_sweep.bat) so it has the latest code, then retry.")
+        return sel
+
     def _ground_kart(self, kart_slug) -> bool:
         from grid import to_filename
-        sel = self.client.send({"type": "at_current_selection"})
+        sel = self._live_selection()
         if sel.get("_dry"):
             return True
         return to_filename(sel.get("kart") or "") == kart_slug
@@ -54,7 +68,7 @@ class SweepRunner:
     def _recover_to(self, kart_slug):
         """Read the actually-selected kart from the live tracker, then step the delta."""
         from grid import to_filename
-        sel = self.client.send({"type": "at_current_selection"})
+        sel = self._live_selection()
         if sel.get("_dry"):
             return
         here = to_filename(sel.get("kart") or "")
@@ -129,7 +143,7 @@ class SweepRunner:
         attempts = 0
         while True:
             time.sleep(self.settle)   # let the cursor land + tracker detection update BEFORE checking
-            sel = self.client.send({"type": "at_current_selection"})
+            sel = self._live_selection()
             if sel.get("_dry"):                     # dry-run: no real tracker — treat as grounded
                 break
             cur_char = to_filename(sel.get("character") or "")
