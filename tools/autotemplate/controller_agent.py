@@ -27,7 +27,7 @@ from switch_bridge import ControllerState
 # Anti-spin R-stick blip: hold straight DOWN (rx=0), with a TINY, BRIEF nudge left/right
 # every BLIP_INTERVAL — just a fresh-input blip to stop the spin without moving the camera.
 # The nudge lasts only BLIP_DURATION, then snaps back to straight-down. Tune here.
-_ANTISPIN_BLIP          = 1      # rx magnitude of the nudge (out of 127); "teeny tiny"
+_ANTISPIN_BLIP          = 2      # rx magnitude of the nudge (out of 127); "teeny tiny"
 _ANTISPIN_BLIP_INTERVAL = 0.5    # seconds between nudges (alternating left / right)
 _ANTISPIN_BLIP_DURATION = 0.04   # how long each nudge lasts before returning to straight-down
 

@@ -131,17 +131,18 @@ class SweepRunner:
         item = f"{combo_slug}__{kart_slug}"
         if self._exists(item):
             return None
-        # Step off the target and back on (while recording) to capture the spawn-in. A kart
-        # at column 0 has no left neighbour (DPAD_LEFT could wrap rows), so go right-then-back;
-        # others go left-then-back. Either way the net move is zero — we end on the same kart.
+        # Step OFF the target to a neighbour, then CLOSED-LOOP back onto it (while recording) so
+        # the return lands ON the target and captures its spawn-in. The back is a re-park, not a
+        # single blind press, so a step eaten by the neighbour's spawn-in animation can't strand
+        # us on the wrong kart. A column-0 kart has no left neighbour, so step right.
         _, tcol = self.grid.coord_of(kart_slug)
-        off, back = ("DPAD_RIGHT", "DPAD_LEFT") if tcol == 0 else ("DPAD_LEFT", "DPAD_RIGHT")
+        off = "DPAD_RIGHT" if tcol == 0 else "DPAD_LEFT"
         attempts = 0
         while True:
-            self._park_on_kart(kart_slug)           # park ON the target first (no overshoot)
+            self._park_on_kart(kart_slug)           # park ON the target first
             self._begin(item)                       # record from before the spawn-in swap
-            self.ctrl.press(off)                    # step off the target...
-            self.ctrl.press(back)                   # ...and back onto it -> spawn-in captured
+            self.ctrl.press(off)                    # step OFF to a neighbour...
+            self._park_on_kart(kart_slug)           # ...closed-loop BACK onto the target -> spawn-in
             self._mark("swap")
             sel = self._poll_until_stable(self._kart_key)   # confirm we're PARKED back on the target
             if sel.get("_dry") or self._kart_key(sel) == kart_slug:

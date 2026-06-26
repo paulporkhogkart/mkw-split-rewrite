@@ -87,9 +87,7 @@ class ClipCaptureManager:
         # and a failure prints the real ffmpeg error instead of silently freezing the feed.
         for attempt, gap in enumerate((0.6, 1.2), start=1):
             time.sleep(gap)
-            # graceful=True: stop() sends 'q' so ffmpeg finalises the real duration (a hard
-            # kill leaves the -t 10000 cap = 2:46:40 as the file's duration).
-            self._pipe = self._pf(cmd, quiet=True, w=1920, h=1080, graceful=True)
+            self._pipe = self._pf(cmd, quiet=True, w=1920, h=1080)
             self._t0 = self._clock()
             has = getattr(self._pipe, "has_frame", None)
             if has is None:
@@ -155,11 +153,37 @@ class ClipCaptureManager:
 
     def end(self) -> dict:
         ev = dict(self._events)
-        with open(self._path(self._item, "events.json"), "w", encoding="utf-8") as f:
+        item = self._item
+        with open(self._path(item, "events.json"), "w", encoding="utf-8") as f:
             json.dump(ev, f, indent=2)
         self.start_preview()                  # stops the record pipe, reopens preview
+        self._remux_async(self._path(item, "mkv"))   # rewrite the real duration in the background
         self._item = None
         return ev
+
+    def _remux_async(self, path):
+        """The record ffmpeg is killed (not finalised), so the .mkv carries the -t cap as its
+        duration (10000s = 2:46:40). Re-mux (stream-copy, no re-encode) in a daemon thread to
+        rewrite the container with the real duration computed from the packets. Best-effort."""
+        if not os.path.exists(path):
+            return
+        import subprocess as _sp
+        import threading as _th
+
+        def _run():
+            tmp = path + ".fix.mkv"
+            try:
+                r = _sp.run([self._ffmpeg, "-hide_banner", "-loglevel", "error",
+                             "-fflags", "+genpts", "-i", path, "-c", "copy", "-y", tmp],
+                            capture_output=True)
+                if r.returncode == 0 and os.path.exists(tmp) and os.path.getsize(tmp) > 0:
+                    os.replace(tmp, path)
+                elif os.path.exists(tmp):
+                    os.remove(tmp)
+            except Exception:
+                pass
+
+        _th.Thread(target=_run, daemon=True).start()
 
     def abort(self):
         item = self._item
