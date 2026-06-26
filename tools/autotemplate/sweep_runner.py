@@ -11,7 +11,7 @@ import time
 
 
 class SweepRunner:
-    GROUND_THRESHOLD = 0.85
+    GROUND_THRESHOLD = 0.70   # edge-method floor (SelectionTracker SELECTION_KART_FLOOR); tune live at bring-up
     MAX_VERIFY_ATTEMPTS = 30
 
     def __init__(self, grid, controller, client, *, idle_seconds=10.0, settle_seconds=0.8, lang="en_uk"):
@@ -117,6 +117,11 @@ class SweepRunner:
             name = slug
             costume = None
 
+        # edge-method floor (SelectionTracker SELECTION_CHAR_FLOOR); tune live at bring-up
+        name_floor = 0.60 if category == "characters" else self.GROUND_THRESHOLD
+        # edge-method floor (SelectionTracker SELECTION_COSTUME_RECONFIRM_THRESHOLD); tune live at bring-up
+        costume_floor = 0.50
+
         attempts = 0
         while True:
             cmd = {
@@ -131,9 +136,9 @@ class SweepRunner:
             name_score = r.get("name_score", 0.0)
             costume_score = r.get("costume_score")
             if category == "characters" and costume != "base" and costume_score is not None:
-                ok = name_score >= self.GROUND_THRESHOLD and costume_score >= 0.65
+                ok = name_score >= name_floor and costume_score >= costume_floor
             else:
-                ok = name_score >= self.GROUND_THRESHOLD
+                ok = name_score >= name_floor
             if ok:
                 break
             if attempts >= self.MAX_VERIFY_ATTEMPTS:
@@ -162,9 +167,11 @@ class NxbtController:
         from switch_bridge import ControllerState, sender_thread
         from full_runner import _press as _press_fn
         self._press_fn = _press_fn
+        self._threading = threading
         self.mac = mac
+        self.adapter = adapter
         self.ctrl = ProController(adapter=adapter)
-        self.ctrl.connect(reconnect_addr=mac)
+        self._connect_with_retry()
         self.state = ControllerState()
         # Hold right-stick down continuously for anti-spin before sender starts
         self.state.replay_update(0, 0, 0, 0, -127)
@@ -174,6 +181,50 @@ class NxbtController:
             args=(self.ctrl, self.state, self._stop),
             daemon=True,
         ).start()
+
+    def _connect_with_retry(self):
+        """Connect to the Switch with retry — mirrors full_runner._ctrl_connect_with_retry.
+
+        Calls self.ctrl.connect() in a thread; if it hasn't succeeded in ~10 s,
+        abandon it, create a FRESH ProController, and retry — looping until connected.
+        """
+        from controller import ProController
+        threading = self._threading
+        attempt = 0
+        while True:
+            attempt += 1
+            print(f"  Connecting to Switch ({self.mac}) — attempt {attempt}…")
+            success = threading.Event()
+            error = [None]
+
+            def _try(ctrl=self.ctrl):
+                try:
+                    ctrl.connect(reconnect_addr=self.mac)
+                    success.set()
+                except Exception as exc:
+                    error[0] = exc
+                    success.set()  # unblock the wait so we can check error[0]
+
+            threading.Thread(target=_try, daemon=True).start()
+            if success.wait(timeout=10.0) and error[0] is None:
+                print("  Switch connected.")
+                return
+
+            reason = f"error: {error[0]}" if error[0] else "timed out after 10s"
+            print(f"  Connection {reason} — retrying with fresh controller…")
+            try:
+                self.ctrl.disconnect()
+            except Exception:
+                pass
+            self.ctrl = ProController(adapter=self.adapter)
+
+    def stop(self):
+        """Teardown: stop the sender thread and disconnect the controller."""
+        self._stop.set()
+        try:
+            self.ctrl.disconnect()
+        except Exception:
+            pass
 
     def press(self, b, duration=0.1):
         self._press_fn(self.state, b, duration=duration, dry_run=False)
@@ -259,6 +310,10 @@ class WsClient:
         assert type_ == "clip_done", f"wait_for: only clip_done supported, got {type_!r}"
         return self._unsolicited.get()
 
+    def close(self):
+        """Stop the asyncio loop (disconnects the WebSocket)."""
+        self._loop.call_soon_threadsafe(self._loop.stop)
+
 
 # ── Dry-run stubs ─────────────────────────────────────────────────────────────
 
@@ -273,6 +328,9 @@ class _DryController:
 
     def rstick_down(self, dur):
         print(f"  [DRY] rstick_down {dur}s")
+
+    def stop(self):
+        print("  [DRY] controller stop (no-op)")
 
 
 class _DryClient:
@@ -294,6 +352,9 @@ class _DryClient:
     def wait_for(self, type_):
         print(f"  [DRY] wait_for {type_}")
         return {"type": "clip_done", "events": {"fps": 60}}
+
+    def close(self):
+        print("  [DRY] client close (no-op)")
 
 
 # ── CLI entry point ───────────────────────────────────────────────────────────
@@ -334,41 +395,45 @@ def main():
         client = WsClient(a.capture_ws)
         runner = SweepRunner(g, ctrl, client)
 
-    # Preamble: HOME -> Time Trials -> character select
-    # Mirror the nav from full_capture.yaml: wake the Switch, open game,
-    # navigate into the character select screen.  In dry-run the exact timings
-    # are irrelevant -- the button sequence just needs to be present.
-    print("-- Preamble: HOME -> Time Trials -> character select --")
-    for btn in ["HOME", "A", "A", "A"]:         # wake + title screen
-        ctrl.press(btn)
-    if not a.dry_run:
-        time.sleep(3.0)                           # wait for menu to load
-    ctrl.press("A")                               # single player
-    if not a.dry_run:
-        time.sleep(1.5)
-    ctrl.press("A")                               # Time Trials
-    if not a.dry_run:
-        time.sleep(2.0)                           # wait for character select
-
-    # Main sweep: characters
-    skipping = bool(a.start_from)
-    for slug, presses in g.sweep_steps("characters"):
-        if skipping:
-            if slug == a.start_from:
-                skipping = False
-            else:
-                print(f"  [skip] {slug}")
-                continue
-
-        print(f"\n-- char: {slug} --")
-        for btn in presses:
+    try:
+        # Preamble: HOME -> Time Trials -> character select
+        # Mirror the nav from full_capture.yaml: wake the Switch, open game,
+        # navigate into the character select screen.  In dry-run the exact timings
+        # are irrelevant -- the button sequence just needs to be present.
+        print("-- Preamble: HOME -> Time Trials -> character select --")
+        for btn in ["HOME", "A", "A", "A"]:         # wake + title screen
             ctrl.press(btn)
+        if not a.dry_run:
+            time.sleep(3.0)                           # wait for menu to load
+        ctrl.press("A")                               # single player
+        if not a.dry_run:
+            time.sleep(1.5)
+        ctrl.press("A")                               # Time Trials
+        if not a.dry_run:
+            time.sleep(2.0)                           # wait for character select
 
-        runner.verify_on(slug, "characters")
-        runner.capture_char(slug)
-        runner.sweep_karts(slug)
+        # Main sweep: characters
+        skipping = bool(a.start_from)
+        for slug, presses in g.sweep_steps("characters"):
+            if skipping:
+                if slug == a.start_from:
+                    skipping = False
+                else:
+                    print(f"  [skip] {slug}")
+                    continue
 
-    print("\nSweep complete.")
+            print(f"\n-- char: {slug} --")
+            for btn in presses:
+                ctrl.press(btn)
+
+            runner.verify_on(slug, "characters")
+            runner.capture_char(slug)
+            runner.sweep_karts(slug)
+
+        print("\nSweep complete.")
+    finally:
+        ctrl.stop()
+        client.close()
 
 
 if __name__ == "__main__":

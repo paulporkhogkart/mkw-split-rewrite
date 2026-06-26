@@ -128,26 +128,36 @@ def _dshow_input(device: str, size: str, fps: int, rtbuf: str) -> List[str]:
             "-video_size", size, "-i", f"video={device}"]
 
 
-def preview_cmd(ffmpeg: str, device: str, size: str, fps: int) -> List[str]:
-    """Preview-only: capture the card -> downscaled bgr24 raw frames on stdout."""
+def preview_cmd(ffmpeg: str, device: str, size: str, fps: int,
+                scale_w: int = PREVIEW_W, scale_h: int = PREVIEW_H) -> List[str]:
+    """Preview-only: capture the card -> downscaled bgr24 raw frames on stdout.
+
+    scale_w/scale_h default to PREVIEW_W/PREVIEW_H (960×540 for the interactive
+    recorder). Pass 1920, 1080 for a full-res 1080p detection tee.
+    """
     return ([ffmpeg, "-hide_banner", "-loglevel", "error"]
             + _dshow_input(device, size, fps, "512M")
-            + ["-an", "-vf", f"scale={PREVIEW_W}:{PREVIEW_H},fps={PREVIEW_FPS}",
+            + ["-an", "-vf", f"scale={scale_w}:{scale_h},fps={PREVIEW_FPS}",
                "-f", "rawvideo", "-pix_fmt", "bgr24", "pipe:1"])
 
 
 def tee_cmd(ffmpeg: str, device: str, size: str, fps: int, duration: float,
             out_path: str, enc: str, enc_args: List[str],
-            pixel_format: Optional[str] = None, rtbuf: str = "1024M") -> List[str]:
+            pixel_format: Optional[str] = None, rtbuf: str = "1024M",
+            scale_w: int = PREVIEW_W, scale_h: int = PREVIEW_H) -> List[str]:
     """Record AND preview from one capture: split the input into the encoded 4K file
-    plus a downscaled bgr24 raw stream on stdout (the live preview / future grounding feed)."""
+    plus a downscaled bgr24 raw stream on stdout (the live preview / future grounding feed).
+
+    scale_w/scale_h default to PREVIEW_W/PREVIEW_H (960×540 for the interactive
+    recorder). Pass 1920, 1080 for a full-res 1080p detection tee.
+    """
     inp = _dshow_input(device, size, fps, rtbuf)
     if pixel_format:
         inp = ["-pixel_format", pixel_format] + inp
     return ([ffmpeg, "-hide_banner", "-loglevel", "warning", "-stats"]
             + inp
             + ["-filter_complex",
-               f"[0:v]split=2[rec][mon];[mon]scale={PREVIEW_W}:{PREVIEW_H},fps={PREVIEW_FPS}[mon2]",
+               f"[0:v]split=2[rec][mon];[mon]scale={scale_w}:{scale_h},fps={PREVIEW_FPS}[mon2]",
                "-map", "[rec]", "-c:v", enc] + enc_args + ["-t", str(duration), "-y", out_path,
                "-map", "[mon2]", "-an", "-f", "rawvideo", "-pix_fmt", "bgr24",
                "-t", str(duration), "pipe:1"])

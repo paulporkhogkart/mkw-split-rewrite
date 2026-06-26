@@ -43,7 +43,10 @@ class ClipCaptureManager:
     # ── pipe lifecycle ────────────────────────────────────────────────────────
     def start_preview(self):
         self._stop_pipe()
-        self._pipe = self._pf(preview_cmd(self._ffmpeg, self.device, self.size, self.fps))
+        self._pipe = self._pf(
+            preview_cmd(self._ffmpeg, self.device, self.size, self.fps,
+                        scale_w=1920, scale_h=1080),
+            w=1920, h=1080)
 
     def _stop_pipe(self):
         if self._pipe is not None:
@@ -75,8 +78,9 @@ class ClipCaptureManager:
                         "flourish_end_t": None, "duration_t": None}
         cmd = tee_cmd(self._ffmpeg, self.device, self.size, self.fps,
                       duration=10_000, out_path=self._path(item, "mkv"),
-                      enc=self._enc, enc_args=self._enc_args)
-        self._pipe = self._pf(cmd, quiet=False)
+                      enc=self._enc, enc_args=self._enc_args,
+                      scale_w=1920, scale_h=1080)
+        self._pipe = self._pf(cmd, quiet=False, w=1920, h=1080)
         self._t0 = self._clock()
 
     def mark(self, event):

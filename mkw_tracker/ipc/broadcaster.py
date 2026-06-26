@@ -480,8 +480,9 @@ class EventBroadcaster:
         Used by the autotemplate runner to verify that a DPAD press actually
         moved the selection cursor before it proceeds to capture.
 
-        For names (characters/karts): binary-threshold the live crop at 170,
-        then TM_CCOEFF_NORMED against the saved grayscale template.
+        For names (characters/karts): Canny-edge both the live crop and the
+        saved BGR template via prepare_text_edges (same method as the live
+        SelectionTracker — background-agnostic, no binary threshold).
         For costumes: Canny-edge both the live crop and the saved BGR template,
         then TM_CCOEFF_NORMED.
 
@@ -507,25 +508,26 @@ class EventBroadcaster:
             return {"type": "at_error",
                     "message": f"No ROI configured for {category!r} - complete setup first"}
 
-        # ── Name score ──────────────────────────────────────────────────────────
+        # ── Name score (Canny edges — mirrors live SelectionTracker) ────────────
         tmpl_path = self._out("images", category, lang, f"{name}.png")
         if not os.path.exists(tmpl_path):
             return {"type": "at_error",
                     "message": f"Template not found (capture it first): {tmpl_path}"}
 
-        tmpl = cv2.imread(tmpl_path, cv2.IMREAD_GRAYSCALE)
-        if tmpl is None:
+        from ..detection.templates import prepare_text_edges
+        tmpl_bgr = cv2.imread(tmpl_path, cv2.IMREAD_COLOR)
+        if tmpl_bgr is None:
             return {"type": "at_error", "message": f"Failed to load template: {tmpl_path}"}
+        tmpl = prepare_text_edges(tmpl_bgr)
 
         x1, y1, x2, y2 = [int(v) for v in roi]
         crop = frame[y1:y2, x1:x2]
-        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop
-        _, processed = cv2.threshold(gray, 170, 255, cv2.THRESH_BINARY)
+        live = prepare_text_edges(crop)
 
-        if tmpl.shape[0] > processed.shape[0] or tmpl.shape[1] > processed.shape[1]:
+        if tmpl.shape[0] > live.shape[0] or tmpl.shape[1] > live.shape[1]:
             name_score = 0.0
         else:
-            result = cv2.matchTemplate(processed, tmpl, cv2.TM_CCOEFF_NORMED)
+            result = cv2.matchTemplate(live, tmpl, cv2.TM_CCOEFF_NORMED)
             name_score = float(cv2.minMaxLoc(result)[1])
 
         response: dict = {"type": "at_asset_score", "name_score": name_score}
