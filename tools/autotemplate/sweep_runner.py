@@ -12,6 +12,7 @@ import time
 
 class SweepRunner:
     GROUND_THRESHOLD = 0.85
+    MAX_VERIFY_ATTEMPTS = 30
 
     def __init__(self, grid, controller, client, *, idle_seconds=10.0, settle_seconds=0.8, lang="en_uk"):
         self.grid = grid
@@ -121,6 +122,10 @@ class SweepRunner:
             score = r.get("name_score", 0.0)
             if score >= self.GROUND_THRESHOLD:
                 break
+            if attempts >= self.MAX_VERIFY_ATTEMPTS:
+                raise RuntimeError(
+                    f"verify_on: {slug!r} never grounded after {self.MAX_VERIFY_ATTEMPTS} presses"
+                )
             attempts += 1
             print(f"  [verify_on] {slug!r} score={score:.3f} < {self.GROUND_THRESHOLD} — re-pressing DPAD_RIGHT")
             self.ctrl.press("DPAD_RIGHT")
@@ -227,9 +232,7 @@ class WsClient:
     def send(self, cmd, timeout=15.0):
         """Send a command dict; block until a non-clip_done reply arrives."""
         import asyncio
-        asyncio.run_coroutine_threadsafe(
-            self._ws.send(self._json.dumps(cmd)), self._loop
-        ).result(timeout=timeout)
+        asyncio.run_coroutine_threadsafe(self._ws.send(self._json.dumps(cmd)), self._loop)
         try:
             return self._reply_q.get(timeout=timeout)
         except Exception:
@@ -237,6 +240,7 @@ class WsClient:
 
     def wait_for(self, type_):
         """Block until an unsolicited message of the given type arrives."""
+        assert type_ == "clip_done", f"wait_for: only clip_done supported, got {type_!r}"
         return self._unsolicited.get()
 
 
@@ -266,7 +270,7 @@ class _DryClient:
         "at_check_asset_match":    {"type": "at_asset_score", "name_score": 0.95},
     }
 
-    def send(self, msg):
+    def send(self, msg, timeout=15.0):
         t = msg.get("type", "")
         print(f"  [DRY] send {t}")
         return self._REPLIES.get(t, {"type": "ok"})
