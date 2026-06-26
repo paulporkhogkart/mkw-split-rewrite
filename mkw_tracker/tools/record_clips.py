@@ -169,7 +169,8 @@ class FramePipe:
     """Run an ffmpeg command that emits PREVIEW_W×PREVIEW_H bgr24 frames on stdout;
     a reader thread keeps only the latest frame. `latest()` returns it (or None)."""
 
-    def __init__(self, cmd: List[str], w: int = PREVIEW_W, h: int = PREVIEW_H, quiet: bool = True):
+    def __init__(self, cmd: List[str], w: int = PREVIEW_W, h: int = PREVIEW_H, quiet: bool = True,
+                 graceful: bool = False):
         self.w, self.h = w, h
         self._n = w * h * 3
         self._buf = np.zeros((h, w, 3), np.uint8)
@@ -177,11 +178,12 @@ class FramePipe:
         self._seq = 0                 # increments per stored frame; lets callers spot a stalled pipe
         self._lock = threading.Lock()
         self._run = True
+        self._graceful = graceful     # stop() sends 'q' so ffmpeg finalises the file (real duration)
         self._errtail: "collections.deque" = collections.deque(maxlen=40)
         self._proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE,
             stderr=(subprocess.PIPE if quiet else None),   # capture quietly, or inherit (live stats)
-            stdin=subprocess.DEVNULL)
+            stdin=(subprocess.PIPE if graceful else subprocess.DEVNULL))
         self._thread = threading.Thread(target=self._reader, daemon=True)
         self._thread.start()
         if quiet and self._proc.stderr is not None:
@@ -231,6 +233,21 @@ class FramePipe:
         self._run = False
         try:
             if self._proc.poll() is None:
+                # Graceful: ask ffmpeg to quit ('q' on stdin) so it FINALISES the container
+                # with the real duration. A hard terminate leaves the -t cap (e.g. 10000s =
+                # 2:46:40) as the file's duration. Fall back to terminate/kill if it hangs.
+                if self._graceful and self._proc.stdin is not None:
+                    try:
+                        self._proc.stdin.write(b"q")
+                        self._proc.stdin.flush()
+                        self._proc.stdin.close()
+                    except Exception:
+                        pass
+                    try:
+                        self._proc.wait(timeout=2.5)   # finalising a short 4K mkv is sub-second
+                        return
+                    except subprocess.TimeoutExpired:
+                        pass
                 self._proc.terminate()
                 try:
                     self._proc.wait(timeout=2.0)

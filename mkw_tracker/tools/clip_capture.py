@@ -87,7 +87,9 @@ class ClipCaptureManager:
         # and a failure prints the real ffmpeg error instead of silently freezing the feed.
         for attempt, gap in enumerate((0.6, 1.2), start=1):
             time.sleep(gap)
-            self._pipe = self._pf(cmd, quiet=True, w=1920, h=1080)
+            # graceful=True: stop() sends 'q' so ffmpeg finalises the real duration (a hard
+            # kill leaves the -t 10000 cap = 2:46:40 as the file's duration).
+            self._pipe = self._pf(cmd, quiet=True, w=1920, h=1080, graceful=True)
             self._t0 = self._clock()
             has = getattr(self._pipe, "has_frame", None)
             if has is None:

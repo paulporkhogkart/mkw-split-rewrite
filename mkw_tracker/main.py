@@ -975,17 +975,19 @@ def run(args):
     _emitted_splits: dict = {}  # lap → time already sent via split_recorded
 
     clip_done_emitted_for = None  # one-shot guard: item identity of last clip_done sent
-    clip_tell_miss = 0            # consecutive non-want frames since flourish mark (character path)
+    clip_tell_miss = 0            # consecutive want-screen frames before the character seal
     clip_flourish_mark_t = None   # wall-clock when the kart flourish hold began
-    # Kart flourish: the kart flourish does NOT leave kart_select — it holds on the screen
-    # (label lingers, nothing scores higher) while the tell score collapses to ~0. So we
-    # can't wait for a screen change. Instead: hold a fixed window from the flourish (A
-    # press) to capture it, then seal — the sweep presses B back to kart_select. The held
-    # flourish should drive the kart_select tell below CLIP_FLOURISH_DROP; if it's still
-    # high after the hold, the A press probably didn't register (warn). Both tunable.
-    CLIP_FLOURISH_DROP = 0.40       # kart_select tell below this == flourish covering the screen
-    CLIP_FLOURISH_HOLD_SECS = 4.0   # capture this many seconds of flourish, then seal + B
-    CLIP_FEED_STALL_SECS = 3.0      # active pipe (preview OR record) yields no new frame this long == stalled
+    clip_char_left_t = None       # wall-clock when the character flourish left CHARACTER_SELECT
+    # Kart flourish: it does NOT leave kart_select — it holds on the screen (label lingers,
+    # nothing scores higher) while the tell collapses. So we can't wait for a screen change:
+    # hold a fixed window from the flourish (A press) to capture it, then seal (the sweep
+    # presses B back to kart_select). Character flourish DOES advance character->kart, but the
+    # animation continues briefly ON kart_select, so we keep recording a short extra window
+    # AFTER leaving CHARACTER_SELECT rather than sealing the instant the screen changes. Tunable.
+    CLIP_FLOURISH_DROP = 0.40            # kart_select tell below this == flourish covering the screen
+    CLIP_FLOURISH_HOLD_SECS = 3.0       # kart: capture this many seconds of flourish, then seal + B
+    CLIP_CHAR_FLOURISH_EXTRA_SECS = 1.0  # character: keep recording this long after leaving CHARACTER_SELECT
+    CLIP_FEED_STALL_SECS = 3.0          # active pipe (preview OR record) yields no new frame this long == stalled
     _clip_pipe_seq = -2             # last seen pipe frame counter (feed-stall watchdog)
     _clip_pipe_seq_t = time.monotonic()   # wall-clock when that counter last advanced
 
@@ -1234,16 +1236,21 @@ def run(args):
                               "flourish hold — A press may not have registered", flush=True)
                     _seal = True
             else:
+                # Character flourish advances character_select -> kart_select, but the animation
+                # keeps playing briefly on kart_select — so don't seal the instant the screen
+                # changes; keep recording CLIP_CHAR_FLOURISH_EXTRA_SECS past it.
                 if detector.current_screen is Screen.CHARACTER_SELECT:
-                    clip_tell_miss = 0                   # still on character_select — re-confirmed
+                    clip_char_left_t = None              # still on character_select
                 else:
-                    clip_tell_miss += 1
-                    if clip_tell_miss >= 3:              # 3 frames off character_select: flourish done
+                    if clip_char_left_t is None:
+                        clip_char_left_t = time.monotonic()   # just left -> start the extra window
+                    elif (time.monotonic() - clip_char_left_t) >= CLIP_CHAR_FLOURISH_EXTRA_SECS:
                         _seal = True
             if _seal:
                 clip_done_emitted_for = _item
                 clip_tell_miss = 0
                 clip_flourish_mark_t = None
+                clip_char_left_t = None
                 clip_mgr.set_duration_end()
                 _clip_ev = clip_mgr.end()
                 if broadcaster is not None:
@@ -1256,6 +1263,7 @@ def run(args):
             # Item changed or no active clip — reset debounce state
             clip_tell_miss = 0
             clip_flourish_mark_t = None
+            clip_char_left_t = None
 
         _race_complete = ts.total_time is not None
 
