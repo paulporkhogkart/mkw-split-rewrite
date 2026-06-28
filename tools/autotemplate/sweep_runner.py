@@ -173,7 +173,19 @@ class SweepRunner:
         self.ctrl.press("A")                        # flourish → kart_select drops
         self._mark("flourish")
         ev = self.client.wait_for("clip_done").get("events")
-        self._return_to("KART_SELECT", "after kart flourish")   # B back — verify it lands
+        # kart -> (not char nor kart): the flourish A advances OFF kart_select. Verify the
+        # DEPARTURE by score (kart_select tell stops scoring); if it's still scoring the A was
+        # eaten, so re-fire it. Non-fatal — if it never departs, _return_to below still verifies.
+        departed = False
+        for _ in range(3):
+            if self._wait_off_screen("KART_SELECT"):
+                departed = True
+                break
+            self.ctrl.press("A")                                # eaten flourish → re-fire
+        if not departed:
+            print("  [capture_kart] kart_select still scoring after flourish "
+                  "(A may not have registered) — returning anyway", flush=True)
+        self._return_to("KART_SELECT", "after kart flourish")   # B back — verify it SCORES
         return ev
 
     def _confirm_screen(self, name) -> bool:
@@ -198,9 +210,24 @@ class SweepRunner:
                 return False
             time.sleep(0.1)
 
+    def _wait_off_screen(self, name, timeout=None) -> bool:
+        """True once screen `name` STOPS confirming by score within `timeout` (we've LEFT it) —
+        the 'kart -> not-kart' departure after a flourish. Dry-run True."""
+        timeout = self.screen_timeout if timeout is None else timeout
+        deadline = time.monotonic() + timeout
+        while True:
+            rep = self.client.send({"type": "at_screen_score", "screen": name})
+            if rep.get("_dry"):
+                return True
+            if not (rep.get("type") == "screen_score" and rep.get("detected")):
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.1)
+
     def _return_to(self, screen_name, what):
-        """Press B until the detector reports `screen_name` — a B can be eaten by a transition
-        animation, so VERIFY the return rather than assuming a single press lands."""
+        """Press B until screen `screen_name`'s tell SCORES (confirms) — a B can be eaten by a
+        transition animation, and the held current_screen would lie, so verify by score."""
         for _ in range(6):
             self.ctrl.press("B")
             if self._wait_screen(screen_name):

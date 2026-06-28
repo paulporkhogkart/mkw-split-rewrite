@@ -76,9 +76,11 @@ def test_capture_char_emits_begin_idle_flourish():
 def test_kart_keep_on_match():
     g = grid.load_grid(YAML)
     ctrl = FakeController()
-    client = FakeClient(selection={"kart": "Plushbuggy"})              # tracker already shows the right kart
+    # tracker already shows the right kart; KART_SELECT departs after the flourish (False), then
+    # scores again on the B return (True).
+    client = FakeScoreClient(selection={"kart": "Plushbuggy"}, scores={"KART_SELECT": [False, True]})
     SweepRunner(g, ctrl, client, idle_seconds=0.0, settle_seconds=0.0,
-                ground_timeout=0.0).capture_kart("mario__base", "plushbuggy")
+                ground_timeout=0.0, screen_timeout=0.0).capture_kart("mario__base", "plushbuggy")
     assert {"type": "at_record_clip_mark", "event": "swap"} in client.sent
     assert {"type": "at_record_clip_mark", "event": "flourish"} in client.sent   # recorded through
     assert not any(m["type"] == "at_record_clip_abort" for m in client.sent)     # grounded, no discard
@@ -89,11 +91,12 @@ def test_kart_navigates_to_offset_target():
     ctrl = FakeController()
     # tracker parks on Standard Kart twice, then Plushbuggy — _park_on_kart steps RIGHT
     # one parked read at a time until it's on the target, then capture proceeds.
-    client = FakeClient(selection=[{"kart": "Standard Kart"},
-                                   {"kart": "Standard Kart"},
-                                   {"kart": "Plushbuggy"}])
+    client = FakeScoreClient(selection=[{"kart": "Standard Kart"},
+                                        {"kart": "Standard Kart"},
+                                        {"kart": "Plushbuggy"}],
+                             scores={"KART_SELECT": [False, True]})
     SweepRunner(g, ctrl, client, idle_seconds=0.0, settle_seconds=0.0,
-                ground_timeout=0.0).capture_kart("mario__base", "plushbuggy")
+                ground_timeout=0.0, screen_timeout=0.0).capture_kart("mario__base", "plushbuggy")
     assert len([b for (_, b) in ctrl.log if b == "DPAD_RIGHT"]) >= 1              # stepped toward target
     assert {"type": "at_record_clip_mark", "event": "flourish"} in client.sent    # reached capture
 
@@ -200,3 +203,17 @@ def test_return_to_raises_when_tell_never_scores():
     with pytest.raises(RuntimeError, match="never reached"):
         SweepRunner(g, ctrl, client, idle_seconds=0.0, screen_timeout=0.02)._return_to("KART_SELECT", "x")
     assert len([b for (_, b) in ctrl.log if b == "B"]) == 6
+
+
+def test_kart_flourish_refires_A_when_not_departed():
+    """kart -> not-kart departure: if KART_SELECT still SCORES after the flourish (the A was
+    eaten), capture_kart re-fires A until kart_select stops scoring, then returns."""
+    g = grid.load_grid(YAML)
+    ctrl = FakeController()
+    # KART_SELECT: still present right after the flourish (eaten), then departs, then scores
+    # again on the B return.
+    client = FakeScoreClient(selection={"kart": "Plushbuggy"},
+                             scores={"KART_SELECT": [True, False, True]})
+    SweepRunner(g, ctrl, client, idle_seconds=0.0, settle_seconds=0.0,
+                ground_timeout=0.0, screen_timeout=0.0).capture_kart("mario__base", "plushbuggy")
+    assert len([b for (_, b) in ctrl.log if b == "A"]) >= 2   # flourish A + at least one re-fire
