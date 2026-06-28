@@ -27,7 +27,10 @@ class WsConsumer:
 
     def _run(self):
         asyncio.set_event_loop(self._loop)
-        self._loop.run_until_complete(self._main())
+        try:
+            self._loop.run_until_complete(self._main())
+        except RuntimeError:
+            pass   # loop.stop() during a pending coroutine — expected on close()
 
     async def _main(self):
         try:
