@@ -34,3 +34,29 @@ def pre_darken(raw_bgr, t, C, mask, CSUB=1.0, TFLOOR=0.05, YELLOW_S=60, BRIGHT_V
     S = np.clip((O - CSUB * C[..., None]) / np.clip(t, TFLOOR, 1.6)[..., None], 0, 255)
     out = np.clip(O * (1 - serr[..., None]) + S * serr[..., None], 0, 255)
     return out.astype(np.uint8)
+
+
+def process(base, names, is_char):
+    """Pre-darken every raw loopframe of each name -> <base>/loopframes/<name>_pre/."""
+    t, C, mask = load_template(is_char)
+    for name in names:
+        src = f"{base}/loopframes/{name}"
+        dst = f"{base}/loopframes/{name}_pre"; os.makedirs(dst, exist_ok=True)
+        files = sorted(glob.glob(f"{src}/*.png"))
+        for f in files:
+            raw = cv2.imread(f)
+            if raw is None:
+                continue
+            cv2.imwrite(f"{dst}/{os.path.basename(f)}", pre_darken(raw, t, C, mask))
+        print(f"{name}: {len(files)} frames pre-darkened ({'char' if is_char else 'kart'}) -> {dst}", flush=True)
+
+
+def main():
+    a = sys.argv[1:]
+    is_char = "--kart" not in a
+    a = [x for x in a if x != "--kart"]
+    process(a[0], a[1:], is_char)
+
+
+if __name__ == "__main__":
+    main()
