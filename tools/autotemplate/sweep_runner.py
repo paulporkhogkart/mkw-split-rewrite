@@ -541,6 +541,9 @@ def main():
                    help="SAMPLE mode: M random karts, OR an explicit comma-list of kart slugs (default 3).")
     p.add_argument("--sample-seed", type=int, default=0, metavar="S",
                    help="SAMPLE mode: RNG seed for the reproducible draw (default 0).")
+    p.add_argument("--nav-settle", type=float, default=0.3, metavar="SECS",
+                   help="Pause after each grid nav press so the cursor + costume settle (default 0.3). "
+                        "Raise it if nav overshoots; lower it for speed.")
     a = p.parse_args()
 
     yaml_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "clip_sweep.yaml")
@@ -569,7 +572,7 @@ def main():
     else:
         ctrl = BridgeController(host=a.agent_host, port=a.agent_port)
         client = WsClient(a.capture_ws)
-        runner = SweepRunner(g, ctrl, client, stop_check=stop_check)
+        runner = SweepRunner(g, ctrl, client, stop_check=stop_check, nav_settle=a.nav_settle)
 
     try:
         if not a.dry_run:
