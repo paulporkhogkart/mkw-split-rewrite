@@ -888,16 +888,13 @@ Replace with:
                    help="WSL python with nxbt (default: nxauto's venv).")
     p.add_argument("--stop", action="store_true",
                    help="Kill the in-WSL controller_agent and exit (clean teardown).")
-    p.add_argument("--port", type=int, default=AGENT_PORT_DEFAULT, dest="port",
-                   help="Agent TCP port (default 7878).") if not any(
-                   getattr(act, "dest", None) == "port" for act in p._actions) else None
     args = p.parse_args()
     if args.stop:
         sys.exit(stop_agent(distro=args.distro, port=args.port))
     sys.exit(run(args))
 ```
 
-NOTE: `--port` already exists in the parser (it's defined earlier in `main()`); the guarded line above is a safety no-op if so — if your tree errors on a duplicate `--port`, delete the guarded `p.add_argument("--port"...)` line entirely and keep the rest.
+NOTE: `--port` and `--distro` already exist in `main()`'s parser (lines ~189–192), so `--stop` reuses `args.port` / `args.distro`. Do NOT re-add them.
 
 - [ ] **Step 4: Run the test**
 
@@ -1348,6 +1345,7 @@ import base64
 import os
 import queue
 import sys
+import time
 import tkinter as tk
 from tkinter import ttk
 
@@ -1358,7 +1356,6 @@ for _d in (_HERE, os.path.join(_HERE, "..", "autotemplate")):
         sys.path.insert(0, _p)
 
 import controlstate as cs
-from commands import sweep_cmd  # noqa: F401 (kept for parity / future use)
 from controller_bridge import ControllerBridge
 from health import HealthModel
 from manual import ManualController
@@ -1370,7 +1367,6 @@ REPO_ROOT = os.path.abspath(os.path.join(_HERE, "..", ".."))
 STOP_FILE = os.path.join(REPO_ROOT, "captures_sdr", "en_uk", ".sweep_stop")
 TOTAL = 6273
 WS_URL = "ws://127.0.0.1:8766"
-import time
 
 
 def _fmt_eta(s):
