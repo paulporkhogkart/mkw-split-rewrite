@@ -27,9 +27,10 @@ class ProcessSupervisor:
 
     # ── spawning ──────────────────────────────────────────────────────────────
     def _spawn(self, name, cmd, on_exit=None):
+        env = {**os.environ, "PYTHONUNBUFFERED": "1"}
         p = subprocess.Popen(cmd, cwd=self.repo_root, stdout=subprocess.PIPE,
                               stderr=subprocess.STDOUT, text=True, bufsize=1,
-                              creationflags=_NO_WINDOW)
+                              creationflags=_NO_WINDOW, env=env)
         self.procs[name] = p
         threading.Thread(target=self._pump, args=(name, p, on_exit), daemon=True).start()
         return p
@@ -64,7 +65,9 @@ class ProcessSupervisor:
 
     # ── stop / teardown ─────────────────────────────────────────────────────────
     def request_stop_file(self, stop_file):
-        os.makedirs(os.path.dirname(stop_file), exist_ok=True)
+        d = os.path.dirname(stop_file)
+        if d:
+            os.makedirs(d, exist_ok=True)
         with open(stop_file, "w") as f:
             f.write("stop")
 
