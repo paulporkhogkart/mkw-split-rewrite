@@ -233,6 +233,22 @@ def test_sample_grid_reproducible_and_valid():
     assert set(karts1) <= all_karts
 
 
+def test_sample_grid_accepts_explicit_slugs_including_costume():
+    """--sample can name exact cells (incl a costume) instead of a random count."""
+    g = grid.load_grid(YAML)
+    chars, karts = sample_grid(g, "mario__touring,baby_mario__base", "standard_kart", seed=0)
+    assert chars == ["mario__touring", "baby_mario__base"]   # explicit, order preserved, costume kept
+    assert karts == ["standard_kart"]
+    assert "mario__touring" in {c.slug for c in g.cells("characters")}   # a costume cell is valid
+
+
+def test_sample_grid_rejects_unknown_slug():
+    import pytest
+    g = grid.load_grid(YAML)
+    with pytest.raises(ValueError):
+        sample_grid(g, "not_a_real_character__base", "3", seed=0)
+
+
 def test_sweep_karts_respects_kart_subset():
     """--sample mode records only the M sampled karts per character, in order."""
     g = grid.load_grid(YAML)

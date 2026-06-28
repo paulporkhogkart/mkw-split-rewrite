@@ -510,17 +510,27 @@ class _DryClient:
 
 # ── CLI entry point ───────────────────────────────────────────────────────────
 
-def sample_grid(grid, n_chars, n_karts, seed=0):
-    """Pick n_chars distinct base-costume characters + n_karts distinct karts, reproducibly
-    by `seed`. For --sample mode: a small spread for testing the pipeline without the full run.
-    Returns (sorted char slugs, sorted kart slugs)."""
+def sample_grid(grid, chars, karts, seed=0):
+    """Resolve the --sample picks. `chars`/`karts` are each either a count (int or digit-string →
+    that many RANDOM cells, reproducible by `seed`; characters default to base costume) OR an
+    explicit comma-string / list of exact cell slugs (which MAY include costumes, e.g.
+    'mario__touring'). Returns (char slugs, kart slugs). Raises ValueError on an unknown slug."""
     import random
     rng = random.Random(seed)
-    base_chars = [c.slug for c in grid.cells("characters") if c.slug.endswith("__base")]
-    karts = [c.slug for c in grid.cells("karts")]
-    chars = sorted(rng.sample(base_chars, min(n_chars, len(base_chars))))
-    picks = sorted(rng.sample(karts, min(n_karts, len(karts))))
-    return chars, picks
+
+    def pick(arg, category, base_only):
+        cells = grid.cells(category)
+        if isinstance(arg, int) or (isinstance(arg, str) and arg.strip().isdigit()):
+            pool = [c.slug for c in cells if not base_only or c.slug.endswith("__base")]
+            return sorted(rng.sample(pool, min(int(arg), len(pool))))
+        items = arg if isinstance(arg, (list, tuple)) else [s.strip() for s in str(arg).split(",") if s.strip()]
+        valid = {c.slug for c in cells}
+        bad = [s for s in items if s not in valid]
+        if bad:
+            raise ValueError(f"sample_grid: unknown {category} slug(s): {bad}")
+        return list(items)
+
+    return pick(chars, "characters", True), pick(karts, "karts", False)
 
 
 def main():
@@ -543,10 +553,11 @@ def main():
                         "to CHARACTER_SELECT, and exit (the console creates it for Pause/Stop).")
     p.add_argument("--dry-run", action="store_true",
                    help="Print all steps without opening controller or capture WS.")
-    p.add_argument("--sample-chars", type=int, default=None, metavar="N",
-                   help="SAMPLE mode: record only N random base-costume characters (else the full sweep).")
-    p.add_argument("--sample-karts", type=int, default=3, metavar="M",
-                   help="SAMPLE mode: M random karts per sampled character (same M for all; default 3).")
+    p.add_argument("--sample-chars", default=None, metavar="N|slug,slug,...",
+                   help="SAMPLE mode: N random base characters, OR an explicit comma-list of cell "
+                        "slugs (may include costumes, e.g. mario__touring). Omit for the full sweep.")
+    p.add_argument("--sample-karts", default="3", metavar="M|slug,...",
+                   help="SAMPLE mode: M random karts, OR an explicit comma-list of kart slugs (default 3).")
     p.add_argument("--sample-seed", type=int, default=0, metavar="S",
                    help="SAMPLE mode: RNG seed for the reproducible draw (default 0).")
     a = p.parse_args()
