@@ -6,7 +6,7 @@ from mkw_tracker.database.connection import get_connection, close_connection
 from mkw_tracker.database.migrations import apply_migrations
 
 _root = os.path.dirname(__file__)
-for _d in ("tools/autotemplate", "tools/asset_matte"):
+for _d in ("tools/autotemplate", "tools/asset_matte", "tools/sweep_console"):
     _p = os.path.abspath(os.path.join(_root, "..", _d))
     if _p not in sys.path:
         sys.path.insert(0, _p)
