@@ -237,10 +237,11 @@ class SweepRunner:
     def _stop_requested(self) -> bool:
         return bool(self.stop_check and self.stop_check())
 
-    def sweep_karts(self, combo_slug):
+    def sweep_karts(self, combo_slug, karts=None):
         # Anti-spin runs all the time (the agent holds it on by default).  Returns True if a
         # pause was requested mid-row (after returning to CHARACTER_SELECT), else False.
-        karts = [c.slug for c in self.grid.cells("karts")]
+        # `karts` defaults to the full kart row; --sample passes a subset.
+        karts = karts if karts is not None else [c.slug for c in self.grid.cells("karts")]
         # CHARACTER_SELECT -> KART_SELECT (capture_char pressed A): confirm by tell SCORE that we
         # actually landed on KART_SELECT before navigating, else _park_on_kart spins on the char
         # screen reading the committed (persisted) kart.
@@ -511,6 +512,19 @@ class _DryClient:
 
 # ── CLI entry point ───────────────────────────────────────────────────────────
 
+def sample_grid(grid, n_chars, n_karts, seed=0):
+    """Pick n_chars distinct base-costume characters + n_karts distinct karts, reproducibly
+    by `seed`. For --sample mode: a small spread for testing the pipeline without the full run.
+    Returns (sorted char slugs, sorted kart slugs)."""
+    import random
+    rng = random.Random(seed)
+    base_chars = [c.slug for c in grid.cells("characters") if c.slug.endswith("__base")]
+    karts = [c.slug for c in grid.cells("karts")]
+    chars = sorted(rng.sample(base_chars, min(n_chars, len(base_chars))))
+    picks = sorted(rng.sample(karts, min(n_karts, len(karts))))
+    return chars, picks
+
+
 def main():
     import argparse
     import os
@@ -531,6 +545,12 @@ def main():
                         "to CHARACTER_SELECT, and exit (the console creates it for Pause/Stop).")
     p.add_argument("--dry-run", action="store_true",
                    help="Print all steps without opening controller or capture WS.")
+    p.add_argument("--sample-chars", type=int, default=None, metavar="N",
+                   help="SAMPLE mode: record only N random base-costume characters (else the full sweep).")
+    p.add_argument("--sample-karts", type=int, default=3, metavar="M",
+                   help="SAMPLE mode: M random karts per sampled character (same M for all; default 3).")
+    p.add_argument("--sample-seed", type=int, default=0, metavar="S",
+                   help="SAMPLE mode: RNG seed for the reproducible draw (default 0).")
     a = p.parse_args()
 
     yaml_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "clip_sweep.yaml")
@@ -538,11 +558,20 @@ def main():
 
     stop_check = (lambda: bool(a.stop_file and os.path.exists(a.stop_file)))
 
+    sampled_chars = sampled_karts = None
+    if a.sample_chars is not None:
+        sampled_chars, sampled_karts = sample_grid(g, a.sample_chars, a.sample_karts, a.sample_seed)
+
     print(f"Agent:       {a.agent_host}:{a.agent_port}")
     print(f"Capture WS:  {a.capture_ws}")
     print(f"Start from:  {a.start_from or '(beginning)'}")
     print(f"Stop file:   {a.stop_file or '(none)'}")
-    print(f"Mode:        {'DRY RUN' if a.dry_run else 'LIVE'}\n")
+    print(f"Mode:        {'DRY RUN' if a.dry_run else 'LIVE'}")
+    if sampled_chars is not None:
+        print(f"Sample:      {len(sampled_chars)} chars × {len(sampled_karts)} karts (seed {a.sample_seed})")
+        print(f"  chars: {', '.join(sampled_chars)}")
+        print(f"  karts: {', '.join(sampled_karts)}")
+    print()
 
     if a.dry_run:
         ctrl, client = _DryController(), _DryClient()
@@ -561,6 +590,7 @@ def main():
 
         skipping = bool(a.start_from)
         paused = False
+        recorded = 0
         for slug, presses in g.sweep_steps("characters"):
             if skipping:
                 if slug == a.start_from:
@@ -571,15 +601,25 @@ def main():
             if runner._stop_requested():
                 paused = True
                 break                                  # at CHARACTER_SELECT (anchor) already
-            print(f"\n-- char: {slug} --")
             for btn in presses:
                 ctrl.press(btn)
-            runner.verify_on(slug, "characters")
+            runner.verify_on(slug, "characters")       # ground every char so the walk can't drift
+            if sampled_chars is not None and slug not in sampled_chars:
+                continue                               # SAMPLE: grounded, but not one of the picks
+            print(f"\n-- char: {slug} --")
             runner.capture_char(slug)
-            if runner.sweep_karts(slug):
+            if runner.sweep_karts(slug, karts=sampled_karts):
                 paused = True
                 break
-        print("\nPaused (stop-file present)." if paused else "\nSweep complete.")
+            recorded += 1
+            if sampled_chars is not None and recorded >= len(sampled_chars):
+                break                                  # SAMPLE: got all the picks; stop walking
+        if paused:
+            print("\nPaused (stop-file present).")
+        elif sampled_chars is not None:
+            print(f"\nSample complete ({recorded} chars).")
+        else:
+            print("\nSweep complete.")
     finally:
         ctrl.stop()
         client.close()

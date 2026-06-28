@@ -6,7 +6,7 @@ detected character/costume/kart display names), so the fake returns a selection
 """
 import os
 import grid
-from sweep_runner import SweepRunner
+from sweep_runner import SweepRunner, sample_grid
 
 YAML = os.path.join(os.path.dirname(__file__), "..",
                     "tools", "autotemplate", "scripts", "clip_sweep.yaml")
@@ -217,3 +217,26 @@ def test_kart_flourish_refires_A_when_not_departed():
     SweepRunner(g, ctrl, client, idle_seconds=0.0, settle_seconds=0.0,
                 ground_timeout=0.0, screen_timeout=0.0).capture_kart("mario__base", "plushbuggy")
     assert len([b for (_, b) in ctrl.log if b == "A"]) >= 2   # flourish A + at least one re-fire
+
+
+def test_sample_grid_reproducible_and_valid():
+    """--sample mode: pick N distinct base-costume characters + M distinct karts, reproducibly."""
+    g = grid.load_grid(YAML)
+    chars1, karts1 = sample_grid(g, 5, 3, seed=0)
+    chars2, karts2 = sample_grid(g, 5, 3, seed=0)
+    assert (chars1, karts1) == (chars2, karts2)            # same seed -> same draw
+    assert len(set(chars1)) == 5 and len(set(karts1)) == 3
+    assert all(c.endswith("__base") for c in chars1)       # base-costume characters
+    all_karts = {c.slug for c in g.cells("karts")}
+    assert set(karts1) <= all_karts
+
+
+def test_sweep_karts_respects_kart_subset():
+    """--sample mode records only the M sampled karts per character, in order."""
+    g = grid.load_grid(YAML)
+    ctrl, client = FakeController(), FakeClient()
+    r = SweepRunner(g, ctrl, client, idle_seconds=0.0, ground_timeout=0.0, screen_timeout=0.0)
+    captured = []
+    r.capture_kart = lambda combo, kart: captured.append(kart)
+    assert r.sweep_karts("mario__base", karts=["plushbuggy", "standard_kart"]) is False
+    assert captured == ["plushbuggy", "standard_kart"]
