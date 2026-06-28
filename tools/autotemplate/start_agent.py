@@ -183,6 +183,26 @@ def run(args) -> int:
         return 0
 
 
+def pkill_cmd(distro: str, port: int = 7878) -> list:
+    """argv that kills the in-WSL controller_agent for `port` (run under sudo -S)."""
+    return ["wsl", "-d", distro, "--", "sudo", "-S", "pkill", "-f",
+            f"controller_agent.py --port {port}"]
+
+
+def stop_agent(distro=None, port: int = 7878) -> int:
+    """Best-effort: kill the in-WSL controller_agent so a later start_agent can reconnect
+    cleanly (the agent has no in-band shutdown command). Returns the subprocess rc (0 = ok)."""
+    distro = distro or nxauto_cfg("wsl_distro") or detect_distro()
+    if not distro:
+        print("[stop_agent] no WSL distro found; nothing to stop.", file=sys.stderr)
+        return 2
+    pw = sudo_password()
+    proc = subprocess.run(pkill_cmd(distro, port), input=pw + "\n",
+                          capture_output=True, text=True)
+    print(f"[stop_agent] pkill controller_agent on {distro}: rc={proc.returncode}")
+    return proc.returncode
+
+
 def main():
     p = argparse.ArgumentParser(description="Launch the clip-sweep nxbt controller agent in WSL2 (reuses nxauto's config).")
     p.add_argument("--distro", default=None, help="WSL distro (default: nxauto.db wsl_distro, else autodetect).")
@@ -192,7 +212,12 @@ def main():
     p.add_argument("--port", type=int, default=AGENT_PORT_DEFAULT, help="Agent TCP port (default 7878).")
     p.add_argument("--venv-python", default=NXAUTO_VENV_PY, dest="venv_python",
                    help="WSL python with nxbt (default: nxauto's venv).")
-    sys.exit(run(p.parse_args()))
+    p.add_argument("--stop", action="store_true",
+                   help="Kill the in-WSL controller_agent and exit (clean teardown).")
+    args = p.parse_args()
+    if args.stop:
+        sys.exit(stop_agent(distro=args.distro, port=args.port))
+    sys.exit(run(args))
 
 
 if __name__ == "__main__":

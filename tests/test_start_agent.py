@@ -42,3 +42,11 @@ def test_first_distro_picks_first_nonempty():
 
 def test_first_distro_strips_bom():
     assert first_distro("﻿Ubuntu\n") == "Ubuntu"
+
+
+def test_pkill_cmd_targets_distro_and_agent():
+    from start_agent import pkill_cmd
+    cmd = pkill_cmd("Ubuntu", 7878)
+    assert cmd[:3] == ["wsl", "-d", "Ubuntu"]
+    joined = " ".join(cmd)
+    assert "pkill" in joined and "controller_agent.py" in joined and "7878" in joined
