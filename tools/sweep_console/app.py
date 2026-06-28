@@ -43,6 +43,7 @@ class ConsoleApp:
     def __init__(self, root):
         self.root = root
         root.title("MKW Asset Sweep")
+        root.geometry("1080x720")                    # fixed initial window size (still resizable)
         self.q = queue.Queue()                       # (callable) marshalled to the Tk thread
         self.state = cs.ControlState()
         self.health = HealthModel()
