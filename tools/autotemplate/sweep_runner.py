@@ -80,9 +80,11 @@ class SweepRunner:
         return (c, to_filename(sel.get("costume") or "")) if c else None
 
     def _char_slug(self, sel) -> str:
-        """Live (character, costume) as a cell slug '<char>__<costume>' ('' if no character)."""
+        """Live (character, costume) as a cell slug '<char>__<costume>' ('' if no character). An
+        empty/None costume means the BASE costume — the tracker reports no costume banner for base
+        characters — so it maps to '<char>__base', the grid's base cell."""
         key = self._char_key(sel)
-        return f"{key[0]}__{key[1]}" if key else ""
+        return f"{key[0]}__{key[1] or 'base'}" if key else ""
 
     def _poll_until_stable(self, key_fn):
         """Poll the live tracker until key_fn(sel) is non-empty and UNCHANGED for

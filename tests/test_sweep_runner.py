@@ -115,16 +115,26 @@ def test_park_on_char_navigates_to_target():
 
 
 def test_park_on_char_repolls_on_invalid_read_not_blind_nudge():
-    """A transient invalid (char,costume) read (e.g. a costume mid-settle giving 'baby_mario__')
-    must NOT trigger a blind DPAD_RIGHT — re-poll until a real cell. This was the drift/oscillation
-    bug: the blind nudge pressed RIGHT regardless of where the target was."""
+    """A transient invalid (char,costume) read (e.g. a costume LAGGED from the previous cell, like
+    'baby_mario__touring' — baby_mario has no touring variant) must NOT trigger a blind DPAD_RIGHT;
+    re-poll until a real cell. This was the drift/oscillation bug."""
     g = grid.load_grid(YAML)
     ctrl = FakeController()
-    # read 1: Baby Mario with an EMPTY costume -> 'baby_mario__' (not a grid cell). read 2: valid.
-    client = FakeClient(selection=[{"character": "Baby Mario", "costume": ""},
-                                   {"character": "Baby Mario", "costume": "Base"}])
-    SweepRunner(g, ctrl, client, ground_timeout=0.0)._park_on_char("baby_mario__base")
+    client = FakeClient(selection=[{"character": "Baby Mario", "costume": "Touring"},  # invalid lag
+                                   {"character": "Baby Mario", "costume": "Base"}])      # settled, valid
+    SweepRunner(g, ctrl, client, ground_timeout=0.0, nav_settle=0.0)._park_on_char("baby_mario__base")
     assert not any(b == "DPAD_RIGHT" for (_, b) in ctrl.log)   # re-polled to the valid cell; no nudge
+
+
+def test_park_on_char_treats_empty_costume_as_base():
+    """The tracker reports costume=None for a BASE character (base = no costume banner), but the grid
+    cell is '<char>__base'. _park_on_char must read empty costume AS base, not get stuck on
+    '<char>__' (the 'stuck reading an unrecognised cell mario__' failure seen on hardware)."""
+    g = grid.load_grid(YAML)
+    ctrl = FakeController()
+    client = FakeClient(selection={"character": "Baby Mario", "costume": None})   # base char, costume None
+    SweepRunner(g, ctrl, client, ground_timeout=0.0, nav_settle=0.0)._park_on_char("baby_mario__base")
+    assert not any(b.startswith("DPAD") for (_, b) in ctrl.log)   # already on target (empty == base)
 
 
 def test_park_on_char_is_costume_aware():
