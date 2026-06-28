@@ -949,6 +949,7 @@ def run(args):
             raise SystemExit("--clip-capture requires --ws-port (the sweep runner drives the broadcaster).")
         import json as _clip_json
         from .tools.clip_capture import ClipCaptureManager
+        from .tools import preview as _preview
         from .tools.record_clips import _resolve_device
         _clip_dev = _resolve_device(None)
         clip_mgr = ClipCaptureManager(
@@ -990,6 +991,7 @@ def run(args):
     CLIP_FEED_STALL_SECS = 3.0          # active pipe (preview OR record) yields no new frame this long == stalled
     _clip_pipe_seq = -2             # last seen pipe frame counter (feed-stall watchdog)
     _clip_pipe_seq_t = time.monotonic()   # wall-clock when that counter last advanced
+    _last_preview_emit = 0.0               # throttle for the WS preview thumbnail
 
     _last_heartbeat = 0.0
 
@@ -1108,6 +1110,11 @@ def run(args):
                 frame = _norm(_clipped)
                 current_frame[0] = frame
                 lifecycle.current_frame = frame
+                if broadcaster is not None:
+                    _pmsg, _last_preview_emit = _preview.maybe_preview(
+                        frame, time.monotonic(), _last_preview_emit, interval=0.5)
+                    if _pmsg is not None:
+                        broadcaster.broadcast(_clip_json.dumps(_pmsg))
                 t_frame = time.perf_counter()
                 frame_times.append(t_frame)
             else:
