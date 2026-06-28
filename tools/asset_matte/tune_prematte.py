@@ -1,15 +1,17 @@
-"""Pre-matte tuner — BROWSER based.
+"""Pre-matte tuner — BROWSER based, multi-subject, with per-subject frame scrubbing.
 
-The GPU matte venv (`temp/asset-venv-gpu`) ships HEADLESS OpenCV, so a cv2 GUI window can't open
-(`cvNamedWindow ... not implemented`). This serves a small web page instead: open the printed URL,
-drag CSUB / TFLOOR / YELLOW_S / BRIGHT_V, hit Render to re-darken + re-matte the representative
-frames over a checkerboard, and read off the values you like — they go straight into pre_darken.
+The GPU matte venv (`temp/asset-venv-gpu`) ships HEADLESS OpenCV, so a cv2 GUI window can't open.
+This serves a web page: each subject gets a FRAME slider (scrub the spawn-in / idle to land on the
+overlap frame — the raw preview updates instantly, no matte) plus its raw view; the global
+CSUB / TFLOOR / YELLOW_S / BRIGHT_V sliders + Render button re-darken + re-matte the CURRENT frame
+of every subject at once so you can dial one value that works across all of them. Values shown for
+baking into pre_darken.
 
   temp/asset-venv-gpu/Scripts/python.exe tools/asset_matte/tune_prematte.py temp/asset_matte_run3 \
-      mario__base donkey_kong__base koopa_troopa__base [--kart <kart_name> ...]
+      donkey_kong__base --kart mario__base__b_dasher donkey_kong__base__roadster_royale
 
-Names before --kart use the char template; names after use the kart template. Re-mattes on Render
-(not live) because each preview runs birefnet (~1 s/frame)."""
+Names before --kart use the char template; names after use the kart template. Render re-mattes the
+current frame of each (~1 s/frame), so it's button-driven; scrubbing is instant (raw only)."""
 import base64, glob, json, os, sys
 import numpy as np, cv2
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -31,13 +33,18 @@ from PIL import Image
 
 SESSION = new_session("birefnet-general-lite", providers=["CUDAExecutionProvider", "CPUExecutionProvider"])
 PORT = 8799
-FRAMES = []                                     # (name, is_char, raw_bgr)
+SUBJECTS = []                                   # [{name, is_char, paths:[...]}]
 TEMPLATES = {}                                  # is_char -> (t, C, mask)
 
 
 def _checker(h, w, s=14, a=210, b=150):
     yy, xx = np.mgrid[0:h, 0:w]
     return np.where(((xx // s + yy // s) % 2 == 0), a, b).astype(np.uint8)[..., None].repeat(3, 2)
+
+
+def _png_b64(bgr):
+    ok, buf = cv2.imencode(".png", bgr)
+    return base64.b64encode(buf).decode()
 
 
 def _render_b64(raw, is_char, p):
@@ -48,40 +55,56 @@ def _render_b64(raw, is_char, p):
                            session=SESSION, post_process_mask=True))
     a = rgba[..., 3:4].astype(np.float32) / 255.0
     comp = (rgba[..., :3].astype(np.float32) * a + _checker(*rgba.shape[:2]).astype(np.float32) * (1 - a))
-    ok, buf = cv2.imencode(".png", cv2.cvtColor(comp.astype(np.uint8), cv2.COLOR_RGB2BGR))
-    return base64.b64encode(buf).decode()
+    return _png_b64(cv2.cvtColor(comp.astype(np.uint8), cv2.COLOR_RGB2BGR))
 
 
 HTML = """<!doctype html><meta charset=utf-8><title>pre-matte tuner</title>
 <style>body{font:13px system-ui;margin:0;background:#1b1d21;color:#ccc}
-.bar{position:sticky;top:0;background:#23262b;padding:10px 14px;border-bottom:1px solid #333;display:flex;gap:18px;align-items:center;flex-wrap:wrap}
-label{display:flex;flex-direction:column;font-variant-numeric:tabular-nums}
-input[type=range]{width:150px}button{padding:7px 16px;font-weight:600;cursor:pointer}
-.imgs{display:flex;flex-wrap:wrap;gap:10px;padding:12px}img{max-height:520px;background:#0a0a0a}
-#vals{font-family:monospace;color:#6f6}</style>
+.bar{position:sticky;top:0;z-index:9;background:#23262b;padding:10px 14px;border-bottom:1px solid #333;display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+label{display:flex;flex-direction:column;font-variant-numeric:tabular-nums;font-size:11px}
+input[type=range]{width:140px}button{padding:7px 16px;font-weight:600;cursor:pointer}
+#vals{font-family:monospace;color:#6f6}
+.cols{display:flex;gap:12px;padding:12px;align-items:flex-start}
+.col{flex:1;min-width:0}.col h3{margin:0 0 4px;font-size:12px;color:#6cf;font-weight:600}
+.col .fr{font-family:monospace;color:#999;font-size:11px}
+img{width:100%;background:#0a0a0a;display:block;margin-top:4px}
+.tag{font-size:10px;color:#888;margin-top:6px}</style>
 <div class=bar>
- <label>CSUB <input id=CSUB type=range min=0.5 max=1.3 step=0.01 value=1.0 oninput=upd()></label>
- <label>TFLOOR <input id=TFLOOR type=range min=0.01 max=0.5 step=0.01 value=0.05 oninput=upd()></label>
- <label>YELLOW_S <input id=YELLOW_S type=range min=0 max=255 step=1 value=60 oninput=upd()></label>
- <label>BRIGHT_V <input id=BRIGHT_V type=range min=0 max=255 step=1 value=200 oninput=upd()></label>
- <button onclick=render()>Render</button>
+ <label>CSUB<input id=CSUB type=range min=0.5 max=1.3 step=0.01 value=1.0 oninput=upd()></label>
+ <label>TFLOOR<input id=TFLOOR type=range min=0.01 max=0.5 step=0.01 value=0.05 oninput=upd()></label>
+ <label>YELLOW_S<input id=YELLOW_S type=range min=0 max=255 step=1 value=60 oninput=upd()></label>
+ <label>BRIGHT_V<input id=BRIGHT_V type=range min=0 max=255 step=1 value=200 oninput=upd()></label>
+ <button onclick=render()>Render all</button>
  <span id=vals></span><span id=status></span>
 </div>
-<div class=imgs id=imgs></div>
+<div class=cols id=cols></div>
 <script>
-const ids=['CSUB','TFLOOR','YELLOW_S','BRIGHT_V'];
-function vals(){let o={};ids.forEach(i=>o[i]=document.getElementById(i).value);return o}
-function upd(){let v=vals();document.getElementById('vals').textContent=
+const SUBJECTS=__SUBJECTS__;          // [{name,n}]
+const pids=['CSUB','TFLOOR','YELLOW_S','BRIGHT_V'];
+function pvals(){let o={};pids.forEach(i=>o[i]=document.getElementById(i).value);return o}
+function upd(){let v=pvals();document.getElementById('vals').textContent=
   `CSUB=${v.CSUB} TFLOOR=${v.TFLOOR} YELLOW_S=${v.YELLOW_S} BRIGHT_V=${v.BRIGHT_V}`}
+function fidx(){return SUBJECTS.map((_,i)=>+document.getElementById('f'+i).value)}
+document.getElementById('cols').innerHTML=SUBJECTS.map((s,i)=>{
+  const d=Math.floor(s.n*0.12);                 // default toward the spawn-in
+  return `<div class=col><h3>${s.name}</h3>
+   <input id=f${i} type=range min=0 max=${s.n-1} value=${d} oninput=scrub(${i})>
+   <span class=fr id=fr${i}></span>
+   <div class=tag>raw (scrub to the overlap frame)</div><img id=raw${i}>
+   <div class=tag>pre-matte result (Render)</div><img id=res${i}></div>`}).join('');
+async function scrub(i){
+  document.getElementById('fr'+i).textContent='frame '+document.getElementById('f'+i).value;
+  let r=await fetch(`/frame?s=${i}&f=${document.getElementById('f'+i).value}`);
+  document.getElementById('raw'+i).src='data:image/png;base64,'+(await r.json()).data;
+}
 async function render(){
-  let v=vals(), q=new URLSearchParams(v).toString();
+  let v=pvals(), q=new URLSearchParams(v); q.set('f',fidx().join(','));
   document.getElementById('status').textContent=' …rendering';
-  let r=await fetch('/render?'+q), j=await r.json();
-  document.getElementById('imgs').innerHTML=j.imgs.map(x=>
-    `<div><div>${x.name}</div><img src="data:image/png;base64,${x.data}"></div>`).join('');
+  let j=await (await fetch('/render?'+q)).json();
+  j.imgs.forEach((d,i)=>document.getElementById('res'+i).src='data:image/png;base64,'+d);
   document.getElementById('status').textContent=' done';
 }
-upd(); render();
+upd(); SUBJECTS.forEach((_,i)=>scrub(i)); render();
 </script>"""
 
 
@@ -91,13 +114,20 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         u = urlparse(self.path)
+        q = parse_qs(u.query)
         if u.path == "/":
-            self._send(200, "text/html", HTML.encode())
+            meta = json.dumps([{"name": s["name"], "n": len(s["paths"])} for s in SUBJECTS])
+            self._send(200, "text/html", HTML.replace("__SUBJECTS__", meta).encode())
+        elif u.path == "/frame":
+            s, f = int(q["s"][0]), int(q["f"][0])
+            raw = cv2.imread(SUBJECTS[s]["paths"][f])
+            self._send(200, "application/json", json.dumps({"data": _png_b64(raw)}).encode())
         elif u.path == "/render":
-            q = parse_qs(u.query)
             p = {"CSUB": float(q["CSUB"][0]), "TFLOOR": float(q["TFLOOR"][0]),
                  "YELLOW_S": int(float(q["YELLOW_S"][0])), "BRIGHT_V": int(float(q["BRIGHT_V"][0]))}
-            imgs = [{"name": n, "data": _render_b64(raw, ic, p)} for (n, ic, raw) in FRAMES]
+            fidx = [int(x) for x in q["f"][0].split(",")]
+            imgs = [_render_b64(cv2.imread(s["paths"][fidx[i]]), s["is_char"], p)
+                    for i, s in enumerate(SUBJECTS)]
             self._send(200, "application/json", json.dumps({"imgs": imgs}).encode())
         else:
             self._send(404, "text/plain", b"not found")
@@ -116,11 +146,11 @@ def main():
     cut = rest.index("--kart") if "--kart" in rest else len(rest)
     items = [(n, True) for n in rest[:cut]] + [(n, False) for n in rest[cut + 1:]]
     for name, is_char in items:
-        fs = sorted(glob.glob(f"{base}/loopframes/{name}/*.png"))
-        if fs:
-            FRAMES.append((name, is_char, cv2.imread(fs[len(fs) // 2])))
+        paths = sorted(glob.glob(f"{base}/loopframes/{name}/*.png"))
+        if paths:
+            SUBJECTS.append({"name": name, "is_char": is_char, "paths": paths})
             TEMPLATES.setdefault(is_char, pd.load_template(is_char))
-    print(f"open  http://127.0.0.1:{PORT}/   ({len(FRAMES)} frames)   Ctrl-C to stop", flush=True)
+    print(f"open  http://127.0.0.1:{PORT}/   ({len(SUBJECTS)} subjects)   Ctrl-C to stop", flush=True)
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
 
 
