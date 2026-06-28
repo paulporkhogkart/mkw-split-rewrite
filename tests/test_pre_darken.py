@@ -1,5 +1,18 @@
+import inspect
 import numpy as np
 import pre_darken as pd        # FLAT import — conftest adds tools/asset_matte to sys.path
+
+
+def test_defaults_are_full_recovery_and_locked():
+    # process() calls pre_darken on BARE defaults, so guard them — CSUB=1.0 (FULL recovery) is the
+    # load-bearing value of this whole approach; a regression to the post-matte 0.69 would silently
+    # break the pipeline while the explicit-kwarg tests below still pass.
+    d = inspect.signature(pd.pre_darken).parameters
+    assert d["CSUB"].default == 1.0
+    assert d["TFLOOR"].default == 0.05
+    assert d["YELLOW_S"].default == 60
+    assert d["BRIGHT_V"].default == 200
+    assert pd.T_OPAQUE == 0.20
 
 
 def test_full_recovery_returns_the_scene_behind_the_plate():
