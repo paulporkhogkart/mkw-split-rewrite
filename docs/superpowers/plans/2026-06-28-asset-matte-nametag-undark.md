@@ -6,7 +6,9 @@
 
 **Architecture:** The matte pipeline becomes `extract_loop → matte_loop → undark`. `extract_loop` is re-cropped to a nameplate-inclusive region (the validated combo crop) at ~1080 tall. A new `undark` stage loads committed template artifacts (a soft-alpha plate mask + the measured `P,A` background pair, per screen), derives the per-pixel transmission/tint `t,C`, and applies the verbatim-ported `drop_nameplate` + `undark_rgba`. The validated algorithm is **ported, not re-tuned**; only the crop/resolution it runs at is generalized.
 
-**Tech Stack:** Python 3 (build python `python` = Python314 has cv2/numpy; GPU matte venv `temp/asset-venv-gpu/Scripts/python.exe` has cv2/numpy/PIL/rembg), OpenCV, NumPy. Tests run under build python via `pytest` (tools are flat modules; `tests/conftest.py` puts `tools/asset_matte` on `sys.path` — verify and add if missing).
+**Tech Stack:** Python 3 (build python `python` = Python314 has cv2/numpy; GPU matte venv `temp/asset-venv-gpu/Scripts/python.exe` has cv2/numpy/PIL/rembg), OpenCV, NumPy. Tests run under build python via `pytest`.
+
+**Import convention (binding):** `tools/asset_matte` is NOT a package — `tests/conftest.py` already inserts `tools/autotemplate`, `tools/asset_matte`, `tools/sweep_console` onto `sys.path`. Use FLAT imports everywhere: `import nametag_core` / `from nametag_core import ...` / `import undark` — exactly like the existing `import grid` and `from clip_segment import segment_spans`. NEVER `import tools.asset_matte.nametag_core` (it will fail). Scripts run directly (`python tools/asset_matte/foo.py`) get their own dir on `sys.path[0]`, so flat imports work there too.
 
 ## Global Constraints
 
@@ -51,7 +53,7 @@
 
 ```python
 import numpy as np
-import tools.asset_matte.nametag_core as nc   # if import fails, see conftest note in plan header
+import nametag_core as nc        # FLAT import — conftest adds tools/asset_matte to sys.path
 
 def test_constants():
     assert nc.PROD_CROP_4K == (2100, 36, 3720, 1806)
@@ -176,7 +178,7 @@ def prod_crop(canvas_4k):
 - [ ] **Step 4: Run tests, expect pass**
 
 Run: `python -m pytest tests/test_nametag_core.py -q`
-Expected: PASS (5 passed). If `import tools.asset_matte.nametag_core` fails, add `sys.path.insert(0, repo_root)` handling to `tests/conftest.py` (it already adds `tools/` flat dirs — confirm `tools/asset_matte` is importable as a package or import the module by file path).
+Expected: PASS (5 passed). Imports are FLAT (`import nametag_core`); `tests/conftest.py` already puts `tools/asset_matte` on `sys.path` (same as `import grid`). No conftest change needed.
 
 - [ ] **Step 5: Commit**
 
@@ -213,9 +215,10 @@ only remaining source, so this rescues the validated templates into the repo.
 
 Run from repo root with build python:  python tools/asset_matte/build_templates.py
 """
-import json, os, glob
+import json, os, glob, sys
 import numpy as np, cv2
-import tools.asset_matte.nametag_core as nc
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # for flat `import nametag_core` when run as a script
+import nametag_core as nc
 
 WORK = "temp/asset_eyetest/nametag/_work"
 MASKS = "temp/asset_eyetest/nametag_mask"
@@ -312,7 +315,7 @@ git commit -m "feat(asset-matte): rescue + commit validated nametag templates (c
 
 ```python
 import numpy as np
-import tools.asset_matte.undark as ud
+import undark as ud        # FLAT import — conftest adds tools/asset_matte to sys.path
 
 def _rgba(h=1080, w=988):
     a = np.zeros((h, w, 4), np.uint8); a[..., 3] = 0
@@ -366,8 +369,8 @@ Run in the matte venv (cv2/numpy/PIL):  temp/asset-venv-gpu/Scripts/python.exe .
 """
 import glob, os, subprocess, sys
 import numpy as np, cv2
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-import tools.asset_matte.nametag_core as nc
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # flat `import nametag_core` as script or test
+import nametag_core as nc
 
 ASSETS = os.path.join(os.path.dirname(__file__), "assets")
 ALPHA_GAIN, STRENGTH, CSUB, TFLOOR = 5.0, 1.02, 0.69, 0.05
@@ -495,7 +498,7 @@ Change the imports + constant near the top:
 from mkw_tracker.tools.loop_probe import (
     load_features, autocorr_by_lag, find_period, scale_roi, HERO_ROI_1080,
 )
-from tools.asset_matte.nametag_core import NAMEPLATE_HERO_ROI, OUT_H
+from nametag_core import NAMEPLATE_HERO_ROI, OUT_H   # FLAT — same dir on sys.path[0] when run as a script
 
 CROP_H = OUT_H   # 1080 — nameplate-inclusive crop (was 860 hero-only)
 ```
