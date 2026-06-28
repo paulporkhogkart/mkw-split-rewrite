@@ -114,6 +114,19 @@ def test_park_on_char_navigates_to_target():
     assert not any(b in ("A", "B") for (_, b) in ctrl.log)            # nav only, never selects
 
 
+def test_park_on_char_repolls_on_invalid_read_not_blind_nudge():
+    """A transient invalid (char,costume) read (e.g. a costume mid-settle giving 'baby_mario__')
+    must NOT trigger a blind DPAD_RIGHT — re-poll until a real cell. This was the drift/oscillation
+    bug: the blind nudge pressed RIGHT regardless of where the target was."""
+    g = grid.load_grid(YAML)
+    ctrl = FakeController()
+    # read 1: Baby Mario with an EMPTY costume -> 'baby_mario__' (not a grid cell). read 2: valid.
+    client = FakeClient(selection=[{"character": "Baby Mario", "costume": ""},
+                                   {"character": "Baby Mario", "costume": "Base"}])
+    SweepRunner(g, ctrl, client, ground_timeout=0.0)._park_on_char("baby_mario__base")
+    assert not any(b == "DPAD_RIGHT" for (_, b) in ctrl.log)   # re-polled to the valid cell; no nudge
+
+
 def test_park_on_char_is_costume_aware():
     """A different COSTUME of the same character is a different cell — keep navigating, don't stop."""
     g = grid.load_grid(YAML)

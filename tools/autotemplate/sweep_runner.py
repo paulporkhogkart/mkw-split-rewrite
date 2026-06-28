@@ -16,7 +16,7 @@ class SweepRunner:
 
     def __init__(self, grid, controller, client, *, idle_seconds=10.0, settle_seconds=0.8,
                  ground_timeout=4.0, ground_stable_reads=3, lang="en_uk", stop_check=None,
-                 screen_timeout=3.0):
+                 screen_timeout=3.0, nav_settle=0.3):
         self.grid = grid
         self.ctrl = controller
         self.client = client
@@ -27,6 +27,7 @@ class SweepRunner:
         self.lang = lang
         self.stop_check = stop_check
         self.screen_timeout = screen_timeout    # per-attempt wait for a screen tell to confirm by score
+        self.nav_settle = nav_settle            # pause after each grid nav press (cursor + costume settle)
 
     def _begin(self, item):
         self.client.send({"type": "at_record_clip_begin", "item": item})
@@ -106,90 +107,70 @@ class SweepRunner:
                 return sel                          # timeout: best-effort last read
             time.sleep(0.15)
 
-    def _await_kart_change(self, prev):
-        """After a nav press, wait until the detected kart LEAVES `prev`. Detection lags a press
-        by a few frames, so re-reading immediately would show the stale pre-press kart — we'd
-        think the step didn't land and press AGAIN, overshooting. No-op in dry-run / on timeout."""
+    def _await_change(self, prev, slug_fn):
+        """After a nav press, wait until the detected cell slug (per slug_fn) LEAVES `prev` —
+        detection lags a press, so re-reading immediately shows the stale cell and over-presses.
+        No-op in dry-run / on timeout."""
         deadline = time.monotonic() + self.ground_timeout
         while time.monotonic() < deadline:
             sel = self._live_selection()
-            if sel.get("_dry") or self._kart_key(sel) != prev:
+            if sel.get("_dry") or slug_fn(sel) != prev:
                 return
             time.sleep(0.05)
 
-    def _park_on_kart(self, kart_slug):
-        """Closed-loop: step ONE press at a time toward kart_slug (row first, then column),
-        WAITING for each step to register (detection lags a press) before re-reading a PARKED
-        selection — so the cursor can't fly past the target, and re-reading self-corrects even
-        if a DPAD_DOWN doesn't land on the same column. Raises if it never arrives; dry-run no-op."""
-        trow, tcol = self.grid.coord_of(kart_slug)
-        here = ""
+    def _park_on(self, target_slug, key_fn, slug_fn, what):
+        """Closed-loop grid nav shared by character + kart select. Read the live PARKED cell, step
+        ONE press toward target_slug (row first, then column), wait for the step to register, then
+        re-read — self-correcting overshoot/undershoot.
+
+        CRITICAL: NEVER press on an invalid/unrecognised read. A transient mis-read — e.g. a
+        costume mid-settle giving '<char>__' or a costume lagged from the previous cell — used to
+        hit a blind DPAD_RIGHT 'nudge' that drifted the cursor rightward (overshoot) and oscillated
+        it at the base↔costume boundary. Instead we RE-POLL until the read is a real cell, and
+        space out inputs (nav_settle) so the cursor + costume settle. Logs each step (no hardware
+        repro on the dev box). Raises if it never arrives; dry-run no-op."""
+        trow, tcol = self.grid.coord_of(target_slug)
+        here, invalid = "", 0
         for _ in range(self.MAX_VERIFY_ATTEMPTS):
-            sel = self._poll_until_stable(self._kart_key)
+            sel = self._poll_until_stable(key_fn)
             if sel.get("_dry"):
                 return
-            here = self._kart_key(sel)
-            if here == kart_slug:
-                return                              # parked on the target
-            if not here and sel.get("character"):   # a character but no kart -> not on KART_SELECT
-                raise RuntimeError(
-                    f"_park_on_kart({kart_slug!r}): not on KART_SELECT — tracker shows "
-                    f"character={sel.get('character')!r}, kart=None. capture_char must advance (press A) first.")
-            try:
-                hrow, hcol = self.grid.coord_of(here)
-            except KeyError:
-                self.ctrl.press("DPAD_RIGHT")       # unrecognised kart name: nudge
-                self._await_kart_change(here)
-                continue
-            if hrow != trow:
-                self.ctrl.press("DPAD_DOWN" if trow > hrow else "DPAD_UP")
-            elif hcol != tcol:
-                self.ctrl.press("DPAD_RIGHT" if tcol > hcol else "DPAD_LEFT")
-            self._await_kart_change(here)           # let the step register before re-reading
-        raise RuntimeError(f"_park_on_kart: never reached {kart_slug!r} (last parked on {here!r})")
-
-    def _await_char_change(self, prev):
-        """After a nav press on CHARACTER_SELECT, wait until the detected (char,costume) cell slug
-        LEAVES `prev` — detection lags a press, so re-reading immediately would show the stale
-        cell and over-press. No-op in dry-run / on timeout. Mirrors _await_kart_change."""
-        deadline = time.monotonic() + self.ground_timeout
-        while time.monotonic() < deadline:
-            sel = self._live_selection()
-            if sel.get("_dry") or self._char_slug(sel) != prev:
-                return
-            time.sleep(0.05)
-
-    def _park_on_char(self, char_slug):
-        """Closed-loop: step ONE press at a time toward char_slug (row first, then column) across
-        the character×costume grid, WAITING for each step to register before re-reading a PARKED
-        selection — so the cursor can't fly past the target and re-reading self-corrects
-        overshoot/undershoot, INCLUDING costume (a different costume of the same character is a
-        different cell). Raises if it never arrives; dry-run no-op. Mirrors _park_on_kart."""
-        trow, tcol = self.grid.coord_of(char_slug)
-        here = ""
-        for _ in range(self.MAX_VERIFY_ATTEMPTS):
-            sel = self._poll_until_stable(self._char_key)
-            if sel.get("_dry"):
-                return
-            here = self._char_slug(sel)
-            if here == char_slug:
+            here = slug_fn(sel)
+            if here == target_slug:
                 return                              # parked on the target cell
-            if not here:                            # no character -> not on CHARACTER_SELECT
+            if not here:                            # nothing detected -> not on this screen
                 raise RuntimeError(
-                    f"_park_on_char({char_slug!r}): no character detected — not on CHARACTER_SELECT "
+                    f"_park_on({target_slug!r}): no item detected — not on {what} "
                     f"(tracker shows character={sel.get('character')!r} kart={sel.get('kart')!r}).")
             try:
                 hrow, hcol = self.grid.coord_of(here)
             except KeyError:
-                self.ctrl.press("DPAD_RIGHT")       # unrecognised cell: nudge
-                self._await_char_change(here)
+                # Unrecognised cell = a transient mis-read (costume mid-settle / lagged). DO NOT
+                # press — a blind nudge here is the overshoot/oscillation bug. Re-poll; raise only
+                # if it stays unrecognised (a genuinely unmapped cell).
+                invalid += 1
+                if invalid > max(3, self.ground_stable_reads):
+                    raise RuntimeError(
+                        f"_park_on({target_slug!r}): stuck reading an unrecognised cell {here!r} on {what}.")
+                time.sleep(self.nav_settle)
                 continue
-            if hrow != trow:
-                self.ctrl.press("DPAD_DOWN" if trow > hrow else "DPAD_UP")
-            elif hcol != tcol:
-                self.ctrl.press("DPAD_RIGHT" if tcol > hcol else "DPAD_LEFT")
-            self._await_char_change(here)           # let the step register before re-reading
-        raise RuntimeError(f"_park_on_char: never reached {char_slug!r} (last parked on {here!r})")
+            invalid = 0
+            btn = (("DPAD_DOWN" if trow > hrow else "DPAD_UP") if hrow != trow
+                   else ("DPAD_RIGHT" if tcol > hcol else "DPAD_LEFT"))
+            print(f"  [nav {what}] {here} {(hrow, hcol)} -> {target_slug} {(trow, tcol)}: {btn}", flush=True)
+            self.ctrl.press(btn)
+            self._await_change(here, slug_fn)       # let the step register before re-reading
+            time.sleep(self.nav_settle)             # space out inputs so cursor + costume settle
+        raise RuntimeError(f"_park_on: never reached {target_slug!r} (last on {here!r}) on {what}.")
+
+    def _park_on_kart(self, kart_slug):
+        """Closed-loop kart-select nav (overshoot/undershoot safe). See _park_on."""
+        self._park_on(kart_slug, self._kart_key, self._kart_key, "KART_SELECT")
+
+    def _park_on_char(self, char_slug):
+        """Closed-loop character+costume nav (overshoot/undershoot safe; a different costume of the
+        same character is a different cell). See _park_on."""
+        self._park_on(char_slug, self._char_key, self._char_slug, "CHARACTER_SELECT")
 
     def capture_kart(self, combo_slug, kart_slug):
         item = f"{combo_slug}__{kart_slug}"
@@ -206,7 +187,7 @@ class SweepRunner:
             self._park_on_kart(kart_slug)           # park ON the target first
             self._begin(item)                       # record from before the spawn-in swap
             self.ctrl.press(off)                    # step OFF to a neighbour...
-            self._await_kart_change(kart_slug)      # wait for the OFF to land (detection lags the press)
+            self._await_change(kart_slug, self._kart_key)   # wait for the OFF to land (detection lags)
             self._park_on_kart(kart_slug)           # ...closed-loop BACK onto the target -> spawn-in
             self._mark("swap")
             sel = self._poll_until_stable(self._kart_key)   # confirm we're PARKED back on the target
