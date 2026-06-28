@@ -277,7 +277,10 @@ class EventBroadcaster:
 
             return {"type": "current_selection",
                     "character": getattr(st, "character", None) or _best("char", 0.55),
-                    "costume":   getattr(st, "costume", None)   or _best("costume", 0.30),
+                    # committed costume ONLY: _best() would leak the PREVIOUS character's costume on
+                    # a no-costume char (its score map isn't refreshed), so the sweep would read a
+                    # phantom '<char>__<stale-costume>' and get stuck. base char -> None -> __base.
+                    "costume":   getattr(st, "costume", None),
                     "kart":      getattr(st, "kart", None)      or _best("kart", 0.60),
                     "course":    getattr(st, "course", None)    or _best("course", 0.60)}
         if t == "at_current_screen":
