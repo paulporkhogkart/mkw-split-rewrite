@@ -78,6 +78,11 @@ class SweepRunner:
         c = to_filename(sel.get("character") or "")
         return (c, to_filename(sel.get("costume") or "")) if c else None
 
+    def _char_slug(self, sel) -> str:
+        """Live (character, costume) as a cell slug '<char>__<costume>' ('' if no character)."""
+        key = self._char_key(sel)
+        return f"{key[0]}__{key[1]}" if key else ""
+
     def _poll_until_stable(self, key_fn):
         """Poll the live tracker until key_fn(sel) is non-empty and UNCHANGED for
         ground_stable_reads consecutive reads — i.e. the cursor is PARKED on an item, not
@@ -142,6 +147,49 @@ class SweepRunner:
                 self.ctrl.press("DPAD_RIGHT" if tcol > hcol else "DPAD_LEFT")
             self._await_kart_change(here)           # let the step register before re-reading
         raise RuntimeError(f"_park_on_kart: never reached {kart_slug!r} (last parked on {here!r})")
+
+    def _await_char_change(self, prev):
+        """After a nav press on CHARACTER_SELECT, wait until the detected (char,costume) cell slug
+        LEAVES `prev` — detection lags a press, so re-reading immediately would show the stale
+        cell and over-press. No-op in dry-run / on timeout. Mirrors _await_kart_change."""
+        deadline = time.monotonic() + self.ground_timeout
+        while time.monotonic() < deadline:
+            sel = self._live_selection()
+            if sel.get("_dry") or self._char_slug(sel) != prev:
+                return
+            time.sleep(0.05)
+
+    def _park_on_char(self, char_slug):
+        """Closed-loop: step ONE press at a time toward char_slug (row first, then column) across
+        the character×costume grid, WAITING for each step to register before re-reading a PARKED
+        selection — so the cursor can't fly past the target and re-reading self-corrects
+        overshoot/undershoot, INCLUDING costume (a different costume of the same character is a
+        different cell). Raises if it never arrives; dry-run no-op. Mirrors _park_on_kart."""
+        trow, tcol = self.grid.coord_of(char_slug)
+        here = ""
+        for _ in range(self.MAX_VERIFY_ATTEMPTS):
+            sel = self._poll_until_stable(self._char_key)
+            if sel.get("_dry"):
+                return
+            here = self._char_slug(sel)
+            if here == char_slug:
+                return                              # parked on the target cell
+            if not here:                            # no character -> not on CHARACTER_SELECT
+                raise RuntimeError(
+                    f"_park_on_char({char_slug!r}): no character detected — not on CHARACTER_SELECT "
+                    f"(tracker shows character={sel.get('character')!r} kart={sel.get('kart')!r}).")
+            try:
+                hrow, hcol = self.grid.coord_of(here)
+            except KeyError:
+                self.ctrl.press("DPAD_RIGHT")       # unrecognised cell: nudge
+                self._await_char_change(here)
+                continue
+            if hrow != trow:
+                self.ctrl.press("DPAD_DOWN" if trow > hrow else "DPAD_UP")
+            elif hcol != tcol:
+                self.ctrl.press("DPAD_RIGHT" if tcol > hcol else "DPAD_LEFT")
+            self._await_char_change(here)           # let the step register before re-reading
+        raise RuntimeError(f"_park_on_char: never reached {char_slug!r} (last parked on {here!r})")
 
     def capture_kart(self, combo_slug, kart_slug):
         item = f"{combo_slug}__{kart_slug}"
@@ -256,56 +304,6 @@ class SweepRunner:
             self.capture_kart(combo_slug, kart)
         self._return_to("CHARACTER_SELECT", "after kart row")
         return False
-
-    def verify_on(self, slug, category):
-        """Re-press the last navigation delta until at_check_asset_match >= threshold.
-
-        For characters the slug is ``<char>__<costume>`` and we key on the
-        ``name`` field using the character portion (everything before ``__``).
-        When the costume is not ``base`` we also require the costume score to
-        be >= 0.65 so that e.g. ``mario__touring`` never silently grounds on a
-        different costume whose name plate still reads "Mario".
-        For karts the slug is the full kart slug directly.
-
-        In dry-run (or any situation where _DryClient returns a canned 0.95)
-        this passes on the first check.  On real hardware we keep re-pressing
-        DPAD_RIGHT until the tracker confirms the correct item is displayed.
-        """
-        if category == "characters":
-            # Slug format: "mario__base" or "mario__touring"
-            parts = slug.split("__")
-            name = parts[0]
-            costume = parts[1] if len(parts) > 1 else "base"
-        else:
-            name = slug
-            costume = None
-
-        from grid import to_filename
-        key = self._char_key if category == "characters" else self._kart_key
-
-        def matches(s):
-            if category == "characters":
-                return (to_filename(s.get("character") or "") == name
-                        and (costume == "base" or to_filename(s.get("costume") or "") == costume))
-            return to_filename(s.get("kart") or "") == name
-
-        attempts = 0
-        while True:
-            # Wait for the cursor to PARK (held stable, not scrolling), THEN check — so we
-            # never ground on an item that's only flashing past on the way.
-            sel = self._poll_until_stable(key)
-            if sel.get("_dry") or matches(sel):
-                break                               # parked on the target (dry-run grounds at once)
-            if attempts >= self.MAX_VERIFY_ATTEMPTS:
-                raise RuntimeError(
-                    f"verify_on: {slug!r} never grounded after {self.MAX_VERIFY_ATTEMPTS} presses "
-                    f"(tracker last parked on character={sel.get('character')!r} "
-                    f"costume={sel.get('costume')!r} kart={sel.get('kart')!r})"
-                )
-            attempts += 1
-            print(f"  [verify_on] {slug!r}: parked on character={sel.get('character')!r} "
-                  f"costume={sel.get('costume')!r} kart={sel.get('kart')!r} — pressing DPAD_RIGHT")
-            self.ctrl.press("DPAD_RIGHT")
 
 
 # ── Bridge controller (Windows → WSL2 agent) ─────────────────────────────────
@@ -588,32 +586,31 @@ def main():
                 print("Controller never became ready — is start_agent.py running and the Switch on? Aborting.")
                 return
 
-        skipping = bool(a.start_from)
+        char_slugs = [c.slug for c in g.cells("characters")]
+        if sampled_chars is not None:
+            targets = [s for s in char_slugs if s in sampled_chars]   # the picks, in grid order
+        else:
+            targets = list(char_slugs)
+        if a.start_from:
+            if a.start_from in char_slugs:
+                keep = set(char_slugs[char_slugs.index(a.start_from):])
+                targets = [s for s in targets if s in keep]
+            else:
+                print(f"  --start-from {a.start_from!r}: not a character slug; starting from the top.")
+
         paused = False
         recorded = 0
-        for slug, presses in g.sweep_steps("characters"):
-            if skipping:
-                if slug == a.start_from:
-                    skipping = False
-                else:
-                    print(f"  [skip] {slug}")
-                    continue
+        for slug in targets:
             if runner._stop_requested():
                 paused = True
                 break                                  # at CHARACTER_SELECT (anchor) already
-            for btn in presses:
-                ctrl.press(btn)
-            runner.verify_on(slug, "characters")       # ground every char so the walk can't drift
-            if sampled_chars is not None and slug not in sampled_chars:
-                continue                               # SAMPLE: grounded, but not one of the picks
             print(f"\n-- char: {slug} --")
+            runner._park_on_char(slug)                 # closed-loop char+costume nav (overshoot-safe)
             runner.capture_char(slug)
             if runner.sweep_karts(slug, karts=sampled_karts):
                 paused = True
                 break
             recorded += 1
-            if sampled_chars is not None and recorded >= len(sampled_chars):
-                break                                  # SAMPLE: got all the picks; stop walking
         if paused:
             print("\nPaused (stop-file present).")
         elif sampled_chars is not None:

@@ -101,27 +101,29 @@ def test_kart_navigates_to_offset_target():
     assert {"type": "at_record_clip_mark", "event": "flourish"} in client.sent    # reached capture
 
 
-def test_verify_on_costume_retries_until_right_costume():
-    """name matches but the wrong costume is shown → re-press until the right costume lands."""
+def test_park_on_char_navigates_to_target():
+    """Closed-loop char nav steps toward the target cell and stops on it (overshoot/undershoot safe)."""
     g = grid.load_grid(YAML)
     ctrl = FakeController()
-    client = FakeClient(selection=[{"character": "Mario", "costume": "Base"},      # wrong costume
-                                   {"character": "Mario", "costume": "Touring"}])  # right
-    SweepRunner(g, ctrl, client, idle_seconds=0.0, settle_seconds=0.0,
-                ground_timeout=0.0).verify_on("mario__touring", "characters")
-    assert len([b for (_, b) in ctrl.log if b == "DPAD_RIGHT"]) >= 1
-    assert len(_selections(client)) == 2
+    # parked on Luigi, then on the target Mario after a step — it steps toward Mario and stops.
+    client = FakeClient(selection=[{"character": "Luigi", "costume": "Base"},
+                                   {"character": "Luigi", "costume": "Base"},
+                                   {"character": "Mario", "costume": "Base"}])
+    SweepRunner(g, ctrl, client, ground_timeout=0.0)._park_on_char("mario__base")
+    assert any(b.startswith("DPAD") for (_, b) in ctrl.log)            # stepped toward the target
+    assert not any(b in ("A", "B") for (_, b) in ctrl.log)            # nav only, never selects
 
 
-def test_verify_on_base_grounds_on_character_only():
-    """mario__base grounds as soon as the tracker reports character=Mario (costume ignored)."""
+def test_park_on_char_is_costume_aware():
+    """A different COSTUME of the same character is a different cell — keep navigating, don't stop."""
     g = grid.load_grid(YAML)
     ctrl = FakeController()
-    client = FakeClient(selection={"character": "Mario", "costume": "Base"})
-    SweepRunner(g, ctrl, client, idle_seconds=0.0, settle_seconds=0.0,
-                ground_timeout=0.0).verify_on("mario__base", "characters")
-    assert len([b for (_, b) in ctrl.log if b == "DPAD_RIGHT"]) == 0   # grounded on first check
-    assert len(_selections(client)) == 1
+    # on Mario (Base), target Mario (Touring): same character, different costume cell.
+    client = FakeClient(selection=[{"character": "Mario", "costume": "Base"},
+                                   {"character": "Mario", "costume": "Base"},
+                                   {"character": "Mario", "costume": "Touring"}])
+    SweepRunner(g, ctrl, client, ground_timeout=0.0)._park_on_char("mario__touring")
+    assert any(b.startswith("DPAD") for (_, b) in ctrl.log)            # didn't false-stop on mario__base
 
 
 class FakeScreenClient(FakeClient):
