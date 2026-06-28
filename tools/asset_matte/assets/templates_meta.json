@@ -21,6 +21,10 @@
     988,
     1080
   ],
+  "source": {
+    "char_present": "mario__base",
+    "absent": "mario__base__rally_bike"
+  },
   "params": {
     "ALPHA_GAIN": 5.0,
     "STRENGTH": 1.02,
