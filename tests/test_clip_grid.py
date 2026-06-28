@@ -52,6 +52,14 @@ def test_horizontal_recovery_delta(g):
     assert g.horizontal_delta("standard_kart", "standard_kart") == []
 
 
+def test_span_of(g):
+    # characters: 3 rows × 51 cols; karts: 4 rows × 10. span_of keys off the slug's category and
+    # bounds the nav step budget (must exceed (rows-1)+(width-1)).
+    assert g.span_of("mario__base") == (3, 51)
+    assert g.span_of("dolphin__base") == (3, 51)
+    assert g.span_of("standard_kart") == (4, 10)
+
+
 def test_duplicate_slug_raises():
     with pytest.raises(ValueError):
         grid.Grid({"karts": [["Standard Kart", "Standard Kart"]]})

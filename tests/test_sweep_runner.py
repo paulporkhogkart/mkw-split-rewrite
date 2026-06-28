@@ -149,6 +149,53 @@ def test_park_on_char_is_costume_aware():
     assert any(b.startswith("DPAD") for (_, b) in ctrl.log)            # didn't false-stop on mario__base
 
 
+class GridNavSim:
+    """Position-aware fake (controller + client in one): models a cursor on the grid so DPAD
+    presses actually MOVE it, and at_current_selection reports the cell under the cursor. Lets a
+    test prove _park_on can traverse a full-width row — the bug where a 30-step budget stranded the
+    cursor mid-row (donkey_kong col 7 -> dolphin col 39 = 32 presses > 30)."""
+    _D = {"DPAD_RIGHT": (0, 1), "DPAD_LEFT": (0, -1), "DPAD_DOWN": (1, 0), "DPAD_UP": (-1, 0)}
+
+    def __init__(self, g, start_slug, category="characters"):
+        self.cells = {c.coord: c for c in g.cells(category)}
+        self.r, self.c = g.coord_of(start_slug)
+        self.log = []
+
+    # controller interface
+    def press(self, b, duration=0.1):
+        self.log.append(("press", b))
+        dr, dc = self._D.get(b, (0, 0))
+        if (self.r + dr, self.c + dc) in self.cells:        # stay on the grid (clamp at edges)
+            self.r, self.c = self.r + dr, self.c + dc
+
+    def hold(self, *a): pass
+    def rstick_down(self, *a): pass
+
+    def cur_slug(self):
+        return self.cells[(self.r, self.c)].slug
+
+    # client interface
+    def send(self, msg):
+        if msg["type"] == "at_current_selection":
+            char, cost = self.cur_slug().split("__", 1)      # '<char>__<costume>'; base costume = None
+            return {"type": "current_selection", "course": None, "character": char,
+                    "costume": None if cost == "base" else cost, "kart": None}
+        return {"type": "ok"}
+
+    def wait_for(self, type_):
+        return {"type": "clip_done", "item": "x", "events": {}}
+
+
+def test_park_on_char_crosses_full_width_row():
+    """Regression: _park_on's step budget must exceed the widest grid row. donkey_kong (row 2,
+    col 7) -> dolphin (row 2, col 39) is 32 DPAD_RIGHT presses; the old 30-step cap
+    (MAX_VERIFY_ATTEMPTS) ran out on daisy__swimwear (col 36) and raised 'never reached'."""
+    g = grid.load_grid(YAML)
+    sim = GridNavSim(g, "donkey_kong__base")
+    SweepRunner(g, sim, sim, ground_timeout=0.0, nav_settle=0.0)._park_on_char("dolphin__base")
+    assert sim.cur_slug() == "dolphin__base"                # reached the far target, didn't strand
+
+
 class FakeScreenClient(FakeClient):
     """FakeClient whose at_current_screen reports a fixed screen (so _return_to lands)."""
     def __init__(self, screen="CHARACTER_SELECT", **kw):

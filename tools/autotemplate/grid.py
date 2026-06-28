@@ -49,6 +49,15 @@ class Grid:
     def coord_of(self, slug: str) -> tuple:
         return self._by_slug[(self._cat_of(slug), slug)].coord
 
+    def span_of(self, slug: str) -> tuple:
+        """(#rows, widest row) for the category containing `slug`. Used to bound nav steps:
+        a closed-loop traversal is at most (rows-1)+(width-1) presses, so the step budget
+        must exceed that. Auto-scales if the roster grows (no hard-coded cap to outgrow)."""
+        cells = self._cells[self._cat_of(slug)]
+        rows = max(c.coord[0] for c in cells) + 1
+        width = max(c.coord[1] for c in cells) + 1
+        return (rows, width)
+
     def sweep_steps(self, category: str) -> list:
         steps, prev = [], None
         for cell in self._cells[category]:

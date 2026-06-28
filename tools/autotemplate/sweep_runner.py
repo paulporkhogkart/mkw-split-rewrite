@@ -132,8 +132,16 @@ class SweepRunner:
         space out inputs (nav_settle) so the cursor + costume settle. Logs each step (no hardware
         repro on the dev box). Raises if it never arrives; dry-run no-op."""
         trow, tcol = self.grid.coord_of(target_slug)
+        # Step budget MUST exceed the worst-case traversal: row-first then column is at most
+        # (rows-1)+(width-1) presses. A character row is ~51 cells wide, so the old shared
+        # MAX_VERIFY_ATTEMPTS (30) couldn't even cross one row — donkey_kong (col 7) -> dolphin
+        # (col 39) = 32 presses stranded on daisy__swimwear (col 36). Derive from the grid (2x
+        # the Manhattan bound) so overshoot self-corrections + invalid re-polls have headroom and
+        # it never silently outgrows the roster. Decoupled from MAX_VERIFY_ATTEMPTS (grounding).
+        n_rows, width = self.grid.span_of(target_slug)
+        budget = 2 * (n_rows + width)
         here, invalid = "", 0
-        for _ in range(self.MAX_VERIFY_ATTEMPTS):
+        for _ in range(budget):
             sel = self._poll_until_stable(key_fn)
             if sel.get("_dry"):
                 return
@@ -163,7 +171,9 @@ class SweepRunner:
             self.ctrl.press(btn)
             self._await_change(here, slug_fn)       # let the step register before re-reading
             time.sleep(self.nav_settle)             # space out inputs so cursor + costume settle
-        raise RuntimeError(f"_park_on: never reached {target_slug!r} (last on {here!r}) on {what}.")
+        raise RuntimeError(
+            f"_park_on: never reached {target_slug!r} (last on {here!r}) on {what} "
+            f"in {budget} steps — presses aren't moving the cursor toward the target.")
 
     def _park_on_kart(self, kart_slug):
         """Closed-loop kart-select nav (overshoot/undershoot safe). See _park_on."""
