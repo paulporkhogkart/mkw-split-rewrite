@@ -47,6 +47,8 @@ class FakeClient:
             return {"type": "current_screen", "screen": "KART_SELECT"}
         if t == "at_clip_exists":
             return {"type": "exists_result", "done": False}
+        if t == "at_screen_score":
+            return {"type": "screen_score", "screen": msg.get("screen"), "score": 1.0, "detected": True}
         return {"type": {"at_record_clip_begin": "clip_begun",
                          "at_record_clip_mark": "marked",
                          "at_record_clip_abort": "clip_aborted"}.get(t, "ok")}
@@ -154,3 +156,47 @@ def test_sweep_karts_completes_when_not_paused():
     assert r.sweep_karts("mario__base") is False  # completed
     assert len(captured) == len(list(g.cells("karts")))
     assert ("press", "B") in ctrl.log             # anchor return at end of row
+
+
+class FakeScoreClient(FakeClient):
+    """Answers at_screen_score with a per-screen `detected` sequence (last value repeats),
+    modelling the post-kart intermediary screen: the KART_SELECT tell scores ~0 (detected
+    False) while sitting on it, then scores (True) once B returns to the real KART_SELECT."""
+    def __init__(self, scores=None, **kw):
+        super().__init__(**kw)
+        self._scores = scores or {}
+        self._idx = {}
+    def send(self, msg):
+        if msg.get("type") == "at_screen_score":
+            self.sent.append(msg)
+            name = msg.get("screen")
+            seq = self._scores.get(name, [True])
+            i = self._idx.get(name, 0)
+            det = bool(seq[min(i, len(seq) - 1)])
+            self._idx[name] = i + 1
+            return {"type": "screen_score", "screen": name,
+                    "score": 1.0 if det else 0.0, "detected": det}
+        return super().send(msg)
+
+
+def test_return_to_confirms_by_tell_score_not_held_screen():
+    """The post-kart intermediary screen makes the detector HOLD KART_SELECT; _return_to must
+    keep pressing B until the KART_SELECT tell actually SCORES, not stop at the held name.
+    Modelled as detected=False for the first reads (intermediary), then True (real return)."""
+    g = grid.load_grid(YAML)
+    ctrl = FakeController()
+    client = FakeScoreClient(scores={"KART_SELECT": [False, False, False, True]})
+    SweepRunner(g, ctrl, client, idle_seconds=0.0, screen_timeout=0.02)._return_to("KART_SELECT", "test")
+    assert len([b for (_, b) in ctrl.log if b == "B"]) >= 2   # didn't false-succeed on the held name
+
+
+def test_return_to_raises_when_tell_never_scores():
+    """If the target tell never scores (we never actually leave the intermediary), _return_to
+    presses its full B budget then raises — vs the old silent false-success on the held name."""
+    import pytest
+    g = grid.load_grid(YAML)
+    ctrl = FakeController()
+    client = FakeScoreClient(scores={"KART_SELECT": [False]})
+    with pytest.raises(RuntimeError, match="never reached"):
+        SweepRunner(g, ctrl, client, idle_seconds=0.0, screen_timeout=0.02)._return_to("KART_SELECT", "x")
+    assert len([b for (_, b) in ctrl.log if b == "B"]) == 6

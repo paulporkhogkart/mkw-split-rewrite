@@ -286,12 +286,36 @@ class EventBroadcaster:
             det = self._at_detector
             scr = getattr(getattr(det, "current_screen", None), "name", "") if det is not None else ""
             return {"type": "current_screen", "screen": scr}
+        if t == "at_screen_score":
+            return self._at_screen_score(msg.get("screen", ""))
         return {"type": "at_error", "message": f"Unknown autotemplate command: {t!r}"}
 
     def _current_frame(self) -> Optional[np.ndarray]:
         if self._at_frame_ref is None:
             return None
         return self._at_frame_ref[0]
+
+    def _at_screen_score(self, screen_name: str) -> dict:
+        """Live tell score for a NAMED screen on the current frame — 'is screen X actively
+        confirming right now', re-running detect_tell against the detector's loaded tell.
+        Unlike at_current_screen (which returns the HELD current_screen, so it sticks on an
+        unmatched screen like the post-kart intermediary and falsely reads KART_SELECT), this
+        lets the sweep verify a screen TRANSITION by score instead of the held name."""
+        det = self._at_detector
+        if det is None:
+            return {"type": "at_error", "message": "detector not available"}
+        from ..detection.screen import Screen, detect_tell
+        try:
+            scr = Screen[screen_name]
+        except KeyError:
+            return {"type": "at_error", "message": f"unknown screen {screen_name!r}"}
+        tell = det._tells_by_screen.get(scr)
+        frame = self._current_frame()
+        if tell is None or frame is None:
+            return {"type": "screen_score", "screen": screen_name, "score": 0.0, "detected": False}
+        detected, score = detect_tell(frame, tell)
+        return {"type": "screen_score", "screen": screen_name,
+                "score": float(score), "detected": bool(detected)}
 
     def _out(self, *parts: str) -> str:
         return os.path.join(self._at_base_path, *parts)

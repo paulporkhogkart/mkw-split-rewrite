@@ -15,7 +15,8 @@ class SweepRunner:
     MAX_VERIFY_ATTEMPTS = 30
 
     def __init__(self, grid, controller, client, *, idle_seconds=10.0, settle_seconds=0.8,
-                 ground_timeout=4.0, ground_stable_reads=3, lang="en_uk", stop_check=None):
+                 ground_timeout=4.0, ground_stable_reads=3, lang="en_uk", stop_check=None,
+                 screen_timeout=3.0):
         self.grid = grid
         self.ctrl = controller
         self.client = client
@@ -25,6 +26,7 @@ class SweepRunner:
         self.ground_stable_reads = ground_stable_reads
         self.lang = lang
         self.stop_check = stop_check
+        self.screen_timeout = screen_timeout    # per-attempt wait for a screen tell to confirm by score
 
     def _begin(self, item):
         self.client.send({"type": "at_record_clip_begin", "item": item})
@@ -174,24 +176,27 @@ class SweepRunner:
         self._return_to("KART_SELECT", "after kart flourish")   # B back — verify it lands
         return ev
 
-    def _screen(self) -> str:
-        """The live detector's screen name (e.g. 'KART_SELECT'); '__dry__' in dry-run, '' if
-        unavailable. Reliable for telling KART_SELECT from CHARACTER_SELECT / course select —
-        the committed kart/character persist across screens, so the selection can't."""
-        rep = self.client.send({"type": "at_current_screen"})
+    def _confirm_screen(self, name) -> bool:
+        """True iff screen `name`'s TELL is actively confirming on the live frame (its score is
+        over the detector's threshold). NOT the held current_screen: that sticks on the
+        unmatched post-kart intermediary screen and would falsely read KART_SELECT, so a return
+        could 'succeed' while we're still on the intermediary. Dry-run True."""
+        rep = self.client.send({"type": "at_screen_score", "screen": name})
         if rep.get("_dry"):
-            return "__dry__"
-        return rep.get("screen", "") if rep.get("type") == "current_screen" else ""
+            return True
+        return bool(rep.get("detected")) if rep.get("type") == "screen_score" else False
 
-    def _wait_screen(self, name, timeout=3.0) -> bool:
-        """True once the detector reports screen `name` within `timeout`. Dry-run True."""
+    def _wait_screen(self, name, timeout=None) -> bool:
+        """True once screen `name`'s tell actively CONFIRMS by score within `timeout` (polls at
+        least once). Score-based, not the held screen name — see _confirm_screen. Dry-run True."""
+        timeout = self.screen_timeout if timeout is None else timeout
         deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            scr = self._screen()
-            if scr == "__dry__" or scr == name:
+        while True:
+            if self._confirm_screen(name):
                 return True
+            if time.monotonic() >= deadline:
+                return False
             time.sleep(0.1)
-        return False
 
     def _return_to(self, screen_name, what):
         """Press B until the detector reports `screen_name` — a B can be eaten by a transition
@@ -209,6 +214,13 @@ class SweepRunner:
         # Anti-spin runs all the time (the agent holds it on by default).  Returns True if a
         # pause was requested mid-row (after returning to CHARACTER_SELECT), else False.
         karts = [c.slug for c in self.grid.cells("karts")]
+        # CHARACTER_SELECT -> KART_SELECT (capture_char pressed A): confirm by tell SCORE that we
+        # actually landed on KART_SELECT before navigating, else _park_on_kart spins on the char
+        # screen reading the committed (persisted) kart.
+        if not self._wait_screen("KART_SELECT", timeout=max(self.screen_timeout, 8.0)):
+            raise RuntimeError(
+                f"sweep_karts({combo_slug!r}): KART_SELECT never confirmed after capture_char "
+                "advanced — the char->kart transition did not land.")
         for kart in karts:
             if self._stop_requested():
                 self._return_to("CHARACTER_SELECT", "pause mid kart row")
@@ -343,7 +355,7 @@ class WsClient:
     _REPLY_TYPES = frozenset({
         "at_done", "at_error", "at_tell_score", "at_asset_score",
         "clip_begun", "marked", "clip_aborted", "exists_result", "current_selection",
-        "current_screen",
+        "current_screen", "screen_score",
     })
 
     def __init__(self, url):
@@ -454,6 +466,7 @@ class _DryClient:
         "at_check_asset_match":    {"type": "at_asset_score", "name_score": 0.95},
         "at_current_selection":    {"type": "current_selection", "_dry": True},
         "at_current_screen":       {"type": "current_screen", "_dry": True},
+        "at_screen_score":         {"type": "screen_score", "_dry": True},
     }
 
     def send(self, msg, timeout=15.0):
