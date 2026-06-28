@@ -59,7 +59,8 @@ def solve_tc(P, A):
 
 
 def place_in_canvas(img_roi, roi):
-    """Place an ROI image (HxW or HxWx3) at `roi` into a zeroed full-4K canvas."""
+    """Place an ROI image (HxW or HxWx3) at `roi` into a zeroed full-4K canvas.
+    The canvas dtype matches img_roi.dtype — pass a float image if you need a float canvas."""
     x, y, w, h = roi
     W, H = FULL_4K
     chan = () if img_roi.ndim == 2 else (img_roi.shape[2],)

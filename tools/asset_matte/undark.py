@@ -3,7 +3,7 @@ combo crop / OUT_H. drop_nameplate + undark_rgba are the VERBATIM validated kart
 method (see memory nametag-mask-undark) — char uses the same method, char template.
 Run in the matte venv (cv2/numpy/PIL):  temp/asset-venv-gpu/Scripts/python.exe ...
 """
-import glob, os, subprocess, sys
+import glob, os, sys
 import numpy as np, cv2
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # flat `import nametag_core` as script or test
 import nametag_core as nc

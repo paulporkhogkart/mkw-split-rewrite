@@ -5,6 +5,18 @@ def test_constants():
     assert nc.PROD_CROP_4K == (2100, 36, 3720, 1806)
     assert (nc.OUT_W, nc.OUT_H) == (988, 1080)
     assert nc.CHAR_ROI == (2378, 1604, 1178, 226)
+    assert nc.PLATE_ROI == (2360, 1602, 1378, 226)
+    assert nc.FULL_4K == (3840, 2160)
+    assert nc.NAMEPLATE_HERO_ROI == (1050, 18, 1860, 903)
+
+
+def test_extract_loop_crop_matches_prod_crop():
+    # The undark mask + t,C are placed via PROD_CROP_4K; extract_loop crops
+    # scale_roi(NAMEPLATE_HERO_ROI) instead. They MUST resolve to the same 4K region or the
+    # mask misaligns with the matte frames pixel-for-pixel. Guard the invariant the two paths
+    # share so a future NAMEPLATE_HERO_ROI edit can't silently desync them.
+    from mkw_tracker.tools.loop_probe import scale_roi
+    assert scale_roi(nc.NAMEPLATE_HERO_ROI, 3840, 2160) == nc.PROD_CROP_4K
 
 def test_classify_presence_splits_dark_and_light():
     luma = np.array([40, 42, 41, 200, 198, 201, 39, 43])  # dark=present, light=absent
