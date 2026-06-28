@@ -15,15 +15,16 @@ class SweepRunner:
     MAX_VERIFY_ATTEMPTS = 30
 
     def __init__(self, grid, controller, client, *, idle_seconds=10.0, settle_seconds=0.8,
-                 ground_timeout=4.0, ground_stable_reads=3, lang="en_uk"):
+                 ground_timeout=4.0, ground_stable_reads=3, lang="en_uk", stop_check=None):
         self.grid = grid
         self.ctrl = controller
         self.client = client
         self.idle = idle_seconds
         self.settle = settle_seconds
-        self.ground_timeout = ground_timeout            # how long to POLL for a parked read (0 == one read)
-        self.ground_stable_reads = ground_stable_reads  # consecutive identical reads == parked (not scrolling)
+        self.ground_timeout = ground_timeout
+        self.ground_stable_reads = ground_stable_reads
         self.lang = lang
+        self.stop_check = stop_check
 
     def _begin(self, item):
         self.client.send({"type": "at_record_clip_begin", "item": item})
@@ -201,13 +202,20 @@ class SweepRunner:
                 return
         raise RuntimeError(f"_return_to: never reached {screen_name} after 6 B presses ({what})")
 
+    def _stop_requested(self) -> bool:
+        return bool(self.stop_check and self.stop_check())
+
     def sweep_karts(self, combo_slug):
-        # Anti-spin runs all the time now (the agent holds it on by default), so no per-screen
-        # gating here.
+        # Anti-spin runs all the time (the agent holds it on by default).  Returns True if a
+        # pause was requested mid-row (after returning to CHARACTER_SELECT), else False.
         karts = [c.slug for c in self.grid.cells("karts")]
-        out = [self.capture_kart(combo_slug, kart) for kart in karts]
-        self._return_to("CHARACTER_SELECT", "after kart row")   # B back — verify it lands
-        return out
+        for kart in karts:
+            if self._stop_requested():
+                self._return_to("CHARACTER_SELECT", "pause mid kart row")
+                return True
+            self.capture_kart(combo_slug, kart)
+        self._return_to("CHARACTER_SELECT", "after kart row")
+        return False
 
     def verify_on(self, slug, category):
         """Re-press the last navigation delta until at_check_asset_match >= threshold.
@@ -463,35 +471,6 @@ class _DryClient:
 
 # ── CLI entry point ───────────────────────────────────────────────────────────
 
-def _pilot(ctrl) -> bool:
-    """Keyboard-drive the Switch via the emulated controller until the operator presses
-    Enter (start the sweep from the current screen) or q (quit). Windows-only (msvcrt)."""
-    import msvcrt
-    KEYS = {"a": "A", "b": "B", "x": "X", "y": "Y", "l": "L", "r": "R",
-            "+": "PLUS", "-": "MINUS", "h": "HOME"}
-    ARROWS = {"H": "DPAD_UP", "P": "DPAD_DOWN", "K": "DPAD_LEFT", "M": "DPAD_RIGHT"}
-    print("\n== PILOT — drive to character-select, then start ==")
-    print("  arrow keys -> D-pad    .    a b x y l r  + - (plus/minus)  h (HOME) -> buttons")
-    print("  ENTER -> start the sweep from the current screen    .    q -> quit\n", flush=True)
-    while True:
-        ch = msvcrt.getwch()
-        if ch in ("\r", "\n"):
-            print("  -> starting sweep from here\n", flush=True)
-            return True
-        if ch in ("q", "Q", "\x03"):
-            return False
-        if ch in ("\x00", "\xe0"):                 # arrow / function-key prefix
-            btn = ARROWS.get(msvcrt.getwch())
-            if btn:
-                ctrl.press(btn)
-                print(f"  {btn}", flush=True)
-            continue
-        btn = KEYS.get(ch.lower())
-        if btn:
-            ctrl.press(btn)
-            print(f"  {btn}", flush=True)
-
-
 def main():
     import argparse
     import os
@@ -499,69 +478,49 @@ def main():
 
     p = argparse.ArgumentParser(
         description="Clip sweep: walk the character/kart grid, record one clip per item. "
-                    "Runs on Windows; delegates controller to the WSL2 controller_agent via TCP."
-    )
+                    "Runs on Windows; delegates the controller to the WSL2 controller_agent via TCP. "
+                    "Drive to character-select first (the console's manual cluster), then start this.")
     p.add_argument("--capture-ws", default="ws://127.0.0.1:8766",
-                   help="WebSocket URL of the clip-recorder broadcaster (default: ws://127.0.0.1:8766). "
-                        "Use 127.0.0.1, NOT 'localhost' — the broadcaster binds IPv4 (0.0.0.0); localhost can "
-                        "resolve to IPv6 (::1) on Windows and the connection is refused (WinError 1225).")
-    p.add_argument("--agent-host", default="127.0.0.1",
-                   help="Host where controller_agent.py is listening (default: 127.0.0.1)")
-    p.add_argument("--agent-port", type=int, default=7878,
-                   help="Port where controller_agent.py is listening (default: 7878)")
+                   help="WebSocket URL of the clip-recorder broadcaster (use 127.0.0.1, not localhost).")
+    p.add_argument("--agent-host", default="127.0.0.1", help="controller_agent host (default 127.0.0.1)")
+    p.add_argument("--agent-port", type=int, default=7878, help="controller_agent port (default 7878)")
     p.add_argument("--start-from", default=None, metavar="SLUG",
-                   help="Resume from this character slug (skip earlier cells)")
+                   help="Resume from this character slug (skip earlier cells).")
+    p.add_argument("--stop-file", default=None, metavar="PATH",
+                   help="Graceful-stop flag: when this file exists, finish the current clip, return "
+                        "to CHARACTER_SELECT, and exit (the console creates it for Pause/Stop).")
     p.add_argument("--dry-run", action="store_true",
-                   help="Print all steps without opening controller or capture WS")
-    p.add_argument("--pilot", action="store_true",
-                   help="Drive the Switch to character-select yourself with the keyboard, then press "
-                        "Enter to start the sweep from there (skips the blind HOME preamble).")
+                   help="Print all steps without opening controller or capture WS.")
     a = p.parse_args()
 
     yaml_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "clip_sweep.yaml")
     g = load_grid(yaml_path)
 
+    stop_check = (lambda: bool(a.stop_file and os.path.exists(a.stop_file)))
+
     print(f"Agent:       {a.agent_host}:{a.agent_port}")
     print(f"Capture WS:  {a.capture_ws}")
-    print(f"Grid YAML:   {yaml_path}")
     print(f"Start from:  {a.start_from or '(beginning)'}")
+    print(f"Stop file:   {a.stop_file or '(none)'}")
     print(f"Mode:        {'DRY RUN' if a.dry_run else 'LIVE'}\n")
 
     if a.dry_run:
-        ctrl = _DryController()
-        client = _DryClient()
-        runner = SweepRunner(g, ctrl, client, idle_seconds=0.0, settle_seconds=0.0)
+        ctrl, client = _DryController(), _DryClient()
+        runner = SweepRunner(g, ctrl, client, idle_seconds=0.0, settle_seconds=0.0, stop_check=stop_check)
     else:
         ctrl = BridgeController(host=a.agent_host, port=a.agent_port)
         client = WsClient(a.capture_ws)
-        runner = SweepRunner(g, ctrl, client)
+        runner = SweepRunner(g, ctrl, client, stop_check=stop_check)
 
     try:
-        if a.pilot and not a.dry_run:
+        if not a.dry_run:
             print("Waiting for the controller agent to connect to the Switch...", flush=True)
             if hasattr(ctrl, "wait_ready") and not ctrl.wait_ready():
                 print("Controller never became ready — is start_agent.py running and the Switch on? Aborting.")
                 return
-            if not _pilot(ctrl):
-                print("Pilot aborted; sweep not started.")
-                return
-        else:
-            # Blind preamble: HOME -> Time Trials -> character select.  Assumes you START at
-            # HOME with MKW hovered; use --pilot if you're not in that exact state.
-            print("-- Preamble: HOME -> Time Trials -> character select --")
-            for btn in ["HOME", "A", "A", "A"]:         # wake + title screen
-                ctrl.press(btn)
-            if not a.dry_run:
-                time.sleep(3.0)                           # wait for menu to load
-            ctrl.press("A")                               # single player
-            if not a.dry_run:
-                time.sleep(1.5)
-            ctrl.press("A")                               # Time Trials
-            if not a.dry_run:
-                time.sleep(2.0)                           # wait for character select
 
-        # Main sweep: characters
         skipping = bool(a.start_from)
+        paused = False
         for slug, presses in g.sweep_steps("characters"):
             if skipping:
                 if slug == a.start_from:
@@ -569,16 +528,18 @@ def main():
                 else:
                     print(f"  [skip] {slug}")
                     continue
-
+            if runner._stop_requested():
+                paused = True
+                break                                  # at CHARACTER_SELECT (anchor) already
             print(f"\n-- char: {slug} --")
             for btn in presses:
                 ctrl.press(btn)
-
             runner.verify_on(slug, "characters")
             runner.capture_char(slug)
-            runner.sweep_karts(slug)
-
-        print("\nSweep complete.")
+            if runner.sweep_karts(slug):
+                paused = True
+                break
+        print("\nPaused (stop-file present)." if paused else "\nSweep complete.")
     finally:
         ctrl.stop()
         client.close()

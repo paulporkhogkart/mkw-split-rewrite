@@ -117,3 +117,40 @@ def test_verify_on_base_grounds_on_character_only():
                 ground_timeout=0.0).verify_on("mario__base", "characters")
     assert len([b for (_, b) in ctrl.log if b == "DPAD_RIGHT"]) == 0   # grounded on first check
     assert len(_selections(client)) == 1
+
+
+class FakeScreenClient(FakeClient):
+    """FakeClient whose at_current_screen reports a fixed screen (so _return_to lands)."""
+    def __init__(self, screen="CHARACTER_SELECT", **kw):
+        super().__init__(**kw)
+        self._screen_name = screen
+    def send(self, msg):
+        if msg.get("type") == "at_current_screen":
+            return {"type": "current_screen", "screen": self._screen_name}
+        return super().send(msg)
+
+
+def test_sweep_karts_pauses_at_next_kart_and_returns_to_anchor():
+    g = grid.load_grid(YAML)
+    ctrl, client = FakeController(), FakeScreenClient("CHARACTER_SELECT")
+    calls = [0]
+    def stop_check():
+        calls[0] += 1
+        return calls[0] > 1                       # allow one kart, pause before the second
+    r = SweepRunner(g, ctrl, client, idle_seconds=0.0, ground_timeout=0.0, stop_check=stop_check)
+    captured = []
+    r.capture_kart = lambda combo, kart: captured.append(kart)   # stub hardware
+    assert r.sweep_karts("mario__base") is True   # paused
+    assert len(captured) == 1
+    assert ("press", "B") in ctrl.log             # returned to CHARACTER_SELECT anchor
+
+
+def test_sweep_karts_completes_when_not_paused():
+    g = grid.load_grid(YAML)
+    ctrl, client = FakeController(), FakeScreenClient("CHARACTER_SELECT")
+    r = SweepRunner(g, ctrl, client, idle_seconds=0.0, ground_timeout=0.0, stop_check=lambda: False)
+    captured = []
+    r.capture_kart = lambda combo, kart: captured.append(kart)
+    assert r.sweep_karts("mario__base") is False  # completed
+    assert len(captured) == len(list(g.cells("karts")))
+    assert ("press", "B") in ctrl.log             # anchor return at end of row
