@@ -4,9 +4,9 @@ Thin wiring: pure logic lives in controlstate/progress/health; I/O in
 supervisor/wsconsumer/manual. Cross-thread updates are marshalled onto the Tk
 main thread via a queue drained by after().
 """
-import base64
 import os
 import queue
+import shutil
 import sys
 import time
 import tkinter as tk
@@ -106,7 +106,11 @@ class ConsoleApp:
     def _drain(self):
         try:
             while True:
-                self.q.get_nowait()()
+                cb = self.q.get_nowait()
+                try:
+                    cb()
+                except Exception:
+                    pass   # a callback error must not stop draining
         except queue.Empty:
             pass
         self.root.after(100, self._drain)
@@ -193,6 +197,12 @@ class ConsoleApp:
                 except tk.TclError: pass
         self.status.configure(text=f"● {s.lower().replace('_', ' ')}")
 
+    def _free_gb(self):
+        try:
+            return shutil.disk_usage(self.sup.clips_dir).free / 1e9
+        except OSError:
+            return None
+
     # ── 1 Hz refresh ─────────────────────────────────────────────────────────────
     def _tick(self):
         if self.manual:
@@ -203,11 +213,12 @@ class ConsoleApp:
         self.progress.update(self.sup.clip_count(), time.monotonic())
         h = self.health.snapshot(time.monotonic()); pr = self.progress.snapshot()
         age = h["last_clip_age"]
+        gb = self._free_gb()
         self.hl.configure(text=(
             f"controller {'OK' if h['controller'] else 'X'}    screen {h['screen'] or '-'}\n"
             f"{h['character'] or '-'} / {h['costume'] or '-'} / {h['kart'] or '-'}\n"
             f"clips {pr['done']}/{pr['total']}  {pr['pct']*100:4.1f}%   ETA {_fmt_eta(pr['eta_seconds'])}\n"
-            f"last clip {('%.0fs' % age) if age is not None else '-'}   fps {h['fps'] or '-'}"))
+            f"last clip {('%.0fs' % age) if age is not None else '-'}   fps {h['fps'] or '-'}   disk {('%.0f GB' % gb) if gb is not None else '-'}"))
         self.root.after(1000, self._tick)
 
     def _on_close(self):

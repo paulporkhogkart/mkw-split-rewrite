@@ -42,6 +42,8 @@ class ProcessSupervisor:
                 m = _CHAR_RE.search(line)
                 if m:
                     self.write_resume(m.group(1))
+                elif "Sweep complete." in line:
+                    self.clear_resume()
             self.on_line(name, line)
         p.wait()
         if on_exit:
@@ -120,5 +122,11 @@ class ProcessSupervisor:
             os.makedirs(self.clips_dir, exist_ok=True)
             with open(self._resume, "w") as f:
                 f.write(slug)
+        except OSError:
+            pass
+
+    def clear_resume(self):
+        try:
+            os.remove(self._resume)
         except OSError:
             pass
