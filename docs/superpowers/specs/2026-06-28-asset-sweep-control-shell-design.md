@@ -67,7 +67,7 @@ it does not absorb them.
    spawns + pipes ─────┼─► Agent  (start_agent.py)        stdout ──┐ │
    stdout (no console) ┼─► Tracker(mkw_tracker --clip-     stdout ─┼─┼─► 3 split log panes
                        ┼─►        capture --ws-port 8766           │ │
-                       ┼─►        --no-window)                     │ │
+                       ┼─►        --no-display)                     │ │
                        ┼─► Sweep  (sweep_runner.py)       stdout ──┘ │
                        │                                             │
    read-only WS  ──────┼──ws://127.0.0.1:8766─► thumbnail + state ──►│ thumbnail + health strip
@@ -85,7 +85,7 @@ it does not absorb them.
 
 ### Integration facts (verified against current code)
 
-- Tracker: `--clip-capture` **requires** `--ws-port`; `--no-window` suppresses the
+- Tracker: `--clip-capture` **requires** `--ws-port`; `--no-display` suppresses the
   `cv2.imshow("MKW Tracker", …)` overlay (built for headless Tauri use). `[clip]` /
   `[stall]` watchdog diagnostics still print to stdout even though `--clip-capture`
   silences the per-frame IPC stdout. So piping the tracker stdout yields the useful
@@ -212,7 +212,7 @@ base64, and `broadcaster.broadcast(json({"type":"preview","w":…,"h":…,"data"
   with CPython) — **no Pillow dependency**. (PPM is the fallback if any PNG quirk
   arises: `cv2` → PPM bytes → `PhotoImage(data=…)`.)
 - This **replaces** the old `cv2.imshow` overlay window, which we drop simply by
-  launching the tracker with the existing `--no-window` flag. Net rendering cost on
+  launching the tracker with the existing `--no-display` flag. Net rendering cost on
   the rig goes *down*.
 
 ### Health strip
@@ -261,7 +261,7 @@ Manual cluster buttons: D-pad (▲▼◀▶), A, B, +, HOME. Each click →
 ## Code changes to existing files
 
 1. **`mkw_tracker/main.py`** — add the throttled `preview` thumbnail broadcast inside
-   the `--clip-capture` loop. (Launching with `--no-window` is a spawn argument, not a
+   the `--clip-capture` loop. (Launching with `--no-display` is a spawn argument, not a
    code change.)
 2. **`tools/autotemplate/sweep_runner.py`** —
    - add `--stop-file <path>`; check it at the top of the character loop and at the top
