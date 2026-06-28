@@ -9,8 +9,9 @@ import numpy as np
 from mkw_tracker.tools.loop_probe import (
     load_features, autocorr_by_lag, find_period, scale_roi, HERO_ROI_1080,
 )
+from nametag_core import NAMEPLATE_HERO_ROI, OUT_H
 
-CROP_H = 860   # downscale crop to this height (speed up matting; still crisp)
+CROP_H = OUT_H   # 1080 — nameplate-inclusive crop (was 860 hero-only)
 
 
 def extract(clip: str, outdir: str):
@@ -31,7 +32,7 @@ def extract(clip: str, outdir: str):
     cap = cv2.VideoCapture(clip)
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    x1, y1, x2, y2 = scale_roi(HERO_ROI_1080, w, h)
+    x1, y1, x2, y2 = scale_roi(NAMEPLATE_HERO_ROI, w, h)   # nameplate-inclusive crop
     scale = CROP_H / (y2 - y1)
     out_w = int(round((x2 - x1) * scale))
     idx = saved = 0
@@ -40,8 +41,7 @@ def extract(clip: str, outdir: str):
         if not ok:
             break
         if idx >= start:
-            crop = frame[y1:y2, x1:x2]
-            crop = cv2.resize(crop, (out_w, CROP_H), interpolation=cv2.INTER_AREA)
+            crop = cv2.resize(frame[y1:y2, x1:x2], (out_w, CROP_H), interpolation=cv2.INTER_AREA)
             cv2.imwrite(os.path.join(outdir, f"{saved:03d}.png"), crop)
             saved += 1
         idx += 1
