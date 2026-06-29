@@ -1,7 +1,9 @@
 # Kart-Chip Matte Pipeline (blank-plate un-darken + flourish bumper restore) — Design
 
 **Date:** 2026-06-29
-**Status:** Approved approach — validated live in the tuner; pending spec review → writing-plans.
+**Status:** Stages 1–4 + matte = interim approach (validated, in use). **Stage 5 (flourish bumper fill) is SHELVED** — see the "Stage 5 status" note below. The big text-occlusions (idle and spawn-in) await a generative AI-inpaint design.
+
+> **Stage 5 status (2026-06-29, later):** Live testing shelved the single-flourish-donor bumper fill. A static flourish frame aligned by translation matches only ONE dip frame (d010↔f70); the spawn-in bounce **pitches** the body, so the bumper angle changes through the dip and no single flourish pose fits f71+. This is a fundamental ceiling, not tuning. **Interim:** run stages 1–4 + matte with the flourish fill OFF (`tune_blankplate.py` defaults the toggle off) — text removed, small idle occlusions filled by the interior TELEA inpaint, the large spawn-in bumper notch left for later. **Future:** a generative AI inpaint (LaMa / SD-inpaint) to reconstruct large text-occluded regions, needed for BOTH the idle loop (parts of the kart/character can cross the text) AND the spawn-in one-shot. The chip needs both an idle loop and a spawn-in one-shot asset.
 **Branch:** asset-clip-sweep
 **Builds on:** `2026-06-28-nameplate-prematte-design.md` (pre-matte paint-then-stamp; pre_darken/matte pipeline) and memory `nametag-mask-undark`. This spec is the **kart-combo path** the prematte spec explicitly deferred ("the decisive kart case: a kart dipping into the plate").
 **Calibrator:** `tools/asset_matte/tune_blankplate.py` (browser tuner, GPU venv) — the live reference implementation of everything below.
@@ -65,7 +67,7 @@ The settled idle frame is itself text-occluded, so a shifted idle donor restores
 | `KEY_THR` | **120** | subject-vs-background discriminator on recovered `S` |
 | `CSUB` | **0.5** | additive-floor removal for the **blank-plate** transform (not the 1.0 of the per-template prematte spec) |
 | `TFLOOR` | **0.01** | lower clamp on transmission `t` (also the divide-by-zero guard) |
-| `FILL_K` | **15** | morphological-close kernel for interior-notch detection |
+| `FILL_K` | **51** | morphological-close kernel for interior-notch detection (raised 15→51 to close larger idle text-occlusions) |
 | `SCORE_GATE` | **0.45** | min coarse-NCC bumper-match to engage the flourish fill |
 | `FEATHER` | **0** | fill-boundary blend width (0 = hard fill) |
 | `T_OPAQUE` | **0.20** | `t` below which a plate pixel is opaque (text/badge) |

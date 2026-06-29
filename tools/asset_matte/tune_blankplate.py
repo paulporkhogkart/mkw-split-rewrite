@@ -218,7 +218,7 @@ def _parse(q):
     return {"KEY_THR": int(float(q["KEY_THR"][0])), "CSUB": float(q["CSUB"][0]),
             "TFLOOR": float(q["TFLOOR"][0]), "FILL_K": int(float(q["FILL_K"][0])),
             "SCORE_GATE": float(g("SCORE_GATE", "0.45")), "FEATHER": float(g("FEATHER", "0")),
-            "DONOR": g("DONOR", "1") in ("1", "true", "on"), "HL": g("HL", "1") in ("1", "true", "on")}
+            "DONOR": g("DONOR", "0") in ("1", "true", "on"), "HL": g("HL", "1") in ("1", "true", "on")}
 
 
 HTML = """<!doctype html><meta charset=utf-8><title>blank-plate matte tuner</title>
@@ -237,10 +237,10 @@ img{width:100%;background:#0a0a0a;display:block;margin-top:4px}
  <label>KEY_THR<input id=KEY_THR type=range min=0 max=160 step=1 value=120 oninput=upd()></label>
  <label>CSUB<input id=CSUB type=range min=0.3 max=1.3 step=0.01 value=0.5 oninput=upd()></label>
  <label>TFLOOR<input id=TFLOOR type=range min=0.01 max=0.5 step=0.01 value=0.01 oninput=upd()></label>
- <label>FILL_K<input id=FILL_K type=range min=5 max=51 step=2 value=15 oninput=upd()></label>
+ <label>FILL_K<input id=FILL_K type=range min=5 max=81 step=2 value=51 oninput=upd()></label>
  <label>SCORE_GATE<input id=SCORE_GATE type=range min=0 max=0.95 step=0.05 value=0.45 oninput=upd()></label>
  <label>FEATHER<input id=FEATHER type=range min=0 max=12 step=1 value=0 oninput=upd()></label>
- <label class=ck><input id=DONOR type=checkbox checked onchange=upd()>flourish fill</label>
+ <label class=ck><input id=DONOR type=checkbox onchange=upd()>flourish fill (shelved)</label>
  <label class=ck><input id=HL type=checkbox checked onchange=upd()>show fill</label>
  <button onclick=render()>Render all</button>
  <span id=vals></span><span id=status></span>
