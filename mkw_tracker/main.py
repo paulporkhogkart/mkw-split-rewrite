@@ -948,12 +948,13 @@ def run(args):
         if broadcaster is None:
             raise SystemExit("--clip-capture requires --ws-port (the sweep runner drives the broadcaster).")
         import json as _clip_json
-        from .tools.clip_capture import ClipCaptureManager
+        from .tools.clip_capture import ClipCaptureManager, kart_flourish_action
         from .tools import preview as _preview
         from .tools.record_clips import _resolve_device
         _clip_dev = _resolve_device(None)
         clip_mgr = ClipCaptureManager(
-            out_dir=os.path.join(base_path, "captures_sdr", "en_uk", "clips"),
+            out_dir=(getattr(args, "clip_out", None)
+                     or os.path.join(base_path, "captures_sdr", "en_uk", "clips")),
             device=_clip_dev,
             size="3840x2160",
             fps=60,
@@ -1230,18 +1231,20 @@ def run(args):
             _item = clip_mgr._item
             _is_kart = isinstance(_item, str) and _item.count("__") >= 2
             _seal = False
+            _discard = False
             if _is_kart:
-                # Hold a fixed window from the flourish mark to capture the kart flourish,
-                # then seal — the sweep presses B back to kart_select. The held flourish
-                # suppresses the kart_select tell; warn if it's still high (A likely missed).
+                # Hold a fixed window from the flourish mark to capture the kart flourish. After the
+                # hold, the kart_select tell DROPPING means the flourish played -> seal; STILL high
+                # means the A was eaten and the clip has no flourish -> DISCARD it (a kept bad clip
+                # is indistinguishable downstream — its events.json is identical to a good one) and
+                # tell the sweep to re-record. The sweep then presses B back to kart_select.
                 if clip_flourish_mark_t is None:
                     clip_flourish_mark_t = time.monotonic()
-                if (time.monotonic() - clip_flourish_mark_t) >= CLIP_FLOURISH_HOLD_SECS:
-                    if perf.current_score >= CLIP_FLOURISH_DROP:
-                        print(f"[clip] note: kart_select score {perf.current_score:.2f} still "
-                              f">= {CLIP_FLOURISH_DROP:.2f} after {CLIP_FLOURISH_HOLD_SECS:.0f}s "
-                              "flourish hold — A press may not have registered", flush=True)
-                    _seal = True
+                _action = kart_flourish_action(perf.current_score,
+                                               time.monotonic() - clip_flourish_mark_t,
+                                               CLIP_FLOURISH_HOLD_SECS, CLIP_FLOURISH_DROP)
+                _seal    = _action == "seal"
+                _discard = _action == "discard"
             else:
                 # Character flourish advances character_select -> kart_select, but the animation
                 # keeps playing briefly on kart_select — so don't seal the instant the screen
@@ -1253,7 +1256,23 @@ def run(args):
                         clip_char_left_t = time.monotonic()   # just left -> start the extra window
                     elif (time.monotonic() - clip_char_left_t) >= CLIP_CHAR_FLOURISH_EXTRA_SECS:
                         _seal = True
-            if _seal:
+            if _discard:
+                print(f"[clip] flourish A eaten: kart_select still {perf.current_score:.2f} "
+                      f"(>= {CLIP_FLOURISH_DROP:.2f}) after {CLIP_FLOURISH_HOLD_SECS:.0f}s — "
+                      f"discarding flourish-less clip {_item!r}; sweep will re-record.", flush=True)
+                clip_done_emitted_for = _item
+                clip_tell_miss = 0
+                clip_flourish_mark_t = None
+                clip_char_left_t = None
+                clip_mgr.abort()                          # delete the .mkv + events.json, restore preview
+                if broadcaster is not None:
+                    broadcaster.broadcast(_clip_json.dumps({
+                        "type": "clip_done",
+                        "item": _item,
+                        "error": "flourish not registered",
+                        "events": {},
+                    }))
+            elif _seal:
                 clip_done_emitted_for = _item
                 clip_tell_miss = 0
                 clip_flourish_mark_t = None
@@ -1267,10 +1286,17 @@ def run(args):
                         "events": _clip_ev,
                     }))
         else:
-            # Item changed or no active clip — reset debounce state
+            # Item changed or no active clip — reset debounce state. Also RE-ARM the one-shot
+            # clip_done guard whenever a fresh recording is mid-flight (begun, flourish not yet
+            # marked): a re-recorded item (a retried flourish) reuses the same name, so without
+            # this the previous attempt's clip_done_emitted_for would skip sealing/discarding it.
             clip_tell_miss = 0
             clip_flourish_mark_t = None
             clip_char_left_t = None
+            if (clip_mgr is not None
+                    and getattr(clip_mgr, "_item", None) is not None
+                    and clip_mgr._events.get("flourish_t") is None):
+                clip_done_emitted_for = None
 
         _race_complete = ts.total_time is not None
 
@@ -1607,6 +1633,10 @@ def main():
     parser.add_argument("--clip-capture", action="store_true",
                         help="Asset clip sweep: ffmpeg owns the card, detection runs on the "
                              "tee, record-clip commands enabled. Requires --ws-port.")
+    parser.add_argument("--clip-out", default=None, metavar="DIR",
+                        help="Override the clip-capture output directory (default "
+                             "captures_sdr/en_uk/clips). Used to record a separate DARK-background "
+                             "set against the bright set for two-background (triangulation) matting.")
     args = parser.parse_args()
     run(args)
 

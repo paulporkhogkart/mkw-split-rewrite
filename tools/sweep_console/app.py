@@ -19,6 +19,7 @@ for _d in (_HERE, os.path.join(_HERE, "..", "autotemplate")):
         sys.path.insert(0, _p)
 
 import controlstate as cs
+import procstate as ps
 from controller_bridge import ControllerBridge
 from health import HealthModel
 from manual import ManualController
@@ -27,9 +28,13 @@ from supervisor import ProcessSupervisor
 from wsconsumer import WsConsumer
 
 REPO_ROOT = os.path.abspath(os.path.join(_HERE, "..", ".."))
-STOP_FILE = os.path.join(REPO_ROOT, "captures_sdr", "en_uk", ".sweep_stop")
+BRIGHT_CLIPS = os.path.join(REPO_ROOT, "captures_sdr", "en_uk", "clips")   # the rig's capture target
 TOTAL = 6273
 WS_URL = "ws://127.0.0.1:8766"
+# Asset processing (extract+matte) — independent of the rig; runs the GPU-venv batch driver.
+PROCESS_OUT = os.path.join(REPO_ROOT, "temp", "asset_chips")
+PROCESS_STOP = os.path.join(PROCESS_OUT, ".process_stop")
+PROCESS_MANIFEST = os.path.join(PROCESS_OUT, "manifest.json")
 
 
 def _fmt_eta(s):
@@ -46,12 +51,15 @@ class ConsoleApp:
         root.geometry("1080x720")                    # fixed initial window size (still resizable)
         self.q = queue.Queue()                       # (callable) marshalled to the Tk thread
         self.state = cs.ControlState()
+        self.pstate = ps.ProcessState()              # independent asset-processing lifecycle
         self.health = HealthModel()
         self.progress = ProgressModel(TOTAL)
+        self.pprogress = ProgressModel(0)            # total set per-tick from the clip count
         self.sup = ProcessSupervisor(REPO_ROOT, self._on_line)
         self.ws = None
         self.manual = None
         self._photo = None
+        self._proc_last = ""                         # latest batch-driver log line (shown in headline)
         self._build()
         root.protocol("WM_DELETE_WINDOW", self._on_close)
         root.after(100, self._drain)
@@ -67,10 +75,24 @@ class ConsoleApp:
             b.pack(side="left", padx=2); self.btn[key] = b
         self.status = ttk.Label(bar, text="● idle"); self.status.pack(side="right")
 
+        bar2 = ttk.Frame(self.root); bar2.pack(fill="x", padx=6, pady=(0, 4))
+        ttk.Label(bar2, text="Asset processing:").pack(side="left", padx=(0, 6))
+        self.pbtn = {}
+        for key, label in [("pstart", "Process"), ("ppause", "Pause"), ("pstop", "Stop")]:
+            b = ttk.Button(bar2, text=label, command=lambda k=key: self._click_process(k))
+            b.pack(side="left", padx=2); self.pbtn[key] = b
+        self.pstatus = ttk.Label(bar2, text="● idle"); self.pstatus.pack(side="right")
+
         body = ttk.Frame(self.root); body.pack(fill="both", expand=True)
         left = ttk.Frame(body); left.pack(side="left", fill="y", padx=6, pady=6)
-        self.thumb = tk.Label(left, width=320, height=180, background="#111")
-        self.thumb.pack()
+        # Fix the preview to 320x180 PIXELS. A bare tk.Label sizes width/height in TEXT units until
+        # an image arrives, which ballooned the left column and pushed the log panes off-screen on a
+        # processing-only run (no Start Rig -> no camera image to shrink it). pack_propagate(False)
+        # locks the frame's pixel size so the panes are visible from startup.
+        thumb_box = tk.Frame(left, width=320, height=180, background="#111")
+        thumb_box.pack(); thumb_box.pack_propagate(False)
+        self.thumb = tk.Label(thumb_box, background="#111")
+        self.thumb.pack(fill="both", expand=True)
         man = ttk.LabelFrame(left, text="Manual control"); man.pack(pady=8, fill="x")
         grid = ttk.Frame(man); grid.pack(padx=4, pady=4)
         for (r, c, key, txt) in [(0, 1, "up", "▲"), (1, 0, "left", "◀"),
@@ -86,8 +108,10 @@ class ConsoleApp:
         right = ttk.Frame(body); right.pack(side="left", fill="both", expand=True, padx=6, pady=6)
         self.hl = ttk.Label(right, justify="left", font=("Consolas", 10))
         self.hl.pack(anchor="w")
+        self.phl = ttk.Label(right, justify="left", font=("Consolas", 10), foreground="#2a7")
+        self.phl.pack(anchor="w")
         self.logs = {}
-        for name in ("agent", "tracker", "sweep"):
+        for name in ("agent", "tracker", "sweep", "process"):
             lf = ttk.LabelFrame(right, text=name); lf.pack(fill="both", expand=True, pady=2)
             txt = tk.Text(lf, height=7, wrap="none", font=("Consolas", 8))
             txt.pack(fill="both", expand=True); txt.configure(state="disabled")
@@ -125,6 +149,8 @@ class ConsoleApp:
         if int(t.index("end-1c").split(".")[0]) > 400:
             t.delete("1.0", "100.0")
         t.see("end"); t.configure(state="disabled")
+        if name == "process" and text.strip():
+            self._proc_last = text.strip()
 
     def _set_thumb(self, msg):
         try:
@@ -148,6 +174,9 @@ class ConsoleApp:
             self._do(act)
         self._refresh_buttons()
 
+    def _stop_file(self):
+        return os.path.join(os.path.dirname(self.sup.clips_dir), ".sweep_stop")
+
     def _do(self, action):
         if action == "start_agent":
             self.sup.start_agent()
@@ -162,9 +191,9 @@ class ConsoleApp:
             pass                                       # handled by _refresh_buttons
         elif action == "start_sweep":
             start_from = self.sup.read_resume()
-            self.sup.start_sweep(start_from, STOP_FILE, on_exit=self._sweep_exited)
+            self.sup.start_sweep(start_from, self._stop_file(), on_exit=self._sweep_exited)
         elif action == "request_sweep_stop":
-            self.sup.request_stop_file(STOP_FILE)
+            self.sup.request_stop_file(self._stop_file())
         elif action == "stop_rig":
             self.sup.kill_tracker(); self.sup.kill_agent()
         elif action == "disconnect":
@@ -177,6 +206,37 @@ class ConsoleApp:
     def _after_sweep_exit(self):
         for act in self.state.on_event(cs.SWEEP_EXITED):
             self._do(act)
+        self._refresh_buttons()
+
+    # ── asset processing (independent of the rig) ────────────────────────────────
+    def _click_process(self, key):
+        if key == "pstart" and self.pstate.state == ps.IDLE:
+            self.pprogress = ProgressModel(self.sup.clip_count())   # fresh run: reset ETA samples
+        event = {"pstart": ps.START, "pstop": ps.STOP}.get(key)
+        if key == "ppause":
+            event = ps.RESUME if self.pstate.state == ps.PAUSED else ps.PAUSE
+        for act in self.pstate.on_event(event):
+            self._do_process(act)
+        self._refresh_buttons()
+
+    def _do_process(self, action):
+        if action == "start_processing":
+            self.sup.start_processing(BRIGHT_CLIPS, PROCESS_OUT, PROCESS_STOP,
+                                      on_exit=self._process_exited)   # always the bright set
+        elif action == "request_process_stop":
+            self.sup.request_stop_file(PROCESS_STOP)
+        elif action == "completed":
+            self._on_line("process", "[console] all clips processed")
+
+    def _process_exited(self):
+        self.q.put(self._after_process_exit)
+
+    def _after_process_exit(self):
+        for act in self.pstate.on_event(ps.EXITED):
+            self._do_process(act)
+        msg = self.sup.build_viewer(os.path.join(PROCESS_OUT, "matte"))   # regenerate the chip viewer
+        if msg:
+            self._on_line("process", f"[console] {msg}")
         self._refresh_buttons()
 
     def _manual(self, key):
@@ -197,6 +257,13 @@ class ConsoleApp:
                 try: b.configure(state=("normal" if manual_on else "disabled"))
                 except tk.TclError: pass
         self.status.configure(text=f"● {s.lower().replace('_', ' ')}")
+        pp = self.pstate.state
+        self.pbtn["pstart"].configure(state=("normal" if pp == ps.IDLE else "disabled"))
+        self.pbtn["ppause"].configure(
+            text=("Resume" if pp == ps.PAUSED else "Pause"),
+            state=("normal" if pp in (ps.RUNNING, ps.PAUSED) else "disabled"))
+        self.pbtn["pstop"].configure(state=("disabled" if pp == ps.IDLE else "normal"))
+        self.pstatus.configure(text=f"● {pp.lower().replace('_', ' ')}")
 
     def _free_gb(self):
         try:
@@ -220,6 +287,13 @@ class ConsoleApp:
             f"{h['character'] or '-'} / {h['costume'] or '-'} / {h['kart'] or '-'}\n"
             f"clips {pr['done']}/{pr['total']}  {pr['pct']*100:4.1f}%   ETA {_fmt_eta(pr['eta_seconds'])}\n"
             f"last clip {('%.0fs' % age) if age is not None else '-'}   fps {h['fps'] or '-'}   disk {('%.0f GB' % gb) if gb is not None else '-'}"))
+        self.pprogress.total = self.sup.clip_count()
+        self.pprogress.update(self.sup.process_done_count(PROCESS_MANIFEST), time.monotonic())
+        pp = self.pprogress.snapshot()
+        self.phl.configure(text=(
+            f"processed {pp['done']}/{pp['total']}  {pp['pct'] * 100:4.1f}%   "
+            f"ETA {_fmt_eta(pp['eta_seconds'])}   [{self.pstate.state.lower().replace('_', ' ')}]\n"
+            f"{self._proc_last[:72]}"))
         self.root.after(1000, self._tick)
 
     def _on_close(self):
@@ -230,6 +304,9 @@ class ConsoleApp:
                 self.sup.wait_sweep(timeout=60)
                 for act in self.state.on_event(cs.SWEEP_EXITED):
                     self._do(act)
+        if self.pstate.state in (ps.RUNNING, ps.PAUSE_REQUESTED, ps.STOP_REQUESTED):
+            self.sup.request_stop_file(PROCESS_STOP)   # clean-stop the batch between clips
+            self.sup.wait_processing(timeout=120)
         self.root.destroy()
 
 

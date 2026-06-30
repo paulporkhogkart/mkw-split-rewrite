@@ -14,6 +14,23 @@ from .record_clips import (FramePipe, tee_cmd, preview_cmd, pick_encoder,
                            _bundled_bin, _resolve_device)
 
 
+def kart_flourish_action(score, elapsed, hold_secs, drop):
+    """Decide what to do with a kart clip `elapsed` seconds after the flourish A press.
+
+    Returns one of:
+      'wait'    — still inside the fixed hold window; keep recording the flourish.
+      'seal'    — hold elapsed and the kart_select tell DROPPED (score < `drop`): the flourish
+                  played and the kart committed, so the clip is good — finalise it.
+      'discard' — hold elapsed but kart_select is STILL scoring (score >= `drop`): the flourish A
+                  was eaten, so the clip holds spawn-in + idle but NO flourish. It must NOT be kept
+                  — a flourish-less clip is indistinguishable downstream (its events.json is
+                  identical to a good one), so the sweep is told to re-record.
+    """
+    if elapsed < hold_secs:
+        return "wait"
+    return "discard" if score >= drop else "seal"
+
+
 class ClipCaptureManager:
     def __init__(self, out_dir, device, size, fps, frame_ref, *,
                  _pipe_factory=FramePipe, clock=time.monotonic,

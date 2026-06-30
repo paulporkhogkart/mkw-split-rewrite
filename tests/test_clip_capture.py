@@ -4,7 +4,7 @@ import os
 import itertools
 import warnings
 import pytest
-from mkw_tracker.tools.clip_capture import ClipCaptureManager
+from mkw_tracker.tools.clip_capture import ClipCaptureManager, kart_flourish_action
 
 
 class FakePipe:
@@ -60,6 +60,21 @@ def test_abort_warns_if_delete_fails(tmp_path, monkeypatch):
     monkeypatch.setattr(cc.os, "remove", _boom)
     with pytest.warns(UserWarning):
         m.abort()          # must not raise
+
+
+def test_kart_flourish_action_waits_then_seals_when_tell_dropped():
+    """Within the hold window -> keep recording ('wait'). After the hold, a DROPPED kart_select tell
+    (score below the threshold) means the flourish played -> 'seal'."""
+    assert kart_flourish_action(score=0.9, elapsed=1.0, hold_secs=3.0, drop=0.4) == "wait"
+    assert kart_flourish_action(score=0.1, elapsed=3.0, hold_secs=3.0, drop=0.4) == "seal"
+
+
+def test_kart_flourish_action_discards_when_tell_still_high_after_hold():
+    """After the hold, kart_select STILL scoring (>= drop) == the A was eaten and no flourish
+    played -> 'discard' (the flourish-less clip must not be kept; its events.json would look
+    identical to a good one). Still within the hold -> 'wait' even at a high score."""
+    assert kart_flourish_action(score=0.99, elapsed=3.0, hold_secs=3.0, drop=0.4) == "discard"
+    assert kart_flourish_action(score=0.99, elapsed=2.9, hold_secs=3.0, drop=0.4) == "wait"
 
 
 def test_mark_bogus_event_warns_and_does_not_raise(tmp_path):

@@ -67,5 +67,6 @@ old_assets/
 temp/
 .superpowers/
 
-# Asset capture data (large binary; local only — clips/PNGs written by the sweep)
-captures_sdr/
+# Asset capture data (large binary; local only — clips/PNGs written by the sweep).
+# Glob covers the bright set + paired/backup variants (captures_sdr_dark, _old, _new_old, ...).
+captures_sdr*/

@@ -76,9 +76,9 @@ def test_capture_char_emits_begin_idle_flourish():
 def test_kart_keep_on_match():
     g = grid.load_grid(YAML)
     ctrl = FakeController()
-    # tracker already shows the right kart; KART_SELECT departs after the flourish (False), then
-    # scores again on the B return (True).
-    client = FakeScoreClient(selection={"kart": "Plushbuggy"}, scores={"KART_SELECT": [False, True]})
+    # tracker already shows the right kart; we're on KART_SELECT throughout and clip_done carries
+    # no error (the flourish took), so the clip is kept.
+    client = FakeScoreClient(selection={"kart": "Plushbuggy"}, scores={"KART_SELECT": [True]})
     SweepRunner(g, ctrl, client, idle_seconds=0.0, settle_seconds=0.0,
                 ground_timeout=0.0, screen_timeout=0.0).capture_kart("mario__base", "plushbuggy")
     assert {"type": "at_record_clip_mark", "event": "swap"} in client.sent
@@ -94,7 +94,7 @@ def test_kart_navigates_to_offset_target():
     client = FakeScoreClient(selection=[{"kart": "Standard Kart"},
                                         {"kart": "Standard Kart"},
                                         {"kart": "Plushbuggy"}],
-                             scores={"KART_SELECT": [False, True]})
+                             scores={"KART_SELECT": [True]})
     SweepRunner(g, ctrl, client, idle_seconds=0.0, settle_seconds=0.0,
                 ground_timeout=0.0, screen_timeout=0.0).capture_kart("mario__base", "plushbuggy")
     assert len([b for (_, b) in ctrl.log if b == "DPAD_RIGHT"]) >= 1              # stepped toward target
@@ -180,6 +180,8 @@ class GridNavSim:
             char, cost = self.cur_slug().split("__", 1)      # '<char>__<costume>'; base costume = None
             return {"type": "current_selection", "course": None, "character": char,
                     "costume": None if cost == "base" else cost, "kart": None}
+        if msg["type"] == "at_screen_score":                 # nav happens on the expected screen
+            return {"type": "screen_score", "screen": msg.get("screen"), "score": 1.0, "detected": True}
         return {"type": "ok"}
 
     def wait_for(self, type_):
@@ -196,20 +198,10 @@ def test_park_on_char_crosses_full_width_row():
     assert sim.cur_slug() == "dolphin__base"                # reached the far target, didn't strand
 
 
-class FakeScreenClient(FakeClient):
-    """FakeClient whose at_current_screen reports a fixed screen (so _return_to lands)."""
-    def __init__(self, screen="CHARACTER_SELECT", **kw):
-        super().__init__(**kw)
-        self._screen_name = screen
-    def send(self, msg):
-        if msg.get("type") == "at_current_screen":
-            return {"type": "current_screen", "screen": self._screen_name}
-        return super().send(msg)
-
-
 def test_sweep_karts_pauses_at_next_kart_and_returns_to_anchor():
     g = grid.load_grid(YAML)
-    ctrl, client = FakeController(), FakeScreenClient("CHARACTER_SELECT")
+    ctrl = FakeController()
+    client = FakeScoreClient(scores={"KART_SELECT": [True], "CHARACTER_SELECT": [False, True]})
     calls = [0]
     def stop_check():
         calls[0] += 1
@@ -224,7 +216,8 @@ def test_sweep_karts_pauses_at_next_kart_and_returns_to_anchor():
 
 def test_sweep_karts_completes_when_not_paused():
     g = grid.load_grid(YAML)
-    ctrl, client = FakeController(), FakeScreenClient("CHARACTER_SELECT")
+    ctrl = FakeController()
+    client = FakeScoreClient(scores={"KART_SELECT": [True], "CHARACTER_SELECT": [False, True]})
     r = SweepRunner(g, ctrl, client, idle_seconds=0.0, ground_timeout=0.0, stop_check=lambda: False)
     captured = []
     r.capture_kart = lambda combo, kart: captured.append(kart)
@@ -277,18 +270,65 @@ def test_return_to_raises_when_tell_never_scores():
     assert len([b for (_, b) in ctrl.log if b == "B"]) == 6
 
 
-def test_kart_flourish_refires_A_when_not_departed():
-    """kart -> not-kart departure: if KART_SELECT still SCORES after the flourish (the A was
-    eaten), capture_kart re-fires A until kart_select stops scoring, then returns."""
+def test_park_on_hard_fails_off_screen_instead_of_stampeding():
+    """THE bug: a dropped flourish stranded the sweep on CHARACTER_SELECT, but the committed kart
+    PERSISTS across screens, so _park_on_kart read the stale kart and spammed DPAD_RIGHT across the
+    character roster (28 presses) until the step budget ran out. The screen guard must hard-fail the
+    instant the expected screen's tell isn't scoring — pressing NO d-pad."""
+    import pytest
     g = grid.load_grid(YAML)
     ctrl = FakeController()
-    # KART_SELECT: still present right after the flourish (eaten), then departs, then scores
-    # again on the B return.
-    client = FakeScoreClient(selection={"kart": "Plushbuggy"},
-                             scores={"KART_SELECT": [True, False, True]})
+    # tracker still reports a (stale, committed) kart, but the KART_SELECT tell is NOT scoring.
+    client = FakeScoreClient(selection={"kart": "Funky Dorrie"}, scores={"KART_SELECT": [False]})
+    with pytest.raises(RuntimeError, match="not scoring"):
+        SweepRunner(g, ctrl, client, ground_timeout=0.0, nav_settle=0.0,
+                    screen_timeout=0.0)._park_on_kart("junkyard_hog")
+    assert not any(b.startswith("DPAD") for (_, b) in ctrl.log)   # no stampede — bailed before pressing
+
+
+class FakeErrorClient(FakeClient):
+    """clip_done carries an `error` (the recorder discarded a flourish-less clip) per the `errors`
+    sequence (last value repeats). at_screen_score reports we're on KART_SELECT (True, via FakeClient),
+    since an eaten flourish never leaves it."""
+    def __init__(self, errors=None, **kw):
+        super().__init__(**kw)
+        self._errors = errors if errors is not None else [True]   # default: every clip_done errors
+        self._ei = 0
+
+    def wait_for(self, type_):
+        err = self._errors[min(self._ei, len(self._errors) - 1)]
+        self._ei += 1
+        msg = {"type": "clip_done", "item": "x", "events": {"fps": 60}}
+        if err:
+            msg["error"] = "flourish not registered"
+        return msg
+
+
+def test_kart_flourish_failure_retries_then_hard_fails():
+    """A persistently-eaten flourish (every clip_done carries an error — the recorder keeps
+    discarding the flourish-less clip) re-records a BOUNDED number of times, then HARD-FAILS the run
+    rather than skipping or stampeding (the chosen recovery policy)."""
+    import pytest
+    g = grid.load_grid(YAML)
+    ctrl = FakeController()
+    client = FakeErrorClient(selection={"kart": "Plushbuggy"})        # default: always errors
+    with pytest.raises(RuntimeError, match="flourish never registered"):
+        SweepRunner(g, ctrl, client, idle_seconds=0.0, settle_seconds=0.0,
+                    ground_timeout=0.0, screen_timeout=0.0).capture_kart("mario__base", "plushbuggy")
+    assert len([b for (_, b) in ctrl.log if b == "A"]) == SweepRunner.FLOURISH_MAX_ATTEMPTS  # bounded
+
+
+def test_kart_flourish_recovers_after_one_eaten_A():
+    """A single eaten flourish is recovered: the recorder discards the bad clip (clip_done.error
+    once), capture_kart re-records, and the retry succeeds — clip kept, no hard-fail."""
+    g = grid.load_grid(YAML)
+    ctrl = FakeController()
+    client = FakeErrorClient(selection={"kart": "Plushbuggy"}, errors=[True, False])
     SweepRunner(g, ctrl, client, idle_seconds=0.0, settle_seconds=0.0,
                 ground_timeout=0.0, screen_timeout=0.0).capture_kart("mario__base", "plushbuggy")
-    assert len([b for (_, b) in ctrl.log if b == "A"]) >= 2   # flourish A + at least one re-fire
+    assert len([b for (_, b) in ctrl.log if b == "A"]) == 2          # one eaten + one that took
+    begins = [m for m in client.sent if m.get("type") == "at_record_clip_begin"]
+    assert len(begins) == 2                                          # re-recorded the same item
 
 
 def test_sample_grid_reproducible_and_valid():
@@ -317,6 +357,14 @@ def test_sample_grid_rejects_unknown_slug():
     g = grid.load_grid(YAML)
     with pytest.raises(ValueError):
         sample_grid(g, "not_a_real_character__base", "3", seed=0)
+
+
+def test_sample_grid_all_karts():
+    """'all' expands to every kart cell (dark BD-base run = one char × every kart)."""
+    g = grid.load_grid(YAML)
+    chars, karts = sample_grid(g, "baby_daisy__base", "all", seed=0)
+    assert chars == ["baby_daisy__base"]
+    assert karts == [c.slug for c in g.cells("karts")] and len(karts) > 3
 
 
 def test_sweep_karts_respects_kart_subset():

@@ -22,6 +22,8 @@ class ProcessSupervisor:
         self.clips_dir = os.path.join(repo_root, "captures_sdr", "en_uk", "clips")
         self.on_line = on_line
         self.py = py
+        # the matte batch driver needs the GPU venv (rembg/CUDA), not the console's build python
+        self.gpu_py = os.path.join(repo_root, "temp", "asset-venv-gpu", "Scripts", "python.exe")
         self.procs = {}            # name -> Popen
         self._resume = os.path.join(self.clips_dir, ".resume_char")
 
@@ -42,7 +44,7 @@ class ProcessSupervisor:
                 m = _CHAR_RE.search(line)
                 if m:
                     self.write_resume(m.group(1))
-                elif "Sweep complete." in line:
+                elif "Sweep complete." in line or "Sample complete" in line:
                     self.clear_resume()
             self.on_line(name, line)
         p.wait()
@@ -52,10 +54,17 @@ class ProcessSupervisor:
     def start_agent(self):
         return self._spawn("agent", commands.agent_cmd(self.py, self.at_dir))
 
-    def start_tracker(self, ws_port=8766):
-        return self._spawn("tracker", commands.tracker_cmd(self.py, ws_port))
+    def set_clips_dir(self, clips_dir):
+        """Re-point the sweep target — recorder out-dir, clip count, and resume marker — at
+        `clips_dir`. Used to switch between the bright set and the DARK-background set. Call
+        only while IDLE (the rig bakes the recorder out-dir at launch)."""
+        self.clips_dir = clips_dir
+        self._resume = os.path.join(self.clips_dir, ".resume_char")
 
-    def start_sweep(self, start_from, stop_file, on_exit=None):
+    def start_tracker(self, ws_port=8766, clip_out=None):
+        return self._spawn("tracker", commands.tracker_cmd(self.py, ws_port, clip_out))
+
+    def start_sweep(self, start_from, stop_file, on_exit=None, sample_chars=None, sample_karts=None):
         try:
             if os.path.exists(stop_file):
                 os.remove(stop_file)                 # clear any stale pause flag
@@ -63,7 +72,45 @@ class ProcessSupervisor:
             pass
         return self._spawn("sweep",
                            commands.sweep_cmd(self.py, self.at_dir, "ws://127.0.0.1:8766",
-                                              7878, start_from, stop_file), on_exit=on_exit)
+                                              7878, start_from, stop_file,
+                                              sample_chars=sample_chars, sample_karts=sample_karts),
+                           on_exit=on_exit)
+
+    def start_processing(self, clips_dir, out_dir, stop_file, on_exit=None):
+        """Spawn the headless extract+matte batch driver in the GPU venv. Resumable: it skips
+        clips already 'done' in <out_dir>/manifest.json, so RESUME just relaunches this."""
+        try:
+            if os.path.exists(stop_file):
+                os.remove(stop_file)                 # clear any stale pause/stop flag
+        except OSError:
+            pass
+        os.makedirs(out_dir, exist_ok=True)
+        return self._spawn("process",
+                           commands.process_cmd(self.gpu_py, self.repo_root, clips_dir, out_dir, stop_file),
+                           on_exit=on_exit)
+
+    def wait_processing(self, timeout=120.0):
+        p = self.procs.get("process")
+        if p:
+            try:
+                p.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                p.kill()
+
+    def build_viewer(self, matte_dir, title="asset chips - all segments"):
+        """Regenerate the spawn/idle/flourish HTML viewer over a matte dir (synchronous,
+        best-effort, build python). Returns the tool's last output line, or None if there's
+        nothing to build / it failed -- never raises, so a process exit is never blocked."""
+        if not os.path.isdir(matte_dir):
+            return None
+        try:
+            r = subprocess.run(commands.viewer_cmd(self.py, self.repo_root, matte_dir, title),
+                               capture_output=True, text=True, timeout=120,
+                               creationflags=_NO_WINDOW)
+            lines = [ln for ln in ((r.stdout or "") + (r.stderr or "")).splitlines() if ln.strip()]
+            return lines[-1] if lines else None
+        except Exception as exc:
+            return f"viewer build failed: {exc}"
 
     # ── stop / teardown ─────────────────────────────────────────────────────────
     def request_stop_file(self, stop_file):
@@ -108,6 +155,16 @@ class ProcessSupervisor:
         try:
             return sum(1 for f in os.listdir(self.clips_dir) if f.endswith(".mkv"))
         except OSError:
+            return 0
+
+    def process_done_count(self, manifest_path):
+        """How many clips the batch driver has finished matting (from its manifest)."""
+        try:
+            import json
+            with open(manifest_path) as f:
+                m = json.load(f)
+            return sum(1 for v in m.values() if isinstance(v, dict) and v.get("status") == "done")
+        except (OSError, ValueError):
             return 0
 
     def read_resume(self):

@@ -27,7 +27,9 @@ One unified pre-matte path replaces the entire post-matte plate-removal step for
 
 ## Architecture & components
 
-1. **`pre_darken(raw_bgr, t, C, mask, params) -> bgr`** (new, `tools/asset_matte/pre_darken.py`) — pure cv2/numpy. Un-darkens the **strip-only** serration of the raw frame and returns the modified BGR frame (no alpha). Strip-only = within the plate footprint (`mask > floor`), semi-transparent (`t ≥ T_OPAQUE`), and **excluding** the opaque UI we want birefnet to drop: the yellow name text (`HSV S > YELLOW_S`) and the bright badge (`HSV V > BRIGHT_V`). Recovery on the kept serration: `S = (O − CSUB·C) / clip(t, TFLOOR)` with `CSUB = 1.0`, blended in by the strip coverage. Text/badge pixels pass through unchanged.
+1. **`pre_darken(raw_bgr, t, C, A, mask, params) -> bgr`** (new, `tools/asset_matte/pre_darken.py`) — pure cv2/numpy. **Paints the WHOLE plate footprint to the clean background `A`, then stamps back only the genuine overlapping-subject pixels** (full-recovery `S` from behind the serration), and returns the modified BGR frame (no alpha). A footprint pixel is treated as subject when its recovered colour `S = (O − CSUB·C) / clip(t, TFLOOR)` (with `CSUB = 1.0`) differs from `A` by `≥ KEY_THR` in any channel **and** it is neither the yellow name text (`HSV S > YELLOW_S`) nor the bright/opaque badge (`HSV V > BRIGHT_V`, or `t < T_OPAQUE`). Classification is on the raw (darkened) appearance, so a subject behind the serration — darkened, desaturated — is kept while the saturated text and bright badge are erased to `A`.
+
+   **Why paint-then-stamp, not strip-only recovery.** The earlier strip-only version only un-darkened the serration and *passed the text/badge through unchanged*, trusting birefnet to drop them as non-salient UI. That holds in isolation, but **the instant a kart/character collides with the plate** the text and the background-coloured serration band are connected to the salient subject, and birefnet keeps the whole connected blob — "brings some letters in / chunks of the background in" (the reported failure). Painting the entire footprint to `A` severs that connection: everything birefnet should drop becomes literal background, and only the stamped subject pixels remain attached. Validated through a real matte on the roadster_royale f110 collision and the Hot Rod (Zoom Buggy) spawn-in f24–f56 (`temp/asset_matte_run3/prod_validate.png`): nameplate gone, colliding tires preserved.
 
 2. **Pipeline** becomes `extract_loop → pre_darken → matte_loop` (replacing `extract_loop → matte_loop → undark`). `extract_loop` writes the raw loopframes `loopframes/<name>/`; `pre_darken` writes `loopframes/<name>_pre/`; `matte_loop` mattes the `_pre` set → `matte/<name>_pre_frames/` and the transparent loop. Raw loopframes are kept (the tuner re-darkens from them).
 
@@ -41,10 +43,11 @@ One unified pre-matte path replaces the entire post-matte plate-removal step for
 
 ### Parameters (the tuner's knobs, pre-matte defaults)
 
+- `KEY_THR = 18` — subject-vs-background discriminator (max abs channel difference between recovered `S` and clean `A`). Below it a footprint pixel is background → painted out; at/above it (and not text/badge) it is the colliding subject → stamped back. **Raise** if background bleeds into the cutout at a collision; **lower** if the kart/character gets eaten where it dips into the plate.
 - `CSUB = 1.0` — additive-floor removal; **1.0 = full recovery** (the fix). Lower only if over-recovery brightens the kept overlap wrong.
 - `TFLOOR = 0.05` — lower clamp on transmission `t` (unchanged).
-- `YELLOW_S = 60` — saturation above which a plate pixel is treated as name text → left as UI (not un-darkened).
-- `BRIGHT_V = 200` — value above which a plate pixel is treated as the badge → left as UI.
+- `YELLOW_S = 60` — saturation above which a plate pixel is treated as name text → erased to `A`.
+- `BRIGHT_V = 200` — value above which a plate pixel is treated as the badge → erased to `A`.
 - (No `STRENGTH`/`ALPHA_GAIN` — those were post-matte blend knobs; pre-matte writes the recovered serration directly.)
 
 ## Data flow

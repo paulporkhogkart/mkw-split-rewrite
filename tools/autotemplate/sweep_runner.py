@@ -13,6 +13,7 @@ import time
 class SweepRunner:
     GROUND_THRESHOLD = 0.70   # edge-method floor (SelectionTracker SELECTION_KART_FLOOR); tune live at bring-up
     MAX_VERIFY_ATTEMPTS = 30
+    FLOURISH_MAX_ATTEMPTS = 3   # eaten-flourish re-records before hard-failing the run (controller dropping A)
 
     def __init__(self, grid, controller, client, *, idle_seconds=10.0, settle_seconds=0.8,
                  ground_timeout=4.0, ground_stable_reads=3, lang="en_uk", stop_check=None,
@@ -131,6 +132,17 @@ class SweepRunner:
         it at the base↔costume boundary. Instead we RE-POLL until the read is a real cell, and
         space out inputs (nav_settle) so the cursor + costume settle. Logs each step (no hardware
         repro on the dev box). Raises if it never arrives; dry-run no-op."""
+        # SCREEN GUARD. A valid item read does NOT prove we're on `what`: a committed kart/character
+        # PERSISTS across screens (see broadcaster at_current_selection), so on the WRONG screen we'd
+        # read a stale item and stampede the d-pad — the bug where a dropped flourish stranded us on
+        # CHARACTER_SELECT and _park_on_kart spammed DPAD_RIGHT across the character roster reading
+        # the stale committed kart. Confirm the screen by SCORE first. D-pad presses can't change the
+        # screen, so one check up front covers the whole traversal (dry-run: _confirm_screen True).
+        if not self._confirm_screen(what):
+            raise RuntimeError(
+                f"_park_on({target_slug!r}): {what} tell is not scoring — we are not on {what} "
+                "(a committed kart/character persists across screens, so the cursor read can't be "
+                "trusted here). Refusing to navigate blind.")
         trow, tcol = self.grid.coord_of(target_slug)
         # Step budget MUST exceed the worst-case traversal: row-first then column is at most
         # (rows-1)+(width-1) presses. A character row is ~51 cells wide, so the old shared
@@ -194,40 +206,47 @@ class SweepRunner:
         # us on the wrong kart. A column-0 kart has no left neighbour, so step right.
         _, tcol = self.grid.coord_of(kart_slug)
         off = "DPAD_RIGHT" if tcol == 0 else "DPAD_LEFT"
-        attempts = 0
+        ground_attempts = flourish_attempts = 0
         while True:
-            self._park_on_kart(kart_slug)           # park ON the target first
+            self._park_on_kart(kart_slug)           # park ON the target (screen-guarded in _park_on)
             self._begin(item)                       # record from before the spawn-in swap
             self.ctrl.press(off)                    # step OFF to a neighbour...
             self._await_change(kart_slug, self._kart_key)   # wait for the OFF to land (detection lags)
             self._park_on_kart(kart_slug)           # ...closed-loop BACK onto the target -> spawn-in
             self._mark("swap")
             sel = self._poll_until_stable(self._kart_key)   # confirm we're PARKED back on the target
-            if sel.get("_dry") or self._kart_key(sel) == kart_slug:
-                break
-            self.client.send({"type": "at_record_clip_abort"})
-            attempts += 1
-            if attempts >= self.MAX_VERIFY_ATTEMPTS:
-                raise RuntimeError(
-                    f"capture_kart: {item!r} never grounded after {self.MAX_VERIFY_ATTEMPTS} attempts")
-        time.sleep(self.idle)                       # capture idle (spawn-in already recorded)
-        self.ctrl.press("A")                        # flourish → kart_select drops
-        self._mark("flourish")
-        ev = self.client.wait_for("clip_done").get("events")
-        # kart -> (not char nor kart): the flourish A advances OFF kart_select. Verify the
-        # DEPARTURE by score (kart_select tell stops scoring); if it's still scoring the A was
-        # eaten, so re-fire it. Non-fatal — if it never departs, _return_to below still verifies.
-        departed = False
-        for _ in range(3):
-            if self._wait_off_screen("KART_SELECT"):
-                departed = True
-                break
-            self.ctrl.press("A")                                # eaten flourish → re-fire
-        if not departed:
-            print("  [capture_kart] kart_select still scoring after flourish "
-                  "(A may not have registered) — returning anyway", flush=True)
-        self._return_to("KART_SELECT", "after kart flourish")   # B back — verify it SCORES
-        return ev
+            if not (sel.get("_dry") or self._kart_key(sel) == kart_slug):
+                self.client.send({"type": "at_record_clip_abort"})   # mis-nav -> discard + re-park
+                ground_attempts += 1
+                if ground_attempts >= self.MAX_VERIFY_ATTEMPTS:
+                    raise RuntimeError(
+                        f"capture_kart: {item!r} never grounded after {self.MAX_VERIFY_ATTEMPTS} attempts")
+                continue
+            time.sleep(self.idle)                   # capture idle (spawn-in already recorded)
+            self.ctrl.press("A")                    # flourish -> kart commits, kart_select drops
+            self._mark("flourish")
+            result = self.client.wait_for("clip_done")
+            # The recorder DISCARDS a flourish-less clip — the A was eaten, kart_select never
+            # dropped — and reports it via clip_done.error (a kept bad clip is indistinguishable
+            # downstream: its events.json is identical to a good one). On error the recorder has
+            # already aborted the file + restored preview and we never left KART_SELECT, so re-park
+            # and retry; HARD-FAIL after a bounded number of attempts rather than continuing on a
+            # corrupt state (the controller is dropping the A and a human needs to look).
+            if result.get("error"):
+                flourish_attempts += 1
+                print(f"  [capture_kart] flourish A not registered for {item!r} "
+                      f"({flourish_attempts}/{self.FLOURISH_MAX_ATTEMPTS}): {result.get('error')!r} "
+                      "— re-park and retry.", flush=True)
+                if flourish_attempts >= self.FLOURISH_MAX_ATTEMPTS:
+                    raise RuntimeError(
+                        f"capture_kart: {item!r} flourish never registered after "
+                        f"{self.FLOURISH_MAX_ATTEMPTS} attempts — controller A presses aren't "
+                        "landing on KART_SELECT; stopping the run.")
+                continue
+            # Good clip: the flourish advanced us OFF kart_select. Return to it for the next kart
+            # (B back, verified by score; a no-op if we're already on it).
+            self._return_to("KART_SELECT", "after kart flourish")
+            return result.get("events")
 
     def _confirm_screen(self, name) -> bool:
         """True iff screen `name`'s TELL is actively confirming on the live frame (its score is
@@ -251,24 +270,15 @@ class SweepRunner:
                 return False
             time.sleep(0.1)
 
-    def _wait_off_screen(self, name, timeout=None) -> bool:
-        """True once screen `name` STOPS confirming by score within `timeout` (we've LEFT it) —
-        the 'kart -> not-kart' departure after a flourish. Dry-run True."""
-        timeout = self.screen_timeout if timeout is None else timeout
-        deadline = time.monotonic() + timeout
-        while True:
-            rep = self.client.send({"type": "at_screen_score", "screen": name})
-            if rep.get("_dry"):
-                return True
-            if not (rep.get("type") == "screen_score" and rep.get("detected")):
-                return True
-            if time.monotonic() >= deadline:
-                return False
-            time.sleep(0.1)
-
     def _return_to(self, screen_name, what):
         """Press B until screen `screen_name`'s tell SCORES (confirms) — a B can be eaten by a
         transition animation, and the held current_screen would lie, so verify by score."""
+        # Already on the target? Then DON'T press B — a B from the target screen LEAVES it, and the
+        # lingering pre-transition frame would still score the target and false-confirm "arrived",
+        # silently navigating us off (this is how a never-departed kart flourish drifted the sweep
+        # onto CHARACTER_SELECT). Confirm by score first; arriving == done.
+        if self._confirm_screen(screen_name):
+            return
         for _ in range(6):
             self.ctrl.press("B")
             if self._wait_screen(screen_name):
@@ -513,6 +523,8 @@ def sample_grid(grid, chars, karts, seed=0):
 
     def pick(arg, category, base_only):
         cells = grid.cells(category)
+        if isinstance(arg, str) and arg.strip().lower() == "all":
+            return [c.slug for c in cells]            # every cell in the category, grid order
         if isinstance(arg, int) or (isinstance(arg, str) and arg.strip().isdigit()):
             pool = [c.slug for c in cells if not base_only or c.slug.endswith("__base")]
             return sorted(rng.sample(pool, min(int(arg), len(pool))))
@@ -549,8 +561,9 @@ def main():
     p.add_argument("--sample-chars", default=None, metavar="N|slug,slug,...",
                    help="SAMPLE mode: N random base characters, OR an explicit comma-list of cell "
                         "slugs (may include costumes, e.g. mario__touring). Omit for the full sweep.")
-    p.add_argument("--sample-karts", default="3", metavar="M|slug,...",
-                   help="SAMPLE mode: M random karts, OR an explicit comma-list of kart slugs (default 3).")
+    p.add_argument("--sample-karts", default="3", metavar="M|slug,...|all",
+                   help="SAMPLE mode: M random karts, an explicit comma-list of kart slugs, or "
+                        "'all' for every kart (default 3).")
     p.add_argument("--sample-seed", type=int, default=0, metavar="S",
                    help="SAMPLE mode: RNG seed for the reproducible draw (default 0).")
     p.add_argument("--nav-settle", type=float, default=0.3, metavar="SECS",
