@@ -28,11 +28,15 @@ from supervisor import ProcessSupervisor
 from wsconsumer import WsConsumer
 
 REPO_ROOT = os.path.abspath(os.path.join(_HERE, "..", ".."))
-BRIGHT_CLIPS = os.path.join(REPO_ROOT, "captures_sdr", "en_uk", "clips")   # the rig's capture target
+# Clips + matte output live on the DATA drive (large SSD), NOT in the repo on C:. The app, venv,
+# birefnet model + templates stay on C: (read-only at startup, no perf impact). Override the root
+# with the KARTOFF_DATA_ROOT env var (e.g. to fall back to C: on a machine without D:).
+DATA_ROOT = os.environ.get("KARTOFF_DATA_ROOT", r"D:\kartoff")
+CLIPS_DIR = os.path.join(DATA_ROOT, "captures_sdr", "en_uk", "clips")   # rig records here + processing reads here
 TOTAL = 6273
 WS_URL = "ws://127.0.0.1:8766"
 # Asset processing (extract+matte) — independent of the rig; runs the GPU-venv batch driver.
-PROCESS_OUT = os.path.join(REPO_ROOT, "temp", "asset_chips")
+PROCESS_OUT = os.path.join(DATA_ROOT, "asset_chips")
 PROCESS_STOP = os.path.join(PROCESS_OUT, ".process_stop")
 PROCESS_MANIFEST = os.path.join(PROCESS_OUT, "manifest.json")
 
@@ -56,6 +60,12 @@ class ConsoleApp:
         self.progress = ProgressModel(TOTAL)
         self.pprogress = ProgressModel(0)            # total set per-tick from the clip count
         self.sup = ProcessSupervisor(REPO_ROOT, self._on_line)
+        self.sup.set_clips_dir(CLIPS_DIR)            # rig records + sweep control files live on the data drive
+        for _d in (CLIPS_DIR, PROCESS_OUT):          # ensure the data-drive dirs exist up front
+            try:
+                os.makedirs(_d, exist_ok=True)
+            except OSError:
+                pass
         self.ws = None
         self.manual = None
         self._photo = None
@@ -181,7 +191,7 @@ class ConsoleApp:
         if action == "start_agent":
             self.sup.start_agent()
         elif action == "start_tracker":
-            self.sup.start_tracker()
+            self.sup.start_tracker(clip_out=CLIPS_DIR)   # rig records straight to the data drive
         elif action == "connect_ws":
             self.ws = WsConsumer(WS_URL, self._on_preview, self._on_state); self.ws.start()
         elif action == "connect_manual":
@@ -221,8 +231,8 @@ class ConsoleApp:
 
     def _do_process(self, action):
         if action == "start_processing":
-            self.sup.start_processing(BRIGHT_CLIPS, PROCESS_OUT, PROCESS_STOP,
-                                      on_exit=self._process_exited)   # always the bright set
+            self.sup.start_processing(CLIPS_DIR, PROCESS_OUT, PROCESS_STOP,
+                                      on_exit=self._process_exited)
         elif action == "request_process_stop":
             self.sup.request_stop_file(PROCESS_STOP)
         elif action == "completed":
