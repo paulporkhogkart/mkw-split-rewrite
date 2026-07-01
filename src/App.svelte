@@ -434,6 +434,12 @@
   let _gainNode  = null;
   let _hasAudio  = false;    // true if current stream has audio tracks
 
+  // ── Screenshot ────────────────────────────────────────────────────────────────
+  let feedOverlayComp = null;   // bound <FeedOverlay> instance (for capturePng)
+  let shotMsg = "";             // transient confirmation text
+  let shotErr = false;          // colour the confirmation as an error
+  let _shotTimer = null;
+
   function _setupAudio() {
     _teardownAudio();
     if (!videoStream) return;
@@ -454,6 +460,28 @@
   function _teardownAudio() {
     if (_audioCtx) { _audioCtx.close(); _audioCtx = null; _gainNode = null; }
     _hasAudio = false;
+  }
+
+  function _pad(n, w = 2) { return String(n).padStart(w, "0"); }
+  function _shotStamp() {
+    const d = new Date();
+    return `${d.getFullYear()}${_pad(d.getMonth() + 1)}${_pad(d.getDate())}-`
+         + `${_pad(d.getHours())}${_pad(d.getMinutes())}${_pad(d.getSeconds())}-${_pad(d.getMilliseconds(), 3)}`;
+  }
+  function _flashShot(msg, err = false) {
+    shotMsg = msg; shotErr = err;
+    if (_shotTimer) clearTimeout(_shotTimer);
+    _shotTimer = setTimeout(() => { shotMsg = ""; }, 3000);
+  }
+  async function takeScreenshot() {
+    try {
+      const bytes = await feedOverlayComp?.capturePng();
+      if (!bytes) { _flashShot("No feed to capture", true); return; }
+      const path = await invoke("save_screenshot", { bytes: Array.from(bytes), stamp: _shotStamp() });
+      _flashShot("Saved → " + path);
+    } catch (e) {
+      _flashShot("Screenshot failed", true);
+    }
   }
 
   // Keep gain in sync whenever mute or volume changes
@@ -1411,6 +1439,7 @@
   onDestroy(()=>{
     if (unlisten) unlisten();
     stopCamera(); stopRoiPoll(); stopFeedPoll(); _teardownAudio();
+    if (_shotTimer) clearTimeout(_shotTimer);
     if (trackerCameraPaused) send({type:"resume_camera"});
   });
 
@@ -1588,6 +1617,7 @@
       <div class="main-feed">
         <div class="feed-area">
           <FeedOverlay
+            bind:this={feedOverlayComp}
             stream={setupComplete ? (videoStream ?? null) : null}
             muted={$feedMuted}
             volume={$feedVolume}
@@ -1655,6 +1685,15 @@
             {/if}
             <span class="fc-vid-label">ROI</span>
           </button>
+          <div class="fc-divider"></div>
+          <button class="fc-btn fc-vid-btn" title="Save screenshot" disabled={!cameraOk}
+            on:click={takeScreenshot}>
+            <svg viewBox="0 0 16 16" class="fc-icon"><path d="M2 5h3l1-1.5h4l1 1.5h3v8H2z"/><circle cx="8" cy="9" r="2.5"/></svg>
+            <span class="fc-vid-label">Shot</span>
+          </button>
+          {#if shotMsg}
+            <span class="fc-shot-msg" class:fc-shot-err={shotErr} title={shotMsg}>{shotMsg}</span>
+          {/if}
         </div>
 
         <!-- Live player panel (sub-project #3) -->
@@ -2081,6 +2120,11 @@
   .fc-no-audio { font-size: .58rem; color: var(--tx-dim); flex-shrink: 0; }
   .fc-vid-btn  { gap: 4px; }
   .fc-vid-label { font-size: .62rem; }
+  .fc-shot-msg {
+    font-size: .6rem; color: var(--tx-dim); flex: 1; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left;
+  }
+  .fc-shot-err { color: var(--err); }
   .feed-ph-icon { font-size: 1.8rem; animation: spin 1.4s linear infinite; opacity: .4; }
   .feed-ph-text { font-size: .72rem; color: var(--tx-dim); }
   @keyframes spin { to { transform: rotate(360deg); } }

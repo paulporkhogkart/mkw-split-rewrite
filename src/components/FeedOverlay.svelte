@@ -189,6 +189,22 @@
     });
   }
 
+  // ── Screenshot: draw the live <video> at native resolution → PNG bytes ─────────
+  // Clean feed only (no overlay). A local getUserMedia stream is same-origin, so the
+  // capture canvas is not tainted and toBlob works. Returns null if no frame yet.
+  export async function capturePng() {
+    if (!videoEl || !videoEl.videoWidth || !videoEl.videoHeight) return null;
+    const cap = document.createElement("canvas");
+    cap.width  = videoEl.videoWidth;
+    cap.height = videoEl.videoHeight;
+    const cctx = cap.getContext("2d");
+    if (!cctx) return null;
+    cctx.drawImage(videoEl, 0, 0, cap.width, cap.height);
+    const blob = await new Promise((res) => cap.toBlob(res, "image/png"));
+    if (!blob) return null;
+    return new Uint8Array(await blob.arrayBuffer());
+  }
+
   // Static redraws (ROI boxes, sample, canvas resize) happen on any input change.
   // While mmActive the rAF loop also redraws every frame so the dots move.
   $: { void activeRois; void currentMinimap; void currentTrails; void currentLegend; void sampleImg;
