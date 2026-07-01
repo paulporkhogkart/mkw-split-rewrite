@@ -163,6 +163,17 @@ export function roiToScreen(box, displayRect, srcW = 1920, srcH = 1080) {
 }
 
 /**
+ * Decide what the feed overlay should draw, given the two hide toggles.
+ * - display off (`hidden`) blanks the whole overlay — ROI boxes AND minimap dots;
+ * - the ROI toggle (`roiHidden`) hides only the ROI boxes while the feed is shown.
+ * @param {{ hidden: boolean, roiHidden: boolean }} opts
+ * @returns {{ showRois: boolean, showMinimap: boolean }}
+ */
+export function overlayVisibility({ hidden, roiHidden }) {
+  return { showRois: !hidden && !roiHidden, showMinimap: !hidden };
+}
+
+/**
  * Draw ROI overlays onto `ctx`, mapping 1080p coordinates to the letterboxed
  * display rectangle.  Pure function of its inputs - no DOM/global state beyond
  * the passed canvas 2D context.
