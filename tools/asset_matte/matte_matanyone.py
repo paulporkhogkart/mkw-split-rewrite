@@ -101,12 +101,15 @@ def _propagate(frames_bgr, mask_u8, n_warmup=10, r_erode=10, r_dilate=10):
     return _run()
 
 
-def matte_segment(frames_bgr, first_mask_u8, last_mask_u8, warmup=10, erode=10, dilate=10):
-    """Bidirectional matte for one segment. frames_bgr: predark input frames (list of HxWx3 BGR
-    uint8, in order). first_mask_u8 / last_mask_u8: birefnet BINARY masks (0/255) of the first /
-    last frame. Returns a list of HxW float01 alpha (position-weighted fwd/bwd merge). In-memory
-    equivalent of bidir_prep.py (reverse frames + last-frame mask) + bidir_merge.py."""
+def matte_segment(frames_bgr, first_mask_u8, last_mask_u8, warmup=10, erode=10, dilate=10, bidir=True):
+    """Matte one segment. frames_bgr: predark input frames (list of HxWx3 BGR uint8, in order).
+    first_mask_u8 / last_mask_u8: birefnet BINARY masks (0/255) of the first / last frame. Returns a
+    list of HxW float01 alpha. bidir=True: forward + reversed-backward, position-weighted merge
+    (bidir_prep.py + bidir_merge.py). bidir=False: forward-only (the originally-accepted recipe — no
+    fwd/bwd blend, so no per-frame merge shimmer on fine edges; last_mask unused)."""
     fwd = _propagate(frames_bgr, first_mask_u8, warmup, erode, dilate)
+    if not bidir:
+        return fwd
     bwd_rev = _propagate(list(reversed(frames_bgr)), last_mask_u8, warmup, erode, dilate)
     bwd = list(reversed(bwd_rev))                                # un-reverse to frame order
     return merge_bidir(fwd, bwd)
@@ -154,7 +157,8 @@ def _reset_worker():
         _WORKER = None
 
 
-def matte_segment_worker(frames_bgr, first_mask_u8, last_mask_u8, warmup=10, erode=10, dilate=10):
+def matte_segment_worker(frames_bgr, first_mask_u8, last_mask_u8, warmup=10, erode=10, dilate=10,
+                         bidir=True):
     """Same contract as matte_segment, but the propagation runs in the worker process. Hands frames
     + masks over via a temp dir and reads the alpha PNGs back."""
     import json
@@ -173,7 +177,7 @@ def matte_segment_worker(frames_bgr, first_mask_u8, last_mask_u8, warmup=10, ero
         cv2.imwrite(lp, last_mask_u8)
         out_dir = os.path.join(work, "out")
         job = {"frames_dir": fdir, "first": fp, "last": lp, "out_dir": out_dir,
-               "warmup": warmup, "erode": erode, "dilate": dilate}
+               "warmup": warmup, "erode": erode, "dilate": dilate, "bidir": bidir}
         r = _run_job_with_retry(job)                            # respawns the worker on death/CUDA error
         return [cv2.imread(os.path.join(out_dir, f"{i:03d}.png"),
                            cv2.IMREAD_GRAYSCALE).astype(np.float32) / 255.0

@@ -67,7 +67,8 @@ def main():
             alphas = mm.matte_segment(frames, first, last,
                                       warmup=job.get("warmup", 10),
                                       erode=job.get("erode", 10),
-                                      dilate=job.get("dilate", 10))
+                                      dilate=job.get("dilate", 10),
+                                      bidir=job.get("bidir", True))
             out_dir = job["out_dir"]
             os.makedirs(out_dir, exist_ok=True)
             for i, a in enumerate(alphas):
