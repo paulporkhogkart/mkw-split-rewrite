@@ -37,11 +37,13 @@ class ProcessSupervisor:
         self._resume = os.path.join(self.clips_dir, ".resume_char")
 
     # ── spawning ──────────────────────────────────────────────────────────────
-    def _spawn(self, name, cmd, on_exit=None):
-        env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    def _spawn(self, name, cmd, on_exit=None, env=None):
+        proc_env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+        if env:
+            proc_env.update(env)
         p = subprocess.Popen(cmd, cwd=self.repo_root, stdout=subprocess.PIPE,
                               stderr=subprocess.STDOUT, text=True, bufsize=1,
-                              creationflags=_NO_WINDOW, env=env)
+                              creationflags=_NO_WINDOW, env=proc_env)
         self.procs[name] = p
         threading.Thread(target=self._pump, args=(name, p, on_exit), daemon=True).start()
         return p
@@ -96,7 +98,8 @@ class ProcessSupervisor:
         os.makedirs(out_dir, exist_ok=True)
         return self._spawn("process",
                            commands.process_cmd(self.gpu_py, self.repo_root, clips_dir, out_dir, stop_file),
-                           on_exit=on_exit)
+                           on_exit=on_exit,
+                           env={"MATTE_MATANYONE_BIDIR": "1"})   # run_console mattes bidirectionally
 
     def wait_processing(self, timeout=120.0):
         p = self.procs.get("process")

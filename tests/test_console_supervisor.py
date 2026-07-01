@@ -29,3 +29,19 @@ def test_parse_matte_progress():
 def test_gpu_py_points_at_unified_matte_venv():
     sup = ProcessSupervisor("/repo", lambda *_: None, py="python")
     assert sup.gpu_py.replace("\\", "/").endswith("temp/asset-venv-matte/Scripts/python.exe")
+
+
+def test_start_processing_enables_bidirectional_matanyone(tmp_path):
+    """Console-launched processing must run the matte bidirectionally (MATTE_MATANYONE_BIDIR=1),
+    regardless of the standalone default."""
+    sup = ProcessSupervisor(str(tmp_path), lambda *_: None, py="python")
+    captured = {}
+
+    def fake_spawn(name, cmd, on_exit=None, env=None):
+        captured["name"], captured["env"] = name, env
+
+    sup._spawn = fake_spawn
+    out = tmp_path / "out"
+    sup.start_processing(str(tmp_path / "clips"), str(out), str(out / ".stop"))
+    assert captured["name"] == "process"
+    assert captured["env"] == {"MATTE_MATANYONE_BIDIR": "1"}
