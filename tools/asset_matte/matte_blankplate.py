@@ -82,6 +82,11 @@ BIREFNET_MODEL = os.environ.get("MATTE_BIREFNET_MODEL", "birefnet-general")
 # birefnet path. Set MATTE_ENGINE=birefnet to A/B or roll back. matte_matanyone is imported lazily
 # (only under the matanyone branch) so the birefnet path still runs in a torch-less venv.
 MATTE_ENGINE = os.environ.get("MATTE_ENGINE", "matanyone")
+# MatAnyone2 direction: forward-only by DEFAULT. Bidirectional (fwd+bwd merge) helped some fine edges
+# but its position-weighted crossfade can bleed the backward-anchor's mistakes in toward the end of a
+# loop (e.g. a correct hole fading to filled). Forward-only avoids that and is ~2x faster. Set
+# MATTE_MATANYONE_BIDIR=1 to re-enable the bidirectional merge.
+MATTE_BIDIR = os.environ.get("MATTE_MATANYONE_BIDIR", "0") == "1"
 
 
 def _session():
@@ -305,9 +310,10 @@ def matte_loopframes(framedir, name, out_base, clip=None, backdrop=None,
         if not inproc:
             mm.ensure_worker()
         first = (_birefnet(pres[0])[0] > 0.5).astype(np.uint8) * 255
-        last = (_birefnet(pres[-1])[0] > 0.5).astype(np.uint8) * 255
+        # backward anchor only needed for the bidirectional merge; skip the extra birefnet call otherwise
+        last = (_birefnet(pres[-1])[0] > 0.5).astype(np.uint8) * 255 if MATTE_BIDIR else first
         matte = mm.matte_segment if inproc else mm.matte_segment_worker
-        alphas = matte(pres, first, last)                      # bidirectional, memory-propagated
+        alphas = matte(pres, first, last, bidir=MATTE_BIDIR)   # forward-only by default
         pairs = list(zip(pres, alphas))                        # RGB = predark input (no decontam)
     else:                                                      # legacy per-frame birefnet
         pairs = []
