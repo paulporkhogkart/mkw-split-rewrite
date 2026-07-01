@@ -26,6 +26,7 @@ def main():
     # rembg wraps the ORT session; CUDA provider is on the inner ORT session
     prov = mb._session().inner_session.get_providers()
     assert "CUDAExecutionProvider" in prov, prov
+    assert prov[0] == "CUDAExecutionProvider", f"CUDA is not the primary provider (CPU fallback?): {prov}"
     print(f"birefnet OK on {prov[0]} alpha[min,max]={alpha.min():.3f},{alpha.max():.3f}", flush=True)
 
     # 2) torch + MatAnyone2 on CUDA, same process
