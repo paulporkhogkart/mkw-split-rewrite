@@ -40,7 +40,7 @@
   import { initPresence } from "./lib/presence.js";
   import { initSync } from "./lib/sync.js";
   import { serverUrl as serverUrlStore, authToken as authTokenStore } from "./lib/syncSettings.js";
-  import { feedVolume, feedMuted, feedHidden } from "./lib/feedSettings.js";
+  import { feedVolume, feedMuted, feedHidden, roiHidden } from "./lib/feedSettings.js";
 
   let appWindow = null;
   function winMinimize()       { appWindow?.minimize(); }
@@ -1592,6 +1592,7 @@
             muted={$feedMuted}
             volume={$feedVolume}
             hidden={!cameraOk || $feedHidden}
+            roiHidden={$roiHidden}
           />
           {#if !cameraOk || $feedHidden}
             <div class="feed-placeholder">
@@ -1643,6 +1644,16 @@
               <svg viewBox="0 0 16 16" class="fc-icon"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2"/></svg>
               <span class="fc-vid-label">Hide</span>
             {/if}
+          </button>
+          <button class="fc-btn fc-vid-btn" title={$feedHidden ? "ROI hidden while feed is off" : ($roiHidden ? "Show ROI boxes" : "Hide ROI boxes")}
+            disabled={$feedHidden}
+            on:click={() => $roiHidden = !$roiHidden}>
+            {#if $roiHidden || $feedHidden}
+              <svg viewBox="0 0 16 16" class="fc-icon"><rect x="2.5" y="4.5" width="11" height="7" rx="1" stroke-dasharray="2.2 2"/><line x1="2" y1="2" x2="14" y2="14"/></svg>
+            {:else}
+              <svg viewBox="0 0 16 16" class="fc-icon"><rect x="2.5" y="4.5" width="11" height="7" rx="1"/></svg>
+            {/if}
+            <span class="fc-vid-label">ROI</span>
           </button>
         </div>
 
@@ -2052,6 +2063,8 @@
     border-radius: var(--r); transition: color .1s, background .1s; flex-shrink: 0;
   }
   .fc-btn:hover { color: var(--tx-mut); background: var(--raised); }
+  .fc-btn:disabled { opacity: .35; cursor: default; }
+  .fc-btn:disabled:hover { color: var(--tx-dim); background: transparent; }
   .fc-icon {
     width: 14px; height: 14px; fill: none;
     stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;

@@ -3,7 +3,7 @@
   import { screen as screenStore, tells as tellsStore, rois as roisStore,
            minimap as minimapStore, trailRuns as trailRunsStore, trailLegend as trailLegendStore, sample as sampleStore,
            race as raceStore } from "../lib/stores.js";
-  import { drawOverlay } from "../lib/overlay.js";
+  import { drawOverlay, overlayVisibility } from "../lib/overlay.js";
 
   // ── Props ─────────────────────────────────────────────────────────────────────
   /** @type {MediaStream|null} */
@@ -14,6 +14,8 @@
   export let volume = 0.5;
   /** @type {boolean} */
   export let hidden = false;
+  /** @type {boolean} hide just the ROI boxes (minimap dots still draw while shown) */
+  export let roiHidden = false;
 
   // ── DOM refs ──────────────────────────────────────────────────────────────────
   let videoEl = null;
@@ -116,7 +118,8 @@
   // The minimap reconstruction (ROI outline, tracking dot, trails, icon sample)
   // is only meaningful during a live race: RACING screen AND the final time not
   // yet detected. Outside that window none of it is drawn.
-  $: mmActive = currentScreen === "RACING" && raceFinishTime == null;
+  $: vis = overlayVisibility({ hidden, roiHidden });
+  $: mmActive = currentScreen === "RACING" && raceFinishTime == null && vis.showMinimap;
 
   // ── Race clock: drives replay-dot interpolation ───────────────────────────────
   // Trails are recorded on the ENGINE's race clock (t=0 == GO, frozen through
@@ -177,7 +180,7 @@
       : null;
     drawOverlay(ctx, {
       canvasW, canvasH,
-      rois:          activeRois,
+      rois:          vis.showRois ? activeRois : [],
       minimap:       mmActive ? currentMinimap : null,
       trails:        mmActive ? currentTrails : [],
       legend:        [],   // minimap legend dropped - the player panel identifies players
@@ -189,7 +192,7 @@
   // Static redraws (ROI boxes, sample, canvas resize) happen on any input change.
   // While mmActive the rAF loop also redraws every frame so the dots move.
   $: { void activeRois; void currentMinimap; void currentTrails; void currentLegend; void sampleImg;
-       void mmActive; void canvasW; void canvasH; redraw(); }
+       void mmActive; void vis; void canvasW; void canvasH; redraw(); }
 
   // ── ResizeObserver: keep canvas dimensions in sync with container ─────────────
   let _ro = null;
