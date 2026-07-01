@@ -4,6 +4,7 @@ Thin wiring: pure logic lives in controlstate/progress/health; I/O in
 supervisor/wsconsumer/manual. Cross-thread updates are marshalled onto the Tk
 main thread via a queue drained by after().
 """
+import glob
 import os
 import queue
 import shutil
@@ -24,7 +25,7 @@ from controller_bridge import ControllerBridge
 from health import HealthModel
 from manual import ManualController
 from progress import ProgressModel
-from supervisor import ProcessSupervisor
+from supervisor import ProcessSupervisor, parse_matte_progress
 from wsconsumer import WsConsumer
 
 REPO_ROOT = os.path.abspath(os.path.join(_HERE, "..", ".."))
@@ -39,6 +40,7 @@ WS_URL = "ws://127.0.0.1:8766"
 PROCESS_OUT = os.path.join(DATA_ROOT, "asset_chips")
 PROCESS_STOP = os.path.join(PROCESS_OUT, ".process_stop")
 PROCESS_MANIFEST = os.path.join(PROCESS_OUT, "manifest.json")
+PP_W, PP_H = 200, 219                          # processing-preview box (matched to the 988x1080 chip crop)
 
 
 def _fmt_eta(s):
@@ -70,6 +72,9 @@ class ConsoleApp:
         self.manual = None
         self._photo = None
         self._proc_last = ""                         # latest batch-driver log line (shown in headline)
+        self._proc_seg = None                        # current matte segment dir name (for the preview)
+        self._proc_frac = ""                         # 'done/total' of the current segment
+        self._pphoto = None                          # keep a ref so Tk doesn't GC the preview image
         self._build()
         root.protocol("WM_DELETE_WINDOW", self._on_close)
         root.after(100, self._drain)
@@ -99,8 +104,9 @@ class ConsoleApp:
         # an image arrives, which ballooned the left column and pushed the log panes off-screen on a
         # processing-only run (no Start Rig -> no camera image to shrink it). pack_propagate(False)
         # locks the frame's pixel size so the panes are visible from startup.
-        thumb_box = tk.Frame(left, width=320, height=180, background="#111")
-        thumb_box.pack(); thumb_box.pack_propagate(False)
+        sw = ttk.LabelFrame(left, text="Switch preview"); sw.pack(fill="x")
+        thumb_box = tk.Frame(sw, width=320, height=180, background="#111")
+        thumb_box.pack(padx=4, pady=4); thumb_box.pack_propagate(False)
         self.thumb = tk.Label(thumb_box, background="#111")
         self.thumb.pack(fill="both", expand=True)
         man = ttk.LabelFrame(left, text="Manual control"); man.pack(pady=8, fill="x")
@@ -114,6 +120,13 @@ class ConsoleApp:
             ttk.Button(extra, width=4, text=txt,
                        command=lambda k=key: self._manual(k)).pack(side="left", padx=1)
         self.man_frame = man
+        pp = ttk.LabelFrame(left, text="Processing preview"); pp.pack(fill="x")
+        ppbox = tk.Frame(pp, width=PP_W, height=PP_H, background="#2b2b2b")
+        ppbox.pack(padx=4, pady=4); ppbox.pack_propagate(False)
+        self.pthumb = tk.Label(ppbox, background="#2b2b2b")
+        self.pthumb.pack(fill="both", expand=True)
+        self.pcap = ttk.Label(pp, text="—", font=("Consolas", 8))
+        self.pcap.pack(anchor="w", padx=4, pady=(0, 4))
 
         right = ttk.Frame(body); right.pack(side="left", fill="both", expand=True, padx=6, pady=6)
         self.hl = ttk.Label(right, justify="left", font=("Consolas", 10))
@@ -161,6 +174,9 @@ class ConsoleApp:
         t.see("end"); t.configure(state="disabled")
         if name == "process" and text.strip():
             self._proc_last = text.strip()
+            prog = parse_matte_progress(text)
+            if prog:
+                self._proc_seg, self._proc_frac = prog
 
     def _set_thumb(self, msg):
         try:
@@ -281,6 +297,27 @@ class ConsoleApp:
         except OSError:
             return None
 
+    def _update_proc_preview(self):
+        """Show the newest matted frame of the segment currently being processed (1 Hz, running
+        only). Best-effort: a missing dir or a partial mid-write PNG just skips this tick and the
+        last frame stays up, so the preview never disrupts the UI or stalls processing."""
+        if self.pstate.state != ps.RUNNING or not self._proc_seg:
+            return
+        try:
+            from PIL import Image, ImageTk
+            pngs = glob.glob(os.path.join(PROCESS_OUT, "matte", f"{self._proc_seg}_frames", "*.png"))
+            if not pngs:
+                return
+            im = Image.open(max(pngs)).convert("RGBA")        # zero-padded names: max == newest frame
+            im.thumbnail((PP_W, PP_H))
+            bg = Image.new("RGB", (PP_W, PP_H), (43, 43, 43))  # flat neutral bg shows alpha holes/halos
+            bg.paste(im, ((PP_W - im.width) // 2, (PP_H - im.height) // 2), im)
+            self._pphoto = ImageTk.PhotoImage(bg)
+            self.pthumb.configure(image=self._pphoto)
+            self.pcap.configure(text=f"{' · '.join(self._proc_seg.split('__')[-2:])}   {self._proc_frac}")
+        except Exception:
+            pass
+
     # ── 1 Hz refresh ─────────────────────────────────────────────────────────────
     def _tick(self):
         if self.manual:
@@ -304,6 +341,7 @@ class ConsoleApp:
             f"processed {pp['done']}/{pp['total']}  {pp['pct'] * 100:4.1f}%   "
             f"ETA {_fmt_eta(pp['eta_seconds'])}   [{self.pstate.state.lower().replace('_', ' ')}]\n"
             f"{self._proc_last[:72]}"))
+        self._update_proc_preview()
         self.root.after(1000, self._tick)
 
     def _on_close(self):

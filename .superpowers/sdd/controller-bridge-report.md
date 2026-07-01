@@ -145,7 +145,8 @@ button is held, then `state.replay_update(0, 0, 0, 0, 0)` to release).
 | Phase | Count |
 |---|---|
 | Before (asset-clip-sweep HEAD) | 353 |
-| After (new files added) | 353 + 8 (bridge) + 18 (agent) = 379 |
+| After task 3b9c1cc (bridge + agent added) | 380 |
+| After 0a1dc68 (anti-spin + rstick_down tidy) | 381 |
 
 ### dry-run behaviour
 
@@ -170,3 +171,36 @@ walks the full grid and prints "Sweep complete." without any hardware.
   (single-accept design) — adequate for the sequential test cases.  If tests
   are ever parallelised with `pytest-xdist`, each test needs its own `_EchoServer`
   instance (which they already do, since each test function creates a new one).
+
+---
+
+## Post-Commit Fixes — `0a1dc68`
+
+### FIX 1 — Anti-spin at snapshot level (`_AntiSpinState`)
+
+**Root cause:** `full_runner._press` calls `state.replay_update(bit, 0,0,0,0)` (press)
+then `replay_update(0,0,0,0,0)` (release) — both zero R-stick Y.  The 120 Hz sender
+reads `state.snapshot()`, so during a press (~12 frames) the Switch sees R-stick
+NEUTRAL → kart can spin mid-press.
+
+**Fix:** Added `_AntiSpinState(ControllerState)` in `controller_agent.py` with a
+`snapshot()` override that forces `snap["ry"] = -127` on every call, making anti-spin
+immune to whatever `replay_update` writes.  Moved `from switch_bridge import
+ControllerState` to module top (nxbt-free; Windows-safe).  `_init_ctrl` now
+instantiates `_AntiSpinState()` instead of `ControllerState()` and drops the now-
+redundant `state.replay_update(0, 0, 0, 0, -127)` pre-sender call.
+
+**Test:** `test_antispin_state_forces_rstick_down_even_after_button_update` in
+`tests/test_controller_agent.py` verifies ry=-127 after a neutral release and after a
+button press that zeros the sticks, while confirming the button bit still propagates.
+
+### FIX 2 — Drop dead `dur` param from `rstick_down`
+
+`ControllerBridge.rstick_down(self, dur: float = 0)` accepted `dur` but never
+sent it.  `BridgeController.rstick_down(self, dur: float = 0)` forwarded it
+as `dur=dur` (also unused).  `_DryController.rstick_down(self, dur)` printed
+`{dur}s` (misleading "timed hold").
+
+Changed all three to `rstick_down(self)`.  The delegating call in
+`BridgeController.rstick_down` is updated to `self._bridge.rstick_down()`.
+No call sites in `main()` or `SweepRunner` passed `dur` (confirmed by grep).

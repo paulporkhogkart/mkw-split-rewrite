@@ -13,6 +13,14 @@ import commands
 
 _NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0     # CREATE_NO_WINDOW
 _CHAR_RE = re.compile(r"-- char:\s*(\S+)\s*--")
+_MATTE_RE = re.compile(r"matte\s+(\S+)\s+(\d+)/(\d+)")
+
+
+def parse_matte_progress(line):
+    """Parse a batch-driver progress line ('  matte <name>__<seg> 60/120') into
+    (segment_name, 'done/total'), or None -- lets the console preview the frame being matted."""
+    m = _MATTE_RE.search(line)
+    return (m.group(1), f"{m.group(2)}/{m.group(3)}") if m else None
 
 
 class ProcessSupervisor:
