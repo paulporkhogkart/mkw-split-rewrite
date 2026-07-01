@@ -26,9 +26,10 @@ OUT = ("C:/Users/Paul/AppData/Local/Temp/claude/C--development-mkw-split-rewrite
        "209024a0-084e-4c91-8a28-32378aa23e69/scratchpad/sam2val_out")
 
 # (subject, [segments]) — idle for all 5; spawn also for one kart (off-center test).
+# hot_rod gets ALL three segments to reproduce the user's reported flourish (end) + spawn (start) defects.
 JOBS = [
     ("mario__base", ["idle"]),
-    ("mario__base__hot_rod", ["idle"]),
+    ("mario__base__hot_rod", ["spawn", "idle", "flourish"]),
     ("mario__base__plushbuggy", ["idle"]),
     ("mario__base__standard_kart", ["idle", "spawn"]),
     ("mario__base__zoom_buggy", ["idle"]),
@@ -48,7 +49,8 @@ def run_subject(subject, wanted):
             continue
         raw_dir = os.path.join(seg_raw, f"{subject}__{seg}")
         paths = sorted(glob.glob(os.path.join(raw_dir, "*.png")))
-        pres = mb._build_predark_frames(paths, kart, apply_predark=True)   # BGR uint8 list
+        apply_predark = not (kart and seg == "flourish")   # kart flourish drops the plate -> no predark
+        pres = mb._build_predark_frames(paths, kart, apply_predark=apply_predark)   # BGR uint8 list
         work = os.path.join(OUT, "work", f"{subject}__{seg}")
         fdir = os.path.join(work, "frames")
         os.makedirs(fdir, exist_ok=True)
