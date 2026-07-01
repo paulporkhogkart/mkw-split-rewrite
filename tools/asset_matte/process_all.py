@@ -105,9 +105,9 @@ def main():
                 segname = f"{name}__{seg}"
                 fd = os.path.join(seg_base, segname)
                 print(f"    matting {segname} ({counts[seg]}f)...", flush=True)
-                matted[seg] = int(mb.matte_loopframes(                # flourish: plate dropped -> no predark
-                    fd, segname, mattedir, clip=clip,
-                    apply_predark=(seg != "flourish"), is_kart=kart))
+                matted[seg] = int(mb.matte_loopframes(   # only the KART flourish drops the plate -> no predark;
+                    fd, segname, mattedir, clip=clip,    # the char keeps its nameplate through its flourish
+                    apply_predark=not (kart and seg == "flourish"), is_kart=kart))
             if not a.keep_loopframes:
                 shutil.rmtree(seg_base, ignore_errors=True)
             manifest[name] = {"status": "done", "kart": kart,

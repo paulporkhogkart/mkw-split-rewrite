@@ -186,43 +186,62 @@ def find_segments(clip):
     """{seg: (start, end)} half-open spans for 'spawn'/'idle'/'flourish' (+ fps, kart).
 
     idle  = the seam-searched loop [start, start+P].
-    spawn = from the SWAP (the biggest consecutive COLOUR change in the ~45f before idle settles =
-            the new vehicle replacing the previous selection) to the idle-band start. Grayscale
-            can't separate two karts (both "Mario-in-a-kart blobs"), so the swap MUST use colour;
-            spawn_start = the post-spike frame = the new vehicle's first frame. Omitted if no clear
-            swap is seen (e.g. standalone characters).
-    flourish = the fixed-length in-game flourish anim right after the idle band (kart 64f / char 48f;
-            the anim length is the same regardless of background).
-    Faithful port of the method validated against hand-marks (memory `asset-clip-segmentation`)."""
-    start, P, fps, wh, kart, a, b, _F = _loop_impl(clip)
-    w, h = wh
-    rx, ry = w / 1280.0, h / 720.0
-    x1, y1, x2, y2 = (int(_SWAP_ROI_720[0] * rx), int(_SWAP_ROI_720[1] * ry),
-                      int(_SWAP_ROI_720[2] * rx), int(_SWAP_ROI_720[3] * ry))
-    # decode a COLOUR feature per frame up to the idle-band start (sequential -- HEVC seek is flaky)
-    cap = cv2.VideoCapture(clip)
-    C, idx = [], 0
-    while idx <= a:
-        ok, fr = cap.read()
-        if not ok:
-            break
-        C.append(cv2.resize(fr[y1:y2, x1:x2], (24, 24), interpolation=cv2.INTER_AREA)
-                 .astype(np.float32).reshape(-1))
-        idx += 1
-    cap.release()
-    C = np.stack(C)
-    # swap = the single biggest consecutive colour change in the 45f before idle settles
-    w0 = max(1, a - 45)
-    if len(C) > a and a - w0 >= 1:
-        diffs = np.array([float(np.linalg.norm(C[t] - C[t - 1])) for t in range(w0, a)])
-        best = w0 + int(np.argmax(diffs))
-    else:
-        best = a - 16
-    spawn_start = min(max(best + 1, a - 45), a - 4)
+    spawn = KARTS ONLY. The swap = the biggest consecutive COLOUR change in the ~45f before idle
+            settles (grayscale can't separate two karts); spawn_start = the post-spike frame = the
+            new kart's first frame. Standalone characters have no spawn-in (just a swap, no drop-in
+            animation) -> no spawn segment.
+    flourish = a fixed-length anim (kart 64f / char 48f) starting at the first MOTION BURST after the
+            idle band -- the kart rear-up / the character's jump. Band-end alone suffices for karts
+            (the band ends at the flourish) but NOT for characters, whose idle band can end early
+            while the standing idle keeps going; scanning forward for the burst handles both.
+    Ports the method validated against hand-marks (memory `asset-clip-segmentation`)."""
+    start, P, fps, wh, kart, a, b, F = _loop_impl(clip)
+
+    # ── spawn-in (KARTS only): colour-spike swap in the ~45f before idle settles ──────────────
+    spawn = None
+    if kart:
+        w, h = wh
+        rx, ry = w / 1280.0, h / 720.0
+        x1, y1, x2, y2 = (int(_SWAP_ROI_720[0] * rx), int(_SWAP_ROI_720[1] * ry),
+                          int(_SWAP_ROI_720[2] * rx), int(_SWAP_ROI_720[3] * ry))
+        cap = cv2.VideoCapture(clip)               # sequential decode (HEVC seek is flaky)
+        C, idx = [], 0
+        while idx <= a:
+            ok, fr = cap.read()
+            if not ok:
+                break
+            C.append(cv2.resize(fr[y1:y2, x1:x2], (24, 24), interpolation=cv2.INTER_AREA)
+                     .astype(np.float32).reshape(-1))
+            idx += 1
+        cap.release()
+        C = np.stack(C)
+        w0 = max(1, a - 45)
+        if len(C) > a and a - w0 >= 1:
+            diffs = np.array([float(np.linalg.norm(C[t] - C[t - 1])) for t in range(w0, a)])
+            best = w0 + int(np.argmax(diffs))
+        else:
+            best = a - 16
+        sp = min(max(best + 1, a - 45), a - 4)
+        if a - sp >= 4:
+            spawn = (sp, a)
+
+    # ── flourish START = the first motion burst after the idle band (rear-up / jump) ──────────
+    # Measured on the grayscale features F: idle bob (and the kart wheel) is small + steady; the
+    # flourish is a big pose change. Scanning from the band edge skips a character's long trailing
+    # idle to the jump; for karts the band edge already sits at the flourish so it triggers at once.
+    jump = np.concatenate([[0.0], np.linalg.norm(np.diff(F, axis=0), axis=1)])
+    idle_jump = float(np.median(jump[a:b])) if b > a else 0.0
+    thr = 4.0 * idle_jump
+    fs = b
+    while fs < len(jump) - 1 and jump[fs] <= thr:
+        fs += 1
+    if fs >= len(jump) - 1:                         # burst not in the feature window -> band edge
+        fs = b + 1
     flen = KART_FLOURISH if kart else CHAR_FLOURISH
-    segs = {"idle": (start, start + P), "flourish": (b + 1, b + 1 + flen)}
-    if a - spawn_start >= 4:
-        segs["spawn"] = (spawn_start, a)
+
+    segs = {"idle": (start, start + P), "flourish": (fs, fs + flen)}
+    if spawn:
+        segs["spawn"] = spawn
     return segs, fps, kart
 
 
