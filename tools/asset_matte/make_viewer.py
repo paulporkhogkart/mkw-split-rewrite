@@ -20,7 +20,8 @@ _CSS = """
 body { margin:0; height:100vh; display:flex; flex-direction:column;
        background:#0e0e10; color:#e6e6e6; font:13px/1.4 ui-sans-serif,system-ui,sans-serif; }
 .bar { padding:8px 13px; background:#17171a; border-bottom:1px solid #2a2a2e;
-       display:flex; gap:9px; align-items:center; flex-wrap:wrap; }
+       display:flex; gap:9px; align-items:center;
+       flex-wrap:nowrap; white-space:nowrap; overflow-x:auto; flex-shrink:0; }
 .bar.b2 { background:#131316; }
 button, select { font:inherit; background:#2a2a30; color:#e6e6e6; border:1px solid #3a3a42;
          border-radius:6px; padding:6px 10px; cursor:pointer; }
@@ -130,7 +131,7 @@ function pause(){ stopRaf(); paused=true; $("btnPause").textContent="▶ Play"; 
 function step(d){ if(!paused)pause(); frame(Math.max(0,Math.min(total-1,curFrame+d))); }
 
 function loadCombo(c){ cur=c; $("veh").textContent=`${c.char} · ${c.kart}`;
-  buildTimeline(c); preload(); $("scrub").max=total-1; curFrame=0; resetZoom(); replaySpawn(); }
+  buildTimeline(c); preload(); $("scrub").max=total-1; curFrame=0; applyZoom(); replaySpawn(); }
 function onPick(){ const c=findCombo($("charSel").value,$("kartSel").value); if(c)loadCombo(c); }
 function syncTo(c){ $("charSel").value=c.char; fillKarts(c.char); $("kartSel").value=c.kart; }
 function jumpCombo(d){ const i=COMBOS.indexOf(cur), n=COMBOS[(i+d+COMBOS.length)%COMBOS.length]; syncTo(n); loadCombo(n); }
