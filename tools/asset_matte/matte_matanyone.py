@@ -110,3 +110,101 @@ def matte_segment(frames_bgr, first_mask_u8, last_mask_u8, warmup=10, erode=10, 
     bwd_rev = _propagate(list(reversed(frames_bgr)), last_mask_u8, warmup, erode, dilate)
     bwd = list(reversed(bwd_rev))                                # un-reverse to frame order
     return merge_bidir(fwd, bwd)
+
+
+# ── persistent worker client (runs matte_segment in a SEPARATE torch process) ──────────────────
+# birefnet(onnxruntime) monopolises the GPU and starves an in-process torch matte. So the main
+# pipeline spawns this worker (pure torch) and — crucially — warms it BEFORE its first birefnet
+# call, so torch reserves its GPU block first. See matte_matanyone_worker.py and the ledger.
+_WORKER = None
+
+
+def _worker():
+    """Spawn (once) the persistent matte worker subprocess and block until it prints READY. Uses the
+    SAME interpreter running us (the unified asset-venv-matte python), so no venv path is needed."""
+    global _WORKER
+    if _WORKER is None:
+        import subprocess
+        worker_py = os.path.join(_HERE, "matte_matanyone_worker.py")
+        _WORKER = subprocess.Popen([sys.executable, worker_py],
+                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   text=True, bufsize=1)
+        for line in _WORKER.stdout:                              # wait for warm-up to finish
+            if line.strip() == "READY":
+                break
+            if _WORKER.poll() is not None:
+                raise RuntimeError("matte worker died before READY")
+    return _WORKER
+
+
+def ensure_worker():
+    """Start + warm the worker NOW (call before the first birefnet inference so torch reserves the
+    GPU before onnxruntime grabs it). Idempotent."""
+    _worker()
+
+
+def _reset_worker():
+    """Tear down a dead/broken worker so the next _worker() spawns a fresh one (new CUDA context)."""
+    global _WORKER
+    if _WORKER is not None:
+        try:
+            _WORKER.kill()
+        except Exception:
+            pass
+        _WORKER = None
+
+
+def matte_segment_worker(frames_bgr, first_mask_u8, last_mask_u8, warmup=10, erode=10, dilate=10):
+    """Same contract as matte_segment, but the propagation runs in the worker process. Hands frames
+    + masks over via a temp dir and reads the alpha PNGs back."""
+    import json
+    import shutil
+    import tempfile
+    import cv2
+    w = _worker()
+    work = tempfile.mkdtemp(prefix="mawork_")
+    try:
+        fdir = os.path.join(work, "frames")
+        os.makedirs(fdir)
+        for i, f in enumerate(frames_bgr):
+            cv2.imwrite(os.path.join(fdir, f"{i:04d}.png"), f)
+        fp, lp = os.path.join(work, "first.png"), os.path.join(work, "last.png")
+        cv2.imwrite(fp, first_mask_u8)
+        cv2.imwrite(lp, last_mask_u8)
+        out_dir = os.path.join(work, "out")
+        job = {"frames_dir": fdir, "first": fp, "last": lp, "out_dir": out_dir,
+               "warmup": warmup, "erode": erode, "dilate": dilate}
+        r = _run_job_with_retry(job)                            # respawns the worker on death/CUDA error
+        return [cv2.imread(os.path.join(out_dir, f"{i:03d}.png"),
+                           cv2.IMREAD_GRAYSCALE).astype(np.float32) / 255.0
+                for i in range(r["n"])]
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def _run_job_with_retry(job, attempts=2):
+    """Send a job to the worker; if it dies or returns a CUDA error (sequential-job state corruption
+    can trigger an illegal-memory-access that kills the process), respawn a FRESH worker and retry.
+    A fresh process = fresh CUDA context, and single jobs are reliable."""
+    import json
+    last = None
+    for k in range(attempts):
+        w = _worker()
+        try:
+            w.stdin.write(json.dumps(job) + "\n")
+            w.stdin.flush()
+            reply = w.stdout.readline()
+        except (BrokenPipeError, OSError) as exc:
+            last = f"pipe error: {exc}"
+            _reset_worker()
+            continue
+        if not reply:                                          # worker crashed mid-job
+            last = "worker closed the pipe (no reply)"
+            _reset_worker()
+            continue
+        r = json.loads(reply)
+        if r.get("status") == "ok":
+            return r
+        last = r                                               # error reply (e.g. CUDA) -> fresh worker
+        _reset_worker()
+    raise RuntimeError(f"matte worker failed after {attempts} attempts: {last}")

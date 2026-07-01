@@ -296,9 +296,18 @@ def matte_loopframes(framedir, name, out_base, clip=None, backdrop=None,
 
     if MATTE_ENGINE == "matanyone":
         import matte_matanyone as mm                           # lazy: torch only loads on this path
+        # birefnet(onnxruntime) and matanyone(torch) can't share one process on the GPU — onnxruntime
+        # grabs the whole card and starves torch (~50x). So matanyone runs in a persistent WORKER
+        # process; warm it HERE, before the first birefnet call, so torch reserves its GPU block
+        # first (validated: they then coexist at full speed). MATTE_MATANYONE_INPROC=1 forces the old
+        # single-process path (only usable when birefnet won't also run — e.g. isolated tests).
+        inproc = os.environ.get("MATTE_MATANYONE_INPROC") == "1"
+        if not inproc:
+            mm.ensure_worker()
         first = (_birefnet(pres[0])[0] > 0.5).astype(np.uint8) * 255
         last = (_birefnet(pres[-1])[0] > 0.5).astype(np.uint8) * 255
-        alphas = mm.matte_segment(pres, first, last)           # bidirectional, memory-propagated
+        matte = mm.matte_segment if inproc else mm.matte_segment_worker
+        alphas = matte(pres, first, last)                      # bidirectional, memory-propagated
         pairs = list(zip(pres, alphas))                        # RGB = predark input (no decontam)
     else:                                                      # legacy per-frame birefnet
         pairs = []
