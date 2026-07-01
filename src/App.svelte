@@ -40,6 +40,7 @@
   import { initPresence } from "./lib/presence.js";
   import { initSync } from "./lib/sync.js";
   import { serverUrl as serverUrlStore, authToken as authTokenStore } from "./lib/syncSettings.js";
+  import { feedVolume, feedMuted, feedHidden } from "./lib/feedSettings.js";
 
   let appWindow = null;
   function winMinimize()       { appWindow?.minimize(); }
@@ -428,9 +429,7 @@
   let pythonFrameW = 1920, pythonFrameH = 1080;
 
   // ── Feed audio / video controls ───────────────────────────────────────────────
-  let feedVolume    = 0.5;    // 0–1
-  let feedMuted     = false;
-  let feedVideoHidden = false;
+  // Persisted feed prefs (volume / mute / preview-hide / ROI-hide) live in lib/feedSettings.js.
   let _audioCtx  = null;
   let _gainNode  = null;
   let _hasAudio  = false;    // true if current stream has audio tracks
@@ -447,7 +446,7 @@
     if (!_hasAudio) return;
     _audioCtx = new AudioContext();
     _gainNode = _audioCtx.createGain();
-    _gainNode.gain.value = feedMuted ? 0 : feedVolume;
+    _gainNode.gain.value = $feedMuted ? 0 : $feedVolume;
     _audioCtx.createMediaStreamSource(videoStream).connect(_gainNode);
     _gainNode.connect(_audioCtx.destination);
   }
@@ -458,7 +457,7 @@
   }
 
   // Keep gain in sync whenever mute or volume changes
-  $: if (_gainNode) _gainNode.gain.value = feedMuted ? 0 : feedVolume;
+  $: if (_gainNode) _gainNode.gain.value = $feedMuted ? 0 : $feedVolume;
 
   // ── Wizard step definitions ───────────────────────────────────────────────────
   // First-run finishes straight into the live app from the camera step - no
@@ -1590,13 +1589,13 @@
         <div class="feed-area">
           <FeedOverlay
             stream={setupComplete ? (videoStream ?? null) : null}
-            muted={feedMuted}
-            volume={feedVolume}
-            hidden={!cameraOk || feedVideoHidden}
+            muted={$feedMuted}
+            volume={$feedVolume}
+            hidden={!cameraOk || $feedHidden}
           />
-          {#if !cameraOk || feedVideoHidden}
+          {#if !cameraOk || $feedHidden}
             <div class="feed-placeholder">
-              {#if feedVideoHidden && cameraOk}
+              {#if $feedHidden && cameraOk}
                 <span class="feed-ph-text feed-ph-dim">Feed hidden</span>
               {:else if !trackerConnected}
                 <span class="feed-ph-icon">◌</span>
@@ -1615,29 +1614,29 @@
         <!-- Feed controls: audio + video toggle -->
         <div class="feed-controls">
           {#if _hasAudio}
-            <button class="fc-btn" title={feedMuted ? "Unmute" : "Mute"}
-              on:click={() => feedMuted = !feedMuted}>
-              {#if feedMuted}
+            <button class="fc-btn" title={$feedMuted ? "Unmute" : "Mute"}
+              on:click={() => $feedMuted = !$feedMuted}>
+              {#if $feedMuted}
                 <svg viewBox="0 0 16 16" class="fc-icon"><path d="M8 2v12l-4-3H1V7h3L8 4V2zm4.5 2.5a6 6 0 010 7M11 5.5a4 4 0 010 5"/><line x1="1" y1="1" x2="15" y2="15" stroke-linecap="round"/></svg>
-              {:else if feedVolume < 0.35}
+              {:else if $feedVolume < 0.35}
                 <svg viewBox="0 0 16 16" class="fc-icon"><path d="M8 2v12l-4-3H1V7h3L8 4V2z"/><path d="M11 6a2.5 2.5 0 010 4"/></svg>
               {:else}
                 <svg viewBox="0 0 16 16" class="fc-icon"><path d="M8 2v12l-4-3H1V7h3L8 4V2z"/><path d="M11 5.5a4 4 0 010 5M13 3.5a7 7 0 010 9"/></svg>
               {/if}
             </button>
             <input type="range" min="0" max="1" step="0.01"
-              bind:value={feedVolume}
-              on:input={() => { if (feedVolume > 0) feedMuted = false; }}
+              bind:value={$feedVolume}
+              on:input={() => { if ($feedVolume > 0) $feedMuted = false; }}
               class="fc-slider" title="Volume" />
-            <span class="fc-vol">{Math.round(feedVolume * 100)}%</span>
+            <span class="fc-vol">{Math.round($feedVolume * 100)}%</span>
             <div class="fc-divider"></div>
           {:else if cameraOk}
             <span class="fc-no-audio">no audio</span>
             <div class="fc-divider"></div>
           {/if}
-          <button class="fc-btn fc-vid-btn" title={feedVideoHidden ? "Show feed" : "Hide feed"}
-            on:click={() => feedVideoHidden = !feedVideoHidden}>
-            {#if feedVideoHidden}
+          <button class="fc-btn fc-vid-btn" title={$feedHidden ? "Show feed" : "Hide feed"}
+            on:click={() => $feedHidden = !$feedHidden}>
+            {#if $feedHidden}
               <svg viewBox="0 0 16 16" class="fc-icon"><path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2"/><line x1="2" y1="2" x2="14" y2="14" stroke-linecap="round"/></svg>
               <span class="fc-vid-label">Show</span>
             {:else}
@@ -1717,21 +1716,21 @@
                  (audio-only, no video-hide toggle here). -->
             <div class="feed-controls">
               {#if _hasAudio}
-                <button class="fc-btn" title={feedMuted ? "Unmute" : "Mute"}
-                  on:click={() => feedMuted = !feedMuted}>
-                  {#if feedMuted}
+                <button class="fc-btn" title={$feedMuted ? "Unmute" : "Mute"}
+                  on:click={() => $feedMuted = !$feedMuted}>
+                  {#if $feedMuted}
                     <svg viewBox="0 0 16 16" class="fc-icon"><path d="M8 2v12l-4-3H1V7h3L8 4V2zm4.5 2.5a6 6 0 010 7M11 5.5a4 4 0 010 5"/><line x1="1" y1="1" x2="15" y2="15" stroke-linecap="round"/></svg>
-                  {:else if feedVolume < 0.35}
+                  {:else if $feedVolume < 0.35}
                     <svg viewBox="0 0 16 16" class="fc-icon"><path d="M8 2v12l-4-3H1V7h3L8 4V2z"/><path d="M11 6a2.5 2.5 0 010 4"/></svg>
                   {:else}
                     <svg viewBox="0 0 16 16" class="fc-icon"><path d="M8 2v12l-4-3H1V7h3L8 4V2z"/><path d="M11 5.5a4 4 0 010 5M13 3.5a7 7 0 010 9"/></svg>
                   {/if}
                 </button>
                 <input type="range" min="0" max="1" step="0.01"
-                  bind:value={feedVolume}
-                  on:input={() => { if (feedVolume > 0) feedMuted = false; }}
+                  bind:value={$feedVolume}
+                  on:input={() => { if ($feedVolume > 0) $feedMuted = false; }}
                   class="fc-slider" title="Volume" />
-                <span class="fc-vol">{Math.round(feedVolume * 100)}%</span>
+                <span class="fc-vol">{Math.round($feedVolume * 100)}%</span>
               {:else if cameraOk}
                 <span class="fc-no-audio">no audio</span>
               {/if}
