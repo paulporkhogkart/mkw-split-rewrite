@@ -24,3 +24,8 @@ def test_parse_matte_progress():
     assert parse_matte_progress("    matting baby_daisy__base__billdozer__spawn (150f)...") is None
     assert parse_matte_progress("--- baby_daisy__base (5/41) segmenting...") is None
     assert parse_matte_progress("PROCESSED baby_daisy__base (5/41) {'idle': 120} 484s") is None
+
+
+def test_gpu_py_points_at_unified_matte_venv():
+    sup = ProcessSupervisor("/repo", lambda *_: None, py="python")
+    assert sup.gpu_py.replace("\\", "/").endswith("temp/asset-venv-matte/Scripts/python.exe")

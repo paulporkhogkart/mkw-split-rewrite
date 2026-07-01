@@ -78,6 +78,10 @@ _SESSION = None
 # birefnet model: FULL ("birefnet-general") by default — much better at low-contrast edges (dark kart
 # parts) than the lite model; set MATTE_BIREFNET_MODEL=birefnet-general-lite to go back to fast/lite.
 BIREFNET_MODEL = os.environ.get("MATTE_BIREFNET_MODEL", "birefnet-general")
+# Matte engine: MatAnyone2 video matting (default, kills per-frame flicker) vs the legacy per-frame
+# birefnet path. Set MATTE_ENGINE=birefnet to A/B or roll back. matte_matanyone is imported lazily
+# (only under the matanyone branch) so the birefnet path still runs in a torch-less venv.
+MATTE_ENGINE = os.environ.get("MATTE_ENGINE", "matanyone")
 
 
 def _session():
@@ -234,6 +238,48 @@ def _checker_rgba(w, h, s=22):
     return Image.fromarray(np.where(m[..., None], 205, 150).astype(np.uint8).repeat(3, 2), "RGB").convert("RGBA")
 
 
+def _build_predark_frames(paths, kart, apply_predark):
+    """Predark (or raw, for a plate-dropped flourish) BGR uint8 frame per path. Kart text mask is
+    computed once from the segment median (== the old inline path)."""
+    text = None
+    if kart and apply_predark:
+        sample = [cv2.imread(p).astype(np.float32) for p in paths[::3]]
+        text = _kart_text_mask(np.median(np.stack(sample), axis=0))
+    out = []
+    for p in paths:
+        raw = cv2.imread(p)
+        if not apply_predark:
+            out.append(raw)                                  # flourish: plate dropped -> raw
+        elif kart:
+            out.append(_kart_predark(raw, text))
+        else:
+            out.append(pd.pre_darken(raw, _t_char, _C_char, _A_char, _MASK_char))
+    return out
+
+
+def _write_chip(pairs, name, out_base):
+    """Write RGBA frames + _loop.webp + _checker.webp from (bgr_uint8, alpha_float01) pairs. Shared
+    by both engines. Returns the frame count."""
+    fdir = os.path.join(out_base, f"{name}_frames")
+    os.makedirs(fdir, exist_ok=True)
+    rgba_frames = []
+    for i, (bgr, alpha) in enumerate(pairs):
+        rgb = cv2.cvtColor(np.asarray(bgr).astype(np.uint8), cv2.COLOR_BGR2RGB)
+        rgba = np.dstack([rgb, (np.clip(alpha, 0, 1) * 255).astype(np.uint8)])
+        cv2.imwrite(os.path.join(fdir, f"{i:03d}.png"), cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGRA))
+        rgba_frames.append(Image.fromarray(rgba, "RGBA"))
+        if (i + 1) % 15 == 0 or i + 1 == len(pairs):
+            print(f"  matte {name} {i + 1}/{len(pairs)}", flush=True)
+    W, H = rgba_frames[0].size
+    rgba_frames[0].save(os.path.join(out_base, f"{name}_loop.webp"), save_all=True,
+                        append_images=rgba_frames[1:], duration=DUR_MS, loop=0, lossless=True, disposal=2)
+    chk = _checker_rgba(W, H)
+    comp = [Image.alpha_composite(chk, f) for f in rgba_frames]
+    comp[0].save(os.path.join(out_base, f"{name}_checker.webp"), save_all=True,
+                 append_images=comp[1:], duration=DUR_MS, loop=0)
+    return len(pairs)
+
+
 def matte_loopframes(framedir, name, out_base, clip=None, backdrop=None,
                      apply_predark=True, is_kart=None):
     """Matte every NNN.png frame in `framedir` -> transparent RGBA. Returns the frame count.
@@ -246,47 +292,20 @@ def matte_loopframes(framedir, name, out_base, clip=None, backdrop=None,
     if not paths:
         raise RuntimeError(f"no loop frames in {framedir!r}")
     kart = is_kart_combo(name) if is_kart is None else is_kart
-    text = None
-    if kart and apply_predark:
-        sample = [cv2.imread(p).astype(np.float32) for p in paths[::3]]
-        text = _kart_text_mask(np.median(np.stack(sample), axis=0))
-    # Hole-repair OFF under full birefnet (`birefnet-general`): the lite-era combined hole-repair
-    # (enclosed-pocket + open-notch restore) patched LITE's wrong interior cuts, but the full model's
-    # interiors come out clean (validated incl. the baby_daisy bib it used to target) -> unneeded.
-    # Code kept; to re-enable for a char that shows an interior gap, uncomment both blocks together.
-    # if kart and backdrop is None and clip is not None:   # repair karts only (see below)
-    #     backdrop = clean_backdrop(clip, out_base)
-    fdir = os.path.join(out_base, f"{name}_frames")
-    os.makedirs(fdir, exist_ok=True)
-    rgba_frames = []
-    for i, p in enumerate(paths):
-        raw = cv2.imread(p)
-        if not apply_predark:
-            pre = raw                                        # flourish: plate dropped -> raw birefnet
-        elif kart:
-            pre = _kart_predark(raw, text)
-        else:
-            pre = pd.pre_darken(raw, _t_char, _C_char, _A_char, _MASK_char)
-        alpha, bgr = _birefnet(pre)
-        # Hole-repair OFF under full birefnet (see above); re-enable both blocks together if needed.
-        # if kart and backdrop is not None:
-        #     pre_f = pre.astype(np.float32)
-        #     alpha, bgr = _repair_holes(alpha, bgr, _soft_diff(pre_f, backdrop), pre_f)
-        rgb = cv2.cvtColor(bgr.astype(np.uint8), cv2.COLOR_BGR2RGB)
-        rgba = np.dstack([rgb, (alpha * 255).astype(np.uint8)])
-        cv2.imwrite(os.path.join(fdir, f"{i:03d}.png"),
-                    cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGRA))
-        rgba_frames.append(Image.fromarray(rgba, "RGBA"))
-        if (i + 1) % 15 == 0 or i + 1 == len(paths):     # live per-frame progress for the console
-            print(f"  matte {name} {i + 1}/{len(paths)}", flush=True)
-    W, H = rgba_frames[0].size
-    rgba_frames[0].save(os.path.join(out_base, f"{name}_loop.webp"), save_all=True,
-                        append_images=rgba_frames[1:], duration=DUR_MS, loop=0, lossless=True, disposal=2)
-    chk = _checker_rgba(W, H)
-    comp = [Image.alpha_composite(chk, f) for f in rgba_frames]
-    comp[0].save(os.path.join(out_base, f"{name}_checker.webp"), save_all=True,
-                 append_images=comp[1:], duration=DUR_MS, loop=0)
-    return len(paths)
+    pres = _build_predark_frames(paths, kart, apply_predark)   # predark input frames (shared)
+
+    if MATTE_ENGINE == "matanyone":
+        import matte_matanyone as mm                           # lazy: torch only loads on this path
+        first = (_birefnet(pres[0])[0] > 0.5).astype(np.uint8) * 255
+        last = (_birefnet(pres[-1])[0] > 0.5).astype(np.uint8) * 255
+        alphas = mm.matte_segment(pres, first, last)           # bidirectional, memory-propagated
+        pairs = list(zip(pres, alphas))                        # RGB = predark input (no decontam)
+    else:                                                      # legacy per-frame birefnet
+        pairs = []
+        for pre in pres:
+            alpha, bgr = _birefnet(pre)
+            pairs.append((bgr, alpha))
+    return _write_chip(pairs, name, out_base)
 
 
 if __name__ == "__main__":

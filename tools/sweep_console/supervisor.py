@@ -30,8 +30,9 @@ class ProcessSupervisor:
         self.clips_dir = os.path.join(repo_root, "captures_sdr", "en_uk", "clips")
         self.on_line = on_line
         self.py = py
-        # the matte batch driver needs the GPU venv (rembg/CUDA), not the console's build python
-        self.gpu_py = os.path.join(repo_root, "temp", "asset-venv-gpu", "Scripts", "python.exe")
+        # the matte batch driver needs the unified GPU venv (birefnet + MatAnyone2, CUDA), not the
+        # console's build python
+        self.gpu_py = os.path.join(repo_root, "temp", "asset-venv-matte", "Scripts", "python.exe")
         self.procs = {}            # name -> Popen
         self._resume = os.path.join(self.clips_dir, ".resume_char")
 
