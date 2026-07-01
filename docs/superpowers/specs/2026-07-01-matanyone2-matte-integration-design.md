@@ -91,6 +91,26 @@ Stock MatAnyone2 params (the settings the accepted prototype used): `n_warmup=10
 `InferenceCore` propagation with default memory config; "bidirectional" is achieved by the two
 passes + merge, not by any special mode.
 
+### Reuse the validated prototypes (do not re-derive)
+
+`matte_matanyone.py` is a straight port of the accepted `f267585a` prototype scripts (the ones
+that produced `D:\kartoff\flicker_m2\matte`), not a fresh implementation. Lift the logic verbatim
+where possible from:
+
+- `prep_matanyone_seg.py` — per-segment predark frames + birefnet **first**-frame binary mask
+  (`alpha > 0.5`), reusing `matte_blankplate._kart_text_mask` / `_kart_predark` / `pre_darken` /
+  `_birefnet`.
+- `bidir_prep.py` — reversed frames + birefnet **last**-frame binary mask.
+- `bidir_merge.py` — position-weighted merge `w = 1 − t/max(1, N−1)`,
+  `alpha = clip(w·fwd + (1−w)·bwd, 0, 1)` (un-reverse the backward pass first).
+- `compose_seg.py` / `compose_m2.py` — RGBA = predark RGB + MatAnyone2 alpha (grayscale `pha`).
+- `inference_matanyone2.py` — the MatAnyone2 call itself; port its frame-read / warmup / erode-
+  dilate / `InferenceCore` propagation, changed only to (a) load the model once and (b) accept
+  in-memory frames + mask instead of the CLI's disk round-trip.
+
+These live in the session-`f267585a` scratchpad; the plan copies them into the repo module rather
+than depending on the scratchpad persisting.
+
 ### Module layout
 
 - **New: `tools/asset_matte/matte_matanyone.py`** — the MatAnyone2 engine. Loads the model once
