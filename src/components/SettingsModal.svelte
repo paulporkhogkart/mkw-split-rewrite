@@ -32,6 +32,12 @@
     } catch (_) { /* dialog cancelled/unavailable */ }
   }
 
+  // Open the save folder in File Explorer (browse only). Empty dir → the default
+  // Pictures\pbenguin, resolved backend-side.
+  function openScreenshotDir() {
+    invoke("open_screenshot_dir", { dir: $screenshotDir || null }).catch(() => {});
+  }
+
   // ── Modal open/close ──────────────────────────────────────────────────────────
   export let wizardOpen    = false;
   export let setupComplete = false;
@@ -82,8 +88,7 @@
     on:keydown|self={(e) => { if (e.key === 'Escape' && setupComplete) onClose(); }}
     role="dialog" aria-modal="true"
     tabindex="-1">
-    <div class="wiz-dialog" class:wiz-dialog-narrow={wizardStep === "language" || wizardStep === "discord" || wizardStep === "sync"}
-      class:wiz-dialog-mid={wizardStep === "trails"}>
+    <div class="wiz-dialog">
 
       <!-- Wizard tab bar -->
       <nav class="wiz-tabs">
@@ -264,6 +269,7 @@
               <h3 class="discord-heading">Save folder</h3>
               <div class="ss-row">
                 <span class="ss-path">{$screenshotDir || "Pictures\\pbenguin (default)"}</span>
+                <button class="btn-sm" on:click={openScreenshotDir} title="Open this folder in File Explorer">Open in Explorer</button>
               </div>
               <div class="ss-row">
                 <button class="btn-sm" on:click={chooseScreenshotDir}>Choose folder…</button>
@@ -315,16 +321,15 @@
   }
   .wiz-backdrop { align-items: stretch; padding: 32px; }
 
+  /* One fixed size for every tab — the dialog never resizes as you switch tabs.
+     Sized to the widest/tallest tab (Video); shorter tabs centre their content and
+     the body scrolls if a tab ever exceeds the height. */
   .wiz-dialog {
     background: var(--panel); border: 1px solid var(--bd); border-radius: var(--r);
     display: flex; flex-direction: column; overflow: hidden;
-    width: 100%; max-width: 960px; max-height: 100%; align-self: center; margin: auto;
-    transition: max-width .2s ease;
+    width: 100%; max-width: 960px; height: 680px; max-height: 100%;
+    align-self: center; margin: auto;
   }
-  .wiz-dialog-narrow { max-width: 480px; }
-  /* Trails content is capped at 600px; size the dialog to it (+ wiz-body padding)
-     so the tab doesn't float in the full 960px width with big empty side margins. */
-  .wiz-dialog-mid { max-width: 640px; }
 
   .wiz-tabs {
     display: flex; flex-shrink: 0; background: var(--panel);

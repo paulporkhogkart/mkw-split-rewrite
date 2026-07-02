@@ -186,6 +186,19 @@ fn send_to_tracker(state: tauri::State<SidecarState>, message: String) -> Result
     child.write(&data).map_err(|e| e.to_string())
 }
 
+/// Resolve the screenshot folder: an explicit non-empty `dir`, else the user's
+/// Pictures\pbenguin folder. Shared by save + open-in-explorer so both agree.
+fn screenshot_dir(app: &tauri::AppHandle, dir: Option<String>) -> Result<std::path::PathBuf, String> {
+    match dir {
+        Some(d) if !d.trim().is_empty() => Ok(std::path::PathBuf::from(d)),
+        _ => Ok(app
+            .path()
+            .picture_dir()
+            .map_err(|e| e.to_string())?
+            .join("pbenguin")),
+    }
+}
+
 /// Save a PNG screenshot (raw bytes from the frontend canvas). Writes into `dir`
 /// when given a non-empty path, else the user's Pictures\pbenguin folder. Returns
 /// the full path written.
@@ -196,14 +209,7 @@ fn save_screenshot(
     stamp: String,
     dir: Option<String>,
 ) -> Result<String, String> {
-    let dir = match dir {
-        Some(d) if !d.trim().is_empty() => std::path::PathBuf::from(d),
-        _ => app
-            .path()
-            .picture_dir()
-            .map_err(|e| e.to_string())?
-            .join("pbenguin"),
-    };
+    let dir = screenshot_dir(&app, dir)?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join(format!("mkw-{stamp}.png"));
     std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
@@ -223,6 +229,19 @@ fn copy_screenshot_to_clipboard(app: tauri::AppHandle, bytes: Vec<u8>) -> Result
     app.clipboard().write_image(&image).map_err(|e| e.to_string())
 }
 
+/// Open the screenshot folder in the system file explorer (for browsing, not a
+/// picker). Creates it first so Explorer doesn't open on a missing folder.
+#[tauri::command]
+fn open_screenshot_dir(app: tauri::AppHandle, dir: Option<String>) -> Result<(), String> {
+    let dir = screenshot_dir(&app, dir)?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    std::process::Command::new("explorer")
+        .arg(&dir)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(
@@ -237,7 +256,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![start_tracker, stop_tracker, restart_tracker, send_to_tracker, open_url, save_screenshot, copy_screenshot_to_clipboard, discord::discord_set_presence, discord::discord_clear_presence, sync::sync_set_config, sync::sync_test_connection, sync::sync_resolve_pending, sync::sync_discard_pending, sync::sync_list_pending, sync::sync_course_reads, sync::sync_roster, sync::sync_pb_best])
+        .invoke_handler(tauri::generate_handler![start_tracker, stop_tracker, restart_tracker, send_to_tracker, open_url, save_screenshot, copy_screenshot_to_clipboard, open_screenshot_dir, discord::discord_set_presence, discord::discord_clear_presence, sync::sync_set_config, sync::sync_test_connection, sync::sync_resolve_pending, sync::sync_discard_pending, sync::sync_list_pending, sync::sync_course_reads, sync::sync_roster, sync::sync_pb_best])
         .setup(|app| {
             app.manage(SidecarState(Mutex::new(None)));
             #[cfg(target_os = "windows")]
