@@ -16,14 +16,9 @@ says the pixels are subject material. Two passes -- enclosed-pocket whole-fill (
 + open-notch per-pixel restore (baby_daisy's bib). Strictly additive; validated over-fill-free
 on open-frame / dark / white-wispy karts; skipped if the backdrop can't be computed.
 
-Both engines then run the GAP-CARVE post-pass (carve_gaps.py, spec 2026-07-02): see-through
-gaps the semantic matte wrongly fills (hot_rod's under-spoiler hole) are carved back to
-transparent where the pixels match the per-clip clean backdrop (idle additionally requires
-temporally-static — frozen backdrop doesn't putter, the kart does). MATTE_CARVE=0 disables.
-
 `matte_loopframes(framedir, name, out_base, clip=None, backdrop=None)` is the importable entry
-point (give `clip` to enable the backdrop-dependent passes; the backdrop is derived from its
-fade tail). A CLI mattes one or more already-extracted loops. Emits <name>_loop.webp (alpha),
+point (give `clip` to enable kart hole-repair; the backdrop is derived from its fade tail). A CLI
+mattes one or more already-extracted loops. Emits <name>_loop.webp (alpha),
 <name>_checker.webp, and the RGBA frames in <name>_frames/.
 """
 import glob
@@ -39,7 +34,6 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pre_darken as pd
 import nametag_core as nc
-from carve_gaps import carve_gaps
 from extract_loop import is_kart_combo
 
 
@@ -93,10 +87,6 @@ MATTE_ENGINE = os.environ.get("MATTE_ENGINE", "matanyone")
 # loop (e.g. a correct hole fading to filled). Forward-only avoids that and is ~2x faster. Set
 # MATTE_MATANYONE_BIDIR=1 to re-enable the bidirectional merge.
 MATTE_BIDIR = os.environ.get("MATTE_MATANYONE_BIDIR", "0") == "1"
-# Gap-carve post-pass (spec 2026-07-02): carve see-through gaps the matte wrongly filled with
-# frozen backdrop (hot_rod under-spoiler hole). Needs the per-clip clean backdrop; skipped when
-# that can't be computed. Set MATTE_CARVE=0 to disable.
-MATTE_CARVE = os.environ.get("MATTE_CARVE", "1") == "1"
 
 
 def _session():
@@ -253,15 +243,16 @@ def _checker_rgba(w, h, s=22):
     return Image.fromarray(np.where(m[..., None], 205, 150).astype(np.uint8).repeat(3, 2), "RGB").convert("RGBA")
 
 
-def _build_predark_frames(raws, kart, apply_predark):
-    """Predark (or raw, for a plate-dropped flourish) BGR uint8 frame per input frame. Kart text
-    mask is computed once from the segment median (== the old inline path)."""
+def _build_predark_frames(paths, kart, apply_predark):
+    """Predark (or raw, for a plate-dropped flourish) BGR uint8 frame per path. Kart text mask is
+    computed once from the segment median (== the old inline path)."""
     text = None
     if kart and apply_predark:
-        sample = [r.astype(np.float32) for r in raws[::3]]
+        sample = [cv2.imread(p).astype(np.float32) for p in paths[::3]]
         text = _kart_text_mask(np.median(np.stack(sample), axis=0))
     out = []
-    for raw in raws:
+    for p in paths:
+        raw = cv2.imread(p)
         if not apply_predark:
             out.append(raw)                                  # flourish: plate dropped -> raw
         elif kart:
@@ -295,20 +286,18 @@ def _write_chip(pairs, name, out_base):
 
 
 def matte_loopframes(framedir, name, out_base, clip=None, backdrop=None,
-                     apply_predark=True, is_kart=None, carve_temporal=None):
+                     apply_predark=True, is_kart=None):
     """Matte every NNN.png frame in `framedir` -> transparent RGBA. Returns the frame count.
 
     `apply_predark`: un-darken the nameplate before birefnet (TRUE for spawn/idle, where the plate
     is present; pass FALSE for the FLOURISH segment, where the plate is dropped and predark would
     paint a fake plate). `is_kart`: override kart detection (a segment-suffixed name would otherwise
-    miscount the `__` separators). `carve_temporal`: gap-carve with the temporal-static gate (idle
-    loops only — default infers from a `...__idle` name); spawn/flourish carve per-frame."""
+    miscount the `__` separators)."""
     paths = sorted(glob.glob(os.path.join(framedir, "*.png")))
     if not paths:
         raise RuntimeError(f"no loop frames in {framedir!r}")
     kart = is_kart_combo(name) if is_kart is None else is_kart
-    raws = [cv2.imread(p) for p in paths]                      # raw frames (carve diffs vs these)
-    pres = _build_predark_frames(raws, kart, apply_predark)    # predark input frames (shared)
+    pres = _build_predark_frames(paths, kart, apply_predark)   # predark input frames (shared)
 
     if MATTE_ENGINE == "matanyone":
         import matte_matanyone as mm                           # lazy: torch only loads on this path
@@ -331,21 +320,6 @@ def matte_loopframes(framedir, name, out_base, clip=None, backdrop=None,
         for pre in pres:
             alpha, bgr = _birefnet(pre)
             pairs.append((bgr, alpha))
-
-    # Gap-carve post-pass (spec 2026-07-02): the matte fills real see-through gaps with frozen
-    # backdrop (both engines — it's a semantic miss the anchor propagates); carve pixels that match
-    # the known clean backdrop back to transparent. Raw frames, not predark, feed the diff.
-    if MATTE_CARVE:
-        if backdrop is None and clip:
-            backdrop = clean_backdrop(clip)
-        if backdrop is not None:
-            if carve_temporal is None:
-                carve_temporal = name.endswith("__idle")
-            alphas, carved = carve_gaps([a for _, a in pairs], raws, backdrop,
-                                        temporal_gate=carve_temporal)
-            pairs = list(zip([b for b, _ in pairs], alphas))
-            if any(carved):
-                print(f"  carve {name}: {min(carved)}-{max(carved)} px/frame", flush=True)
     return _write_chip(pairs, name, out_base)
 
 
