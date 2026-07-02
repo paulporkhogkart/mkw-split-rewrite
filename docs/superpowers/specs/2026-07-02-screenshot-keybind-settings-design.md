@@ -19,8 +19,9 @@ folder is user-selectable.
 5. Hotkey does **not** fire while any modal is open, during first-time setup, or
    on any non-monitor view (e.g. Edit Screens) — only on the live monitor.
 6. Default hotkey = **F12** (free — see "F12 note" below).
-7. On capture (button or hotkey), play `TWL_CMN_SE_SHUTTER.wav`. Sound always
-   plays, independent of the feed mute state.
+7. On capture (button or hotkey), play `TWL_CMN_SE_SHUTTER.wav` whenever a
+   screenshot is actually produced (save and/or clipboard enabled), independent
+   of the feed mute state. If neither is enabled, nothing happens and no sound plays.
 8. Capture now **also copies the image to the clipboard** (in addition to file save).
 9. Two checkboxes in the tab: **Save to file** and **Copy to clipboard**, both
    **checked by default**.
@@ -107,18 +108,23 @@ Canonical string form so the recorder, storage, matcher, and display all agree.
 
 ```
 async function takeScreenshot() {
-  play shutter (new Audio(shutterSnd).play(), swallow autoplay errors) — ALWAYS
+  if (!$screenshotSaveFile && !$screenshotClipboard) {   // nothing would happen
+    flash "Screenshot: enable save or clipboard" (err); return;   // no shutter
+  }
+  play shutter (new Audio(shutterSnd).play(), swallow autoplay errors)
   const bytes = await feedOverlayComp?.capturePng();
   if (!bytes) { flash "No feed to capture" (err); return; }
   let savedPath = null, copied = false;
   if ($screenshotSaveFile) savedPath = await invoke("save_screenshot", {bytes:Array.from(bytes), stamp, dir: $screenshotDir || null});
   if ($screenshotClipboard) { await invoke("copy_screenshot_to_clipboard", {bytes:Array.from(bytes)}); copied = true; }
-  flash a summary ("Saved → <path>", "Copied to clipboard", "Saved + copied", or
-    "Screenshot: nothing enabled" if both off);
+  flash a summary ("Saved → <path>", "Copied to clipboard", or "Saved + copied");
 }
 ```
 
-- Sound plays before the async capture so feedback is immediate.
+- If neither save nor clipboard is enabled, nothing happens **and no shutter
+  plays** — the sound only fires when a screenshot is actually taken. This is
+  checked first, before the sound.
+- Otherwise the shutter plays right before the async capture so feedback is immediate.
 - Errors in save/clipboard flash an error but don't crash; each guarded.
 
 ### 6. Rust — `src-tauri/src/lib.rs`
@@ -172,8 +178,8 @@ unaffected. Documented, not worked around.
 
 ## Edge cases
 
-- Both checkboxes off → capture plays the shutter and flashes "nothing enabled";
-  no file, no clipboard.
+- Both checkboxes off → no shutter, no file, no clipboard; flashes a hint to
+  enable one. The sound only plays when a screenshot is genuinely produced.
 - No feed yet → "No feed to capture" (unchanged behaviour).
 - Recording a modifier-only chord → recorder keeps waiting (can't bind bare `Ctrl`).
 - Typing the combo inside a text field or with a modal open → suppressed by the
