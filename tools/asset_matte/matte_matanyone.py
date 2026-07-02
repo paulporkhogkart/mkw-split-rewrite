@@ -24,6 +24,22 @@ _MODEL = None
 _DEVICE = None
 
 
+def segment_bidir(is_kart, segment):
+    """Direction rule for one segment's matte. The KART FLOURISH runs bidirectional: its backward
+    anchor is the settled, plate-free end pose (birefnet's best case) and forward-only propagation
+    heals real see-through holes shut by the tail — measured on wario pirate buggybud's ring
+    (tail alpha 1.000 fwd -> 0.103 bidir, 2026-07-02) — which then pops when the viewer hands off
+    to the idle loop. Spawn/idle/char segments stay forward-only: the position-weighted crossfade
+    can bleed backward-anchor mistakes in toward the end of a loop (a correct hole fading to
+    filled). MATTE_MATANYONE_BIDIR=1/0 forces bidir/forward-only for EVERY segment."""
+    env = os.environ.get("MATTE_MATANYONE_BIDIR", "")
+    if env == "1":
+        return True
+    if env == "0":
+        return False
+    return bool(is_kart) and segment == "flourish"
+
+
 def merge_bidir(fwd, bwd):
     """Position-weighted forward/backward alpha merge (== bidir_merge.py). fwd/bwd are equal-length
     lists of HxW float01 arrays in the SAME frame order (backward already un-reversed). Forward

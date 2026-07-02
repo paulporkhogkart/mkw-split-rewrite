@@ -27,6 +27,7 @@ for _p in (_HERE, _REPO):                              # extract_loop needs mkw_
 
 import extract_loop as el
 import matte_blankplate as mb
+import matte_matanyone as mm
 
 
 def clip_names(clips_dir):
@@ -107,7 +108,8 @@ def main():
                 print(f"    matting {segname} ({counts[seg]}f)...", flush=True)
                 matted[seg] = int(mb.matte_loopframes(   # only the KART flourish drops the plate -> no predark;
                     fd, segname, mattedir, clip=clip,    # the char keeps its nameplate through its flourish
-                    apply_predark=not (kart and seg == "flourish"), is_kart=kart))
+                    apply_predark=not (kart and seg == "flourish"), is_kart=kart,
+                    bidir=mm.segment_bidir(kart, seg)))  # kart flourish = bidir (settled-tail anchor)
             if not a.keep_loopframes:
                 shutil.rmtree(seg_base, ignore_errors=True)
             manifest[name] = {"status": "done", "kart": kart,

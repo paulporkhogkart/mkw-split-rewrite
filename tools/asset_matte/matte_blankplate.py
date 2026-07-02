@@ -83,10 +83,12 @@ BIREFNET_MODEL = os.environ.get("MATTE_BIREFNET_MODEL", "birefnet-general")
 # birefnet path. Set MATTE_ENGINE=birefnet to A/B or roll back. matte_matanyone is imported lazily
 # (only under the matanyone branch) so the birefnet path still runs in a torch-less venv.
 MATTE_ENGINE = os.environ.get("MATTE_ENGINE", "matanyone")
-# MatAnyone2 direction: forward-only by DEFAULT. Bidirectional (fwd+bwd merge) helped some fine edges
-# but its position-weighted crossfade can bleed the backward-anchor's mistakes in toward the end of a
-# loop (e.g. a correct hole fading to filled). Forward-only avoids that and is ~2x faster. Set
-# MATTE_MATANYONE_BIDIR=1 to re-enable the bidirectional merge.
+# MatAnyone2 direction: forward-only by DEFAULT for a segment-less call (bidir's position-weighted
+# crossfade can bleed the backward-anchor's mistakes in toward the end of a loop, e.g. a correct
+# hole fading to filled, and forward-only is ~2x faster). Segment-aware callers (process_all) pass
+# an explicit `bidir` from matte_matanyone.segment_bidir instead — kart flourish = bidir, whose
+# settled plate-free end pose makes the backward anchor reliable. MATTE_MATANYONE_BIDIR=1 forces
+# bidir here too.
 MATTE_BIDIR = os.environ.get("MATTE_MATANYONE_BIDIR", "0") == "1"
 
 
@@ -295,13 +297,14 @@ def _write_chip(pairs, name, out_base):
 
 
 def matte_loopframes(framedir, name, out_base, clip=None, backdrop=None,
-                     apply_predark=True, is_kart=None):
+                     apply_predark=True, is_kart=None, bidir=None):
     """Matte every NNN.png frame in `framedir` -> transparent RGBA. Returns the frame count.
 
     `apply_predark`: un-darken the nameplate before birefnet (TRUE for spawn/idle, where the plate
     is present; pass FALSE for the FLOURISH segment, where the plate is dropped and predark would
     paint a fake plate). `is_kart`: override kart detection (a segment-suffixed name would otherwise
-    miscount the `__` separators)."""
+    miscount the `__` separators). `bidir`: MatAnyone2 direction — None falls back to the
+    MATTE_BIDIR env default; segment-aware callers pass matte_matanyone.segment_bidir(kart, seg)."""
     paths = sorted(glob.glob(os.path.join(framedir, "*.png")))
     if not paths:
         raise RuntimeError(f"no loop frames in {framedir!r}")
@@ -318,11 +321,13 @@ def matte_loopframes(framedir, name, out_base, clip=None, backdrop=None,
         inproc = os.environ.get("MATTE_MATANYONE_INPROC") == "1"
         if not inproc:
             mm.ensure_worker()
+        if bidir is None:
+            bidir = MATTE_BIDIR
         first = (_birefnet(pres[0])[0] > 0.5).astype(np.uint8) * 255
         # backward anchor only needed for the bidirectional merge; skip the extra birefnet call otherwise
-        last = (_birefnet(pres[-1])[0] > 0.5).astype(np.uint8) * 255 if MATTE_BIDIR else first
+        last = (_birefnet(pres[-1])[0] > 0.5).astype(np.uint8) * 255 if bidir else first
         matte = mm.matte_segment if inproc else mm.matte_segment_worker
-        alphas = matte(pres, first, last, bidir=MATTE_BIDIR)   # forward-only by default
+        alphas = matte(pres, first, last, bidir=bidir)
         pairs = list(zip(pres, alphas))                        # RGB = predark input (no decontam)
     else:                                                      # legacy per-frame birefnet
         pairs = []
