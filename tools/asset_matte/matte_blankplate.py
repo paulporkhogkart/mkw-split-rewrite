@@ -2,10 +2,11 @@
 GPU venv (rembg + CUDA). Promotes the VALIDATED matte pipelines into importable form so
 the headless batch driver can call them without the browser tuner.
 
-- KART COMBOS  -> the LOCKED blank-plate pipeline (== tune_blankplate.py / the 2026-06-29
-  kart-chip-matte spec): blank-transform un-darken + per-clip text mask + interior TELEA
-  inpaint, then birefnet. Locked params KEY_THR=120, CSUB=0.5, TFLOOR=0.01, FILL_K=51;
-  flourish bumper fill is SHELVED (off).
+- KART COMBOS  -> the blank-plate pipeline (== the 2026-06-29 kart-chip-matte spec, with the
+  2026-07-02 full-S stamp fix): blank-transform un-darken across the whole plate footprint +
+  per-clip text mask + interior TELEA inpaint, then the matte engine. Params KEY_THR=120
+  (notch-inpaint subject estimate only), CSUB=0.5, TFLOOR=0.01, FILL_K=51; flourish bumper
+  fill is SHELVED (off).
 - STANDALONE CHARS -> plain pre_darken(CHAR template) + birefnet. NO hole-repair: a bare char
   is a clean silhouette birefnet mattes well, and the fade-tail backdrop over-grows it (an ~8.8k
   px haze blob beside baby_daisy's head in validation) -- so repair is KART-ONLY.
@@ -123,12 +124,20 @@ def _kart_text_mask(P_clip):
 
 
 def _kart_predark(raw, text):
-    """Blank-transform un-darken + interior TELEA inpaint (tune_blankplate `_predark`, flourish off)."""
+    """Blank-transform un-darken (full-S stamp) + interior TELEA inpaint.
+
+    The whole plate footprint is replaced with the un-darkened recovery S — over empty plate S
+    recovers ≈ the clean backdrop (matte drops it), over a subject it recovers the subject (matte
+    keeps it). Only the truly opaque text/badge are painted to the backdrop A. The earlier
+    paint-A-then-stamp-|S−A|≥KEY_THR variant amputated karts that dip into the plate on spawn-in
+    (plushbuggy/zoom_buggy: pale body on pale backdrop fails the threshold → razor-flat cut at the
+    stamp boundary); stamping S everywhere removes that per-pixel threshold from the kart boundary
+    entirely. KEY_THR remains as the subject estimate for the notch inpaint below."""
     O = raw.astype(np.float64)
     S = np.clip((O - CSUB * _C_B[..., None]) / np.clip(_T_B, TFLOOR, 1.6)[..., None], 0, 255)
     opaque = (_BADGE | text) & _IN_PLATE
     subject = _IN_PLATE & (np.abs(S - _A_kart).max(2) >= KEY_THR) & ~opaque
-    out = O.copy(); out[_IN_PLATE] = _A_kart[_IN_PLATE]; out[subject] = S[subject]
+    out = O.copy(); out[_IN_PLATE] = S[_IN_PLATE]; out[opaque] = _A_kart[opaque]
     out = np.clip(out, 0, 255).astype(np.uint8)
     K = int(FILL_K) | 1
     closed = cv2.morphologyEx(subject.astype(np.uint8) * 255, cv2.MORPH_CLOSE,
