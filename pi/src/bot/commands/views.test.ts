@@ -63,7 +63,7 @@ describe('buildTrackBoard', () => {
   it('anchors the body on the rank-1 PB (WR shows its gap to #1)', () => {
     const result = buildTrackBoard(seeded(), 'Rainbow Road', 150);
     if ('error' in result) throw new Error('unexpected error: ' + result.error);
-    // WR line now carries its gap to the #1 PB: `   WR      1:40.000  (-6.000s)`
+    // WR line carries its gap to the #1 PB, name-column-aligned: `   WR    1:40.000  (-6.000s)`
     expect(result.body).toMatch(/WR\s+1:40\.000\s+\(-6\.000s\)/);
     expect(result.body).toMatch(/`1\. Paul/);
     expect(result.body).toMatch(/`2\. Luke/);
@@ -164,9 +164,11 @@ describe('buildNemesis', () => {
   });
 
   it('returns untargeted nemesis rows when Paul requests with a real discord id', () => {
-    // Paul is id '1213316126948335636' in players.config; seed a player named 'Paul'
-    // so nameForId resolves and playerId() finds the DB row.
-    const result = buildNemesis(seeded(), '1213316126948335636', null, 150);
+    // Paul is id '1213316126948335636' -> 'paul pork' in players.config (renamed from 'Paul').
+    // Rename the seeded player to match so nameForId resolves and playerId() finds the DB row.
+    const db = seeded();
+    db.exec("UPDATE players SET display_name='paul pork' WHERE id=1");
+    const result = buildNemesis(db, '1213316126948335636', null, 150);
     // Paul is the fastest on both courses → no tracks where Paul is behind
     // So we expect an error/empty case
     if ('error' in result) {
@@ -197,7 +199,9 @@ describe('buildNemesis', () => {
   it('returns rows with negative diffs (ahead) when the requester leads all courses', () => {
     // Paul leads both courses; nemesisRows compares to 2nd (Luke) → negative diffs, still rows returned.
     // buildNemesis only errors on empty data (no PBs at all), not on negative diffs.
-    const result = buildNemesis(seeded(), '1213316126948335636', null, 150);
+    const db = seeded();
+    db.exec("UPDATE players SET display_name='paul pork' WHERE id=1");   // matches nameForId (renamed)
+    const result = buildNemesis(db, '1213316126948335636', null, 150);
     // Either rows returned (negative diffs) or an error — depends on whether nemesisRows filters
     // We just confirm it doesn't crash and the shape is consistent.
     if ('error' in result) {

@@ -72,9 +72,9 @@ describe('formatTrackLeaderboard', () => {
       { record: '1:40.000', record_ms: 100000 },
     );
     expect(out).toBe(
-      '`   WR      1:40.000  (-6.000s)`\n' +   // WR is 6s faster than the #1 PB
-      '`1. Paul  1:46.000`\n' +               // rank-1 PB: zero anchor, no delta
-      '`2. Luke  1:48.000  (+2.000s)`'        // total gap to #1
+      '`   WR    1:40.000  (-6.000s)`\n' +   // WR record aligns with the player time column (maxName=4)
+      '`1. Paul  1:46.000`\n' +             // rank-1 PB: zero anchor, no delta
+      '`2. Luke  1:48.000  (+2.000s)`'      // total gap to #1
     );
   });
   it('handles empty', () => {
@@ -90,7 +90,7 @@ describe('formatTotalLeaderboard', () => {
       '3:20.000', 200000,
     );
     expect(out).toBe(
-      '`   WR      3:20.000  (-10.000s)`\n' +
+      '`   WR    3:20.000  (-10.000s)`\n' +
       '`1. Paul  3:30.000`\n' +
       '`2. Luke  3:36.000  (+6.000s)`'
     );

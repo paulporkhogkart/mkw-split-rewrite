@@ -57,6 +57,8 @@ export function buildSelfEntry(s) {
     pos, final_time: race?.finishTime ?? null, dnf: !!race?.dnf, resets: resets ?? null,
     invalidated: !!race?.invalidated, invalid_reason: race?.invalidReason ?? null,
     elapsed_ms: race?.elapsedMs ?? null,
+    // No server stamp on the offline echo: the activity line shows the count without a timer.
+    screen_since_ms: null,
     pb_ms: pbTotalMs ?? null, pb_laps_ms, lap_deltas,
     completion: null, dividers: [], has_model: false,
     pb_delta_ms: null, lap_delta: null, off_stats: null,

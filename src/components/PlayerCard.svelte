@@ -1,5 +1,5 @@
 <script>
-  import { viewModel } from "../lib/playerCard.js";
+  import { viewModel, fmtDuration } from "../lib/playerCard.js";
   import { figureFor, onpaceFigure } from "../lib/playerFigures.js";
   import { sampleAt, deltaTrendAt, DELAY_MS } from "../lib/raceTimerBuffer.js";
   import { deltaMode } from "../lib/cardSettings.js";
@@ -81,8 +81,15 @@
     </div>
     {/if}
     <div class="sp"></div>
-    {#if vm.resets != null}
-      <div class="foot"><span class="rk">RESETS</span><b>{vm.resets}</b></div>
+    {#if vm.activity}
+      <!-- Live activity line (replaces the old RESETS number): a race-context count
+           ("41 attempts") or a labelled activity ("choosing character"), each with a
+           ticking timer once the server stamps when it began. -->
+      <div class="act-line">
+        {#if vm.activity.count != null}<span class="n">{vm.activity.count}</span> attempts
+        {:else}{vm.activity.label}{/if}
+        {#if vm.activity.sinceMs != null}<span class="sepdot">·</span> <span class="t">{fmtDuration(now - vm.activity.sinceMs)}</span>{/if}
+      </div>
     {/if}
     {#if vm.pbStr}
       <div class="pb"><span>PB</span>{vm.pbStr}{#if vm.delta}<span class="delta {vm.delta.cls}">{vm.delta.text}</span>{/if}</div>
@@ -119,9 +126,7 @@
         {/if}
         <span class="ttx">{vm.primary.text}</span>
       </div>
-    {:else if vm.primary.kind === "activity"}
-      <div class="prim act">{vm.primary.text}</div>
-    {:else}
+    {:else if vm.primary.kind === "seen"}
       <div class="prim seen">{vm.primary.text}</div>
     {/if}
     {#if vm.bar}
@@ -170,9 +175,12 @@
             min-width: 46px; padding-top: 2px; }
   .kv.dim { color: var(--tx-dim); }
   .sp { flex: 1; }
-  .foot { display: flex; align-items: center; gap: 6px; }
-  .rk { font-size: 7.5px; letter-spacing: .1em; color: var(--tx-dim); }
-  .foot b { font-size: 11px; font-weight: 700; color: var(--tx); }
+  /* Live activity line (RESETS' replacement): muted running text, with the count and the
+     ticking timer lifted to the primary text colour. */
+  .act-line { font-size: 10.5px; color: var(--tx-mut); line-height: 1.3;
+              white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .act-line .n, .act-line .t { color: var(--tx); font-weight: 600; }
+  .act-line .sepdot { color: var(--tx-dim); margin: 0 2px; }
   .pb { font-size: 9.5px; color: var(--tx-dim); margin-top: 3px; display: flex; gap: 5px; align-items: center; }
   .pb span { font-size: 7.5px; letter-spacing: .1em; }
   /* All deltas follow LiveSplit conventions: sharp red = losing + behind,
@@ -202,7 +210,6 @@
      No nudges: the time text is cap-trimmed (.ttx), so centre IS the digit centre. */
   .tag { display: inline-flex; color: var(--tx-dim); flex: 0 0 auto; }
   .tag svg { width: 11px; height: 11px; }
-  .prim.act { font-size: 11.5px; font-weight: 600; color: var(--tx-mut); margin-top: 4px; }
   .prim.seen { font-size: 10.5px; color: var(--tx-dim); margin-top: 4px; }
   .barwrap { position: relative; margin-top: 7px; }
   .bar { height: 4px; background: var(--track); overflow: hidden; border-radius: 1px; }

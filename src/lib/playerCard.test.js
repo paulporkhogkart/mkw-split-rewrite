@@ -1,16 +1,25 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { viewModel, lastSeen, pbDelta, liveDelta, lapDeltaVm, fmtTimeMs, charName, clearHolds } from "./playerCard.js";
+import { viewModel, lastSeen, pbDelta, liveDelta, lapDeltaVm, fmtTimeMs, fmtDuration, charName, clearHolds } from "./playerCard.js";
 
 const base = { player_id: 1, name: "Paul", color: "#a78bfa", online: true, screen: "RACING",
   course: "Rainbow Road", character: "Mario", kart: "Standard", cur_lap: 2, tot_lap: 3,
-  coins: 7, mushrooms: 2, resets: 3, pb_ms: 79880, completion: 0.63, dividers: [0.33, 0.67],
-  final_time: null, updated_at: 1000 };
+  coins: 7, mushrooms: 2, resets: 3, screen_since_ms: 500, pb_ms: 79880, completion: 0.63,
+  dividers: [0.33, 0.67], final_time: null, updated_at: 1000 };
 
 describe("fmtTimeMs", () => {
   it("formats ms as m:ss.SSS", () => {
     expect(fmtTimeMs(79880)).toBe("1:19.880");
     expect(fmtTimeMs(2044)).toBe("0:02.044");
     expect(fmtTimeMs(null)).toBeNull();
+  });
+});
+
+describe("fmtDuration", () => {
+  it("formats ms as m:ss, unpadded minutes, clamping negatives", () => {
+    expect(fmtDuration(40000)).toBe("0:40");
+    expect(fmtDuration(843000)).toBe("14:03");
+    expect(fmtDuration(-500)).toBe("0:00");     // small skew never shows a negative
+    expect(fmtDuration(null)).toBeNull();
   });
 });
 
@@ -79,7 +88,7 @@ describe("viewModel", () => {
     const vm = viewModel(base, () => 2000);
     expect(vm.state).toBe("racing");
     expect(vm.primary).toEqual({ kind: "time", text: "0:00.000" });
-    expect(vm.resets).toBe(3);
+    expect(vm.activity).toEqual({ count: 3, label: null, sinceMs: 500 });
     expect(vm.pbStr).toBe("1:19.880");
   });
   it("composes the costume into the character name", () => {
@@ -158,6 +167,32 @@ describe("viewModel", () => {
     expect(vm.bar).toBeNull();
     expect(viewModel({ ...base, screen: "START_TIME_TRIAL" }, () => 2000).primary)
       .toEqual({ kind: "activity", text: "Starting time trial…" });
+  });
+  it("activity line: race-context states carry the attempt count + start stamp", () => {
+    expect(viewModel(base, () => 2000).activity).toEqual({ count: 3, label: null, sinceMs: 500 });
+    // held (reset/pause) replays the count live from the entry, timer keeps ticking
+    viewModel(base, () => 2000, { elapsed_ms: 51234, completion: 0.4, pb_delta_ms: 800 });
+    expect(viewModel({ ...base, screen: "RESET" }, () => 3000).activity)
+      .toEqual({ count: 3, label: null, sinceMs: 500 });
+    clearHolds();
+    expect(viewModel({ ...base, screen: "POST_TIME_TRIAL", final_time: null, dnf: true }, () => 2000).activity)
+      .toEqual({ count: 3, label: null, sinceMs: 500 });                                  // dnf
+    expect(viewModel({ ...base, invalidated: true, invalid_reason: "Photo Mode" }, () => 2000).activity)
+      .toEqual({ count: 3, label: null, sinceMs: 500 });                                  // invalidated
+  });
+  it("activity line: non-race states carry a lowercase label + start stamp, no count", () => {
+    expect(viewModel({ ...base, screen: "CHARACTER_SELECT" }, () => 2000).activity)
+      .toEqual({ count: null, label: "choosing character", sinceMs: 500 });
+    expect(viewModel({ ...base, screen: "MAIN_MENU" }, () => 2000).activity)
+      .toEqual({ count: null, label: "in the menus", sinceMs: 500 });
+    expect(viewModel({ ...base, screen: "GHOST" }, () => 2000).activity)
+      .toEqual({ count: null, label: "watching a ghost", sinceMs: 500 });
+  });
+  it("activity line: null on offline cards, and null timer when unstamped", () => {
+    expect(viewModel({ ...base, online: false, updated_at: 1 }, () => 2).activity).toBeNull();
+    // the own offline echo has no server stamp: count shows, timer stays null
+    const { screen_since_ms, ...noStamp } = base;
+    expect(viewModel(noStamp, () => 2000).activity).toEqual({ count: 3, label: null, sinceMs: null });
   });
   it("finished: final time + delta + FIN badge, bar present", () => {
     const vm = viewModel({ ...base, final_time: "1:21.044" }, () => 2000);

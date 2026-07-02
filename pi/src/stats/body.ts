@@ -6,7 +6,7 @@ import { toEpochSeconds } from './period';
 
 /** porker table -> kart-player display name. Blu/Cbri excluded (non-participants). */
 export const PORKER_MAP: { table: string; player: string }[] = [
-  { table: 'Measurements', player: 'Paul' },
+  { table: 'Measurements', player: 'paul pork' },   // must match players.display_name (renamed from 'Paul')
   { table: 'AddymerMeasurements', player: 'Gub' },   // external porker table name kept (we don't own it)
   { table: 'AlexMeasurements', player: 'Alex' },
   { table: 'EunoraMeasurements', player: 'Luke' },

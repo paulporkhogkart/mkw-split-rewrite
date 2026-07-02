@@ -56,6 +56,47 @@ describe('PresenceHub', () => {
     expect(got.filter((m) => m.type === 'presence_update' && m.player.player_id === 1 && !m.player.online)).toHaveLength(1);
   });
 
+  it('stamps screen_since_ms when the activity class changes, holding it while it persists', () => {
+    let t = 1000;
+    const hub = new PresenceHub(db(), noCompletion, noPace, noLaps, () => t);
+    const got: any[] = [];
+    hub.addSink((m) => got.push(m));
+    const since = () => got.at(-1).player.screen_since_ms;
+
+    hub.update(1, { screen: 'CHARACTER_SELECT' });   // enters character-select @1000
+    expect(since()).toBe(1000);
+    t = 1500;
+    hub.update(1, { screen: 'CHARACTER_SELECT' });   // same class -> unchanged
+    expect(since()).toBe(1000);
+    t = 2000;
+    hub.update(1, { screen: 'KART_SELECT' });         // new class -> restamped
+    expect(since()).toBe(2000);
+    t = 3000;
+    hub.update(1, { screen: 'RACING', course: 'bc' }); // starts the grind @3000
+    expect(since()).toBe(3000);
+    t = 3500;
+    hub.update(1, { screen: 'RESET' });                // held screen continues racing -> unchanged
+    expect(since()).toBe(3000);
+    t = 4000;
+    hub.update(1, { screen: 'RACING', course: 'bc' }); // back on track, same grind -> unchanged
+    expect(since()).toBe(3000);
+  });
+
+  it('nulls screen_since_ms offline and restamps on the next login', () => {
+    let t = 1000;
+    const hub = new PresenceHub(db(), noCompletion, noPace, noLaps, () => t);
+    const got: any[] = [];
+    hub.addSink((m) => got.push(m));
+    hub.update(1, { screen: 'RACING', course: 'bc' });
+    expect(got.at(-1).player.screen_since_ms).toBe(1000);
+    t = 2000;
+    hub.setOffline(1);
+    expect(got.at(-1).player.screen_since_ms).toBeNull();
+    t = 3000;
+    hub.update(1, { screen: 'RACING', course: 'bc' });   // fresh login -> new stamp
+    expect(got.at(-1).player.screen_since_ms).toBe(3000);
+  });
+
   it('fires onLogin on the first frame and onLogout on going offline (idempotently)', () => {
     const logins: number[] = []; const logouts: number[] = [];
     const sink = { onFrame() {}, onOffline() {},

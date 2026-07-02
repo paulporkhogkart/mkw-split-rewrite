@@ -6,10 +6,10 @@ describe('players.config', () => {
     expect(gifFor('NobodySpecial')).toBeNull();
   });
   it('gifFor returns a configured url for a known player', () => {
-    expect(gifFor('Paul')).toMatch(/^https:\/\/i\.imgur\.com\//);
+    expect(gifFor('paul pork')).toMatch(/^https:\/\/i\.imgur\.com\//);
   });
   it('nameForId maps a known discord id', () => {
-    expect(nameForId('1213316126948335636')).toBe('Paul');
+    expect(nameForId('1213316126948335636')).toBe('paul pork');
     expect(nameForId('0')).toBeNull();
   });
 });

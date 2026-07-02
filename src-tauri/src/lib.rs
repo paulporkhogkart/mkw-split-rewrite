@@ -3,7 +3,6 @@ mod sync;
 
 use std::sync::Mutex;
 use tauri::{Emitter, Manager};
-use log::{error, info, warn};
 use tauri_plugin_shell::{process::CommandEvent, ShellExt};
 
 /// Silently grant camera and microphone permissions to the webview so getUserMedia

@@ -6,6 +6,10 @@ import { parseTime } from "./discordFormat.js";
 
 const SETUP = { CHARACTER_SELECT: "Choosing character…", KART_SELECT: "Choosing kart…", COURSE_SELECT: "Choosing track…",
                 START_TIME_TRIAL: "Starting time trial…" };
+// Lowercase labels for the card's live activity line (the RESETS line's replacement); calmer,
+// feed-style casing, distinct from the SETUP primary strings above.
+const ACTIVITY_LABEL = { CHARACTER_SELECT: "choosing character", KART_SELECT: "choosing kart",
+                         COURSE_SELECT: "choosing track", START_TIME_TRIAL: "starting time trial" };
 // Ghost-watch screens (the ghost equivalent of RACING; REPLAY_MENU is the ghost's pause menu).
 // Handled like a race: held on screen through the overlays below - see ghostHolds.
 const GHOST_SCREENS = new Set(["GHOST", "START_REPLAY", "REPLAY_MENU"]);
@@ -36,6 +40,22 @@ export function fmtTimeMs(ms) {
   const m = Math.floor(ms / 60000), s = Math.floor((ms % 60000) / 1000), msec = ms % 1000;
   return `${m}:${String(s).padStart(2, "0")}.${String(msec).padStart(3, "0")}`;
 }
+
+/** duration ms -> "m:ss" (minutes unpadded, seconds 2-digit) for the activity-line timer, or
+ *  null. Clamps negatives to 0 so a small viewer/server clock skew never shows "-0:01". */
+export function fmtDuration(ms) {
+  if (ms == null || Number.isNaN(ms)) return null;
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(total / 60), s = total % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+/** The live activity line's model: a race-context readout ("41 attempts") or a labelled activity
+ *  ("choosing character"), each with the epoch-ms the activity began so the card can tick a timer.
+ *  `count` and `label` are mutually exclusive; `sinceMs` is null when the server hasn't stamped it
+ *  yet (e.g. the own card on the offline echo). */
+const raceActivity = (e) => ({ count: e.resets ?? 0, label: null, sinceMs: e.screen_since_ms ?? null });
+const labelActivity = (e, label) => ({ count: null, label, sinceMs: e.screen_since_ms ?? null });
 
 /** elapsed ms since last seen -> coarse relative label, or null. */
 export function lastSeen(deltaMs) {
@@ -109,7 +129,7 @@ export function viewModel(e, now = Date.now, delayed = null, opts = {}) {
       : (e.off_stats ?? null);
     return { state: "offline", name: e.name, color, online: false, char: null, kart: null, trk: null,
       primary: { kind: "seen", text: seen ? `last seen ${seen}` : "offline" },
-      resets: null, pbStr: null, delta: null, finPb: false, badge: null, bar: null,
+      activity: null, pbStr: null, delta: null, finPb: false, badge: null, bar: null,
       stats };
   }
   const racing = !e.dnf && e.screen === "RACING" && !e.final_time;
@@ -131,7 +151,7 @@ export function viewModel(e, now = Date.now, delayed = null, opts = {}) {
     return {
       state: "invalidated", ...ident,
       primary: { kind: "time", text: "INVALID" },
-      resets: e.resets ?? 0,
+      activity: raceActivity(e),
       pbStr: e.pb_ms != null ? fmtTimeMs(e.pb_ms) : null,
       delta: null, finPb: false, badge: null,
       bar: { fill: 0, dividers, calibrating: true, calLabel: e.invalid_reason || "invalid" },
@@ -145,7 +165,7 @@ export function viewModel(e, now = Date.now, delayed = null, opts = {}) {
     return {
       state: "dnf", ...ident,
       primary: { kind: "time", text: "DNF" },
-      resets: e.resets ?? 0,
+      activity: raceActivity(e),
       pbStr: e.pb_ms != null ? fmtTimeMs(e.pb_ms) : null,
       delta: null, finPb: false, badge: null, bar: null,
     };
@@ -179,7 +199,7 @@ export function viewModel(e, now = Date.now, delayed = null, opts = {}) {
       : liveDelta(delayed ? delayed.pb_delta_ms : null, opts.trend);
     const vm = {
       state, ...ident, primary,
-      resets: e.resets ?? 0,
+      activity: raceActivity(e),
       pbStr: e.pb_ms != null ? fmtTimeMs(e.pb_ms) : null,
       delta,
       // Finished colour: green when the final beat the (pre-race) PB; a first-ever
@@ -191,8 +211,7 @@ export function viewModel(e, now = Date.now, delayed = null, opts = {}) {
     // Remember the readout: pause menus + reset loaders keep showing it. A race supersedes any
     // prior ghost-watch context.
     ghostHolds.delete(e.player_id);
-    holds.set(e.player_id, { primary, delta, bar, pbStr: vm.pbStr, resets: vm.resets,
-                             finPb: vm.finPb, finished });
+    holds.set(e.player_id, { primary, delta, bar, pbStr: vm.pbStr, finPb: vm.finPb, finished });
     return vm;
   }
 
@@ -202,7 +221,7 @@ export function viewModel(e, now = Date.now, delayed = null, opts = {}) {
   const held = holds.get(e.player_id);
   if (held && HOLD_SCREENS.has(e.screen)) {
     return { state: held.finished ? "finished" : "held", ...ident,
-      primary: held.primary, resets: held.resets, pbStr: held.pbStr, delta: held.delta,
+      primary: held.primary, activity: raceActivity(e), pbStr: held.pbStr, delta: held.delta,
       finPb: held.finPb,
       badge: held.finished ? "fin"
         : PAUSE_SCREENS.has(e.screen) ? "pause"
@@ -217,7 +236,7 @@ export function viewModel(e, now = Date.now, delayed = null, opts = {}) {
   // real menu drops it.
   const ghostVm = () => ({ state: "setup", ...ident,
     primary: { kind: "activity", text: "Watching a ghost…" },
-    resets: null, pbStr: null, delta: null, finPb: false, badge: null, bar: null,
+    activity: labelActivity(e, "watching a ghost"), pbStr: null, delta: null, finPb: false, badge: null, bar: null,
     stats: e.off_stats ?? null });
   if (GHOST_SCREENS.has(e.screen)) { ghostHolds.add(e.player_id); return ghostVm(); }
   if (ghostHolds.has(e.player_id) && HOLD_SCREENS.has(e.screen)) return ghostVm();
@@ -226,10 +245,11 @@ export function viewModel(e, now = Date.now, delayed = null, opts = {}) {
   const primary = SETUP[e.screen]
     ? { kind: "activity", text: SETUP[e.screen] }
     : { kind: "activity", text: "In the menus" };
+  const activity = labelActivity(e, ACTIVITY_LABEL[e.screen] ?? "in the menus");
   // Idle, with no race to show: expose the same career stats the offline card uses
   // (server sends off_stats for idle online players). The card renders them only
   // while nothing is selected yet - a pick swaps back to the char/kart/track rows.
-  return { state: SETUP[e.screen] ? "setup" : "menus", ...ident, primary,
-    resets: null, pbStr: null, delta: null, finPb: false, badge: null, bar: null,
+  return { state: SETUP[e.screen] ? "setup" : "menus", ...ident, primary, activity,
+    pbStr: null, delta: null, finPb: false, badge: null, bar: null,
     stats: e.off_stats ?? null };
 }

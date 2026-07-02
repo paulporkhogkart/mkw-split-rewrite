@@ -84,11 +84,14 @@ export function formatTrackLeaderboard(rows: BoardRow[], wr: { record: string; r
   const wrDiff = wr ? formatTimeDifference(wr.record_ms - anchorMs) : '';                 // faster -> negative
   const rowDiffs = alignDiffColumn(rows.map((r, i) => (i === 0 ? '' : formatTimeDifference(r.time_ms - anchorMs))));
 
-  const lines: string[] = [];
-  if (wr) lines.push(`\`   WR      ${wr.record}${wrDiff ? `  (${wrDiff})` : ''}\``);
-
   const maxName = Math.max(...rows.map((r) => r.name.length));
   const maxTime = Math.max(...rows.map((r) => r.time.length));
+
+  const lines: string[] = [];
+  // WR row aligns with the dynamic name column: 3 chars for the "N. " position slot, "WR"
+  // in the name slot, padded to the widest name (mirrors paddedName's maxName+2 width) so the
+  // record lands under the player times whatever the longest name is (rebrand-proof).
+  if (wr) lines.push(`\`   WR${' '.repeat(maxName)}${wr.record}${wrDiff ? `  (${wrDiff})` : ''}\``);
   for (let i = 0; i < rows.length; i++) {
     const { position, name, time } = rows[i];
     const paddedName = name + ' '.repeat(maxName - name.length + 2);
@@ -113,9 +116,11 @@ export function formatTotalLeaderboard(rows: TotalRow[], wrTotalDisplay: string,
   const wrDiff = wrTotalMs > 0 ? formatTimeDifference(wrTotalMs - anchorMs) : '';
   const rowDiffs = alignDiffColumn(rows.map((r, i) => (i === 0 ? '' : formatTimeDifference(r.total_ms - anchorMs))));
 
-  const lines = [`\`   WR      ${wrTotalDisplay}${wrDiff ? `  (${wrDiff})` : ''}\``];
   const maxName = Math.max(...rows.map((r) => r.name.length));
   const maxTime = Math.max(...rows.map((r) => r.total_display.length));
+  // WR row aligns with the dynamic name column (see formatTrackLeaderboard) so the aggregate
+  // record lands under the player totals regardless of the widest name.
+  const lines = [`\`   WR${' '.repeat(maxName)}${wrTotalDisplay}${wrDiff ? `  (${wrDiff})` : ''}\``];
   for (let i = 0; i < rows.length; i++) {
     const { position, name, total_display } = rows[i];
     const paddedName = name + ' '.repeat(maxName - name.length + 2);

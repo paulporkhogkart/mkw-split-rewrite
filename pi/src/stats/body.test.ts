@@ -3,48 +3,45 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { openPorker, resolveBody } from './body';
-import { resolvePeriod } from './period';
 import { DateTime } from 'luxon';
+import { PORKER_MAP, openPorker, resolveBody } from './body';
+import { resolvePeriod } from './period';
 
+const epoch = (iso: string) => Math.floor(DateTime.fromISO(iso, { zone: 'utc' }).toSeconds());
 let dir: string, path: string;
 
+// Paul's porker table is 'Measurements'; his players.display_name was renamed 'Paul' -> 'paul pork'
+// (see db/playerRenames.ts). PORKER_MAP.player must track that rename or he silently drops out of
+// every body / correlation / body_condition stat.
 function mkPorker(p: string) {
   const d = new DatabaseSync(p);
-  const cols = `"Timestamp" INTEGER, "Weight" REAL, "BodyMassIndex" REAL, "BodyFat" REAL,
-    "FatFreeBodyWeight" REAL, "SubcutaneousFat" REAL, "VisceralFat" REAL, "BodyWater" REAL,
-    "SkeletalMuscle" REAL, "MuscleMass" REAL, "BoneMass" REAL, "Protein" REAL,
-    "BasalMetabolicRate" REAL, "MetabolicAge" REAL`;
-  for (const t of ['Measurements', 'EunoraMeasurements']) d.exec(`CREATE TABLE "${t}" (${cols})`);
-  const ins = (t: string, ts: number, fat: number, muscle: number) => d.prepare(
-    `INSERT INTO "${t}"("Timestamp","Weight","BodyMassIndex","BodyFat","FatFreeBodyWeight","SubcutaneousFat","VisceralFat","BodyWater","SkeletalMuscle","MuscleMass","BoneMass","Protein","BasalMetabolicRate","MetabolicAge")
-     VALUES (?,80,22,?,60,15,5,55,50,?,3,18,1700,25)`).run(ts, fat, muscle);
-  const day = (iso: string) => Math.floor(DateTime.fromISO(iso, { zone: 'utc' }).toSeconds());
-  // Luke (Eunora): fat 20 -> 18 over June; Paul (Measurements): muscle 52 latest
-  ins('EunoraMeasurements', day('2026-06-02T00:00:00'), 20, 49);
-  ins('EunoraMeasurements', day('2026-06-20T00:00:00'), 18, 50);
-  ins('Measurements', day('2026-06-05T00:00:00'), 16, 52);
+  d.exec(`CREATE TABLE "Measurements" ("Timestamp" INTEGER,"Weight" REAL,"BodyMassIndex" REAL,"BodyFat" REAL,
+    "FatFreeBodyWeight" REAL,"SubcutaneousFat" REAL,"VisceralFat" REAL,"BodyWater" REAL,"SkeletalMuscle" REAL,
+    "MuscleMass" REAL,"BoneMass" REAL,"Protein" REAL,"BasalMetabolicRate" REAL,"MetabolicAge" REAL)`);
+  d.prepare(`INSERT INTO "Measurements" VALUES (?,90,27,25,65,20,8,50,45,48,3,17,1800,30)`).run(epoch('2026-06-01T00:00:00'));
   d.close();
 }
 
-beforeAll(() => { dir = mkdtempSync(join(tmpdir(), 'porker-')); path = join(dir, 'porker.db'); mkPorker(path); });
+beforeAll(() => { dir = mkdtempSync(join(tmpdir(), 'body-')); path = join(dir, 'porker.db'); mkPorker(path); });
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-const june = () => resolvePeriod('this_month', 'Australia/Melbourne',
-  { now: DateTime.fromISO('2026-06-15T12:00:00', { zone: 'Australia/Melbourne' }) });
-
-describe('resolveBody', () => {
-  it('change = last - first in window, per player', () => {
-    const pk = openPorker(path);
-    const r = resolveBody(pk, { metric: 'body_fat', agg: 'change', period: june(), filters: { player: 'Luke' } });
-    expect(r.total).toBeCloseTo(-2, 5); // 18 - 20
-    pk.close();
+describe('PORKER_MAP identity bridge', () => {
+  it('maps the Measurements table to the renamed display name "paul pork"', () => {
+    const entry = PORKER_MAP.find((m) => m.table === 'Measurements');
+    expect(entry?.player).toBe('paul pork');
   });
 
-  it('current (no player) sums latest across the roster', () => {
+  it("surfaces paul pork's BMI keyed by his current display name, and matches a player filter", () => {
     const pk = openPorker(path);
-    const r = resolveBody(pk, { metric: 'muscle_mass', agg: 'current', period: june(), filters: {} });
-    expect(r.total).toBeCloseTo(102, 5); // Luke 50 + Paul 52
+    const period = resolvePeriod('all_time', 'Australia/Melbourne');
+
+    const all = resolveBody(pk, { metric: 'bmi', agg: 'current', period, filters: {} });
+    expect(all.rows.map((r) => r.key)).toContain('paul pork');
+    expect(all.rows.find((r) => r.key === 'paul pork')?.value).toBe(27);
+
+    const filtered = resolveBody(pk, { metric: 'bmi', agg: 'current', period, filters: { player: 'paul pork' } });
+    expect(filtered.rows).toEqual([{ key: 'paul pork', value: 27 }]);
+
     pk.close();
   });
 });

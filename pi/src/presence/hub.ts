@@ -4,6 +4,7 @@ import { slugify } from '../db/slug';
 import { pbRunFor } from '../db/pb';
 import type { CompletionFn } from './completion';
 import type { FrameInput } from '../activity/sessionTracker';
+import { classify, type ScreenClass } from '../activity/screenClass';
 
 // The engine's _TrackState values (mkw_tracker/minimap/tracker.py) that mean a confident live
 // fix; anything else it emits (e.g. 'reacquire') is treated as stale so completion holds.
@@ -46,6 +47,11 @@ export interface PresenceEntry {
   invalidated: boolean; // run killed by an overlay (card/rail show "INVALID - <reason>", never a PB)
   invalid_reason: string | null;
   elapsed_ms: number | null;
+  // Epoch ms when the player's current activity (racing / a select screen / menus / a ghost-watch)
+  // began, so the card's activity line can tick "time on screen" / grind duration. Held/overlay
+  // screens (pause, reset loaders, Home/Gallery/Photo) continue the activity, and a PB keeps the
+  // screen RACING, so the racing timer survives both. null when offline.
+  screen_since_ms: number | null;
   has_model: boolean;   // false -> course has no model yet (bar shows "calibrating")
   pb_delta_ms: number | null;   // live ahead(-)/behind(+) vs own PB at the same completion
   lap_delta: LapD | null;       // latest completed lap (the card badge readout)
@@ -76,7 +82,7 @@ function offlineEntry(player_id: number, name: string, color: string | null, now
   return { player_id, name, color, online: false, screen: null, course: null, character: null, kart: null,
            costume: null, cur_lap: null, tot_lap: null, coins: null, mushrooms: null, resets: null,
            pb_ms: null, completion: null, dividers: [], final_time: null, updated_at: now, dnf: false,
-           invalidated: false, invalid_reason: null, elapsed_ms: null,
+           invalidated: false, invalid_reason: null, elapsed_ms: null, screen_since_ms: null,
            has_model: false, pb_delta_ms: null, lap_delta: null, lap_deltas: null, pb_laps_ms: null, off_stats };
 }
 
@@ -88,6 +94,10 @@ export class PresenceHub {
   private sinks = new Set<Sink>();
   // Last app_version persisted per player, so the ~4Hz frame only writes the DB on change.
   private appVersionSeen = new Map<number, string>();
+  // Per-player activity class + the epoch ms it began, driving screen_since_ms. The class mirrors
+  // the card (classify): held/overlay screens continue the open class, so a pause/reset/results
+  // screen (and a PB, which keeps the screen RACING) never restarts the racing grind timer.
+  private activitySince = new Map<number, { cls: ScreenClass; since: number }>();
   // Cached career snapshot per player (offStats). It only changes on a finished
   // upload (refreshOffStats), so attaching it to idle live frames costs no query.
   private offStatsCache = new Map<number, PresenceEntry['off_stats']>();
@@ -165,6 +175,7 @@ export class PresenceHub {
     const racing = frame.screen === 'RACING' && !frame.final_time && !frame.dnf && !frame.invalidated;
     const inRaceCtx = frame.screen === 'RACING' || frame.screen === 'POST_TIME_TRIAL';
     const pb_delta_ms = racing ? this.pace(playerId, frame.course, completion, frame.elapsed_ms) : null;
+    const screen_since_ms = this.activitySinceMs(playerId, frame.screen ?? null, now);
     const pin = this.latchedPb(playerId, cur, frame);
     // Lap comparison stays up through the finished/results state (the rail reads
     // it there), pinned to the pre-race PB run + pre-race gold baseline.
@@ -176,7 +187,7 @@ export class PresenceHub {
       character: frame.character ?? null, kart: frame.kart ?? null, costume: frame.costume ?? null,
       cur_lap: frame.cur_lap ?? null, tot_lap: frame.tot_lap ?? null,
       coins: frame.coins ?? null, mushrooms: frame.mushrooms ?? null, resets: frame.resets ?? null,
-      elapsed_ms: frame.elapsed_ms ?? null,
+      elapsed_ms: frame.elapsed_ms ?? null, screen_since_ms,
       completion, pb_ms: pin.pb,
       dividers, final_time: frame.final_time ?? null, updated_at: now,
       dnf: frame.dnf ?? false,
@@ -224,8 +235,20 @@ export class PresenceHub {
     return latch;
   }
 
+  /** The epoch ms the player's current activity began. Classifies the live screen like the card
+   *  (held/overlay screens continue the open class), stamping a fresh start only when the class
+   *  actually changes. */
+  private activitySinceMs(playerId: number, screen: string | null, now: number): number {
+    const prev = this.activitySince.get(playerId);
+    const cls = classify(screen, prev?.cls ?? null);
+    if (prev && prev.cls === cls) return prev.since;
+    this.activitySince.set(playerId, { cls, since: now });
+    return now;
+  }
+
   setOffline(playerId: number): void {
     this.pbLatch.delete(playerId);
+    this.activitySince.delete(playerId);   // a re-login restamps from its first frame
     const e = this.map.get(playerId);
     if (!e || !e.online) return;
     const now = this.now();

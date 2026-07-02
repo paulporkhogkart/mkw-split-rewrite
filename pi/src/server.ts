@@ -23,7 +23,7 @@ const PORT = Number(process.env.PORT ?? 8787);
 const db = openDb(DB_PATH);
 applySchema(db);
 migrateSeason0Recovered(db);   // one-time: real Discord-recovered Season 0 progression
-migratePlayerRenames(db);      // idempotent display-name corrections (e.g. Paul -> Paul Pork)
+migratePlayerRenames(db);      // idempotent display-name corrections (e.g. Paul -> paul pork)
 try { backfillActivity(db); } catch { /* guard: safe to skip if activity_events absent */ }
 // Purge the legacy emit-at-end session events ('attempts'/'screen') from any pre-redesign DB;
 // sessions are presence-driven now and the new model never writes these types (idempotent).
