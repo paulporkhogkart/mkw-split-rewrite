@@ -21,6 +21,16 @@
   import { invoke }        from "@tauri-apps/api/core";
   import { discordEnabled, twitchButtonEnabled, twitchLabel, twitchUrl } from "../lib/discordSettings.js";
   import { deltaMode } from "../lib/cardSettings.js";
+  import KeybindRecorder from "./KeybindRecorder.svelte";
+  import { screenshotKeybind, screenshotSaveFile, screenshotClipboard, screenshotDir } from "../lib/screenshotSettings.js";
+  import { open as openDialog } from "@tauri-apps/plugin-dialog";
+
+  async function chooseScreenshotDir() {
+    try {
+      const picked = await openDialog({ directory: true, title: "Choose screenshot folder" });
+      if (typeof picked === "string" && picked) screenshotDir.set(picked);
+    } catch (_) { /* dialog cancelled/unavailable */ }
+  }
 
   // ── Modal open/close ──────────────────────────────────────────────────────────
   export let wizardOpen    = false;
@@ -222,6 +232,50 @@
             </div>
           </div>
 
+        <!-- ── SCREENSHOTS step ───────────────────────────────────────────── -->
+        {:else if wizardStep === "screenshots"}
+          <div class="step-centred">
+            <h2>Screenshots</h2>
+            <p>Capture the clean camera feed from the monitor view. Use the button on the feed, or the hotkey below (only while pbenguin is focused on the monitor).</p>
+
+            <div class="discord-section">
+              <h3 class="discord-heading">Hotkey</h3>
+              <div class="ss-row">
+                <KeybindRecorder bind:value={$screenshotKeybind} />
+                <button class="btn-sm" on:click={() => screenshotKeybind.set("F12")}>Reset to F12</button>
+              </div>
+              <p class="discord-note">Click, then press a key or combination (e.g. Ctrl+Shift+S). Esc cancels.</p>
+            </div>
+
+            <div class="discord-section">
+              <h3 class="discord-heading">On capture</h3>
+              <label class="discord-row">
+                <input type="checkbox" bind:checked={$screenshotSaveFile} />
+                <span>Save screenshot to file</span>
+              </label>
+              <label class="discord-row">
+                <input type="checkbox" bind:checked={$screenshotClipboard} />
+                <span>Copy screenshot to clipboard</span>
+              </label>
+              <p class="discord-note">A shutter sound plays whenever a screenshot is taken. With both off, nothing happens.</p>
+            </div>
+
+            <div class="discord-section">
+              <h3 class="discord-heading">Save folder</h3>
+              <div class="ss-row">
+                <span class="ss-path">{$screenshotDir || "Pictures\\pbenguin (default)"}</span>
+              </div>
+              <div class="ss-row">
+                <button class="btn-sm" on:click={chooseScreenshotDir}>Choose folder…</button>
+                <button class="btn-sm" on:click={() => screenshotDir.set("")} disabled={!$screenshotDir}>Use default</button>
+              </div>
+            </div>
+
+            <div class="cam-nav" style="justify-content:flex-end">
+              <button class="btn-primary" on:click={onClose}>Done</button>
+            </div>
+          </div>
+
         <!-- ── TRAILS step ────────────────────────────────────────────────── -->
         {:else if wizardStep === "trails"}
           <TrailSettings />
@@ -395,6 +449,14 @@
   .discord-fields { display: flex; flex-direction: column; gap: .35rem; }
   .discord-note { font-size: .66rem; color: var(--tx-dim); margin: .1rem 0 0; line-height: 1.5; }
   .discord-dim { opacity: .45; transition: opacity .15s; }
+
+  /* Screenshots tab */
+  .ss-row { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+  .ss-path {
+    font-family: inherit; font-size: .7rem; color: var(--tx-mut);
+    background: var(--panel); border: 1px solid var(--bd); border-radius: var(--r);
+    padding: .22rem .5rem; word-break: break-all;
+  }
 
   /* PB delta mode (trails tab) */
   .delta-set { max-width: 600px; margin: 1rem auto 0; padding-top: .8rem; border-top: 1px solid var(--bd); }
