@@ -96,10 +96,11 @@ class ProcessSupervisor:
         except OSError:
             pass
         os.makedirs(out_dir, exist_ok=True)
+        # forward-only matte (engine default) — the user-validated configuration (spawn-dip fix
+        # eyetest 2026-07-02); the earlier console bidir opt-in is dropped with it.
         return self._spawn("process",
                            commands.process_cmd(self.gpu_py, self.repo_root, clips_dir, out_dir, stop_file),
-                           on_exit=on_exit,
-                           env={"MATTE_MATANYONE_BIDIR": "1"})   # run_console mattes bidirectionally
+                           on_exit=on_exit)
 
     def wait_processing(self, timeout=120.0):
         p = self.procs.get("process")

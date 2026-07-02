@@ -31,9 +31,9 @@ def test_gpu_py_points_at_unified_matte_venv():
     assert sup.gpu_py.replace("\\", "/").endswith("temp/asset-venv-matte/Scripts/python.exe")
 
 
-def test_start_processing_enables_bidirectional_matanyone(tmp_path):
-    """Console-launched processing must run the matte bidirectionally (MATTE_MATANYONE_BIDIR=1),
-    regardless of the standalone default."""
+def test_start_processing_uses_engine_default_direction(tmp_path):
+    """Console-launched processing must NOT override the matte direction: the forward-only
+    engine default is the user-validated configuration (spawn-dip fix eyetest 2026-07-02)."""
     sup = ProcessSupervisor(str(tmp_path), lambda *_: None, py="python")
     captured = {}
 
@@ -44,4 +44,4 @@ def test_start_processing_enables_bidirectional_matanyone(tmp_path):
     out = tmp_path / "out"
     sup.start_processing(str(tmp_path / "clips"), str(out), str(out / ".stop"))
     assert captured["name"] == "process"
-    assert captured["env"] == {"MATTE_MATANYONE_BIDIR": "1"}
+    assert captured["env"] is None
