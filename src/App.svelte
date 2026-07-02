@@ -507,6 +507,12 @@
     }
   }
 
+  // Open the screenshots save folder in File Explorer (browse only). Empty dir →
+  // the default Pictures\pbenguin, resolved backend-side.
+  function openScreenshotsFolder() {
+    invoke("open_screenshot_dir", { dir: $screenshotDir || null }).catch(() => {});
+  }
+
   // Screenshot hotkey: only on the live monitor, no modal open, not while typing.
   $: anyModalOpen = wizardOpen || !!reviewHead || ghostWarnOpen;
   $: screenshotAllowed = appView === "main" && $viewStore !== "edit" && !anyModalOpen;
@@ -1681,6 +1687,11 @@
               {/if}
             </div>
           {/if}
+          <!-- Screenshot confirmation toast: low over the display near the Shot button;
+               its own backdrop so it reads even when the feed is hidden. -->
+          {#if shotMsg}
+            <div class="shot-toast" class:shot-toast-err={shotErr} title={shotMsg}>{shotMsg}</div>
+          {/if}
         </div>
 
         <!-- Feed controls: audio + video toggle -->
@@ -1732,9 +1743,11 @@
             <svg viewBox="0 0 16 16" class="fc-icon"><path d="M2 5h3l1-1.5h4l1 1.5h3v8H2z"/><circle cx="8" cy="9" r="2.5"/></svg>
             <span class="fc-vid-label">Shot</span>
           </button>
-          {#if shotMsg}
-            <span class="fc-shot-msg" class:fc-shot-err={shotErr} title={shotMsg}>{shotMsg}</span>
-          {/if}
+          <button class="fc-btn fc-vid-btn" title="Open screenshots folder"
+            on:click={openScreenshotsFolder}>
+            <svg viewBox="0 0 16 16" class="fc-icon"><path d="M1.8 4.6h3.6l1 1.4H14.2v7.4H1.8z"/></svg>
+            <span class="fc-vid-label">Folder</span>
+          </button>
         </div>
 
         <!-- Live player panel (sub-project #3) -->
@@ -2166,11 +2179,17 @@
   .fc-no-audio { font-size: .58rem; color: var(--tx-dim); flex-shrink: 0; }
   .fc-vid-btn  { gap: 4px; }
   .fc-vid-label { font-size: .62rem; }
-  .fc-shot-msg {
-    font-size: .6rem; color: var(--tx-dim); flex: 1; min-width: 0;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left;
+  /* Screenshot confirmation toast — small, low over the feed near the Shot button.
+     Sits inside .feed-area (position:relative) which is always rendered, so it shows
+     even when the feed is hidden; its own dark plate keeps it legible over anything. */
+  .shot-toast {
+    position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%);
+    max-width: 88%; padding: 3px 10px; border-radius: var(--r);
+    background: rgba(0,0,0,.74); color: var(--tx); border: 1px solid var(--bd);
+    font-size: .62rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    pointer-events: none; z-index: 6;
   }
-  .fc-shot-err { color: var(--err); }
+  .shot-toast-err { color: var(--err); border-color: var(--err); }
   .feed-ph-icon { font-size: 1.8rem; animation: spin 1.4s linear infinite; opacity: .4; }
   .feed-ph-text { font-size: .72rem; color: var(--tx-dim); }
   @keyframes spin { to { transform: rotate(360deg); } }
