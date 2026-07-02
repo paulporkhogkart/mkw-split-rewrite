@@ -32,6 +32,7 @@ CHAR_FEAT_ROI = HERO_ROI_1080           # (1075,30,1800,845) — standalone hero
 KART_FEAT_ROI = (1180, 175, 1800, 760)  # whole hero, name label/icon excluded
 MAX_DECODE_S = 16.0                     # cap features to spawn+idle+flourish-start
 _GAP = 10                               # close idle-band dips shorter than this (blinks)
+_FADE_THR = 0.5                         # backdrop-corner luma deviation = the scene fade
 
 
 def is_kart_combo(name: str) -> bool:
@@ -89,18 +90,26 @@ def _decode_features(clip, roi):
         raise RuntimeError(f"cannot open {clip!r}")
     fps = cap.get(cv2.CAP_PROP_FPS) or 60.0
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)); h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    x1, y1, x2, y2, _ = _prod_crop_params(w, h)
+    # Two backdrop corner patches at the top of the prod crop: static through the whole
+    # spawn/idle/flourish, they only move when the scene fades out. Two corners so a
+    # subject crossing ONE of them (flourish jump peak) can't read as a fade.
+    ch, cw = int(0.12 * (y2 - y1)), int(0.22 * (x2 - x1))
+    corners = ((y1, y1 + ch, x1, x1 + cw), (y1, y1 + ch, x2 - cw, x2))
     cap_frames = int(MAX_DECODE_S * fps)
-    feats, idx = [], 0
+    feats, bg, idx = [], [], 0
     while idx < cap_frames:
         ok, fr = cap.read()
         if not ok:
             break
         feats.append(frame_feature(fr, roi, 48))
+        bg.append([float(cv2.cvtColor(fr[cy1:cy2, cx1:cx2], cv2.COLOR_BGR2GRAY).mean())
+                   for cy1, cy2, cx1, cx2 in corners])
         idx += 1
     cap.release()
     if not feats:
         raise RuntimeError(f"no frames decoded from {clip!r}")
-    return fps, np.stack(feats), (w, h)
+    return fps, np.stack(feats), (w, h), np.array(bg)
 
 
 def find_loop(clip):
@@ -108,16 +117,42 @@ def find_loop(clip):
 
     Importable by the batch driver so it can stamp the period/start without re-decoding.
     """
-    best_s, P, fps, wh, kart, _a, _b, _F = _loop_impl(clip)
+    best_s, P, fps, wh, kart, _a, _b, _F, _bg = _loop_impl(clip)
     return best_s, P, fps, wh, kart
 
 
+def seam_start(F, a, b, P):
+    """Most-seamless loop start within the FIRST idle cycle: frame s ~ s+P in position AND
+    velocity. The idle is periodic, so every seam phase already exists in [a, a+P]; keeping
+    the start in the first cycle lets the spawn segment run straight into it (a start deep
+    in the band would make spawn->idle playback jump frames mid-bob)."""
+    best_s, best_d = a, 1e18
+    for s in range(a, max(a + 1, min(a + P + 1, b - P))):
+        d = float(np.sum((F[s] - F[s + P]) ** 2) + np.sum((F[s + 1] - F[s + P + 1]) ** 2))
+        if d < best_d:
+            best_d, best_s = d, s
+    return best_s
+
+
+def fade_start(bg, a, b, thr=_FADE_THR):
+    """First frame at/after the idle-band end where BOTH backdrop corners deviate from
+    their idle baseline = the scene fade-out (a subject crossing one corner is not a fade).
+    Returns len(bg) when no fade is inside the decoded window."""
+    base = np.median(bg[a:b], axis=0)
+    dev = np.abs(bg - base[None, :]).min(axis=1)       # min over corners = both must move
+    for k in range(b, len(bg)):
+        if dev[k] > thr:
+            return k
+    return len(bg)
+
+
 def _loop_impl(clip):
-    """find_loop internals, also returning the idle band (a, b) and the decoded features F
-    (needed by find_segments to place spawn relative to where idling actually starts)."""
+    """find_loop internals, also returning the idle band (a, b), the decoded features F
+    (needed by find_segments to place spawn relative to where idling actually starts) and
+    the backdrop-corner luma track bg (needed to clamp the flourish before the fade-out)."""
     name = os.path.splitext(os.path.basename(clip))[0]
     kart = is_kart_combo(name)
-    fps, F, wh = _decode_features(clip, KART_FEAT_ROI if kart else CHAR_FEAT_ROI)
+    fps, F, wh, bg = _decode_features(clip, KART_FEAT_ROI if kart else CHAR_FEAT_ROI)
     a, b = idle_band(F)
     if kart:
         P = int(round(KART_PERIOD_S * fps))            # baked rule: forced 2.0s
@@ -126,13 +161,7 @@ def _loop_impl(clip):
         lags, scores = autocorr_by_lag(F[a:b + 1], lo, hi)
         P, _conf, _ = find_period(lags, scores)
     P = int(max(2, min(P, (b - a) - 2)))               # keep one full cycle inside the band
-    # Most-seamless start within the idle band: frame s ~ s+P in position AND velocity.
-    best_s, best_d = a, 1e18
-    for s in range(a, b - P):
-        d = float(np.sum((F[s] - F[s + P]) ** 2) + np.sum((F[s + 1] - F[s + P + 1]) ** 2))
-        if d < best_d:
-            best_d, best_s = d, s
-    return best_s, P, fps, wh, kart, a, b, F
+    return seam_start(F, a, b, P), P, fps, wh, kart, a, b, F, bg
 
 
 def extract(clip, outdir):
@@ -185,17 +214,21 @@ CHAR_FLOURISH = 48
 def find_segments(clip):
     """{seg: (start, end)} half-open spans for 'spawn'/'idle'/'flourish' (+ fps, kart).
 
-    idle  = the seam-searched loop [start, start+P].
+    idle  = the seam-searched loop [start, start+P], with start inside the band's FIRST cycle.
     spawn = KARTS ONLY. The swap = the biggest consecutive COLOUR change in the ~45f before idle
             settles (grayscale can't separate two karts); spawn_start = the post-spike frame = the
             new kart's first frame. Standalone characters have no spawn-in (just a swap, no drop-in
-            animation) -> no spawn segment.
+            animation) -> no spawn segment. The spawn runs through the settle up to the idle-loop
+            start, so spawn's last frame is the source frame right before idle's first: the
+            spawn->idle handoff plays frame-contiguously.
     flourish = a fixed-length anim (kart 64f / char 48f) starting at the first MOTION BURST after the
             idle band -- the kart rear-up / the character's jump. Band-end alone suffices for karts
             (the band ends at the flourish) but NOT for characters, whose idle band can end early
             while the standing idle keeps going; scanning forward for the burst handles both.
+            The end is clamped to the scene FADE-OUT (backdrop corners leaving their idle
+            baseline): the fixed length can overshoot into the fade by a few frames.
     Ports the method validated against hand-marks (memory `asset-clip-segmentation`)."""
-    start, P, fps, wh, kart, a, b, F = _loop_impl(clip)
+    start, P, fps, wh, kart, a, b, F, bg = _loop_impl(clip)
 
     # ── spawn-in (KARTS only): colour-spike swap in the ~45f before idle settles ──────────────
     spawn = None
@@ -223,7 +256,7 @@ def find_segments(clip):
             best = a - 16
         sp = min(max(best + 1, a - 45), a - 4)
         if a - sp >= 4:
-            spawn = (sp, a)
+            spawn = (sp, start)                        # run through the settle to the loop start
 
     # ── flourish START = the first motion burst after the idle band (rear-up / jump) ──────────
     # Measured on the grayscale features F: idle bob (and the kart wheel) is small + steady; the
@@ -238,8 +271,9 @@ def find_segments(clip):
     if fs >= len(jump) - 1:                         # burst not in the feature window -> band edge
         fs = b + 1
     flen = KART_FLOURISH if kart else CHAR_FLOURISH
+    fe = min(fs + flen, max(fade_start(bg, a, b), fs + 1))   # never include fade-out frames
 
-    segs = {"idle": (start, start + P), "flourish": (fs, fs + flen)}
+    segs = {"idle": (start, start + P), "flourish": (fs, fe)}
     if spawn:
         segs["spawn"] = spawn
     return segs, fps, kart
