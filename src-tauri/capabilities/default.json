@@ -13,6 +13,8 @@
     "process:allow-restart",
     "shell:allow-spawn",
     "shell:allow-execute",
-    "log:default"
+    "log:default",
+    "clipboard-manager:allow-write-image",
+    "dialog:allow-open"
   ]
 }
