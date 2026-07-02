@@ -2143,6 +2143,11 @@
     border-radius: var(--r); transition: color .1s, background .1s; flex-shrink: 0;
   }
   .fc-btn:hover { color: var(--tx-mut); background: var(--raised); }
+  /* No focus ring on the icon toolbar (hover is the affordance; matches the app's
+     outline:none on inputs/selects). Without this, a button focused by an earlier
+     click shows its focus-visible ring the moment the user switches to the keyboard
+     — e.g. pressing the F12 screenshot hotkey. */
+  .fc-btn:focus, .fc-btn:focus-visible { outline: none; }
   .fc-btn:disabled { opacity: .35; cursor: default; }
   .fc-btn:disabled:hover { color: var(--tx-dim); background: transparent; }
   .fc-icon {
