@@ -481,12 +481,14 @@
       _flashShot("Enable save or clipboard first", true);
       return;
     }
-    try { new Audio(shutterSnd).play().catch(() => {}); } catch (_) { /* autoplay blocked */ }
+    let savedPath = null, copied = false;
     try {
       const bytes = await feedOverlayComp?.capturePng();
-      if (!bytes) { _flashShot("No feed to capture", true); return; }
+      if (!bytes) { _flashShot("No feed to capture", true); return; }   // nothing produced → no shutter
+      // Only now that a frame is captured (and save/clipboard is enabled) is a screenshot
+      // actually being produced — play the shutter here, not before the null-check.
+      try { new Audio(shutterSnd).play().catch(() => {}); } catch (_) { /* autoplay blocked */ }
       const arr = Array.from(bytes);
-      let savedPath = null, copied = false;
       if ($screenshotSaveFile) {
         savedPath = await invoke("save_screenshot", { bytes: arr, stamp: _shotStamp(), dir: $screenshotDir || null });
       }
@@ -499,7 +501,9 @@
                 : "Copied to clipboard";
       _flashShot(msg);
     } catch (e) {
-      _flashShot("Screenshot failed", true);
+      // Report what DID complete — save runs first, so a file can exist even if the
+      // clipboard copy then throws.
+      _flashShot(savedPath ? "Saved → " + savedPath + " (clipboard failed)" : "Screenshot failed", true);
     }
   }
 
@@ -508,6 +512,7 @@
   $: screenshotAllowed = appView === "main" && $viewStore !== "edit" && !anyModalOpen;
 
   function onGlobalKeydown(e) {
+    if (e.repeat) return;              // holding the hotkey must not spam captures
     if (!screenshotAllowed) return;
     const t = e.target;
     if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
