@@ -41,6 +41,9 @@
   import { initSync } from "./lib/sync.js";
   import { serverUrl as serverUrlStore, authToken as authTokenStore } from "./lib/syncSettings.js";
   import { feedVolume, feedMuted, feedHidden, roiHidden } from "./lib/feedSettings.js";
+  import shutterSnd from "./assets/shutter.wav";
+  import { matchesKeybind } from "./lib/keybind.js";
+  import { screenshotKeybind, screenshotSaveFile, screenshotClipboard, screenshotDir } from "./lib/screenshotSettings.js";
 
   let appWindow = null;
   function winMinimize()       { appWindow?.minimize(); }
@@ -474,13 +477,43 @@
     _shotTimer = setTimeout(() => { shotMsg = ""; }, 3000);
   }
   async function takeScreenshot() {
+    if (!$screenshotSaveFile && !$screenshotClipboard) {   // nothing would happen → no shutter
+      _flashShot("Enable save or clipboard first", true);
+      return;
+    }
+    try { new Audio(shutterSnd).play().catch(() => {}); } catch (_) { /* autoplay blocked */ }
     try {
       const bytes = await feedOverlayComp?.capturePng();
       if (!bytes) { _flashShot("No feed to capture", true); return; }
-      const path = await invoke("save_screenshot", { bytes: Array.from(bytes), stamp: _shotStamp() });
-      _flashShot("Saved → " + path);
+      const arr = Array.from(bytes);
+      let savedPath = null, copied = false;
+      if ($screenshotSaveFile) {
+        savedPath = await invoke("save_screenshot", { bytes: arr, stamp: _shotStamp(), dir: $screenshotDir || null });
+      }
+      if ($screenshotClipboard) {
+        await invoke("copy_screenshot_to_clipboard", { bytes: arr });
+        copied = true;
+      }
+      const msg = savedPath && copied ? "Saved + copied to clipboard"
+                : savedPath ? "Saved → " + savedPath
+                : "Copied to clipboard";
+      _flashShot(msg);
     } catch (e) {
       _flashShot("Screenshot failed", true);
+    }
+  }
+
+  // Screenshot hotkey: only on the live monitor, no modal open, not while typing.
+  $: anyModalOpen = wizardOpen || !!reviewHead || ghostWarnOpen;
+  $: screenshotAllowed = appView === "main" && $viewStore !== "edit" && !anyModalOpen;
+
+  function onGlobalKeydown(e) {
+    if (!screenshotAllowed) return;
+    const t = e.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+    if (matchesKeybind(e, $screenshotKeybind)) {
+      e.preventDefault();
+      takeScreenshot();
     }
   }
 
@@ -493,9 +526,10 @@
   const FIRST_TIME_STEPS = ["language", "camera", "sync"];
   // Post-setup, the ⚙ modal is a slim Settings panel: Language + Camera only.
   // Screen/tell/HUD/template editing now lives in the Edit Screens view.
-  const RERUN_STEPS      = ["language", "camera", "discord", "sync", "trails"];
+  const RERUN_STEPS      = ["language", "camera", "discord", "sync", "trails", "screenshots"];
   const STEP_LABELS = {
-    language: "Language", camera: "Video", discord: "Discord", sync: "Sync", trails: "Trails", screens: "Screens",
+    language: "Language", camera: "Video", discord: "Discord", sync: "Sync", trails: "Trails",
+    screenshots: "Screenshots", screens: "Screens",
     selection: "Selection", hud: "HUD", templates: "Templates",
   };
   $: STEPS = setupComplete ? RERUN_STEPS : FIRST_TIME_STEPS;
@@ -1523,6 +1557,8 @@
 <!-- ═══════════════════════════════════════════════════════════════════════════ -->
 <!--  MAIN LAYOUT                                                               -->
 <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+
+<svelte:window on:keydown={onGlobalKeydown} />
 
 <div class="app">
 
