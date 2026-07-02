@@ -10,7 +10,8 @@ while birefnet holds ~15 GB next door).
 
 Lifecycle: load model -> WARM a tiny full-res matte to reserve GPU memory -> print `READY` -> serve
 one JSON job per stdin line:
-    {"frames_dir":.., "first":.., "last":.., "out_dir":.., "warmup":10, "erode":10, "dilate":10}
+    {"frames_dir":.., "first":.., "last":.., "out_dir":.., "warmup":10, "erode":10, "dilate":10,
+     "direction":"fwd|bwd|split|bidir"}
 matte -> write alpha `NNN.png` (grayscale) into out_dir -> reply one JSON line
     {"status":"ok","n":N}   or   {"status":"error","error":".."}
 `quit` or EOF exits. Spawned/driven by matte_matanyone._worker().
@@ -68,7 +69,7 @@ def main():
                                       warmup=job.get("warmup", 10),
                                       erode=job.get("erode", 10),
                                       dilate=job.get("dilate", 10),
-                                      bidir=job.get("bidir", True))
+                                      direction=job.get("direction", "fwd"))
             out_dir = job["out_dir"]
             os.makedirs(out_dir, exist_ok=True)
             for i, a in enumerate(alphas):

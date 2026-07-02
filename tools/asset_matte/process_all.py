@@ -109,7 +109,7 @@ def main():
                 matted[seg] = int(mb.matte_loopframes(   # only the KART flourish drops the plate -> no predark;
                     fd, segname, mattedir, clip=clip,    # the char keeps its nameplate through its flourish
                     apply_predark=not (kart and seg == "flourish"), is_kart=kart,
-                    bidir=mm.segment_bidir(kart, seg)))  # kart flourish = bidir (settled-tail anchor)
+                    direction=mm.segment_direction(kart, seg)))  # kart: spawn=bwd, flourish=split
             if not a.keep_loopframes:
                 shutil.rmtree(seg_base, ignore_errors=True)
             manifest[name] = {"status": "done", "kart": kart,

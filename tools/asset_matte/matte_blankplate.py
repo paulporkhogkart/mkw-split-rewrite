@@ -83,12 +83,11 @@ BIREFNET_MODEL = os.environ.get("MATTE_BIREFNET_MODEL", "birefnet-general")
 # birefnet path. Set MATTE_ENGINE=birefnet to A/B or roll back. matte_matanyone is imported lazily
 # (only under the matanyone branch) so the birefnet path still runs in a torch-less venv.
 MATTE_ENGINE = os.environ.get("MATTE_ENGINE", "matanyone")
-# MatAnyone2 direction: forward-only by DEFAULT for a segment-less call (bidir's position-weighted
-# crossfade can bleed the backward-anchor's mistakes in toward the end of a loop, e.g. a correct
-# hole fading to filled, and forward-only is ~2x faster). Segment-aware callers (process_all) pass
-# an explicit `bidir` from matte_matanyone.segment_bidir instead — kart flourish = bidir, whose
-# settled plate-free end pose makes the backward anchor reliable. MATTE_MATANYONE_BIDIR=1 forces
-# bidir here too.
+# MatAnyone2 direction: forward-only by DEFAULT for a segment-less call. Segment-aware callers
+# (process_all) pass an explicit `direction` from matte_matanyone.segment_direction instead —
+# kart spawn = bwd (settled-tail anchor at the idle handoff), kart flourish = split (pure-fwd
+# head, pure-bwd tail, seam-searched switch). MATTE_MATANYONE_BIDIR=1 forces the legacy bidir
+# crossfade here too.
 MATTE_BIDIR = os.environ.get("MATTE_MATANYONE_BIDIR", "0") == "1"
 
 
@@ -277,7 +276,10 @@ def _write_chip(pairs, name, out_base):
     """Write RGBA frames + _loop.webp + _checker.webp from (bgr_uint8, alpha_float01) pairs. Shared
     by both engines. Returns the frame count."""
     fdir = os.path.join(out_base, f"{name}_frames")
-    os.makedirs(fdir, exist_ok=True)
+    # recreate empty: frames are numbered from 000, so re-matting a SHORTER segment over a
+    # previous run would leave the old tail frames behind (the viewer globs *.png)
+    shutil.rmtree(fdir, ignore_errors=True)
+    os.makedirs(fdir)
     rgba_frames = []
     for i, (bgr, alpha) in enumerate(pairs):
         rgb = cv2.cvtColor(np.asarray(bgr).astype(np.uint8), cv2.COLOR_BGR2RGB)
@@ -297,14 +299,15 @@ def _write_chip(pairs, name, out_base):
 
 
 def matte_loopframes(framedir, name, out_base, clip=None, backdrop=None,
-                     apply_predark=True, is_kart=None, bidir=None):
+                     apply_predark=True, is_kart=None, direction=None):
     """Matte every NNN.png frame in `framedir` -> transparent RGBA. Returns the frame count.
 
     `apply_predark`: un-darken the nameplate before birefnet (TRUE for spawn/idle, where the plate
     is present; pass FALSE for the FLOURISH segment, where the plate is dropped and predark would
     paint a fake plate). `is_kart`: override kart detection (a segment-suffixed name would otherwise
-    miscount the `__` separators). `bidir`: MatAnyone2 direction — None falls back to the
-    MATTE_BIDIR env default; segment-aware callers pass matte_matanyone.segment_bidir(kart, seg)."""
+    miscount the `__` separators). `direction`: MatAnyone2 direction ("fwd"/"bwd"/"split"/"bidir")
+    — None falls back to the MATTE_BIDIR env default; segment-aware callers pass
+    matte_matanyone.segment_direction(kart, seg)."""
     paths = sorted(glob.glob(os.path.join(framedir, "*.png")))
     if not paths:
         raise RuntimeError(f"no loop frames in {framedir!r}")
@@ -321,13 +324,17 @@ def matte_loopframes(framedir, name, out_base, clip=None, backdrop=None,
         inproc = os.environ.get("MATTE_MATANYONE_INPROC") == "1"
         if not inproc:
             mm.ensure_worker()
-        if bidir is None:
-            bidir = MATTE_BIDIR
-        first = (_birefnet(pres[0])[0] > 0.5).astype(np.uint8) * 255
-        # backward anchor only needed for the bidirectional merge; skip the extra birefnet call otherwise
-        last = (_birefnet(pres[-1])[0] > 0.5).astype(np.uint8) * 255 if bidir else first
+        if direction is None:
+            direction = "bidir" if MATTE_BIDIR else "fwd"
+        # each anchor costs a birefnet call — only compute the one(s) the direction uses
+        first = ((_birefnet(pres[0])[0] > 0.5).astype(np.uint8) * 255
+                 if direction != "bwd" else None)
+        last = ((_birefnet(pres[-1])[0] > 0.5).astype(np.uint8) * 255
+                if direction != "fwd" else first)
+        if first is None:
+            first = last
         matte = mm.matte_segment if inproc else mm.matte_segment_worker
-        alphas = matte(pres, first, last, bidir=bidir)
+        alphas = matte(pres, first, last, direction=direction)
         pairs = list(zip(pres, alphas))                        # RGB = predark input (no decontam)
     else:                                                      # legacy per-frame birefnet
         pairs = []

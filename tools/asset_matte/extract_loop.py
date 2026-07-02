@@ -172,6 +172,16 @@ def fade_start(bg, a, b, thr=_FADE_THR):
     return len(bg)
 
 
+def clamp_flourish_end(fe, fade, n, fs):
+    """Clamp the flourish end before the scene fade-out. `fade` = fade_start's detection, whose
+    0.5-luma corner gate fires ~_FADE_GUARD frames after the (brighter) subject visibly dims, so
+    a detected fade is backed off by the guard. fade == n means no fade inside the decoded
+    window — never trim against the window edge. Always keeps at least one frame past fs."""
+    if fade >= n:
+        return fe
+    return min(fe, max(fade - _FADE_GUARD, fs + 1))
+
+
 def _loop_impl(clip):
     """find_loop internals, also returning the idle band (a, b), the decoded features F
     (needed by find_segments to place spawn relative to where idling actually starts) and
@@ -233,9 +243,14 @@ def _prod_crop_params(w, h):
 # recurrence (already in _loop_impl); the SPAWN swap is a COLOUR spike -- grayscale can't tell two
 # karts apart -- and the flourish is the fixed in-game anim length after the band (bg-independent).
 _SWAP_ROI_720 = (760, 90, 1230, 560)     # generous hero box @720p; scaled to the clip resolution
-KART_FLOURISH = 64
+# The in-game kart flourish is a 64f anim, but the sweep recording's fade-out owns its last 2
+# frames (measured: f62/f63 subject dimming on all 4 dirval karts, recorder timing deterministic).
+KART_FLOURISH = 62
 CHAR_FLOURISH = 48          # burst-fallback length when no recurrence dip is found
 CHAR_FLOURISH_MAX = 64      # cap on the dip run (pre-swap frames can't fully recover)
+# fade_start's 0.5-luma gate sits on the DARK backdrop corners, which dim less per frame than the
+# bright subject — it fires ~2 frames after the fade is visible on the kart. Back the clamp off.
+_FADE_GUARD = 2
 
 
 def _colour_feats(clip, wh, upto):
@@ -269,8 +284,8 @@ def find_segments(clip):
             animation) -> no spawn segment. The spawn runs through the settle up to the idle-loop
             start, so spawn's last frame is the source frame right before idle's first: the
             spawn->idle handoff plays frame-contiguously.
-    flourish = a fixed-length anim (kart 64f / char 48f) starting at the first MOTION BURST after the
-            idle band -- the kart rear-up / the character's jump. Band-end alone suffices for karts
+    flourish = a fixed-length anim (kart 62f / char 48f) starting at the first MOTION BURST after the
+            idle band -- the kart 3D-spin / the character's jump. Band-end alone suffices for karts
             (the band ends at the flourish) but NOT for characters, whose idle band can end early
             while the standing idle keeps going; scanning forward for the burst handles both.
             The end is clamped to the scene FADE-OUT (backdrop corners leaving their idle
@@ -293,9 +308,9 @@ def find_segments(clip):
             spawn = (sp, start)                        # run through the settle to the loop start
 
     # ── flourish span after the idle band: kart = motion burst, char = recurrence dip ─────────
-    # KART: the rear-up is a big pose change — first jump ||dF|| over 4x the idle median nails
-    # the start (validated across the sweep) and the anim is a fixed 64f. CHAR: the jump's
-    # magnitude scales with body size and a baby-size character never clears the burst threshold
+    # KART: the spin is a big pose change — first jump ||dF|| over 4x the idle median nails
+    # the start (validated across the sweep) and the window is the fixed KART_FLOURISH. CHAR: the
+    # jump's magnitude scales with body size and a baby-size character never clears the burst threshold
     # (the scan then ran on to the SWAP to the next captured item) — so take the first SUSTAINED
     # low-recurrence run instead, which is size-free and covers windup -> jump -> landing
     # (anim length varies per character: wario's laugh outruns mario's 48f jump). The run is
@@ -325,12 +340,21 @@ def find_segments(clip):
         if fs >= len(jump) - 1:                     # burst not in the feature window -> band edge
             fs = b + 1
         fe = fs + (KART_FLOURISH if kart else CHAR_FLOURISH)
-    fe = min(fe, max(fade_start(bg, a, b), fs + 1))          # never include fade-out frames
+    fe = clamp_flourish_end(fe, fade_start(bg, a, b), len(bg), fs)   # never include fade-out frames
 
     segs = {"idle": (start, start + P), "flourish": (fs, fe)}
     if spawn:
         segs["spawn"] = spawn
     return segs, fps, kart
+
+
+def _fresh_dir(d):
+    """Recreate d empty. Segment dirs are numbered from 000, so re-extracting a SHORTER span
+    over a previous run would otherwise leave the old tail frames behind (stale 062/063 put the
+    recorder fade back into a 62f flourish) — downstream globs *.png and can't tell."""
+    import shutil
+    shutil.rmtree(d, ignore_errors=True)
+    os.makedirs(d)
 
 
 def extract_segments(clip, out_base, name):
@@ -343,7 +367,7 @@ def extract_segments(clip, out_base, name):
             want.setdefault(f, []).append((seg, f - s))
     dirs = {seg: os.path.join(out_base, f"{name}__{seg}") for seg in segs}
     for d in dirs.values():
-        os.makedirs(d, exist_ok=True)
+        _fresh_dir(d)
     cap = cv2.VideoCapture(clip)
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)); h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     x1, y1, x2, y2, out_w = _prod_crop_params(w, h)

@@ -24,20 +24,48 @@ _MODEL = None
 _DEVICE = None
 
 
-def segment_bidir(is_kart, segment):
-    """Direction rule for one segment's matte. The KART FLOURISH runs bidirectional: its backward
-    anchor is the settled, plate-free end pose (birefnet's best case) and forward-only propagation
-    heals real see-through holes shut by the tail — measured on wario pirate buggybud's ring
-    (tail alpha 1.000 fwd -> 0.103 bidir, 2026-07-02) — which then pops when the viewer hands off
-    to the idle loop. Spawn/idle/char segments stay forward-only: the position-weighted crossfade
-    can bleed backward-anchor mistakes in toward the end of a loop (a correct hole fading to
-    filled). MATTE_MATANYONE_BIDIR=1/0 forces bidir/forward-only for EVERY segment."""
+def segment_direction(is_kart, segment):
+    """Direction rule for one segment's matte -> "fwd" | "bwd" | "split" | "bidir".
+
+    KART SPAWN = "bwd": the settled LAST frame is pose-continuous with idle f0 (birefnet anchor
+    disagreement 639-1558px vs 12k-22k for the mid-drop first frame), so backward propagation puts
+    the accurate end at the spawn->idle handoff and pushes drift into the fast-motion drop-in.
+    KART FLOURISH = "split" (fwd first part, bwd second part, seam-searched hard switch): the
+    pure-bwd tail holds see-through holes fully open (wario ring 0.00 vs 1.000 fwd / 0.10 bidir-
+    crossfade ghost) and hands off cleanly into idle; the switch pop is an order of magnitude
+    below the spin's natural per-frame alpha motion (median ~12.5k px/frame vs 3-3.7k, and ~0 at
+    the seam-searched frame). No blending anywhere, so neither pass's drift can cross the seam.
+    Everything else (idle loops, all char segments) = "fwd": forward-only from the birefnet
+    anchor. MATTE_MATANYONE_BIDIR=1/0 forces bidir/forward-only for EVERY segment."""
     env = os.environ.get("MATTE_MATANYONE_BIDIR", "")
     if env == "1":
-        return True
+        return "bidir"
     if env == "0":
-        return False
-    return bool(is_kart) and segment == "flourish"
+        return "fwd"
+    if is_kart and segment == "spawn":
+        return "bwd"
+    if is_kart and segment == "flourish":
+        return "split"
+    return "fwd"
+
+
+def split_seam(fwd, bwd, thresh=0.5):
+    """Pick the switch frame for the split merge: the index t in the MIDDLE THIRD [n//3, n-n//3)
+    where fwd[t] and bwd[t] disagree the least (px count of |fwd-bwd| > thresh). Both passes are
+    near their anchors' truth at their own end and drifted at the other, so the middle is where
+    they overlap best; bounding the search keeps the pure-fwd head and pure-bwd tail guarantees.
+    Segments shorter than 6 frames just cut at the midpoint."""
+    n = len(fwd)
+    if n < 6:
+        return n // 2
+    lo, hi = n // 3, n - n // 3
+    counts = [int((np.abs(fwd[t] - bwd[t]) > thresh).sum()) for t in range(lo, hi)]
+    return lo + int(np.argmin(counts))
+
+
+def merge_split(fwd, bwd, t):
+    """Hard-switch merge: fwd frames before t, bwd frames from t on."""
+    return list(fwd[:t]) + list(bwd[t:])
 
 
 def merge_bidir(fwd, bwd):
@@ -117,18 +145,32 @@ def _propagate(frames_bgr, mask_u8, n_warmup=10, r_erode=10, r_dilate=10):
     return _run()
 
 
-def matte_segment(frames_bgr, first_mask_u8, last_mask_u8, warmup=10, erode=10, dilate=10, bidir=True):
+def matte_segment(frames_bgr, first_mask_u8, last_mask_u8, warmup=10, erode=10, dilate=10,
+                  direction="fwd"):
     """Matte one segment. frames_bgr: predark input frames (list of HxWx3 BGR uint8, in order).
-    first_mask_u8 / last_mask_u8: birefnet BINARY masks (0/255) of the first / last frame. Returns a
-    list of HxW float01 alpha. bidir=True: forward + reversed-backward, position-weighted merge
-    (bidir_prep.py + bidir_merge.py). bidir=False: forward-only (the originally-accepted recipe — no
-    fwd/bwd blend, so no per-frame merge shimmer on fine edges; last_mask unused)."""
+    first_mask_u8 / last_mask_u8: birefnet BINARY masks (0/255) of the first / last frame (pass the
+    one your direction needs; the other may be a copy). Returns a list of HxW float01 alpha.
+
+    direction (see segment_direction for the per-segment rule + evidence):
+      "fwd"   forward from first_mask (last_mask unused)
+      "bwd"   backward from last_mask over reversed frames, un-reversed (first_mask unused)
+      "split" both passes, hard switch at the seam-searched min-disagreement frame — pure-fwd
+              head, pure-bwd tail, no blending
+      "bidir" both passes, position-weighted crossfade (legacy; can bleed each anchor's mistakes
+              toward the other end — kept for the MATTE_MATANYONE_BIDIR=1 escape hatch)"""
+    if direction == "fwd":
+        return _propagate(frames_bgr, first_mask_u8, warmup, erode, dilate)
+    if direction == "bwd":
+        return list(reversed(_propagate(list(reversed(frames_bgr)), last_mask_u8,
+                                        warmup, erode, dilate)))
     fwd = _propagate(frames_bgr, first_mask_u8, warmup, erode, dilate)
-    if not bidir:
-        return fwd
-    bwd_rev = _propagate(list(reversed(frames_bgr)), last_mask_u8, warmup, erode, dilate)
-    bwd = list(reversed(bwd_rev))                                # un-reverse to frame order
-    return merge_bidir(fwd, bwd)
+    bwd = list(reversed(_propagate(list(reversed(frames_bgr)), last_mask_u8,
+                                   warmup, erode, dilate)))
+    if direction == "split":
+        return merge_split(fwd, bwd, split_seam(fwd, bwd))
+    if direction == "bidir":
+        return merge_bidir(fwd, bwd)
+    raise ValueError(f"unknown matte direction {direction!r}")
 
 
 # ── persistent worker client (runs matte_segment in a SEPARATE torch process) ──────────────────
@@ -174,7 +216,7 @@ def _reset_worker():
 
 
 def matte_segment_worker(frames_bgr, first_mask_u8, last_mask_u8, warmup=10, erode=10, dilate=10,
-                         bidir=True):
+                         direction="fwd"):
     """Same contract as matte_segment, but the propagation runs in the worker process. Hands frames
     + masks over via a temp dir and reads the alpha PNGs back."""
     import json
@@ -193,7 +235,7 @@ def matte_segment_worker(frames_bgr, first_mask_u8, last_mask_u8, warmup=10, ero
         cv2.imwrite(lp, last_mask_u8)
         out_dir = os.path.join(work, "out")
         job = {"frames_dir": fdir, "first": fp, "last": lp, "out_dir": out_dir,
-               "warmup": warmup, "erode": erode, "dilate": dilate, "bidir": bidir}
+               "warmup": warmup, "erode": erode, "dilate": dilate, "direction": direction}
         r = _run_job_with_retry(job)                            # respawns the worker on death/CUDA error
         return [cv2.imread(os.path.join(out_dir, f"{i:03d}.png"),
                            cv2.IMREAD_GRAYSCALE).astype(np.float32) / 255.0

@@ -71,3 +71,36 @@ def test_first_sustained_dip_skips_blinks():
 def test_first_sustained_dip_none_returns_none():
     r = np.ones(300)
     assert el.first_sustained_dip(r, 20, 240) is None
+
+
+def test_kart_flourish_excludes_recorder_fade_frames():
+    # The in-game kart flourish is 64f but the sweep recording's fade-out owns the last 2
+    # (measured f62/f63 dimming on all 4 dirval karts) -> the fixed window stops at 62.
+    assert el.KART_FLOURISH == 62
+
+
+def test_clamp_flourish_end_backs_off_detected_fade():
+    # fade_start's 0.5-luma corner gate fires ~2f after the brighter subject visibly dims,
+    # so the clamp must back the detected fade off by the guard.
+    assert el.clamp_flourish_end(fe=64, fade=60, n=200, fs=0) == 58
+
+
+def test_clamp_flourish_end_without_fade_leaves_end():
+    # fade == n means "no fade inside the decoded window": never trim against the window edge.
+    assert el.clamp_flourish_end(fe=64, fade=200, n=200, fs=0) == 64
+
+
+def test_clamp_flourish_end_keeps_at_least_one_frame():
+    assert el.clamp_flourish_end(fe=10, fade=1, n=200, fs=5) == 6
+
+
+def test_fresh_dir_clears_stale_frames(tmp_path):
+    # Re-extracting a SHORTER segment into a dir that already holds a longer run must not
+    # leave the old tail behind (a stale 062/063 put the recorder fade back into a 62f
+    # flourish); _fresh_dir gives extract_segments an empty dir every time.
+    d = tmp_path / "seg"
+    d.mkdir()
+    (d / "063.png").write_bytes(b"stale")
+    el._fresh_dir(str(d))
+    import os
+    assert os.path.isdir(str(d)) and os.listdir(str(d)) == []
