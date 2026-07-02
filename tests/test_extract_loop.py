@@ -49,3 +49,25 @@ def test_fade_start_ignores_single_corner_occlusion():
 def test_fade_start_no_fade_in_window_returns_length():
     bg = np.full((200, 2), 100.0)
     assert el.fade_start(bg, 30, 150) == 200
+
+
+def test_first_sustained_dip_finds_flourish_run():
+    # Char flourish = a LONG non-recurring run after the band; magnitude-free so a tiny
+    # character (baby_mario) triggers it just like a big one. Returns the full half-open
+    # run (windup -> jump -> landing).
+    r = np.ones(400)
+    r[250:320] = 0.6              # the jump: 70 low-recurrence frames
+    assert el.first_sustained_dip(r, 20, 240) == (250, 320)
+
+
+def test_first_sustained_dip_skips_blinks():
+    # A blink is a SHORT dip (<10f) — must not read as the flourish start.
+    r = np.ones(400)
+    r[250:257] = 0.6              # blink
+    r[300:370] = 0.55             # the real jump
+    assert el.first_sustained_dip(r, 20, 240) == (300, 370)
+
+
+def test_first_sustained_dip_none_returns_none():
+    r = np.ones(300)
+    assert el.first_sustained_dip(r, 20, 240) is None

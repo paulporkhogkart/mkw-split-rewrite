@@ -134,6 +134,32 @@ def seam_start(F, a, b, P):
     return best_s
 
 
+def first_sustained_dip(r, a, b, drop=0.05, min_run=16):
+    """(start, end) of the first at/after-band run where the recurrence r stays below the
+    idle plateau for >= min_run frames = the character's one-shot flourish. Recurrence is
+    magnitude-free (unit-vector cosine), so a tiny character's jump registers exactly like
+    a big one — unlike a motion-burst threshold, which baby-size characters never clear
+    (their scan then ran on to the SWAP to the next captured item). A blink is a <10f dip
+    by the band's own gap-close rule, so min_run=16 skips it. The run covers windup ->
+    jump -> landing (it ends where recurring idle resumes); half-open end. None when no
+    dip is found in the window."""
+    plateau = float(np.median(r[a:b]))
+    lo = r < (plateau - drop)
+    k = b
+    n = len(r)
+    while k < n:
+        if lo[k]:
+            j = k
+            while j + 1 < n and lo[j + 1]:
+                j += 1
+            if (j - k + 1) >= min_run:
+                return k, j + 1
+            k = j + 1
+        else:
+            k += 1
+    return None
+
+
 def fade_start(bg, a, b, thr=_FADE_THR):
     """First frame at/after the idle-band end where BOTH backdrop corners deviate from
     their idle baseline = the scene fade-out (a subject crossing one corner is not a fade).
@@ -208,7 +234,29 @@ def _prod_crop_params(w, h):
 # karts apart -- and the flourish is the fixed in-game anim length after the band (bg-independent).
 _SWAP_ROI_720 = (760, 90, 1230, 560)     # generous hero box @720p; scaled to the clip resolution
 KART_FLOURISH = 64
-CHAR_FLOURISH = 48
+CHAR_FLOURISH = 48          # burst-fallback length when no recurrence dip is found
+CHAR_FLOURISH_MAX = 64      # cap on the dip run (pre-swap frames can't fully recover)
+
+
+def _colour_feats(clip, wh, upto):
+    """24x24 BGR colour features of the swap ROI for frames [0, upto) (sequential decode —
+    HEVC seek is flaky). Colour is the swap discriminator: grayscale can't tell two karts
+    (or a char vs char-in-kart) apart."""
+    w, h = wh
+    rx, ry = w / 1280.0, h / 720.0
+    x1, y1, x2, y2 = (int(_SWAP_ROI_720[0] * rx), int(_SWAP_ROI_720[1] * ry),
+                      int(_SWAP_ROI_720[2] * rx), int(_SWAP_ROI_720[3] * ry))
+    cap = cv2.VideoCapture(clip)
+    C, idx = [], 0
+    while idx < upto:
+        ok, fr = cap.read()
+        if not ok:
+            break
+        C.append(cv2.resize(fr[y1:y2, x1:x2], (24, 24), interpolation=cv2.INTER_AREA)
+                 .astype(np.float32).reshape(-1))
+        idx += 1
+    cap.release()
+    return np.stack(C)
 
 
 def find_segments(clip):
@@ -233,21 +281,7 @@ def find_segments(clip):
     # ── spawn-in (KARTS only): colour-spike swap in the ~45f before idle settles ──────────────
     spawn = None
     if kart:
-        w, h = wh
-        rx, ry = w / 1280.0, h / 720.0
-        x1, y1, x2, y2 = (int(_SWAP_ROI_720[0] * rx), int(_SWAP_ROI_720[1] * ry),
-                          int(_SWAP_ROI_720[2] * rx), int(_SWAP_ROI_720[3] * ry))
-        cap = cv2.VideoCapture(clip)               # sequential decode (HEVC seek is flaky)
-        C, idx = [], 0
-        while idx <= a:
-            ok, fr = cap.read()
-            if not ok:
-                break
-            C.append(cv2.resize(fr[y1:y2, x1:x2], (24, 24), interpolation=cv2.INTER_AREA)
-                     .astype(np.float32).reshape(-1))
-            idx += 1
-        cap.release()
-        C = np.stack(C)
+        C = _colour_feats(clip, wh, a + 1)
         w0 = max(1, a - 45)
         if len(C) > a and a - w0 >= 1:
             diffs = np.array([float(np.linalg.norm(C[t] - C[t - 1])) for t in range(w0, a)])
@@ -258,20 +292,40 @@ def find_segments(clip):
         if a - sp >= 4:
             spawn = (sp, start)                        # run through the settle to the loop start
 
-    # ── flourish START = the first motion burst after the idle band (rear-up / jump) ──────────
-    # Measured on the grayscale features F: idle bob (and the kart wheel) is small + steady; the
-    # flourish is a big pose change. Scanning from the band edge skips a character's long trailing
-    # idle to the jump; for karts the band edge already sits at the flourish so it triggers at once.
-    jump = np.concatenate([[0.0], np.linalg.norm(np.diff(F, axis=0), axis=1)])
-    idle_jump = float(np.median(jump[a:b])) if b > a else 0.0
-    thr = 4.0 * idle_jump
-    fs = b
-    while fs < len(jump) - 1 and jump[fs] <= thr:
-        fs += 1
-    if fs >= len(jump) - 1:                         # burst not in the feature window -> band edge
-        fs = b + 1
-    flen = KART_FLOURISH if kart else CHAR_FLOURISH
-    fe = min(fs + flen, max(fade_start(bg, a, b), fs + 1))   # never include fade-out frames
+    # ── flourish span after the idle band: kart = motion burst, char = recurrence dip ─────────
+    # KART: the rear-up is a big pose change — first jump ||dF|| over 4x the idle median nails
+    # the start (validated across the sweep) and the anim is a fixed 64f. CHAR: the jump's
+    # magnitude scales with body size and a baby-size character never clears the burst threshold
+    # (the scan then ran on to the SWAP to the next captured item) — so take the first SUSTAINED
+    # low-recurrence run instead, which is size-free and covers windup -> jump -> landing
+    # (anim length varies per character: wario's laugh outruns mario's 48f jump). The run is
+    # capped at CHAR_FLOURISH_MAX because right before the swap the recurrence can't fully
+    # recover (too few idle frames left), which would otherwise bleed the run into the next item.
+    # Scanning from the band edge skips a character's long trailing idle to the jump.
+    dip = None if kart else first_sustained_dip(_smooth(recurrence(F)), a, b)
+    if dip is not None:
+        fs, fe = dip
+        fe = min(fe, fs + CHAR_FLOURISH_MAX)
+        # The char's landing->swap gap can be too short for the recurrence to recover, so the
+        # dip run (and even the cap) can reach the SWAP to the next captured item. Bound the end
+        # at the tail colour spike = the swap crossfade (mario's kart showed inside his jump span).
+        C = _colour_feats(clip, wh, len(F))
+        if len(C) > fs + 2:
+            diffs = np.array([float(np.linalg.norm(C[t] - C[t - 1])) for t in range(fs + 1, len(C))])
+            swap = fs + 1 + int(np.argmax(diffs))
+            if float(diffs.max()) > 4.0 * float(np.median(diffs) + 1e-6):   # a real spike, not noise
+                fe = min(fe, swap - 2)                 # crossfade blends a couple of frames early
+    else:
+        jump = np.concatenate([[0.0], np.linalg.norm(np.diff(F, axis=0), axis=1)])
+        idle_jump = float(np.median(jump[a:b])) if b > a else 0.0
+        thr = 4.0 * idle_jump
+        fs = b
+        while fs < len(jump) - 1 and jump[fs] <= thr:
+            fs += 1
+        if fs >= len(jump) - 1:                     # burst not in the feature window -> band edge
+            fs = b + 1
+        fe = fs + (KART_FLOURISH if kart else CHAR_FLOURISH)
+    fe = min(fe, max(fade_start(bg, a, b), fs + 1))          # never include fade-out frames
 
     segs = {"idle": (start, start + P), "flourish": (fs, fe)}
     if spawn:
