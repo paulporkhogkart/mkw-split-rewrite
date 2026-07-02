@@ -41,8 +41,32 @@ def test_gap_carved_on_idle():
     for a in out:
         assert a[30, 37] == 0.0                             # gap centre now transparent
     assert all(c >= 100 for c in carved)                    # ~14x10 gap
-    # and consistently so (the alpha flicker is gone): same carve every frame
-    assert len({c for c in carved}) <= 2
+    # ONE global mask: the exact same carve every frame (flicker impossible)
+    assert len({c for c in carved}) == 1
+
+
+def test_idle_mask_stable_even_when_engine_alpha_flickers():
+    # The engine alpha popping 0<->1 in the gap (the observed defect) must still yield a
+    # constant carve: any-frame alpha support feeds the global mask.
+    alphas, raws = _stack()
+    for i, a in enumerate(alphas):
+        if i % 2 == 0:
+            a[25:35, 30:44] = 0.0                           # engine already carved these frames
+    out, carved = cg.carve_gaps(alphas, raws, _backdrop(), temporal_gate=True)
+    assert len({c for c in carved}) == 1
+    for a in out:
+        assert a[30, 37] == 0.0                             # transparent in EVERY frame
+
+
+def test_oscillating_borderline_match_never_carved_per_frame():
+    # spawn/flourish: a subject patch that matches the backdrop only on alternating frames
+    # (threshold noise) must never carve — per-frame decisions used to flicker here.
+    alphas, raws = _stack(jitter=False, gap=False)
+    for i, r in enumerate(raws):
+        r[30:40, 20:40] = BG_VAL if i % 2 == 0 else KART_VAL    # match, miss, match, miss...
+    out, carved = cg.carve_gaps(alphas, raws, _backdrop(), temporal_gate=False)
+    assert all(c == 0 for c in carved)
+    assert out[0][35, 30] == 1.0
 
 
 def test_subject_kept():

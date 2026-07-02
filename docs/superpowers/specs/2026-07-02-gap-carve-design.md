@@ -50,6 +50,26 @@ gap's component mean-std was 0.66 vs ≥ 0.90 for every false candidate → `CAR
 0.8`. With these gates the idle carve heat map reduces to exactly the real gap; the worst
 spawn/flourish frames show no visible subject damage.
 
+## v2 — per-segment decisions (flicker fix)
+
+v1 made carve decisions independently PER FRAME with hard thresholds; kart parts near the
+backdrop colour flipped in/out with codec noise (user-observed flicker; measured on hot_rod
+spawn: ≥4-transition pixels 1845 vs 847 pre-carve). v2 makes every decision ONCE PER
+SEGMENT, so carve flicker is structurally impossible:
+
+- **Idle**: one global mask from temporal aggregates (per-pixel *median* diff, static gate,
+  any-frame alpha support, component gates on the aggregate) applied identically to every
+  frame. Idle carve px/frame is now literally constant.
+- **Spawn/flourish**: a pixel qualifies only while it matches the backdrop for ≥
+  `CARVE_RUN = 4` consecutive frames (noise can't sustain a run), and each spatial
+  component (projected over the segment) gets one keep/drop verdict from the median diff
+  over its whole space-time support. Pixels enter/leave only at real occlusion boundaries.
+
+Verified: hot_rod spawn ≥4-transition pixels 698 (below the 847 pre-carve baseline); across
+all 13 sweep clips no segment exceeds baseline due to carve — the two segments above
+baseline measure IDENTICAL flicker with `MATTE_CARVE=0` on the same engine run (engine
+variance, not carve). Defect fixes retained (idle f115 rect alpha 0.02, constant).
+
 Raw (pre-predark) frames are used for the diff — predark repaints the nameplate band and must
 not perturb the comparison; frames are re-read from `raw_paths` (already on disk).
 
