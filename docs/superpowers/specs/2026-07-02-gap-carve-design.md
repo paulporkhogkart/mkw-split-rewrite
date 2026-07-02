@@ -35,10 +35,20 @@ Per segment:
    per-frame backdrop match + component gates alone.
 3. **Candidates:** `carve_i = bgmatch_i & (alpha_i > 0) [& static]`.
 4. **Component gates** (per frame): drop connected components `< CARVE_MIN_AREA` px
-   (speckle); keep components whose *mean* diff is low (mirrors `_repair_holes`' mean-decides
-   rule, guards against grazing bg-coloured subject edges).
+   (speckle); keep only components whose **median** diff is at the clip's codec-noise floor
+   (`CARVE_MED_DIFF`) — a true gap IS the plate, so its median tracks the floor, while a
+   dark kart part merely *near* a dark backdrop sits measurably higher; on idle additionally
+   require the component's mean temporal std ≤ `CARVE_COMP_STD`.
 5. **Apply + feather:** `alpha_i = min(alpha_i, 1 − blur3(carve_i))` — carved region goes to
    0 with a ~1px soft edge.
+
+**Measured tuning (hot_rod, dark set):** outside-background noise floors 2.45–3.0; true gap
+components median 2.45–3.74 (incl. two *additional* real gaps the pass found on its own:
+Mario's arm-body gap and the steering-wheel ring); harmful coincidental matches (engine
+intake slots, grille stripe, skirt shadows) ≥ 4.4 → `CARVE_MED_DIFF = 4.0`. On idle the true
+gap's component mean-std was 0.66 vs ≥ 0.90 for every false candidate → `CARVE_COMP_STD =
+0.8`. With these gates the idle carve heat map reduces to exactly the real gap; the worst
+spawn/flourish frames show no visible subject damage.
 
 Raw (pre-predark) frames are used for the diff — predark repaints the nameplate band and must
 not perturb the comparison; frames are re-read from `raw_paths` (already on disk).
@@ -53,8 +63,9 @@ under-arm gaps too); the sweep check below validates both, and the char haze-blo
 doesn't transfer (that was the additive direction with percentile-normalised soft-diff — the
 carve uses a tight absolute threshold).
 
-**Config:** module constants `CARVE_THR = 12`, `CARVE_STD_THR = 2.0`, `CARVE_MIN_AREA = 25`
-(tuned during validation on the real defect), env kill switch `MATTE_CARVE=0`.
+**Config:** module constants `CARVE_THR = 12`, `CARVE_MED_DIFF = 4.0`, `CARVE_STD_THR =
+2.0`, `CARVE_COMP_STD = 0.8`, `CARVE_MIN_AREA = 25` (tuned on the real defects, see above),
+env kill switch `MATTE_CARVE=0`.
 
 ## Failure analysis
 
