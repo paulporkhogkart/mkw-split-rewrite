@@ -4,6 +4,7 @@ import type { Env } from './app';
 import { activeSeasonId, listSeasons, courseIdBySlug } from '../db/seasons';
 import { slugify } from '../db/slug';
 import { courseLeaderboard, overallLeaderboard, friendsPbs, playerPbs, currentWr, myPbs, myPbSplits, courseTrails, roster, playerTrails, territoryOwners, territoryTimeline } from '../db/reads';
+import { playerSummary } from '../db/playerSummary';
 import type { TrailMode } from '../db/reads';
 import { requireToken } from './auth';
 import { playerByToken } from '../db/players';
@@ -27,6 +28,10 @@ export function readsRoutes(db: DatabaseSync): Hono<Env> {
     return c.json(friendsPbs(db, season(c), cid, num(c.req.query('cc'), 150)));
   });
   r.get('/v1/players/:id/pbs', (c) => c.json(playerPbs(db, season(c), Number(c.req.param('id')), num(c.req.query('cc'), 150))));
+  r.get('/v1/players/:slug', (c) => {
+    const s = playerSummary(db, season(c), num(c.req.query('cc'), 150), c.req.param('slug'));
+    return s ? c.json(s) : c.json({ error: 'unknown player' }, 404);
+  });
   r.get('/v1/world-records', (c) => {
     const cid = course(c); if (cid === null) return c.json({ error: 'unknown course' }, 400);
     return c.json(currentWr(db, cid, num(c.req.query('cc'), 150)));

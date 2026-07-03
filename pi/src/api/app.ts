@@ -38,9 +38,12 @@ export function createApp(db: DatabaseSync, hub: EventHub,
   const PUBLIC_READS = ['/v1/leaderboard', '/v1/world-records', '/v1/roster', '/v1/territory', '/v1/territory/timeline', '/v1/version', '/v1/activity'];
   const readCors = cors({ origin: '*', allowMethods: ['GET'] });
   for (const p of PUBLIC_READS) app.use(p, readCors);
+  app.use('/v1/players/:slug', readCors);   // single-segment player summary is public
 
   const OPEN = new Set(['/health', '/v1/events', '/v1/presence', '/v1/activity/stream', ...PUBLIC_READS]);
-  app.use('*', (c, next) => (OPEN.has(c.req.path) ? next() : requireTokenAny(db)(c, next)));
+  const PLAYER_SUMMARY = /^\/v1\/players\/[^/]+$/;   // NOT /v1/players/:id/pbs|trails (two segments — stay gated)
+  const isOpen = (path: string) => OPEN.has(path) || PLAYER_SUMMARY.test(path);
+  app.use('*', (c, next) => (isOpen(c.req.path) ? next() : requireTokenAny(db)(c, next)));
   const activity = opts?.activity ?? new ActivityHub();
   // A default no-op tracker keeps runsRoutes working in tests; server.ts passes the real one
   // (shared with presence) so attempts land on the presence-opened racing session.

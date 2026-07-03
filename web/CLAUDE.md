@@ -22,13 +22,16 @@ runs `npm --prefix web run build` on each tagged deploy.
 
 - `main.js` → mounts `App.svelte` + `startPresence(API_BASE)`.
 - `App.svelte` — shell + navbar, **History-API routing** (no hash) via `lib/view.js`:
-  `/` → Live (`CardWall`), `/turf` → `WorldMap`, plus URL-only `/heat` (`HeatGraph`) and
-  `/version` (`VersionPage`).
+  `/` → Live (`CardWall`), `/turf` → `WorldMap`, `/players` → `PlayersIndex` (roster grid) /
+  `/players/:slug` → `PlayerProfile`, plus URL-only `/heat` (`HeatGraph`) and `/version`
+  (`VersionPage`). `view.js` also exports `playerSlugFromPath` (the `:slug` for the profile).
 - Components: `CardWall`, `WorldMap`, `MapFireLayer`, `TurfLeaderboard`, `HeatGraph`,
-  `TimelineScrubber`, `ActivityLog`, `CoursePopup`, `VersionPage`.
+  `TimelineScrubber`, `ActivityLog`, `CoursePopup`, `VersionPage`, `PlayersIndex`,
+  `PlayerProfile`, `StrategyPanel` (GOLF/TURF/TIME toggle on a player profile).
 - `lib/` — `api.js` (API base + URL builders), `turf.js` / `territory*.js`, `timeline.js`,
-  `heat.js`, `map.js`, `fireModel.js`/`onFire.js`, `chips.js`, `Wordmark*.svelte`. WS clients:
-  `presenceClient.js`, `activityClient.js`.
+  `heat.js`, `map.js`, `fireModel.js`/`onFire.js`, `strategy.js` (GOLF/TURF/TIME sorts, reuses
+  `fireModel.fireBarPct`), `playerSlug.js` (mirrors the Pi `slugify`), `chips.js`,
+  `Wordmark*.svelte`. WS clients: `presenceClient.js`, `activityClient.js`.
 - **Shares desktop code:** imports from `../../src/` (root `src/lib/` — `stores.js`, `presence.js`,
   `theme.css`, `PlayerCard`, `playerFigures`, `playerKey`). `vite.config.js` sets
   `server.fs.allow:['..']` so dev can read one dir up. Editing those root files affects BOTH the
@@ -38,7 +41,9 @@ runs `npm --prefix web run build` on each tagged deploy.
 
 - `API_BASE` = `VITE_API_BASE`, else `http://127.0.0.1:8787` in dev, else `https://api.thekartoff.com`.
 - Only hits token-free `PUBLIC_READS` (`/v1/territory`, `/v1/territory/timeline`, `/v1/version`,
-  `/v1/activity`) + receive-only WS (`/v1/presence`, `/v1/activity/stream`).
+  `/v1/activity`, `/v1/roster`, and `/v1/players/:slug` — the public player summary, opened by a
+  single-segment regex exception in `pi/src/api/app.ts`, NOT the token-gated `/v1/players/:id/pbs`)
+  + receive-only WS (`/v1/presence`, `/v1/activity/stream`).
 
 ## Visual work — read `../CLAUDE.md` conventions + note
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { viewFromPath } from "./view.js";
+import { viewFromPath, playerSlugFromPath } from "./view.js";
 
 describe("viewFromPath", () => {
   it("defaults to the live card wall at the root or an unknown path", () => {
@@ -16,5 +16,17 @@ describe("viewFromPath", () => {
   });
   it("returns version for the unlisted /version path", () => {
     expect(viewFromPath("/version")).toBe("version");
+  });
+});
+
+describe("players routing", () => {
+  it("routes /players and /players/:slug to the players view", () => {
+    expect(viewFromPath("/players")).toBe("players");
+    expect(viewFromPath("/players/paul")).toBe("players");
+  });
+  it("extracts the slug (null on the index)", () => {
+    expect(playerSlugFromPath("/players")).toBeNull();
+    expect(playerSlugFromPath("/players/paul")).toBe("paul");
+    expect(playerSlugFromPath("/turf")).toBeNull();
   });
 });
