@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Turf — figure masked to card, head pops</title>
+<style>
+@font-face{font-family:'Inter';font-weight:700;font-display:swap;src:url('assets/inter-700.woff2') format('woff2');}
+@font-face{font-family:'Inter';font-weight:800;font-display:swap;src:url('assets/inter-800.woff2') format('woff2');}
+@font-face{font-family:'Inter';font-weight:900;font-display:swap;src:url('assets/inter-900.woff2') format('woff2');}
+:root{
+  --bg:#141517;--panel:#202023;--bd:#34353a;--feed-bg:#0b0c0e;--tx:#d9dadd;--tx-mut:#9a9ca1;--tx-dim:#6b6d73;
+  --gub:#38bdf8;--aliias:#4ade80;--paul:#a78bfa;--luke:#f87171;--alex:#fbbf24;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--tx);font-family:'Inter',system-ui,sans-serif;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased;padding:26px 22px 90px}
+.intro{max-width:1180px;margin:0 auto 22px}
+.intro h1{font-weight:900;font-size:23px;letter-spacing:-.02em;color:#f3f4f6}
+.intro p{color:var(--tx-mut);font-size:13.5px;line-height:1.55;margin-top:7px;max-width:900px}
+.intro b{color:var(--tx)}
+.pagemock{position:relative;max-width:1180px;margin:0 auto 26px;background:#0e0f11;border:1px solid var(--bd);border-radius:8px;overflow:hidden}
+.caption{display:flex;align-items:baseline;gap:12px;padding:13px 16px 12px;border-bottom:1px solid #1e1f22}
+.caption .k{font-weight:900;font-size:12px;letter-spacing:.14em;color:#ff4438}
+.caption .nm{font-weight:800;font-size:15px;letter-spacing:-.01em;color:#f3f4f6}
+.caption .dsc{color:var(--tx-mut);font-size:12px;font-weight:600}
+.stage{position:relative;height:720px;background:var(--bg);display:flex;flex-direction:column}
+.appbar{flex:0 0 44px;display:flex;align-items:center;gap:26px;padding:0 18px;border-bottom:1px solid var(--bd)}
+.logo{font-weight:900;font-size:15px;letter-spacing:-.02em;color:#f3f4f6}
+.logo .off{background:#ff4438;color:#141517;padding:1px 4px 2px;border-radius:2px;margin-left:1px}
+.appbar .t{font-weight:700;font-size:11px;letter-spacing:.15em;text-transform:uppercase;color:var(--tx-mut)}
+.appbar .t.on{color:#f3f4f6}
+.console{display:flex;align-items:center;gap:13px;background:var(--panel);border:1px solid var(--bd);border-radius:4px;padding:8px 13px;margin:12px 14px 0}
+.play{width:26px;height:26px;border-radius:4px;background:#26272b;border:1px solid var(--bd);display:grid;place-items:center;flex:0 0 auto}
+.play::before{content:"";border-left:9px solid #d9dadd;border-top:6px solid transparent;border-bottom:6px solid transparent;margin-left:2px}
+.track{position:relative;flex:1;height:4px;border-radius:2px;background:#27282b}
+.track .fill{position:absolute;left:0;top:0;bottom:0;width:78%;background:#ffffff2e;border-radius:2px}
+.track .tk{position:absolute;top:-3px;width:2px;height:10px;border-radius:1px;opacity:.6}
+.tstamp{flex:0 0 auto;font-weight:700;font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--tx-mut)}
+.appbody{flex:1;display:flex;min-height:0;padding:12px 14px 14px;gap:14px}
+.maparea{flex:1;min-width:0}
+.mapframe{position:relative;width:100%;height:100%;border:1px solid var(--bd);border-radius:4px;overflow:hidden;background:var(--feed-bg)}
+.mapframe img{width:100%;height:100%;object-fit:cover;filter:saturate(.82) brightness(.8)}
+.mapframe::after{content:"";position:absolute;inset:0;box-shadow:inset 0 0 70px 12px rgba(0,0,0,.5);pointer-events:none}
+.datestamp{position:absolute;top:10px;right:12px;text-align:right;text-shadow:0 1px 8px rgba(0,0,0,.9)}
+.datestamp .d{font-weight:700;font-size:12px;letter-spacing:.15em;text-transform:uppercase;color:#f3f4f6}
+.datestamp .t2{font-weight:600;font-size:11px;letter-spacing:.13em;color:#b9bbc0}
+.turfcol{flex:0 0 172px}
+.stack{display:flex;flex-direction:column;align-items:flex-end;gap:10px;height:100%}
+.rp{position:relative;width:160px;height:110px;overflow:visible}
+.rp.zero{filter:saturate(.32) brightness(.72)}   /* 0% turf: muted section, a hint of colour left */
+.ck,.cf{position:absolute;inset:0}
+.ck{background:var(--c);opacity:.92}                 /* the offset colour border on two edges */
+.cf{background:#191a1d}
+.cf.dot::after{content:"";position:absolute;inset:0;opacity:.16;background-image:radial-gradient(circle,var(--c) 1px,transparent 1.5px);background-size:7px 7px}
+/* figure MASKED to the card shape (sides+bottom cut to the border), TOP OPEN so the head pops */
+.figmask{position:absolute;inset:0;z-index:3}
+.figmask img{position:absolute;bottom:-6px;height:138px;filter:drop-shadow(-1px 3px 4px rgba(0,0,0,.45))}
+.num{position:absolute;top:10px;z-index:5;font-weight:900;font-style:italic;color:#fff;font-size:44px;line-height:.66;letter-spacing:-.045em;
+  -webkit-text-stroke:2.2px #101114;paint-order:stroke fill;text-shadow:3px 3px 0 var(--c),1px 2px 0 rgba(0,0,0,.5);white-space:nowrap}
+.num.L{left:11px}.num.R{right:11px}
+.num .d{display:inline-block}
+.num .pc{display:inline-block;color:var(--c);font-size:.5em;-webkit-text-stroke:1.2px #101114;text-shadow:2px 2px 0 rgba(0,0,0,.5)}
+.name{position:absolute;top:47px;z-index:6;font-weight:900;font-style:italic;background:var(--c);color:#101114;padding:2px 7px 3px;letter-spacing:.01em;font-size:11px;box-shadow:1.5px 1.5px 0 rgba(0,0,0,.45);white-space:nowrap}
+.name.L{left:12px}.name.R{right:12px}
+/* card shapes (slab + colour border) */
+.j1{clip-path:polygon(3% 2%,30% 0,66% 4%,100% 0,96% 46%,99% 84%,70% 96%,40% 85%,14% 98%,0 82%,4% 44%)}
+.j2{clip-path:polygon(0 5%,34% 0,70% 6%,100% 2%,95% 50%,100% 88%,66% 94%,36% 88%,8% 97%,3% 52%)}
+.j3{clip-path:polygon(5% 0,40% 5%,72% 0,100% 6%,94% 84%,58% 100%,24% 88%,0 96%,6% 40%)}
+.j4{clip-path:polygon(6% 3%,100% 0,96% 40%,100% 92%,46% 100%,8% 90%,0 30%,5% 12%)}
+.j5{clip-path:polygon(2% 0,100% 6%,96% 52%,88% 100%,0 92%,6% 40%)}
+/* SAME shapes but the top edge opened upward (-40%) so the head protrudes while sides+bottom stay cut */
+.m1{clip-path:polygon(0% -40%,100% -40%,96% 46%,99% 84%,70% 96%,40% 85%,14% 98%,0 82%,4% 44%)}
+.m2{clip-path:polygon(0% -40%,100% -40%,95% 50%,100% 88%,66% 94%,36% 88%,8% 97%,3% 52%)}
+.m3{clip-path:polygon(0% -40%,100% -40%,94% 84%,58% 100%,24% 88%,0 96%,6% 40%)}
+.m4{clip-path:polygon(0% -40%,100% -40%,96% 40%,100% 92%,46% 100%,8% 90%,0 30%,5% 12%)}
+.m5{clip-path:polygon(0% -40%,100% -40%,96% 52%,88% 100%,0 92%,6% 40%)}
+</style>
+</head>
+<body>
+<div class="intro">
+  <h1>Figure masked to the card — protruding sides/bottom cut, head pops the top</h1>
+  <p>The card keeps its offset <b>colour border</b> on two edges. Each figure is now <b>masked to the card's shape</b>, so any part that would spill past that border on the <b>sides &amp; bottom is cut out</b> — only the <b>head rises over the top</b>. Reverted the figure outline (that was my misread).</p>
+</div>
+
+<div class="pagemock">
+  <div class="caption"><span class="k">✦</span><span class="nm">Figure masked to card</span>
+    <span class="dsc">sides/bottom cut to the border · head pops top</span></div>
+  <div class="stage">
+    <div class="appbar"><span class="logo">THE KART-<span class="off">OFF</span></span><span class="t">Live</span><span class="t on">Turf</span></div>
+    <div class="console"><span class="play"></span><div class="track"><span class="fill"></span>
+      <span class="tk" style="left:20%;background:var(--aliias)"></span><span class="tk" style="left:46%;background:var(--paul)"></span>
+      <span class="tk" style="left:63%;background:var(--gub)"></span><span class="tk" style="left:78%;background:var(--gub)"></span></div>
+      <span class="tstamp">28 Jun 2026 · 3:14 PM</span></div>
+    <div class="appbody">
+      <div class="turfcol">
+        <div class="stack">
+          <div class="rp" style="--c:var(--gub);transform:rotate(-1.6deg)">
+            <div class="ck j1" style="transform:translate(5px,5px)"></div><div class="cf dot j1"></div>
+            <div class="figmask m1"><img src="assets/gub.png" style="right:0"></div>
+            <div class="num L"><span class="d" style="transform:rotate(-4deg)">4</span><span class="d" style="transform:rotate(5deg) translateY(-5px)">3</span><span class="pc" style="transform:rotate(-2deg)">%</span></div>
+            <div class="name L">Gub</div>
+          </div>
+          <div class="rp" style="--c:var(--aliias);transform:rotate(1.4deg)">
+            <div class="ck j2" style="transform:translate(-5px,4px)"></div><div class="cf dot j2"></div>
+            <div class="figmask m2"><img src="assets/aliias.png" style="left:0"></div>
+            <div class="num R"><span class="d" style="transform:rotate(4deg) translateY(-2px)">2</span><span class="d" style="transform:rotate(-5deg) translateY(3px)">7</span><span class="pc" style="transform:rotate(2deg)">%</span></div>
+            <div class="name R">Aliias</div>
+          </div>
+          <div class="rp" style="--c:var(--paul);transform:rotate(-1.9deg)">
+            <div class="ck j3" style="transform:translate(5px,4px)"></div><div class="cf dot j3"></div>
+            <div class="figmask m3"><img src="assets/paul.png" style="right:0"></div>
+            <div class="num L"><span class="d" style="transform:rotate(-3deg)">1</span><span class="d" style="transform:rotate(6deg) translateY(-5px)">7</span><span class="pc" style="transform:rotate(-1deg)">%</span></div>
+            <div class="name L">paul pork</div>
+          </div>
+          <div class="rp" style="--c:var(--luke);transform:rotate(1.5deg)">
+            <div class="ck j4" style="transform:translate(-4px,3px)"></div><div class="cf dot j4"></div>
+            <div class="figmask m4"><img src="assets/luke.png" style="left:0"></div>
+            <div class="num R"><span class="d" style="transform:rotate(4deg)">1</span><span class="d" style="transform:rotate(-4deg) translateY(2px)">0</span><span class="pc" style="transform:rotate(2deg)">%</span></div>
+            <div class="name R">Luke</div>
+          </div>
+          <div class="rp zero" style="--c:var(--alex);transform:rotate(-1.2deg)">
+            <div class="ck j5" style="transform:translate(4px,3px)"></div><div class="cf dot j5"></div>
+            <div class="figmask m5"><img src="assets/alex.png" style="right:0"></div>
+            <div class="num L"><span class="d" style="transform:rotate(-5deg)">0</span><span class="pc" style="transform:rotate(3deg)">%</span></div>
+            <div class="name L">Alex</div>
+          </div>
+        </div>
+      </div>
+      <div class="maparea"><div class="mapframe"><img src="assets/base.jpg" alt="map"><div class="datestamp"><div class="d">28 JUN 2026</div><div class="t2">3:14 PM</div></div></div></div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

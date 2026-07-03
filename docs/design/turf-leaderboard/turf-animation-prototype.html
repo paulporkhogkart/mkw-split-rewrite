@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Turf — animation prototype</title>
+<style>
+@font-face{font-family:'Inter';font-weight:700;src:url('assets/inter-700.woff2') format('woff2');}
+@font-face{font-family:'Inter';font-weight:800;src:url('assets/inter-800.woff2') format('woff2');}
+@font-face{font-family:'Inter';font-weight:900;src:url('assets/inter-900.woff2') format('woff2');}
+:root{
+  --bg:#141517;--panel:#202023;--bd:#34353a;--tx:#d9dadd;--tx-mut:#9a9ca1;--tx-dim:#6b6d73;
+  --gub:#38bdf8;--aliias:#4ade80;--paul:#a78bfa;--luke:#f87171;--alex:#fbbf24;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--tx);font-family:'Inter',system-ui,sans-serif;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased;padding:24px 26px 60px}
+h1{font-weight:900;font-size:20px;letter-spacing:-.02em;color:#f3f4f6}
+.sub{color:var(--tx-mut);font-size:13px;margin:6px 0 16px;max-width:760px;line-height:1.5}
+.controls{display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+button{font-family:inherit;font-weight:800;font-size:12px;border-radius:6px;padding:9px 16px;cursor:pointer;border:1px solid var(--bd);background:#26272b;color:var(--tx)}
+button:hover{border-color:#4a4c52}
+button.go{background:#ff4438;border-color:#ff4438;color:#fff}
+.seg{display:inline-flex;border:1px solid var(--bd);border-radius:6px;overflow:hidden}
+.seg button{border:0;border-radius:0;background:#202023;color:var(--tx-mut);padding:9px 14px}
+.seg button.on{background:#26303c;color:#cde1f5}
+.sweepwrap{width:360px;max-width:60vw}
+.sweeplbl{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--tx-dim);margin-bottom:5px}
+.sweep{height:5px;border-radius:3px;background:#26272b;overflow:hidden}
+.sweep i{display:block;height:100%;width:0;background:linear-gradient(90deg,#4a4c52,#f3f4f6)}
+.stage{display:flex;gap:26px;align-items:flex-start}
+
+/* ===== the column ===== */
+.col{position:relative;width:172px;height:600px;flex:0 0 172px}
+.rp{position:absolute;top:0;left:12px;width:160px;height:110px;overflow:visible;
+  transition:transform .44s cubic-bezier(.5,.05,.15,1), filter .45s ease;will-change:transform}
+.rp.zero{filter:saturate(.32) brightness(.72)}
+.inner{position:absolute;inset:0}
+.ck,.cf{position:absolute;inset:0}
+.ck{background:var(--c);opacity:.92}
+.cf{background:#191a1d}
+.cf.dot::after{content:"";position:absolute;inset:0;opacity:.16;background-image:radial-gradient(circle,var(--c) 1px,transparent 1.5px);background-size:7px 7px}
+.figmask{position:absolute;inset:0;z-index:3}
+.figmask img{position:absolute;bottom:-6px;height:138px;filter:drop-shadow(-1px 3px 4px rgba(0,0,0,.45))}
+.rp.L .figmask img{right:calc(0px - var(--fx,0px))}.rp.R .figmask img{left:calc(0px - var(--fx,0px))}
+.header{position:absolute;top:9px;z-index:6;width:auto;max-width:130px}
+.rp.L .header{left:11px;text-align:left}
+.rp.R .header{right:11px;text-align:right}
+.num{display:block;font-weight:900;font-style:italic;color:#fff;font-size:44px;line-height:.66;letter-spacing:-.045em;
+  -webkit-text-stroke:2.2px #101114;paint-order:stroke fill;text-shadow:3px 3px 0 var(--c),1px 2px 0 rgba(0,0,0,.5);white-space:nowrap}
+.num .d{display:inline-block}
+.num .pc{display:inline-block;color:var(--c);font-size:.5em;-webkit-text-stroke:1.2px #101114;text-shadow:2px 2px 0 rgba(0,0,0,.5)}
+.name{display:inline-block;margin-top:4px;font-weight:900;font-style:italic;background:var(--c);color:#101114;padding:2px 7px 3px;font-size:11px;box-shadow:1.5px 1.5px 0 rgba(0,0,0,.45);white-space:nowrap}
+.streak{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:5}
+.streak b{position:absolute;top:-12%;height:124%;width:30px;transform:translateX(-160%) skewX(-14deg);
+  background:linear-gradient(90deg,transparent,var(--c),#fff,transparent);opacity:0;mix-blend-mode:screen}
+.p1{clip-path:polygon(3% 2%,30% 0,66% 4%,100% 0,96% 46%,99% 84%,70% 96%,40% 85%,14% 98%,0 82%,4% 44%)}
+.p2{clip-path:polygon(0 5%,34% 0,70% 6%,100% 2%,95% 50%,100% 88%,66% 94%,36% 88%,8% 97%,3% 52%)}
+.p3{clip-path:polygon(5% 0,40% 5%,72% 0,100% 6%,94% 84%,58% 100%,24% 88%,0 96%,6% 40%)}
+.p4{clip-path:polygon(6% 3%,100% 0,96% 40%,100% 92%,46% 100%,8% 90%,0 30%,5% 12%)}
+.p5{clip-path:polygon(2% 0,100% 6%,96% 52%,88% 100%,0 92%,6% 40%)}
+.m1{clip-path:polygon(0% -40%,100% -40%,96% 46%,99% 84%,70% 96%,40% 85%,14% 98%,0 82%,4% 44%)}
+.m2{clip-path:polygon(0% -40%,100% -40%,95% 50%,100% 88%,66% 94%,36% 88%,8% 97%,3% 52%)}
+.m3{clip-path:polygon(0% -40%,100% -40%,94% 84%,58% 100%,24% 88%,0 96%,6% 40%)}
+.m4{clip-path:polygon(0% -40%,100% -40%,96% 40%,100% 92%,46% 100%,8% 90%,0 30%,5% 12%)}
+.m5{clip-path:polygon(0% -40%,100% -40%,96% 52%,88% 100%,0 92%,6% 40%)}
+.legend{color:var(--tx-mut);font-size:12px;line-height:1.7;max-width:300px}
+.legend b{color:var(--tx)}
+.legend .k{color:#f3f4f6;font-weight:800}
+</style>
+</head>
+<body>
+<h1>Turf column — live animation prototype</h1>
+<p class="sub">Press <b>Play</b> to run a scripted capture sequence. Watch the <b>%s tick up &amp; down</b> in sync with the sweep bar (that bar stands in for the map's territory front), cards <b>slide to new ranks</b> as the counts cross, and the header/figure do a <b>kinetic side-swap</b> when a card lands on the opposite parity. Toggle the side-swap style.</p>
+
+<div class="controls">
+  <button class="go" id="play">▶ Play</button>
+  <button id="reset">Reset</button>
+  <div class="seg" id="styleseg">
+    <button data-s="slide" class="on">Swap: Slide + streak</button>
+    <button data-s="flip">Swap: Card-flip</button>
+  </div>
+  <div class="sweepwrap"><div class="sweeplbl">territory sweep (map front)</div><div class="sweep"><i id="sweepfill"></i></div></div>
+</div>
+
+<div class="stage">
+  <div class="col" id="col"></div>
+  <div class="legend">
+    <p><span class="k">Ticking</span> — the % is derived from a fractional course count, so a capture climbs e.g. 40→41→42→43 as the sweep completes; the loser ticks down the same beat.</p>
+    <p style="margin-top:10px"><span class="k">Reorder</span> — fires the instant the interpolated counts cross, so it's timed to the front reaching the deciding cell.</p>
+    <p style="margin-top:10px"><span class="k">Side-swap</span> — sides follow the slot (always alternating); on a swap the header + figure slam across (overshoot) with a color streak. No fading.</p>
+    <p style="margin-top:10px"><span class="k">0%</span> — a player who loses their last course ticks to 0 and the whole card eases to muted.</p>
+  </div>
+</div>
+
+<script>
+const P=[
+  {key:'gub',   name:'Gub',       color:'var(--gub)',    fig:'assets/gub.png',    sh:1, rot:-1.6, ox:5, oy:5, fx:0},
+  {key:'aliias',name:'Aliias',    color:'var(--aliias)', fig:'assets/aliias.png', sh:2, rot: 1.4, ox:5, oy:4, fx:12},
+  {key:'paul',  name:'paul pork', color:'var(--paul)',   fig:'assets/paul.png',   sh:3, rot:-1.9, ox:5, oy:4, fx:0},
+  {key:'luke',  name:'Luke',      color:'var(--luke)',   fig:'assets/luke.png',   sh:4, rot: 1.5, ox:5, oy:3, fx:0},
+  {key:'alex',  name:'Alex',      color:'var(--alex)',   fig:'assets/alex.png',   sh:5, rot:-1.2, ox:5, oy:3, fx:0},
+];
+const SEQ=[
+  {gub:13,aliias:8, paul:5,luke:3,alex:1},
+  {gub:9, aliias:14,paul:4,luke:2,alex:1},
+  {gub:9, aliias:12,paul:2,luke:6,alex:1},
+  {gub:5, aliias:12,paul:2,luke:6,alex:5},
+  {gub:3, aliias:10,paul:2,luke:6,alex:9},
+  {gub:5, aliias:10,paul:0,luke:6,alex:9},
+];
+const TOTAL=30, STEP=120, DUR=1150, SWAP=420;
+let swapStyle='slide', token=0, cards={}, curSlot={}, curSide={}, curPct={};
+
+const col=document.getElementById('col');
+P.forEach(p=>{
+  const el=document.createElement('div');
+  el.className='rp'; el.style.setProperty('--c',p.color);
+  el.innerHTML=`<div class="inner">
+    <div class="ck p${p.sh}"></div><div class="cf dot p${p.sh}"></div>
+    <div class="figmask m${p.sh}"><img src="${p.fig}" alt=""></div>
+    <div class="header"><span class="num"></span><span class="name">${p.name}</span></div>
+    <div class="streak p${p.sh}"><b></b></div>
+  </div>`;
+  col.appendChild(el); cards[p.key]=el;
+  el.style.setProperty('--fx',(p.fx||0)+'px');   // per-figure edge push (aliias hugs the border)
+});
+
+const ROT=[-4,5,-3,4,-5], TY=[0,-5,3,-4,2];
+function setNum(p,pct){
+  const num=cards[p].querySelector('.num');
+  let h='';
+  const s=String(pct);
+  for(let i=0;i<s.length;i++) h+=`<span class="d" style="transform:rotate(${ROT[i%5]}deg) translateY(${TY[i%5]}px)">${s[i]}</span>`;
+  h+=`<span class="pc" style="transform:rotate(2deg)">%</span>`;
+  num.innerHTML=h;
+  num.animate([{transform:'scale(1.16)'},{transform:'scale(1)'}],{duration:230,easing:'cubic-bezier(.3,1.6,.4,1)'});
+}
+function order(counts){ return P.map(p=>p.key).sort((a,b)=> counts[b]-counts[a] || (a<b?-1:1)); }
+
+function place(counts, animated){
+  order(counts).forEach((k,slot)=>{
+    const el=cards[k], p=P.find(x=>x.key===k), side=slot%2===0?'L':'R';
+    if(curSlot[k]!==slot){
+      const first=curSlot[k]===undefined;
+      el.style.transform=`translateY(${slot*STEP}px) rotate(${p.rot}deg)`;
+      curSlot[k]=slot;
+      // z by slot: lower players sit on top so their popped-out head overlaps the card above.
+      // On a live reorder, flip z at the slide midpoint (cards coincident) so the swap is unseen.
+      if(animated && !first) setTimeout(()=>{ if(curSlot[k]===slot) el.style.zIndex=10+slot; },220);
+      else el.style.zIndex=10+slot;
+    }
+    if(curSide[k]!==side){
+      const animSwap = animated && curSide[k]!==undefined;
+      if(animSwap) doSwap(el,side); else { el.classList.remove('L','R'); el.classList.add(side); }
+      setBorder(el,p,side,animSwap);   // the 2-sided colour border mirrors to match the new side
+      curSide[k]=side;
+    }
+    const z=Math.round(counts[k])<=0; el.classList.toggle('zero',z);
+  });
+}
+function doSwap(el,side){
+  if(swapStyle==='flip'){
+    const inner=el.querySelector('.inner');
+    inner.animate([{transform:'scaleX(1)'},{transform:'scaleX(.05)',offset:.5},{transform:'scaleX(1)'}],{duration:SWAP,easing:'cubic-bezier(.6,0,.4,1)'});
+    setTimeout(()=>{el.classList.remove('L','R');el.classList.add(side);},SWAP/2);
+    return;
+  }
+  const hdr=el.querySelector('.header'), img=el.querySelector('.figmask img');
+  const h0=hdr.getBoundingClientRect(), i0=img.getBoundingClientRect();
+  el.classList.remove('L','R'); el.classList.add(side);
+  const h1=hdr.getBoundingClientRect(), i1=img.getBoundingClientRect();
+  slide(hdr,h0.left-h1.left); slide(img,i0.left-i1.left);
+  const bar=el.querySelector('.streak b');
+  bar.animate([{transform:'translateX(-160%) skewX(-14deg)',opacity:.9},{transform:'translateX(360%) skewX(-14deg)',opacity:0}],{duration:SWAP,easing:'ease-out'});
+}
+function slide(el,dx){ if(Math.abs(dx)<1)return; el.animate([{transform:`translateX(${dx}px)`},{transform:'translateX(0)'}],{duration:SWAP,easing:'cubic-bezier(.3,1.55,.35,1)'}); }
+// the offset colour border sits on the figure's side; on a side-swap it slides across to mirror.
+function setBorder(el,p,side,animate){
+  const ck=el.querySelector('.ck'), ax=Math.abs(p.ox);
+  const nx = side==='L' ? ax : -ax, nt=`translate(${nx}px,${p.oy}px)`;
+  if(animate){ const ot=ck.style.transform||nt; ck.animate([{transform:ot},{transform:nt}],{duration:SWAP,easing:'cubic-bezier(.3,1.55,.35,1)'}); }
+  ck.style.transform=nt;
+}
+
+function hardSet(counts){
+  curSlot={};curSide={};curPct={};
+  P.forEach(p=>{ setNum(p.key,Math.round(counts[p.key]/TOTAL*100)); curPct[p.key]=Math.round(counts[p.key]/TOTAL*100); });
+  place(counts,false);
+}
+function tween(from,to){
+  return new Promise(res=>{
+    const my=token, t0=performance.now(), fill=document.getElementById('sweepfill');
+    (function loop(now){
+      if(my!==token) return;
+      const tau=Math.min(1,(now-t0)/DUR); fill.style.width=(tau*100)+'%';
+      const c={}; P.forEach(p=>c[p.key]=from[p.key]+(to[p.key]-from[p.key])*tau);
+      P.forEach(p=>{ const pct=Math.round(c[p.key]/TOTAL*100); if(pct!==curPct[p.key]){ setNum(p.key,pct); curPct[p.key]=pct; } });
+      place(c,true);
+      if(tau<1) requestAnimationFrame(loop); else { setTimeout(()=>{fill.style.width='0%';},260); res(); }
+    })(t0);
+  });
+}
+async function play(){
+  const my=++token; document.getElementById('play').textContent='▶ Playing…';
+  hardSet(SEQ[0]); await new Promise(r=>setTimeout(r,450));
+  for(let i=0;i<SEQ.length-1 && my===token;i++) await tween(SEQ[i],SEQ[i+1]);
+  document.getElementById('play').textContent='▶ Play';
+}
+document.getElementById('play').onclick=play;
+document.getElementById('reset').onclick=()=>{ token++; document.getElementById('play').textContent='▶ Play'; document.getElementById('sweepfill').style.width='0%'; hardSet(SEQ[0]); };
+document.getElementById('styleseg').onclick=(e)=>{ const b=e.target.closest('button'); if(!b)return;
+  swapStyle=b.dataset.s; [...e.currentTarget.children].forEach(x=>x.classList.toggle('on',x===b)); };
+
+hardSet(SEQ[0]);
+</script>
+</body>
+</html>

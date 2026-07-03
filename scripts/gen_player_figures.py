@@ -38,6 +38,18 @@ MAP = {
     "alex":   ("gubPosted.gif",    "gubPosted.gif"),
 }
 
+# Manual re-frame per (player, suffix), applied AFTER the alpha-bbox crop and
+# BEFORE the height normalise, as fractions (left, top, right, bottom) of the
+# bbox frame. Use when a pose sits too small in frame: a tighter box normalises
+# to 260px tall WIDER, matching the other figures' scale.
+#   luke online was shot further back -> full body normalised to a thin 122px.
+#   Trimming the lower legs (keep top 299/354) re-normalises him to ~144px wide;
+#   his offline pose gets the same treatment (keep top 272/340 -> ~219px wide).
+FIGURE_CROP = {
+    ("luke", "on"):  (0.0, 0.0, 1.0, 299 / 354),
+    ("luke", "off"): (0.0, 0.0, 1.0, 272 / 340),
+}
+
 
 def n_frames(path):
     return getattr(Image.open(path), "n_frames", 1)
@@ -56,8 +68,9 @@ def heuristic_index(path, end):
     return 0
 
 
-def extract(path, idx, h=260):
-    """One gif frame -> RGBA image, cropped to the alpha bbox, <=h tall."""
+def extract(path, idx, h=260, crop=None):
+    """One gif frame -> RGBA image, cropped to the alpha bbox (then an optional
+    manual `crop` of fractions (l,t,r,b)), resized to <=h tall."""
     im = Image.open(path)
     n = getattr(im, "n_frames", 1)
     im.seek(max(0, min(int(idx), n - 1)))
@@ -65,6 +78,10 @@ def extract(path, idx, h=260):
     bb = fr.getchannel("A").getbbox()
     if bb:
         fr = fr.crop(bb)
+    if crop:
+        l, t, r, b = crop
+        w, ht = fr.size
+        fr = fr.crop((round(l * w), round(t * ht), round(r * w), round(b * ht)))
     if fr.height > h:
         fr = fr.resize((round(fr.width * h / fr.height), h), Image.LANCZOS)
     return fr
@@ -102,7 +119,7 @@ def main():
                 print("SKIP", f"{name}__{suffix}", "- missing gif", gif)
                 continue
             out = os.path.join(OUT, f"{name}__{suffix}.png")
-            extract(src, idx).save(out, "PNG", optimize=True)
+            extract(src, idx, crop=FIGURE_CROP.get((name, suffix))).save(out, "PNG", optimize=True)
             print("wrote", os.path.relpath(out, ROOT), f"({gif} #{idx})")
         # No on-pace pick -> remove any stale __onpace.png so the card falls back to online.
         if "onpace" not in plan:
