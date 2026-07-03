@@ -69,12 +69,31 @@ describe('playerHeadline', () => {
     expect(h.turf.pct).toBe(50);      // owns 1 of 2 courses
     // % off WR: Paul avg of rr(10%) + mc((90000-80000)/80000=12.5%) = 11.25%.
     expect(h.offwr.avg_pct).toBeCloseTo(11.25, 4);
-    expect(typeof h.offwr.rank).toBe('number');
+    expect(h.offwr.rank).toBe(2);     // Luke 8% < Paul 11.25% < Max 13%
   });
 
   it('avgOffWrByPlayer averages only WR-covered PBs', () => {
     const m = avgOffWrByPlayer(seeded(), 1, 150);
     expect(m.get(1)).toBeCloseTo(11.25, 4);   // Paul
     expect(m.get(2)).toBeCloseTo(8, 6);        // Luke: rr only, (108000-100000)/100000
+  });
+
+  it('returns null ranks when a roster player has no runs', () => {
+    const db = openDb(':memory:');
+    applySchema(db);
+    db.exec("INSERT INTO seasons(id,name,is_active) VALUES (1,'S1',1)");
+    db.exec("INSERT INTO players(id,display_name) VALUES (1,'NoRuns')");
+    db.exec("INSERT INTO season_rosters(season_id,player_id) VALUES (1,1)");
+    db.exec("INSERT INTO courses(id,slug,display_name) VALUES (1,'rr','Rainbow Road')");
+    db.exec("INSERT INTO world_records(course_id,cc,holder_name,record_ms,record_str,is_current) VALUES (1,150,'WR',100000,'1:40',1)");
+    const h = playerHeadline(db, 1, 150, 1);
+    expect(h.turf.rank).toBeNull();
+    expect(h.time.rank).toBeNull();
+    expect(h.golf.rank).toBeNull();
+    expect(h.offwr.rank).toBeNull();
+    expect(h.turf.pct).toBe(0);
+    expect(h.time.total_ms).toBe(0);
+    expect(h.golf.points).toBe(0);
+    expect(h.offwr.avg_pct).toBeNull();
   });
 });

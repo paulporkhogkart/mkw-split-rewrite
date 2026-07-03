@@ -46,9 +46,9 @@ export function playerPbRows(db: DatabaseSync, seasonId: number, cc: number, pla
 }
 
 export interface Headline {
-  turf:  { pct: number; rank: number };
-  time:  { total_ms: number; rank: number };
-  golf:  { points: number; rank: number };
+  turf:  { pct: number; rank: number | null };
+  time:  { total_ms: number; rank: number | null };
+  golf:  { points: number; rank: number | null };
   offwr: { avg_pct: number | null; rank: number | null };
 }
 
@@ -67,12 +67,13 @@ export function avgOffWrByPlayer(db: DatabaseSync, seasonId: number, cc: number)
 }
 
 export function playerHeadline(db: DatabaseSync, seasonId: number, cc: number, playerId: number): Headline {
+  const rankOf = (i: number): number | null => (i >= 0 ? i + 1 : null);
   const standings = overallStandings(db, seasonId, cc); // {player_id, display_name, total_ms, tracks, points}
 
   const byTime = [...standings].sort((a, b) => a.total_ms - b.total_ms || a.points - b.points);
-  const timeRank = byTime.findIndex((s) => s.player_id === playerId) + 1;
+  const timeRank = rankOf(byTime.findIndex((s) => s.player_id === playerId));
   const byGolf = [...standings].sort((a, b) => a.points - b.points || a.total_ms - b.total_ms);
-  const golfRank = byGolf.findIndex((s) => s.player_id === playerId) + 1;
+  const golfRank = rankOf(byGolf.findIndex((s) => s.player_id === playerId));
   const me = standings.find((s) => s.player_id === playerId);
 
   // Turf: owned-course counts, ranked (owned desc, total_ms asc, name asc) — matches web turf.js.
@@ -83,7 +84,7 @@ export function playerHeadline(db: DatabaseSync, seasonId: number, cc: number, p
   const turfRows = standings
     .map((s) => ({ id: s.player_id, name: s.display_name, owned: ownCount.get(s.player_id) ?? 0, total: s.total_ms }))
     .sort((a, b) => b.owned - a.owned || a.total - b.total || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-  const turfRank = turfRows.findIndex((r) => r.id === playerId) + 1;
+  const turfRank = rankOf(turfRows.findIndex((r) => r.id === playerId));
   const owned = ownCount.get(playerId) ?? 0;
   const turfPct = totalCourses ? Math.round((owned / totalCourses) * 100) : 0;
 
