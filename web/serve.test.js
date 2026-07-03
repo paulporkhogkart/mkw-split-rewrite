@@ -71,6 +71,13 @@ describe("createStaticServer (http)", () => {
     expect(r.status).toBe(404);
   });
 
+  it("falls back to index.html for a trailing-slash client route", async () => {
+    const r = await fetch(`${base}/turf/`);
+    expect(r.status).toBe(200);
+    expect(r.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(await r.text()).toContain("shell");
+  });
+
   it("serves index.html at /", async () => {
     const r = await fetch(`${base}/`);
     expect(r.status).toBe(200);

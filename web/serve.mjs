@@ -35,8 +35,12 @@ export function createStaticServer(distDir) {
       let file = resolveFile(req.url, distDir);
       const exists = await stat(file).then((s) => s.isFile()).catch(() => false);
       if (!exists) {
-        if (extname(file)) { res.writeHead(404); res.end("not found"); return; }
-        file = indexHtml;   // extension-less path -> SPA shell
+        // A concrete sub-resource extension (.js/.png/...) 404s; document-ish paths fall
+        // through to the SPA shell — both extension-less client routes (/turf) and a missing
+        // .html like a trailing-slash route (/turf/ -> /turf/index.html).
+        const ext = extname(file).toLowerCase();
+        if (ext && ext !== ".html") { res.writeHead(404); res.end("not found"); return; }
+        file = indexHtml;   // client route -> SPA shell
       }
       const body = await readFile(file);
       res.writeHead(200, {

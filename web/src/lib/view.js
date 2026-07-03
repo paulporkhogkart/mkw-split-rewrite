@@ -1,9 +1,10 @@
-// Views selected by the location hash. Unknown hashes fall back to "live".
-// `heat` is intentionally unlisted (no navbar tab) — reachable by URL only.
-export function viewFromHash(hash) {
-  const h = (hash || "").replace(/^#\/?/, "");
-  if (h === "turf" || h === "territory") return "turf";   // "territory" kept as an old-hash alias
-  if (h === "heat") return "heat";
-  if (h === "version") return "version";   // unlisted, URL-only (no navbar tab)
+// Views selected by the URL path (History API — no more #/ hash). Unknown paths fall back
+// to "live". `heat` and `version` are intentionally unlisted (no navbar tab) — reachable by
+// URL only. The static server (serve.mjs) serves index.html for these extension-less paths.
+export function viewFromPath(pathname) {
+  const p = (pathname || "/").replace(/^\/+/, "").replace(/\/+$/, "");
+  if (p === "turf") return "turf";
+  if (p === "heat") return "heat";
+  if (p === "version") return "version";
   return "live";
 }

@@ -1,6 +1,6 @@
 <script>
   import { onMount, tick } from "svelte";
-  import { viewFromHash } from "./lib/view.js";
+  import { viewFromPath } from "./lib/view.js";
   import Wordmark from "./lib/Wordmark.svelte";
   import WordmarkFire from "./lib/WordmarkFire.svelte";
   import wordmarkConfig from "./lib/wordmark.config.json";
@@ -16,7 +16,7 @@
   const brandColor = wordmarkConfig.players[brandPlayer].color;
   let brandHot = false;
 
-  let view = viewFromHash(typeof location !== "undefined" ? location.hash : "");
+  let view = viewFromPath(typeof location !== "undefined" ? location.pathname : "/");
   let navEl;
   let mk = { left: 0, width: 0 };
 
@@ -33,29 +33,40 @@
   // Reposition after the .on class lands in the DOM (tab switch).
   $: view, tick().then(updateMarker);
 
+  // Plain left-clicks on internal links switch views in-SPA (pushState, no reload). Modifier /
+  // middle clicks fall through to a real navigation, which also works — the static server serves
+  // the app shell for every route path.
+  function navigate(e) {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    const path = e.currentTarget.getAttribute("href");
+    e.preventDefault();
+    if (path !== location.pathname) history.pushState({}, "", path);
+    view = viewFromPath(location.pathname);
+  }
+
   onMount(() => {
-    const sync = () => (view = viewFromHash(location.hash));
-    window.addEventListener("hashchange", sync);
+    const sync = () => (view = viewFromPath(location.pathname));
+    window.addEventListener("popstate", sync);
     window.addEventListener("resize", updateMarker);
     // Webfont metrics change offset widths — recompute once Inter has loaded.
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(updateMarker);
     updateMarker();
     return () => {
-      window.removeEventListener("hashchange", sync);
+      window.removeEventListener("popstate", sync);
       window.removeEventListener("resize", updateMarker);
     };
   });
 </script>
 
 <header class="top" style="--brand-accent:{brandColor}">
-  <a class="brand" href="#/" aria-label="THE KART-OFF — home"
+  <a class="brand" href="/" aria-label="THE KART-OFF — home" on:click={navigate}
      on:mouseenter={() => (brandHot = true)} on:mouseleave={() => (brandHot = false)}>
     <WordmarkFire color={brandColor} active={brandHot} />
     <span class="wmwrap"><Wordmark size="22px" player={brandPlayer} fire={brandHot} /></span>
   </a>
   <nav class="nav" bind:this={navEl}>
-    <a class="tab" class:on={view === "live"} href="#/">Live</a>
-    <a class="tab" class:on={view === "turf"} href="#/turf">Turf</a>
+    <a class="tab" class:on={view === "live"} href="/" on:click={navigate}>Live</a>
+    <a class="tab" class:on={view === "turf"} href="/turf" on:click={navigate}>Turf</a>
     <span class="marker" style="left:{mk.left}px;width:{mk.width}px"></span>
   </nav>
 </header>
