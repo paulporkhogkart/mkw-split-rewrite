@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { openDb, applySchema } from './connect';
-import { playerPbRows } from './playerSummary';
+import { playerPbRows, avgOffWrByPlayer, playerHeadline } from './playerSummary';
 
 function seeded() {
   const db = openDb(':memory:');
@@ -50,5 +50,31 @@ describe('playerPbRows', () => {
     expect(rr.wr_ms).toBeNull();
     expect(rr.off_wr_pct).toBeNull();
     expect(rr.leader_off_wr_pct).toBeNull();
+  });
+});
+
+describe('playerHeadline', () => {
+  it('ranks the player in turf %, total time, golf, and % off WR', () => {
+    // Reuse the seeded() fixture from the playerPbRows block above.
+    // Standings (150cc): Paul total=200000 (rr 110000 + mc 90000, ranks 2+1=3 golf),
+    //   Luke total=108000 (rr only, rank 1 => 1 golf), Max total=203000 (rr 111000 + mc 92000, ranks 3+2=5 golf).
+    const h = playerHeadline(seeded(), 1, 150, 1); // Paul
+    expect(h.time.total_ms).toBe(200000);
+    expect(h.time.rank).toBe(2);      // Luke 108000 < Paul 200000 < Max 203000
+    expect(h.golf.points).toBe(3);
+    expect(h.golf.rank).toBe(2);      // Luke 1 < Paul 3 < Max 5
+    // Turf: Paul owns mc (1), Luke owns rr (1), Max owns 0. Tie on owned=1 broken by total_ms asc:
+    //   Luke(108000) ahead of Paul(200000). Paul rank 2.
+    expect(h.turf.rank).toBe(2);
+    expect(h.turf.pct).toBe(50);      // owns 1 of 2 courses
+    // % off WR: Paul avg of rr(10%) + mc((90000-80000)/80000=12.5%) = 11.25%.
+    expect(h.offwr.avg_pct).toBeCloseTo(11.25, 4);
+    expect(typeof h.offwr.rank).toBe('number');
+  });
+
+  it('avgOffWrByPlayer averages only WR-covered PBs', () => {
+    const m = avgOffWrByPlayer(seeded(), 1, 150);
+    expect(m.get(1)).toBeCloseTo(11.25, 4);   // Paul
+    expect(m.get(2)).toBeCloseTo(8, 6);        // Luke: rr only, (108000-100000)/100000
   });
 });
