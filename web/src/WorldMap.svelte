@@ -24,6 +24,8 @@
   // Live play-progress handed to the turf leaderboard so its numbers tick + cards
   // reorder in lockstep with the territory front. active only while animating a step.
   let turfAnim = { active: false, from: 0, to: 0, tau: 0 };
+  let turfScale = 1;   // column scale so its height matches the map's shared height
+  let rowW = 0;        // width of the column+map row; the scrubber never exceeds this
   // showSnapshot coalescing: the knob (tlIndex) tracks instantly while only the newest request paints.
   let pendingIndex = null, rendering = false;
   // Capture animation: per-frame source buffers (backing res) + the constant course field + the rAF runner.
@@ -38,16 +40,30 @@
   let headerH = 46, mapViewEl, consoleEl, mapW = 0, mapH = 0, ro = null;
   function fitMap() {
     if (!mapViewEl) return;
-    const padV = 24, padH = 24;               // .map-view padding (12*2)
-    const consoleH = consoleEl ? consoleEl.offsetHeight + 10 : 0;   // console + its 10px gap to the frame
+    const padV = 24, padH = 24, GAP = 14, ar = 2200 / 1775;   // .map-view padding (12*2), column↔map gap
+    const consoleH = consoleEl ? consoleEl.offsetHeight + 10 : 0;   // console + its 10px gap to the row
     const availH = mapViewEl.clientHeight - consoleH - padV;
-    // reserve the turf column's width (172px + 14px gap) when it's showing (wide screens only)
-    const colW = (timelineReady && snapshots.length && mapViewEl.clientWidth > 760) ? 172 + 14 : 0;
-    const availW = mapViewEl.clientWidth - padH - colW;
-    const ar = 2200 / 1775;
-    let h = Math.max(140, availH), w = h * ar;
-    if (w > availW) { w = availW; h = availW / ar; }
-    mapW = Math.round(w); mapH = Math.round(h);
+    const N = (timelineReady && snapshots.length) ? Object.keys(tlColors).length : 0;
+    const showCol = N && mapViewEl.clientWidth > 760;
+    if (showCol) {
+      // Column + map share one height H: the largest H that fits both across the width.
+      // The column's width scales with H (172px wide at N*120px tall), so on a wide screen
+      // the column scales up to the map's height; when width-limited, both scale down together.
+      const totalW = mapViewEl.clientWidth - padH - GAP;
+      const colUnit = 172 / (N * 120);                       // column width per px of height
+      const H = Math.max(140, Math.min(availH, totalW / (colUnit + ar)));
+      turfScale = H / (N * 120);
+      mapH = Math.round(H);
+      mapW = Math.round(H * ar);
+      rowW = Math.round(172 * turfScale) + GAP + mapW;
+    } else {
+      turfScale = 1;
+      const availW = mapViewEl.clientWidth - padH;
+      let h = Math.max(140, availH), w = h * ar;
+      if (w > availW) { w = availW; h = availW / ar; }
+      mapW = Math.round(w); mapH = Math.round(h);
+      rowW = mapW;
+    }
   }
 
   // Date of the currently-shown snapshot, stamped on the map pane (top-right). Inter + tabular
@@ -431,7 +447,7 @@
 
 <div class="map-view" bind:this={mapViewEl} style="height:calc(100dvh - {headerH}px)">
   {#if timelineReady && snapshots.length}
-    <div class="console" bind:this={consoleEl} style="width:100%">
+    <div class="console" bind:this={consoleEl} style="width:{rowW ? rowW + 'px' : '100%'}">
       <TimelineScrubber {snapshots} index={tlIndex} {playing}
         on:scrub={(e) => onScrub(e.detail.index)}
         on:toggle={togglePlay} />
@@ -442,7 +458,7 @@
     {#if timelineReady && snapshots.length}
       <TurfLeaderboard {snapshots} colors={tlColors}
         courseCount={manifest?.courses?.length ?? 30}
-        frameIndex={tlIndex} anim={turfAnim} />
+        frameIndex={tlIndex} anim={turfAnim} scale={turfScale} />
     {/if}
 
   <div class="frame" style={mapW ? `width:${mapW}px;height:${mapH}px` : ""}>

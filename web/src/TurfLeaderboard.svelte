@@ -14,6 +14,7 @@
   export let courseCount = 30;
   export let frameIndex = 0;
   export let anim = { active: false, from: 0, to: 0, tau: 0 };
+  export let scale = 1;   // whole-column scale (set by WorldMap so its height matches the map)
 
   const STEP = 120, SWAP = 420;
 
@@ -41,7 +42,9 @@
 
   function slide(node, dx) {
     if (Math.abs(dx) < 1) return;
-    node.animate([{ transform: `translateX(${dx}px)` }, { transform: "translateX(0)" }],
+    // dx is measured in scaled screen px; the node lives inside the scaled column, so divide by
+    // the scale to move exactly dx on screen (otherwise the slam overshoots by the scale factor).
+    node.animate([{ transform: `translateX(${dx / scale}px)` }, { transform: "translateX(0)" }],
       { duration: SWAP, easing: "cubic-bezier(.3,1.55,.35,1)" });
   }
 
@@ -128,7 +131,8 @@
   $: mounted, snapshots, colors, courseCount, roster, cfg, drive(frameIndex, anim);
 </script>
 
-<div class="turfcol" style="height:{roster.length * STEP}px">
+<div class="turfwrap" style="width:{172 * scale}px;height:{roster.length * STEP * scale}px">
+  <div class="turfcol" style="height:{roster.length * STEP}px;transform:scale({scale})">
   {#each roster as name, i (name)}
     <div class="rp" bind:this={cardEls[i]} style="--c:{colors[name]};--fx:{cfg[i].fx}px">
       <div class="inner">
@@ -140,6 +144,7 @@
       </div>
     </div>
   {/each}
+  </div>
 </div>
 
 <style>
@@ -147,7 +152,10 @@
      The subtree is styled with `.turfcol :global(...)` because classes/elements are managed
      imperatively (.L/.R/.zero toggles, JS-built .d/.pc digit spans) — scoped selectors would
      not match them. Bounding under the unique `.turfcol` root keeps it collision-safe. */
-  .turfcol { position: relative; width: 172px; flex: 0 0 172px; }
+  /* .turfwrap reserves the SCALED footprint in WorldMap's flex row; .turfcol renders at its
+     base 172px width and is scaled up via transform (so figures/text/gaps all scale together). */
+  .turfwrap { position: relative; flex: 0 0 auto; }
+  .turfcol { position: absolute; top: 0; left: 0; width: 172px; transform-origin: top left; }
   .turfcol :global(.rp) { position: absolute; top: 0; left: 12px; width: 160px; height: 110px; overflow: visible;
     transition: transform .44s cubic-bezier(.5,.05,.15,1), filter .45s ease; will-change: transform; }
   .turfcol :global(.rp.zero) { filter: saturate(.32) brightness(.72); }
@@ -187,5 +195,5 @@
   .turfcol :global(.m3) { clip-path: polygon(0% -40%,100% -40%,94% 84%,58% 100%,24% 88%,0 96%,6% 40%); }
   .turfcol :global(.m4) { clip-path: polygon(0% -40%,100% -40%,96% 40%,100% 92%,46% 100%,8% 90%,0 30%,5% 12%); }
   .turfcol :global(.m5) { clip-path: polygon(0% -40%,100% -40%,96% 52%,88% 100%,0 92%,6% 40%); }
-  @media (max-width: 760px) { .turfcol { margin: 0 auto; } }
+  @media (max-width: 760px) { .turfwrap { margin: 0 auto; } }
 </style>
