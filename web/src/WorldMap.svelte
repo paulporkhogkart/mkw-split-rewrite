@@ -46,12 +46,12 @@
     const N = (timelineReady && snapshots.length) ? Object.keys(tlColors).length : 0;
     const showCol = N && mapViewEl.clientWidth > 760;
     if (showCol) {
-      // Column + map share one height H: the largest H that fits both across the width.
-      // The column's width scales with H (172px wide at N*120px tall), so on a wide screen
-      // the column scales up to the map's height; when width-limited, both scale down together.
+      // Column stays at its crisp base size (never scaled UP); the map shrinks its height to
+      // match it. Shared height H = the column's natural height (N*120), capped by the viewport
+      // height and the width budget (on a narrow screen both scale DOWN together, still crisp).
       const totalW = mapViewEl.clientWidth - padH - GAP;
       const colUnit = 172 / (N * 120);                       // column width per px of height
-      const H = Math.max(140, Math.min(availH, totalW / (colUnit + ar)));
+      const H = Math.max(140, Math.min(availH, N * 120, totalW / (colUnit + ar)));
       turfScale = H / (N * 120);
       mapH = Math.round(H);
       mapW = Math.round(H * ar);
