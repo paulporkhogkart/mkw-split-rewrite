@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { openDb, applySchema } from './connect';
-import { playerPbRows, avgOffWrByPlayer, playerHeadline } from './playerSummary';
+import { playerPbRows, avgOffWrByPlayer, playerHeadline, playerSummary } from './playerSummary';
 
 function seeded() {
   const db = openDb(':memory:');
@@ -95,5 +95,19 @@ describe('playerHeadline', () => {
     expect(h.time.total_ms).toBe(0);
     expect(h.golf.points).toBe(0);
     expect(h.offwr.avg_pct).toBeNull();
+  });
+});
+
+describe('playerSummary', () => {
+  it('resolves a roster player by slugified display name and assembles the summary', () => {
+    const s = playerSummary(seeded(), 1, 150, 'paul');
+    expect(s).not.toBeNull();
+    expect(s!.profile.display_name).toBe('Paul');
+    expect(s!.headline.turf.pct).toBe(50);
+    expect(s!.pbs.map((r) => r.slug).sort()).toEqual(['mc', 'rr']);
+  });
+
+  it('returns null for an unknown slug', () => {
+    expect(playerSummary(seeded(), 1, 150, 'nobody')).toBeNull();
   });
 });

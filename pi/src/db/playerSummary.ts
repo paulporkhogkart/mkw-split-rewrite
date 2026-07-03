@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { courseLeaderboard, currentWr } from './reads';
 import { overallStandings } from './leaderboards';
 import { territoryOwners } from './reads';
+import { slugify } from './slug';
 
 export interface PbRow {
   slug: string; course: string; cc: number;
@@ -99,5 +100,26 @@ export function playerHeadline(db: DatabaseSync, seasonId: number, cc: number, p
     time: { total_ms: me?.total_ms ?? 0, rank: timeRank },
     golf: { points: me?.points ?? 0, rank: golfRank },
     offwr,
+  };
+}
+
+export interface PlayerSummary {
+  profile: { slug: string; display_name: string };
+  headline: Headline;
+  pbs: PbRow[];
+}
+
+/** Assemble a roster player's public summary, resolving :slug via slugify(display_name).
+ *  Returns null when no active-season roster player slugifies to `slug`. */
+export function playerSummary(db: DatabaseSync, seasonId: number, cc: number, slug: string): PlayerSummary | null {
+  const players = db.prepare(
+    `SELECT p.id, p.display_name FROM season_rosters sr JOIN players p ON p.id = sr.player_id WHERE sr.season_id=?`
+  ).all(seasonId) as { id: number; display_name: string }[];
+  const player = players.find((p) => slugify(p.display_name) === slug);
+  if (!player) return null;
+  return {
+    profile: { slug, display_name: player.display_name },
+    headline: playerHeadline(db, seasonId, cc, player.id),
+    pbs: playerPbRows(db, seasonId, cc, player.id),
   };
 }
