@@ -1,6 +1,5 @@
 <script>
   import { onMount, tick } from "svelte";
-  import { viewFromPath } from "./lib/view.js";
   import Wordmark from "./lib/Wordmark.svelte";
   import WordmarkFire from "./lib/WordmarkFire.svelte";
   import wordmarkConfig from "./lib/wordmark.config.json";
@@ -8,6 +7,9 @@
   import WorldMap from "./WorldMap.svelte";
   import HeatGraph from "./HeatGraph.svelte";
   import VersionPage from "./VersionPage.svelte";
+  import PlayersIndex from "./PlayersIndex.svelte";
+  import PlayerProfile from "./PlayerProfile.svelte";
+  import { viewFromPath, playerSlugFromPath } from "./lib/view.js";
 
   // The navbar wears a random player's figure + colour each load; hovering lights the on-fire
   // variant. The player's colour drives the whole nav accent (OFF tag + active-tab marker).
@@ -17,6 +19,7 @@
   let brandHot = false;
 
   let view = viewFromPath(typeof location !== "undefined" ? location.pathname : "/");
+  let playerSlug = playerSlugFromPath(typeof location !== "undefined" ? location.pathname : "/");
   let navEl;
   let mk = { left: 0, width: 0 };
 
@@ -42,10 +45,11 @@
     e.preventDefault();
     if (path !== location.pathname) history.pushState({}, "", path);
     view = viewFromPath(location.pathname);
+    playerSlug = playerSlugFromPath(location.pathname);
   }
 
   onMount(() => {
-    const sync = () => (view = viewFromPath(location.pathname));
+    const sync = () => { view = viewFromPath(location.pathname); playerSlug = playerSlugFromPath(location.pathname); };
     window.addEventListener("popstate", sync);
     window.addEventListener("resize", updateMarker);
     // Webfont metrics change offset widths — recompute once Inter has loaded.
@@ -67,6 +71,7 @@
   <nav class="nav" bind:this={navEl}>
     <a class="tab" class:on={view === "live"} href="/" on:click={navigate}>Live</a>
     <a class="tab" class:on={view === "turf"} href="/turf" on:click={navigate}>Turf</a>
+    <a class="tab" class:on={view === "players"} href="/players" on:click={navigate}>Players</a>
     <span class="marker" style="left:{mk.left}px;width:{mk.width}px"></span>
   </nav>
 </header>
@@ -74,6 +79,8 @@
   {#if view === "turf"}<WorldMap />
   {:else if view === "heat"}<HeatGraph />
   {:else if view === "version"}<VersionPage />
+  {:else if view === "players"}
+    {#if playerSlug}<PlayerProfile slug={playerSlug} />{:else}<PlayersIndex />{/if}
   {:else}<CardWall />{/if}
 </main>
 

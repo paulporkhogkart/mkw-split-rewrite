@@ -13,3 +13,5 @@ export const activityUrl = (before, limit = 100) =>
   `${API_BASE}/v1/activity?limit=${limit}${before != null ? `&before=${before}` : ""}`;
 export const activityStreamWsUrl = () =>
   `${API_BASE.replace(/^http/, "ws")}/v1/activity/stream`;
+export const rosterUrl = () => `${API_BASE}/v1/roster`;
+export const playerSummaryUrl = (slug, cc = 150) => `${API_BASE}/v1/players/${encodeURIComponent(slug)}?cc=${cc}`;
