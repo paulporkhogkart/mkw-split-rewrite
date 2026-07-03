@@ -6,6 +6,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Mario Kart World (MKW) real-time race telemetry tracker.** Captures a 1920×1080 @ 60fps OBS camera feed and uses OpenCV template matching to detect game screens, track player selections, and record race data (laps, coins, timestamps, minimap position). Designed to integrate with a Tauri frontend via stdio sidecar IPC.
 
+## Repo Surfaces
+
+This repo is **four surfaces**, not one. Most of this file documents surface 1 (the desktop
+engine); the others have their own `CLAUDE.md` where noted.
+
+| Surface | Path | What it is |
+|---------|------|-----------|
+| **Desktop app "pbenguin"** | `mkw_tracker/` (Python engine) + `src/`, `src-tauri/` (Tauri v2 + Svelte shell) | The capture/detection client. **Pure detector**: the engine emits `run_finalized` over stdio; Rust does all networking. Product name is `pbenguin` (`src-tauri/tauri.conf.json`); the npm package id is still `mkw-tracker`. |
+| **Pi server** | `pi/` (Node/TS, Hono + `node:sqlite`, run via `tsx`) — see `pi/CLAUDE.md` | **Canonical source of truth**, runs on a Raspberry Pi. Hosts the token-gated API, Discord bot, WR scraper, stats/`/explorer`, presence/activity. |
+| **Website thekartoff.com** | `web/` (Vite + Svelte SPA) — see `web/CLAUDE.md` | Public site, **served by the Pi**. Live cards, Turf (territory) map, activity feed. Imports shared components from the desktop `src/`. |
+| **Schema + importer** | `server/` (Python) | Owns the canonical DB DDL `server/schema.sql` (which the Pi loads at boot) and the legacy-data importer (`python -m server.importer`). NOT an HTTP server. |
+
+**Data flow:** desktop engine → Rust upload → `POST /v1/runs` on the Pi → Pi's SQLite (`runs`,
+`run_laps`, `run_points`, …) → served to the website + Discord bot. The desktop app's own
+`mkw_tracker.db` holds only config + minimap detection tuning (race data moved to the Pi).
+Deploy is pull-based off git **tags** (`deploy/update.sh`); see `docs/pi-deploy.md`.
+
 ## Running the App
 
 ```bash
