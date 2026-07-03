@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildSnapshots, flippedCourses, leaderboardAt, wrAsOf } from "./timeline.js";
+import { buildSnapshots, flippedCourses, leaderboardAt, wrAsOf, DNF_MS } from "./timeline.js";
 
 const C = { Aliias: "#4ade80", Gub: "#38bdf8" };
 
@@ -14,6 +14,18 @@ describe("buildSnapshots", () => {
     expect(s.map((x) => x.owners.mc.player)).toEqual(["Aliias", "Gub"]);
     expect(s.map((x) => x.t)).toEqual([1000, 3000]);
     expect(s[1].owners.mc.color).toBe("#38bdf8");
+  });
+
+  it("attaches per-player summed track times, DNF-filling unset tracks", () => {
+    const events = [
+      { t: 1000, player: "Aliias", slug: "mc", ms: 90000 },
+      { t: 2000, player: "Gub", slug: "dk", ms: 80000 }, // new leader on dk -> new snapshot
+    ];
+    const s = buildSnapshots(events, C, 30);
+    const last = s[s.length - 1].totals;
+    // Aliias: 1 real track (90000) + 29 unset; Gub: 1 real (80000) + 29 unset.
+    expect(last.Aliias).toBe(90000 + 29 * DNF_MS);
+    expect(last.Gub).toBe(80000 + 29 * DNF_MS);
   });
 });
 

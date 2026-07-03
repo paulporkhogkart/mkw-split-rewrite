@@ -188,7 +188,7 @@
       const res = await fetch(territoryTimelineUrl(150));
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const { events, colors, wrHistory } = await res.json();
-      const snaps = buildSnapshots(events, colors);
+      const snaps = buildSnapshots(events, colors, manifest?.courses?.length ?? 30);
       if (!snaps.length) return false;
       tlEvents = events; tlColors = colors; tlWrHistory = wrHistory || {};   // kept for the unified board + fire
       const [cov, base] = await Promise.all([

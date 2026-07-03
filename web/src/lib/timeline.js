@@ -1,9 +1,28 @@
+// Unset-track penalty for the turf tie-break: a player with no time on a track is scored as
+// 9:59.999 (the DNF cap) when summing their per-track total.
+export const DNF_MS = 9 * 60000 + 59 * 1000 + 999; // 599999
+
+// Sum of every roster player's running-best time across ALL courses as of the current `best`
+// map: known tracks contribute their best ms, unset tracks contribute DNF_MS. Used only as the
+// turf tie-break between players on equal course counts (lower total ranks higher).
+function playerTotals(best, colors, totalCourses) {
+  const sum = {}, cnt = {};
+  for (const slug in best) {
+    const bm = best[slug];
+    for (const p in bm) { sum[p] = (sum[p] || 0) + bm[p]; cnt[p] = (cnt[p] || 0) + 1; }
+  }
+  const out = {};
+  for (const p in (colors || {})) out[p] = (sum[p] || 0) + (totalCourses - (cnt[p] || 0)) * DNF_MS;
+  return out;
+}
+
 // Replay the finished-run stream into the sequence of DISTINCT ownership snapshots.
 // Owner of a course = the player with the running-minimum time up to that moment; a snapshot
 // is emitted only when some course's leader actually changes (consecutive identical maps are
 // deduped). Each snapshot carries `gainColor` = the colour of the last course to flip at that
-// `t` (for colouring the scrubber tick). Pure: no DOM, no map knowledge.
-export function buildSnapshots(events, colors) {
+// `t` (for colouring the scrubber tick) and `totals` = per-player summed track time as of that
+// frame (turf tie-break, DNF-filled for unset tracks). Pure: no DOM, no map knowledge.
+export function buildSnapshots(events, colors, totalCourses = 30) {
   const best = {}; // slug -> { player -> ms }
   const owner = {}; // slug -> current leader player
   const snaps = [];
@@ -33,7 +52,8 @@ export function buildSnapshots(events, colors) {
     const owners = {};
     for (const slug in owner)
       if (owner[slug]) owners[slug] = { player: owner[slug], color: colors[owner[slug]] || null };
-    snaps.push({ t, date: new Date(t).toISOString().slice(0, 10), owners, gainColor });
+    snaps.push({ t, date: new Date(t).toISOString().slice(0, 10), owners, gainColor,
+      totals: playerTotals(best, colors, totalCourses) });
   }
   return snaps;
 }

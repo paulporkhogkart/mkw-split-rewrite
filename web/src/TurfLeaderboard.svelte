@@ -9,7 +9,7 @@
   import { onMount } from "svelte";
   import { figureFor } from "../../src/lib/playerFigures.js";
   import { playerKey } from "../../src/lib/playerKey.js";
-  import { turfStandings, cardConfig, digitJank } from "./lib/turf.js";
+  import { turfStandings, cardConfig, digitJank, cmpTotalMs } from "./lib/turf.js";
 
   export let snapshots = [];
   export let colors = {};
@@ -76,13 +76,16 @@
       { duration: SWAP, easing: "ease-out" });
   }
 
-  function place(counts, animated) {
+  function place(counts, totals, animated) {
     const scaleChanged = scale !== curScale; curScale = scale;
     const order = roster.slice().sort((a, b) => {
       const d = counts[b] - counts[a];
       if (d) return d;
-      // TIE: keep the current relative order so equal scores never cause an instant flip;
-      // cards only reorder on a genuine crossing. Fall back to name before any layout exists.
+      // TIE on courses: lower summed track time ranks higher (DNF-filled for unset tracks).
+      const tc = cmpTotalMs(totals[a], totals[b]);
+      if (tc) return tc;
+      // Still tied: keep the current relative order so equal standings never cause an instant
+      // flip; cards only reorder on a genuine crossing. Fall back to name before any layout exists.
       const sa = curSlot[a], sb = curSlot[b];
       if (sa !== undefined && sb !== undefined) return sa - sb;
       return a < b ? -1 : a > b ? 1 : 0;
@@ -116,29 +119,39 @@
     });
   }
 
+  function standingsAt(i) {
+    const idx = Math.max(0, Math.min(i, snapshots.length - 1));
+    return turfStandings(snapshots[idx], colors, courseCount);
+  }
   function countsAt(i) {
     const out = {};
-    const idx = Math.max(0, Math.min(i, snapshots.length - 1));
-    turfStandings(snapshots[idx], colors, courseCount).forEach((r) => (out[r.player] = r.courses));
+    standingsAt(i).forEach((r) => (out[r.player] = r.courses));
+    return out;
+  }
+  function totalsAt(i) {
+    const out = {};
+    standingsAt(i).forEach((r) => (out[r.player] = r.totalMs));
     return out;
   }
 
   function drive(fi, a) {
     if (!mounted || !snapshots.length) return;
     const scaleChanged = scale !== curScale;
-    let counts;
+    let counts, totals;
     if (a && a.active) {
       const f = countsAt(a.from), t = countsAt(a.to);
       counts = {};
       roster.forEach((n) => (counts[n] = (f[n] || 0) + ((t[n] || 0) - (f[n] || 0)) * a.tau));
+      totals = totalsAt(a.to);   // tie-break by the frame the sweep is settling into
     } else {
       counts = countsAt(fi);
+      totals = totalsAt(fi);
     }
     roster.forEach((n) => {
       const pct = Math.round((counts[n] / courseCount) * 100);
       if (pct !== curPct[n] || scaleChanged) { setNum(n, pct); curPct[n] = pct; }   // rebuild digits on scale change
     });
-    place(counts, !!(a && a.active));
+    place(counts, totals, !!(a && a.active));
   }
 
   onMount(() => { mounted = true; });

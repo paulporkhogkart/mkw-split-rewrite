@@ -26,8 +26,23 @@ describe("turfStandings", () => {
     expect(st[2].pct).toBe(0);
     expect(st[0].color).toBe("#38bdf8");
   });
-  it("breaks ties by player name ascending (stable)", () => {
+  it("breaks ties by player name ascending when no totals present (stable)", () => {
     const s = snap({ mc: { player: "Gub" }, bc: { player: "Aliias" } }); // 1 each
+    expect(turfStandings(s, C, 30).map((r) => r.player)).toEqual(["Aliias", "Gub", "Alex"]);
+  });
+  it("breaks equal-course ties by lower summed track time (before name)", () => {
+    const s = {
+      owners: { mc: { player: "Gub" }, bc: { player: "Aliias" } }, // 1 each
+      totals: { Gub: 100000, Aliias: 250000, Alex: 599999 },
+    };
+    // Gub sorts above Aliias on time despite the name order; Alex (0 courses) stays last.
+    expect(turfStandings(s, C, 30).map((r) => r.player)).toEqual(["Gub", "Aliias", "Alex"]);
+  });
+  it("keeps name tie-break when totals are equal", () => {
+    const s = {
+      owners: { mc: { player: "Gub" }, bc: { player: "Aliias" } },
+      totals: { Gub: 200000, Aliias: 200000, Alex: 599999 },
+    };
     expect(turfStandings(s, C, 30).map((r) => r.player)).toEqual(["Aliias", "Gub", "Alex"]);
   });
 });

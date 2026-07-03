@@ -13,18 +13,33 @@ export function courseCounts(snapshot) {
   return out;
 }
 
+/** Compare two players' summed track times (turf tie-break): lower time ranks higher.
+ *  A missing total (no `snapshot.totals`) sorts last; two missing totals are equal. */
+export function cmpTotalMs(a, b) {
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  return a - b;
+}
+
 /** Standings for a snapshot: every roster player (keys of `colors`), sorted by
- *  courses desc, tie-break player name asc. pct = round(courses/total*100). */
+ *  courses desc, then by summed track time asc (equal pct → lower total time ranks
+ *  higher), then player name asc. pct = round(courses/total*100). */
 export function turfStandings(snapshot, colors, totalCourses = 30) {
   const counts = courseCounts(snapshot);
+  const totals = snapshot?.totals || {};
   return Object.keys(colors || {})
     .map((player) => ({
       player,
       color: colors[player],
       courses: counts[player] || 0,
       pct: Math.round(((counts[player] || 0) / totalCourses) * 100),
+      totalMs: totals[player],
     }))
-    .sort((a, b) => b.courses - a.courses || (a.player < b.player ? -1 : a.player > b.player ? 1 : 0))
+    .sort((a, b) =>
+      b.courses - a.courses ||
+      cmpTotalMs(a.totalMs, b.totalMs) ||
+      (a.player < b.player ? -1 : a.player > b.player ? 1 : 0))
     .map((r, i) => ({ ...r, rank: i + 1 }));
 }
 
