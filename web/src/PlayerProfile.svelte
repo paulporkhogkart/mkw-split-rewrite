@@ -16,6 +16,7 @@
     try {
       const res = await fetch(playerSummaryUrl(s));
       if (res.status === 404) { error = "No such player."; return; }
+      if (!res.ok) { error = "Couldn't load this player."; return; }
       summary = await res.json();
     } catch (e) { error = String(e); }
   }
