@@ -8,6 +8,7 @@
   import { prepareTransition, interpolatePatch, buildCourseField } from "./lib/territoryAnim.js";
   import TimelineScrubber from "./TimelineScrubber.svelte";
   import MapFireLayer from "./MapFireLayer.svelte";
+  import TurfLeaderboard from "./TurfLeaderboard.svelte";
   import { fireListAt } from "./lib/onFire.js";
 
   let manifest = null;
@@ -20,6 +21,9 @@
   const ASSET_W = 2200;            // cap: the island/base asset native width
   let presentBitmap = null;   // shown only as the no-timeline fallback
   let playing = false;
+  // Live play-progress handed to the turf leaderboard so its numbers tick + cards
+  // reorder in lockstep with the territory front. active only while animating a step.
+  let turfAnim = { active: false, from: 0, to: 0, tau: 0 };
   // showSnapshot coalescing: the knob (tlIndex) tracks instantly while only the newest request paints.
   let pendingIndex = null, rendering = false;
   // Capture animation: per-frame source buffers (backing res) + the constant course field + the rAF runner.
@@ -37,7 +41,9 @@
     const padV = 24, padH = 24;               // .map-view padding (12*2)
     const consoleH = consoleEl ? consoleEl.offsetHeight + 10 : 0;   // console + its 10px gap to the frame
     const availH = mapViewEl.clientHeight - consoleH - padV;
-    const availW = mapViewEl.clientWidth - padH;
+    // reserve the turf column's width (172px + 14px gap) when it's showing (wide screens only)
+    const colW = (timelineReady && snapshots.length && mapViewEl.clientWidth > 760) ? 172 + 14 : 0;
+    const availW = mapViewEl.clientWidth - padH - colW;
     const ar = 2200 / 1775;
     let h = Math.max(140, availH), w = h * ar;
     if (w > availW) { w = availW; h = availW / ar; }
@@ -239,6 +245,7 @@
   const rowsOf = (i) => Object.entries(snapshots[i].owners).map(([slug, o]) => ({ slug, color: o.color }));
 
   function cancelAnim() {                 // stop the running transition and unblock its awaiter
+    turfAnim = { ...turfAnim, active: false };   // pause/scrub -> the column snaps to the shown frame
     cancelAnimationFrame(animRaf);
     if (animResolve) { const r = animResolve; animResolve = null; r(); }
   }
@@ -264,13 +271,15 @@
       const dur = Math.max(MIN_MS, Math.min(MAX_MS, prep.extent / FRONT_SPEED));   // constant speed -> duration scales with the front's travel
       const ctx = terr.getContext("2d");
       const t0 = performance.now();
+      turfAnim = { active: true, from, to, tau: 0 };    // leaderboard tweens its numbers over this same clock
       const tick = (now) => {
         if (animResolve !== resolve) return;            // cancelled by scrub/pause
         const tau = easeFlow(Math.min(1, (now - t0) / dur));
+        turfAnim = { active: true, from, to, tau };
         const patch = interpolatePatch(prep, tau);
         ctx.putImageData(new ImageData(patch.rgba, patch.w, patch.h), patch.x, patch.y);
         if (tau < 1) animRaf = requestAnimationFrame(tick);
-        else done();        // leave the tau=1 patch; settle on pause/end keeps chained play fluid
+        else { turfAnim = { active: false, from, to, tau: 1 }; done(); }   // settle the column on the final frame
       };
       animRaf = requestAnimationFrame(tick);
     });
@@ -422,12 +431,19 @@
 
 <div class="map-view" bind:this={mapViewEl} style="height:calc(100dvh - {headerH}px)">
   {#if timelineReady && snapshots.length}
-    <div class="console" bind:this={consoleEl} style="width:{mapW ? mapW + 'px' : '100%'}">
+    <div class="console" bind:this={consoleEl} style="width:100%">
       <TimelineScrubber {snapshots} index={tlIndex} {playing}
         on:scrub={(e) => onScrub(e.detail.index)}
         on:toggle={togglePlay} />
     </div>
   {/if}
+
+  <div class="appbody">
+    {#if timelineReady && snapshots.length}
+      <TurfLeaderboard {snapshots} colors={tlColors}
+        courseCount={manifest?.courses?.length ?? 30}
+        frameIndex={tlIndex} anim={turfAnim} />
+    {/if}
 
   <div class="frame" style={mapW ? `width:${mapW}px;height:${mapH}px` : ""}>
     {#if error}
@@ -466,6 +482,7 @@
       <div class="msg">Loading map…</div>
     {/if}
   </div>
+  </div>
 </div>
 
 <style>
@@ -473,6 +490,11 @@
     display: flex; flex-direction: column; align-items: center; gap: 10px;
     padding: 12px; box-sizing: border-box; overflow: hidden;
   }
+
+  /* Below the full-width scrubber: the turf leaderboard column + the map, side by side. */
+  .appbody { display: flex; flex: 1; min-height: 0; width: 100%; gap: 14px;
+             justify-content: center; align-items: flex-start; }
+  @media (max-width: 760px) { .appbody { flex-direction: column; align-items: center; overflow-y: auto; } }
 
   /* Console: a slim graphite panel holding just the timeline scrubber, aligned to the map width. */
   .console { max-width: 100%; padding: 7px 12px; background: var(--panel); border: 1px solid var(--bd); border-radius: var(--r); }
