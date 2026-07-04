@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { openDb, applySchema } from './connect';
-import { courseSplits } from './courseSummary';
+import { courseSplits, courseSummary } from './courseSummary';
+import { currentWr } from './reads';
 
 function seededLaps() {
   const db = openDb(':memory:');
@@ -38,5 +39,37 @@ describe('courseSplits', () => {
     applySchema(db);
     db.exec("INSERT INTO courses(id,slug,display_name) VALUES (1,'rr','Rainbow Road')");
     expect(courseSplits(db, 1, 1, 150)).toEqual({ laps: 0, perPlayer: [], fieldIdeal: [] });
+  });
+});
+
+describe('courseSummary', () => {
+  function seeded() {
+    const db = openDb(':memory:');
+    applySchema(db);
+    db.exec("INSERT INTO seasons(id,name,is_active) VALUES (1,'S1',1)");
+    db.exec("INSERT INTO players(id,display_name,color) VALUES (1,'Paul','#f00'),(2,'Luke','#0f0')");
+    db.exec("INSERT INTO season_rosters(season_id,player_id) VALUES (1,1),(1,2)");
+    db.exec("INSERT INTO courses(id,slug,display_name) VALUES (1,'rr','Rainbow Road')");
+    db.exec(`INSERT INTO runs(id,season_id,player_id,course_id,cc,status,provenance,total_time_ms,is_pb,ended_at) VALUES
+      (1,1,2,1,150,'finished','live',108000,1,'2026-01-02T00:00:00Z'),
+      (2,1,1,1,150,'finished','live',110000,1,'2026-01-03T00:00:00Z')`);
+    db.exec("INSERT INTO run_laps(run_id,lap_index,lap_time_ms) VALUES (1,1,40000),(1,2,34000),(2,1,41000),(2,2,35000)");
+    db.exec("INSERT INTO world_records(course_id,cc,holder_name,record_ms,record_str,video_url,is_current,achieved_at) VALUES (1,150,'WR',100000,'1:40','http://v',1,'2025-12-01T00:00:00Z')");
+    return db;
+  }
+
+  it('assembles profile, wr, coloured leaderboard, splits, and history', () => {
+    const s = courseSummary(seeded(), 1, 150, 'rr')!;
+    expect(s.profile.display_name).toBe('Rainbow Road');
+    expect(s.wr!.record_ms).toBe(100000);
+    expect(s.wr!.video_url).toBe('http://v');
+    expect(s.leaderboard.map(r => [r.display_name, r.rank, r.color])).toEqual([['Luke', 1, '#0f0'], ['Paul', 2, '#f00']]);
+    expect(s.splits.laps).toBe(2);
+    expect(s.history.recordProgression.length).toBeGreaterThan(0);
+    expect(s.history.wrHistory[0].holder_name).toBe('WR');
+  });
+
+  it('returns null for an unknown slug', () => {
+    expect(courseSummary(seeded(), 1, 150, 'nope')).toBeNull();
   });
 });
