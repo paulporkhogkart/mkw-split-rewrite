@@ -69,11 +69,15 @@ describe('stats routes', () => {
     const dir = mkdtempSync(join(tmpdir(), 'pk-'));
     const pkPath = join(dir, 'porker.db');
     const pk = new DatabaseSync(pkPath);
-    pk.exec(`CREATE TABLE "EunoraMeasurements" ("Timestamp" INTEGER,"Weight" REAL,"BodyMassIndex" REAL,
-      "BodyFat" REAL,"FatFreeBodyWeight" REAL,"SubcutaneousFat" REAL,"VisceralFat" REAL,"BodyWater" REAL,
-      "SkeletalMuscle" REAL,"MuscleMass" REAL,"BoneMass" REAL,"Protein" REAL,"BasalMetabolicRate" REAL,"MetabolicAge" REAL)`);
+    pk.exec(`CREATE TABLE measurements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, person TEXT NOT NULL, timestamp INTEGER NOT NULL,
+      weight REAL, body_mass_index REAL, body_fat REAL, fat_free_body_weight REAL,
+      subcutaneous_fat REAL, visceral_fat REAL, body_water REAL, skeletal_muscle REAL,
+      muscle_mass REAL, bone_mass REAL, protein REAL, basal_metabolic_rate REAL, metabolic_age REAL,
+      UNIQUE(person, timestamp))`);
     const ts = Math.floor(DateTime.fromISO('2026-06-09T00:00:00', { zone: 'utc' }).toSeconds());
-    pk.prepare(`INSERT INTO "EunoraMeasurements" VALUES (?,80,21,18,60,15,5,55,50,50,3,18,1700,25)`).run(ts);
+    pk.prepare(`INSERT INTO measurements (person,timestamp,weight,body_mass_index,body_fat,fat_free_body_weight,subcutaneous_fat,visceral_fat,body_water,skeletal_muscle,muscle_mass,bone_mass,protein,basal_metabolic_rate,metabolic_age)
+      VALUES ('eunora',?,80,21,18,60,15,5,55,50,50,3,18,1700,25)`).run(ts);
     pk.close();
 
     const app = createStatsApp(db(), { porkerPath: pkPath }); // player 1 = 'Luke' = Eunora
@@ -119,11 +123,15 @@ describe('stats routes', () => {
     const dir = mkdtempSync(join(tmpdir(), 'corr-'));
     const pkPath = join(dir, 'porker.db');
     const pk = new DatabaseSync(pkPath);
-    pk.exec(`CREATE TABLE "EunoraMeasurements" ("Timestamp" INTEGER,"Weight" REAL,"BodyMassIndex" REAL,"BodyFat" REAL,
-      "FatFreeBodyWeight" REAL,"SubcutaneousFat" REAL,"VisceralFat" REAL,"BodyWater" REAL,"SkeletalMuscle" REAL,
-      "MuscleMass" REAL,"BoneMass" REAL,"Protein" REAL,"BasalMetabolicRate" REAL,"MetabolicAge" REAL)`);
+    pk.exec(`CREATE TABLE measurements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, person TEXT NOT NULL, timestamp INTEGER NOT NULL,
+      weight REAL, body_mass_index REAL, body_fat REAL, fat_free_body_weight REAL,
+      subcutaneous_fat REAL, visceral_fat REAL, body_water REAL, skeletal_muscle REAL,
+      muscle_mass REAL, bone_mass REAL, protein REAL, basal_metabolic_rate REAL, metabolic_age REAL,
+      UNIQUE(person, timestamp))`);
     const ep = (iso: string) => Math.floor(DateTime.fromISO(iso, { zone: 'utc' }).toSeconds());
-    pk.prepare(`INSERT INTO "EunoraMeasurements" VALUES (?,80,22,?,60,15,5,55,50,50,3,18,1700,25)`).run(ep('2026-06-09T00:00:00'), 18);
+    pk.prepare(`INSERT INTO measurements (person,timestamp,weight,body_mass_index,body_fat,fat_free_body_weight,subcutaneous_fat,visceral_fat,body_water,skeletal_muscle,muscle_mass,bone_mass,protein,basal_metabolic_rate,metabolic_age)
+      VALUES ('eunora',?,80,22,?,60,15,5,55,50,50,3,18,1700,25)`).run(ep('2026-06-09T00:00:00'), 18);
     pk.close();
 
     const app = createStatsApp(db(), { porkerPath: pkPath }); // db(): Luke + bc + a finished run on 2026-06-10

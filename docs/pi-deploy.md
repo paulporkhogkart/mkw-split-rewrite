@@ -8,7 +8,7 @@ Layout it creates:
 
 | Path | What |
 |---|---|
-| `/home/pi/mkw` | the git clone (checked out at a release tag) |
+| `/home/pi/mkw` | the git clone - **sparse** (`pi web src server deploy`) + **blobless**, at a release tag |
 | `/home/pi/mkw-data` | `mkw.db`, `bot-state.json`, `.deployed-tag` (outside the clone) |
 | `/etc/mkw/mkw.env` | env + secrets (outside the clone) |
 | `/home/pi/.ssh/mkw_deploy` | read-only GitHub deploy key |
@@ -53,9 +53,14 @@ On GitHub: repo → **Settings → Deploy keys → Add deploy key** → paste th
 **Allow write access** unchecked.
 
 ```bash
+# Partial + sparse clone: only pi/ web/ src/ server/ deploy/ ever land on disk, and .git carries
+# blobs for just those paths (~30 MB) instead of the whole desktop app's binary history (~800 MB).
+# The set is the deploy's real dependency footprint: web/ builds by importing the desktop src/, and
+# pi/ reads server/schema.sql + server/data/ at boot - a bare "pi web" would break the build/boot.
 GIT_SSH_COMMAND="ssh -i ~/.ssh/mkw_deploy -o IdentitiesOnly=yes" \
-  git clone git@github.com:<you>/<repo>.git /home/pi/mkw
+  git clone --filter=blob:none --sparse git@github.com:<you>/<repo>.git /home/pi/mkw
 cd /home/pi/mkw
+git sparse-checkout set pi web src server deploy
 GIT_SSH_COMMAND="ssh -i ~/.ssh/mkw_deploy -o IdentitiesOnly=yes" git checkout v0.3.0
 npm --prefix pi install --no-audit --no-fund
 ```
@@ -207,3 +212,47 @@ pi install` + `sudo systemctl restart mkw-server mkw-bot` and write that tag int
   WebSockets after ~100s; the desktop reconnects on its own (the presence client carries an idle
   heartbeat, see `pi/src/presence/hub.ts`). If a friend's cards don't recover, that's a client
   heartbeat gap to chase, not a server one — `/v1/presence` is unauthenticated and unchanged here.
+
+## 13. Reclaiming disk space on an existing Pi
+
+Pis cloned before the sparse/blobless switch are a *full* clone: the whole desktop app checks out
+(`screenshots/` ~840 MB, `captures/` ~350 MB, …) and `.git` carries every revision of those binaries
+(~800 MB) — roughly **2 GB the Pi never reads** (it only uses `pi/`, `web/`, `src/`, `server/`,
+`deploy/`). Two independent reclaims; do A now, B when convenient.
+
+**A. Working tree (~1.2 GB) — instant, zero-risk, no downtime.** Drop the desktop-only dirs from the
+checkout:
+
+```bash
+cd /home/pi/mkw
+git sparse-checkout set pi web src server deploy   # removes screenshots/, captures/, images/, …
+du -sh /home/pi/mkw                                # confirm it shrank
+```
+
+Nothing to restart — the services run from `pi/`/`web/`, which stay. `deploy/update.sh` now runs
+this on every timer tick, so even if you skip it by hand the next tick (~2 min) reclaims it and keeps
+it off for good.
+
+**B. `.git` history (~800 MB).** git can't evict already-downloaded blobs in place, so re-clone lean
+and swap. Data (`/home/pi/mkw-data`) and env (`/etc/mkw`) live *outside* the clone, so this only
+moves code — no data risk:
+
+```bash
+tag="$(cat /home/pi/mkw-data/.deployed-tag)"
+GIT_SSH_COMMAND="ssh -i ~/.ssh/mkw_deploy -o IdentitiesOnly=yes" \
+  git clone --filter=blob:none --sparse git@github.com:<you>/<repo>.git /home/pi/mkw.new
+cd /home/pi/mkw.new
+git sparse-checkout set pi web src server deploy
+GIT_SSH_COMMAND="ssh -i ~/.ssh/mkw_deploy -o IdentitiesOnly=yes" git checkout "$tag"
+npm --prefix pi install --no-audit --no-fund
+npm --prefix web install --no-audit --no-fund
+npm --prefix web run build
+# swap (brief downtime while the three services restart):
+sudo systemctl stop mkw-server mkw-bot mkw-web
+mv /home/pi/mkw /home/pi/mkw.old && mv /home/pi/mkw.new /home/pi/mkw
+sudo systemctl start mkw-server mkw-bot mkw-web
+# verify healthy, then drop the old clone:
+curl -s http://localhost:8787/health && rm -rf /home/pi/mkw.old
+```
+
+A fresh partial+sparse clone is ~30 MB of `.git` + the five source dirs, versus ~2 GB before.

@@ -10,7 +10,7 @@ import { resolveSequential } from '../stats/sequential';
 import { resolveCompletion } from '../stats/completion';
 import { resolveScreen } from '../stats/screen';
 import { resolveCorrelation } from '../stats/correlation';
-import { resolveBody, openPorker, presentPorkerTables } from '../stats/body';
+import { resolveBody, openPorker, presentPorkerPeople } from '../stats/body';
 import { parseBodyCondition, bodyConditionSql } from '../stats/align';
 import { activeSeasonId } from '../db/seasons';
 
@@ -63,8 +63,8 @@ export function createStatsApp(db: DatabaseSync, deps: StatsDeps): Hono {
     const path = requirePorker();
     db.exec(`ATTACH DATABASE '${path.replace(/'/g, "''")}' AS porker`);
     try {
-      const tables = presentPorkerTables(db, 'porker');
-      const frag = bodyConditionSql(parseBodyCondition(bcRaw), tables);
+      const people = presentPorkerPeople(db, 'porker');
+      const frag = bodyConditionSql(parseBodyCondition(bcRaw), people);
       return resolveRace(db, { metric, period: period(c), filters, groupBy, seasonId, cc, bodyConditionSql: frag });
     } finally { try { db.exec('DETACH DATABASE porker'); } catch { /* ignore */ } }
   };

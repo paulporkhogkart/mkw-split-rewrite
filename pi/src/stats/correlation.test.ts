@@ -27,11 +27,15 @@ let dir: string, path: string;
 
 function mkPorker(p: string) {
   const d = new DatabaseSync(p);
-  d.exec(`CREATE TABLE "EunoraMeasurements" ("Timestamp" INTEGER,"Weight" REAL,"BodyMassIndex" REAL,"BodyFat" REAL,
-    "FatFreeBodyWeight" REAL,"SubcutaneousFat" REAL,"VisceralFat" REAL,"BodyWater" REAL,"SkeletalMuscle" REAL,
-    "MuscleMass" REAL,"BoneMass" REAL,"Protein" REAL,"BasalMetabolicRate" REAL,"MetabolicAge" REAL)`);
+  d.exec(`CREATE TABLE measurements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, person TEXT NOT NULL, timestamp INTEGER NOT NULL,
+    weight REAL, body_mass_index REAL, body_fat REAL, fat_free_body_weight REAL,
+    subcutaneous_fat REAL, visceral_fat REAL, body_water REAL, skeletal_muscle REAL,
+    muscle_mass REAL, bone_mass REAL, protein REAL, basal_metabolic_rate REAL, metabolic_age REAL,
+    UNIQUE(person, timestamp))`);
   const ins = (iso: string, fat: number) => d.prepare(
-    `INSERT INTO "EunoraMeasurements" VALUES (?,80,22,?,60,15,5,55,50,50,3,18,1700,25)`).run(epoch(iso), fat);
+    `INSERT INTO measurements (person,timestamp,weight,body_mass_index,body_fat,fat_free_body_weight,subcutaneous_fat,visceral_fat,body_water,skeletal_muscle,muscle_mass,bone_mass,protein,basal_metabolic_rate,metabolic_age)
+     VALUES ('eunora',?,80,22,?,60,15,5,55,50,50,3,18,1700,25)`).run(epoch(iso), fat);
   ins('2026-06-01T00:00:00', 20);
   ins('2026-06-02T00:00:00', 18);
   ins('2026-06-03T00:00:00', 16);

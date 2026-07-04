@@ -15,14 +15,14 @@ export function parseBodyCondition(raw: string): BodyCondition {
 }
 
 /** WHERE fragment keeping runs whose player's latest weigh-in (<= ended_at) matches the
- *  condition. Assumes porker is ATTACHed AS porker; `tables` are the present porker tables
- *  (porker schema). Identity bridges run.player_id -> players.display_name -> porker table. */
-export function bodyConditionSql(cond: BodyCondition, tables: { table: string; player: string }[]):
+ *  condition. Assumes porker is ATTACHed AS porker; `people` are the present porker people
+ *  (porker schema). Identity bridges run.player_id -> players.display_name -> porker person. */
+export function bodyConditionSql(cond: BodyCondition, people: { person: string; player: string }[]):
     { join: string; where: string; params: unknown[] } {
-  if (tables.length === 0) return { join: '', where: '1=0', params: [] };
+  if (people.length === 0) return { join: '', where: '1=0', params: [] };
   const col = BODY_SOURCE_COLUMNS[cond.column];
-  const unions = tables.map((m) =>
-    `SELECT '${m.player}' AS player, "${col}" AS v, "Timestamp" AS ts FROM porker."${m.table}"`).join(' UNION ALL ');
+  const unions = people.map((m) =>
+    `SELECT '${m.player}' AS player, "${col}" AS v, "timestamp" AS ts FROM porker.measurements WHERE person='${m.person}'`).join(' UNION ALL ');
   const where = `(
     SELECT b.v FROM ( ${unions} ) b
     JOIN players pp ON pp.display_name = b.player COLLATE NOCASE

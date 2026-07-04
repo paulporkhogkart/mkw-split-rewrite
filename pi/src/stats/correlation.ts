@@ -1,6 +1,6 @@
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import type { Period } from './types';
-import { BODY_SOURCE_COLUMNS, PORKER_MAP, presentPorkerTables } from './body';
+import { BODY_SOURCE_COLUMNS, PORKER_MAP, presentPorkerPeople } from './body';
 
 export interface Correlation { n: number; r: number | null; slope: number | null; intercept: number | null; }
 
@@ -47,13 +47,13 @@ export function resolveCorrelation(mkw: DatabaseSync, porker: DatabaseSync, q: C
     `SELECT total_time_ms AS y, CAST(strftime('%s', datetime(ended_at)) AS INTEGER) AS ep FROM runs WHERE ${where.join(' AND ')}`
   ).all(...(params as SQLInputValue[])) as { y: number; ep: number }[];
 
-  const table = PORKER_MAP.find((m) => m.player.toLowerCase() === player.display_name.toLowerCase())?.table;
-  const present = new Set(presentPorkerTables(porker).map((t) => t.table));
+  const person = PORKER_MAP.find((m) => m.player.toLowerCase() === player.display_name.toLowerCase())?.person;
+  const present = new Set(presentPorkerPeople(porker).map((t) => t.person));
   const pairs: [number, number][] = [];
-  if (table && present.has(table)) {
-    const asof = porker.prepare(`SELECT "${col}" AS v FROM "${table}" WHERE "Timestamp" <= ? ORDER BY "Timestamp" DESC LIMIT 1`);
+  if (person && present.has(person)) {
+    const asof = porker.prepare(`SELECT "${col}" AS v FROM measurements WHERE person = ? AND "timestamp" <= ? ORDER BY "timestamp" DESC LIMIT 1`);
     for (const run of runs) {
-      const m = asof.get(run.ep) as { v: number | null } | undefined;
+      const m = asof.get(person, run.ep) as { v: number | null } | undefined;
       if (m && m.v != null) pairs.push([m.v, run.y]);
     }
   }

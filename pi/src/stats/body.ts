@@ -4,21 +4,24 @@ import type { BodyAgg } from './metrics';
 import { getMetric } from './metrics';
 import { toEpochSeconds } from './period';
 
-/** porker table -> kart-player display name. Blu/Cbri excluded (non-participants). */
-export const PORKER_MAP: { table: string; player: string }[] = [
-  { table: 'Measurements', player: 'paul pork' },   // must match players.display_name (renamed from 'Paul')
-  { table: 'AddymerMeasurements', player: 'Gub' },   // external porker table name kept (we don't own it)
-  { table: 'AlexMeasurements', player: 'Alex' },
-  { table: 'EunoraMeasurements', player: 'Luke' },
-  { table: 'BraydenMeasurements', player: 'Aliias' },
+/** porker `person` key -> kart-player display name. Blu/Cbri excluded (non-participants).
+ *  The new porker.db uses one `measurements` table keyed by `person` (mr-porker 2.0);
+ *  these keys match the participant `key`s in mr-porker's config.json and the labels the
+ *  migration wrote for the historical per-person tables. */
+export const PORKER_MAP: { person: string; player: string }[] = [
+  { person: 'paul', player: 'paul pork' },   // must match players.display_name (renamed from 'Paul')
+  { person: 'addymer', player: 'Gub' },
+  { person: 'alex', player: 'Alex' },
+  { person: 'eunora', player: 'Luke' },
+  { person: 'brayden', player: 'Aliias' },
 ];
 
-/** Normalized metric id -> porker original column name. Shared with align.ts. */
+/** Normalized metric id -> porker.db column name (mr-porker 2.0 snake_case). Shared with align.ts. */
 export const BODY_SOURCE_COLUMNS: Record<string, string> = {
-  weight: 'Weight', bmi: 'BodyMassIndex', body_fat: 'BodyFat', fat_free_weight: 'FatFreeBodyWeight',
-  subcutaneous_fat: 'SubcutaneousFat', visceral_fat: 'VisceralFat', body_water: 'BodyWater',
-  skeletal_muscle: 'SkeletalMuscle', muscle_mass: 'MuscleMass', bone_mass: 'BoneMass',
-  protein: 'Protein', bmr: 'BasalMetabolicRate', metabolic_age: 'MetabolicAge',
+  weight: 'weight', bmi: 'body_mass_index', body_fat: 'body_fat', fat_free_weight: 'fat_free_body_weight',
+  subcutaneous_fat: 'subcutaneous_fat', visceral_fat: 'visceral_fat', body_water: 'body_water',
+  skeletal_muscle: 'skeletal_muscle', muscle_mass: 'muscle_mass', bone_mass: 'bone_mass',
+  protein: 'protein', bmr: 'basal_metabolic_rate', metabolic_age: 'metabolic_age',
 };
 
 /** Open porker.db read-only (coexists with the pork bot's writer). */
@@ -28,38 +31,41 @@ export function openPorker(path: string): DatabaseSync {
   return db;
 }
 
-/** Which porker tables actually exist in a given schema ('main' for a standalone porker
- *  connection, 'porker' when ATTACHed). A fixture/partial DB may omit some. */
-export function presentPorkerTables(db: DatabaseSync, schema = 'main'): { table: string; player: string }[] {
-  const names = new Set((db.prepare(`SELECT name FROM ${schema}.sqlite_master WHERE type='table'`).all() as { name: string }[]).map((r) => r.name));
-  return PORKER_MAP.filter((m) => names.has(m.table));
+/** Which mapped porker people actually have rows in a given schema ('main' for a standalone
+ *  porker connection, 'porker' when ATTACHed). Returns [] if the `measurements` table is
+ *  absent (empty fixture) or no mapped person has data. */
+export function presentPorkerPeople(db: DatabaseSync, schema = 'main'): { person: string; player: string }[] {
+  const hasTable = db.prepare(`SELECT 1 FROM ${schema}.sqlite_master WHERE type='table' AND name='measurements'`).get() != null;
+  if (!hasTable) return [];
+  const people = new Set((db.prepare(`SELECT DISTINCT person FROM ${schema}.measurements`).all() as { person: string }[]).map((r) => r.person));
+  return PORKER_MAP.filter((m) => people.has(m.person));
 }
 
 export interface BodyQuery {
   metric: string; agg: BodyAgg; period: Period; filters: { player?: string };
 }
 
-/** One player's column value under an aggregation, scoped to the period window (epoch bounds).
- *  `column` is the porker ORIGINAL column name (e.g. BodyFat), not the normalized metric id. */
-function valueFor(db: DatabaseSync, table: string, column: string, agg: BodyAgg, lo: number | null, hi: number | null): number | null {
-  const win: string[] = []; const p: number[] = [];
-  if (lo != null) { win.push('"Timestamp" >= ?'); p.push(lo); }
-  if (hi != null) { win.push('"Timestamp" < ?'); p.push(hi); }
-  const w = win.length ? `WHERE ${win.join(' AND ')}` : '';
+/** One person's column value under an aggregation, scoped to the period window (epoch bounds).
+ *  `column` is the porker.db column name (e.g. body_fat), not the normalized metric id. */
+function valueFor(db: DatabaseSync, person: string, column: string, agg: BodyAgg, lo: number | null, hi: number | null): number | null {
+  const win: string[] = ['person = ?']; const p: (string | number)[] = [person];
+  if (lo != null) { win.push('"timestamp" >= ?'); p.push(lo); }
+  if (hi != null) { win.push('"timestamp" < ?'); p.push(hi); }
+  const w = `WHERE ${win.join(' AND ')}`;
   if (agg === 'min' || agg === 'max') {
-    const row = db.prepare(`SELECT ${agg.toUpperCase()}("${column}") AS v FROM "${table}" ${w}`).get(...p) as { v: number | null };
+    const row = db.prepare(`SELECT ${agg.toUpperCase()}("${column}") AS v FROM measurements ${w}`).get(...p) as { v: number | null };
     return row?.v ?? null;
   }
   if (agg === 'current') {
     // latest on-or-before the window end (hi); ignore lo so "current" is the standing value
-    const hw = hi != null ? 'WHERE "Timestamp" < ?' : '';
-    const hp = hi != null ? [hi] : [];
-    const row = db.prepare(`SELECT "${column}" AS v FROM "${table}" ${hw} ORDER BY "Timestamp" DESC LIMIT 1`).get(...hp) as { v: number | null };
+    const hw: string[] = ['person = ?']; const hp: (string | number)[] = [person];
+    if (hi != null) { hw.push('"timestamp" < ?'); hp.push(hi); }
+    const row = db.prepare(`SELECT "${column}" AS v FROM measurements WHERE ${hw.join(' AND ')} ORDER BY "timestamp" DESC LIMIT 1`).get(...hp) as { v: number | null };
     return row?.v ?? null;
   }
   // change = last - first within the window
-  const first = db.prepare(`SELECT "${column}" AS v FROM "${table}" ${w} ORDER BY "Timestamp" ASC LIMIT 1`).get(...p) as { v: number | null };
-  const last = db.prepare(`SELECT "${column}" AS v FROM "${table}" ${w} ORDER BY "Timestamp" DESC LIMIT 1`).get(...p) as { v: number | null };
+  const first = db.prepare(`SELECT "${column}" AS v FROM measurements ${w} ORDER BY "timestamp" ASC LIMIT 1`).get(...p) as { v: number | null };
+  const last = db.prepare(`SELECT "${column}" AS v FROM measurements ${w} ORDER BY "timestamp" DESC LIMIT 1`).get(...p) as { v: number | null };
   return first?.v != null && last?.v != null ? last.v - first.v : null;
 }
 
@@ -73,10 +79,10 @@ export function resolveBody(db: DatabaseSync, q: BodyQuery): StatResult {
   const lo = q.period.startUtc ? toEpochSeconds(q.period.startUtc) : null;
   const hi = q.period.endUtc ? toEpochSeconds(q.period.endUtc) : null;
 
-  const tables = presentPorkerTables(db).filter((t) => !q.filters.player || t.player.toLowerCase() === q.filters.player.toLowerCase());
+  const people = presentPorkerPeople(db).filter((t) => !q.filters.player || t.player.toLowerCase() === q.filters.player.toLowerCase());
   const rows: StatRow[] = [];
-  for (const t of tables) {
-    const v = valueFor(db, t.table, col, q.agg, lo, hi);
+  for (const t of people) {
+    const v = valueFor(db, t.person, col, q.agg, lo, hi);
     if (v != null) rows.push({ key: t.player, value: v });
   }
   rows.sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
