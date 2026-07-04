@@ -63,9 +63,20 @@ time · gap, with on-fire flames). The whole card is an `<a href="/tracks/:slug"
 hub (App's `navigate` intercepts the click). The track sprite (`spriteUrl(slug)`) may sit as a
 small marker in the card header, but the leaderboard is the substance.
 
+**Overall-time card (pinned, non-linking).** Lead the page with one extra leaderboard card
+titled **Overall** — each player's summed PBs (total time across all tracks, ranked, with a
+track-count), the #2 axis of the site's leaderboard hierarchy. Same leaderboard-card styling,
+but with **no WR/fire and it links nowhere** (it is a summary, not a track). Derived from the
+same timeline data (sum each player's current per-track best), mirroring the pi
+`overallLeaderboard` semantics (sum of available PBs). Not affected by the search.
+
+**Track search.** A text input filters the track cards by name client-side (substring match) so
+finding a track is quick. It filters only the track grid; the Overall card stays pinned.
+
 **Data (no new endpoint).** Fetch `/v1/territory/timeline` **once** — the same public source
 the turf map uses — and derive all 30 tracks' standings + colours + current WR client-side
-(`lib/timeline.js` → `courseData.js buildCourseView`). No per-card fetch, no popups. (The
+(`lib/timeline.js` → `courseData.js buildCourseView`). No per-card fetch, no popups. The
+Overall card and the search filter read this same data — no extra request. (The
 timeline is a biggish payload, but the turf map already downloads it; a dedicated "all current
 boards" endpoint is a possible later optimization, not needed for v1.)
 
@@ -196,6 +207,8 @@ Reused: `src/lib/overlay.js`, `src/lib/trailSettings.js`, `web/src/lib/courseDat
 - **Pure math** — `fireTarget.js` (crossing solve; undefined cases: no WR, empty board,
   impossible target, already-leader) and `courseSplits.js` (theoretical best, missing laps,
   field ideal) fully unit-tested with hand-built inputs.
+- **Index derivations** — the timeline → overall-standings sum (sum of per-track bests +
+  track-count) and the client-side name filter are pure helpers, unit-tested.
 - **`courseSummary.ts`** — seeded in-memory DB (mirroring `playerSummary.test.ts`): leaderboard
   order, WR fields, per-lap bests + field ideal, reigns/record-progression, and slug 404.
 - **HTTP + gate/CORS** — mirror `players.test.ts`: `/v1/courses/:slug` (+ `/model`, `/trails`,
