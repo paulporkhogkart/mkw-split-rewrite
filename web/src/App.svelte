@@ -9,7 +9,9 @@
   import VersionPage from "./VersionPage.svelte";
   import PlayersIndex from "./PlayersIndex.svelte";
   import PlayerProfile from "./PlayerProfile.svelte";
-  import { viewFromPath, playerSlugFromPath } from "./lib/view.js";
+  import CoursesIndex from "./CoursesIndex.svelte";
+  import CourseProfile from "./CourseProfile.svelte";
+  import { viewFromPath, playerSlugFromPath, courseSlugFromPath } from "./lib/view.js";
 
   // The navbar wears a random player's figure + colour each load; hovering lights the on-fire
   // variant. The player's colour drives the whole nav accent (OFF tag + active-tab marker).
@@ -20,6 +22,7 @@
 
   let view = viewFromPath(typeof location !== "undefined" ? location.pathname : "/");
   let playerSlug = playerSlugFromPath(typeof location !== "undefined" ? location.pathname : "/");
+  let courseSlug = courseSlugFromPath(typeof location !== "undefined" ? location.pathname : "/");
   let navEl;
   let mk = { left: 0, width: 0 };
 
@@ -46,10 +49,15 @@
     if (path !== location.pathname) history.pushState({}, "", path);
     view = viewFromPath(location.pathname);
     playerSlug = playerSlugFromPath(location.pathname);
+    courseSlug = courseSlugFromPath(location.pathname);
   }
 
   onMount(() => {
-    const sync = () => { view = viewFromPath(location.pathname); playerSlug = playerSlugFromPath(location.pathname); };
+    const sync = () => {
+      view = viewFromPath(location.pathname);
+      playerSlug = playerSlugFromPath(location.pathname);
+      courseSlug = courseSlugFromPath(location.pathname);
+    };
     window.addEventListener("popstate", sync);
     window.addEventListener("resize", updateMarker);
     // Webfont metrics change offset widths — recompute once Inter has loaded.
@@ -72,6 +80,7 @@
     <a class="tab" class:on={view === "live"} href="/" on:click={navigate}>Live</a>
     <a class="tab" class:on={view === "turf"} href="/turf" on:click={navigate}>Turf</a>
     <a class="tab" class:on={view === "players"} href="/players" on:click={navigate}>Players</a>
+    <a class="tab" class:on={view === "courses"} href="/tracks" on:click={navigate}>Tracks</a>
     <span class="marker" style="left:{mk.left}px;width:{mk.width}px"></span>
   </nav>
 </header>
@@ -81,6 +90,8 @@
   {:else if view === "version"}<VersionPage />
   {:else if view === "players"}
     {#if playerSlug}<PlayerProfile slug={playerSlug} />{:else}<PlayersIndex />{/if}
+  {:else if view === "courses"}
+    {#if courseSlug}<CourseProfile slug={courseSlug} />{:else}<CoursesIndex />{/if}
   {:else}<CardWall />{/if}
 </main>
 

@@ -16,6 +16,20 @@ export function friendsPbs(db: DatabaseSync, seasonId: number, courseId: number,
   return courseLeaderboard(db, seasonId, courseId, cc);
 }
 
+/** All-time (cross-season) course leaderboard: each player's best finished, non-carryover time on
+ *  the course at cc, fastest first. Matches the website's all-time timeline/turf model. */
+export function courseLeaderboardAllTime(db: DatabaseSync, courseId: number, cc: number): LeaderRow[] {
+  const rows = db.prepare(
+    `SELECT r.player_id, p.display_name, MIN(r.total_time_ms) AS total_time_ms
+     FROM runs r JOIN players p ON p.id = r.player_id
+     WHERE r.course_id=? AND r.cc=? AND r.status='finished'
+       AND r.provenance!='carryover' AND r.total_time_ms IS NOT NULL
+     GROUP BY r.player_id
+     ORDER BY total_time_ms ASC`
+  ).all(courseId, cc) as Omit<LeaderRow, 'rank' | 'total_time_str'>[];
+  return rows.map((r, i) => ({ ...r, total_time_str: null, rank: i + 1 }));
+}
+
 export function playerPbs(db: DatabaseSync, seasonId: number, playerId: number, cc: number) {
   return db.prepare(
     `SELECT r.course_id, c.slug, c.display_name, r.total_time_ms, r.total_time_str

@@ -5,6 +5,7 @@ import { activeSeasonId, listSeasons, courseIdBySlug } from '../db/seasons';
 import { slugify } from '../db/slug';
 import { courseLeaderboard, overallLeaderboard, friendsPbs, playerPbs, currentWr, myPbs, myPbSplits, courseTrails, roster, playerTrails, territoryOwners, territoryTimeline } from '../db/reads';
 import { playerSummary } from '../db/playerSummary';
+import { courseSummary } from '../db/courseSummary';
 import type { TrailMode } from '../db/reads';
 import { requireToken } from './auth';
 import { playerByToken } from '../db/players';
@@ -31,6 +32,10 @@ export function readsRoutes(db: DatabaseSync): Hono<Env> {
   r.get('/v1/players/:slug', (c) => {
     const s = playerSummary(db, season(c), num(c.req.query('cc'), 150), c.req.param('slug'));
     return s ? c.json(s) : c.json({ error: 'unknown player' }, 404);
+  });
+  r.get('/v1/courses/:slug', (c) => {
+    const s = courseSummary(db, num(c.req.query('cc'), 150), c.req.param('slug'));
+    return s ? c.json(s) : c.json({ error: 'unknown course' }, 404);
   });
   r.get('/v1/world-records', (c) => {
     const cid = course(c); if (cid === null) return c.json({ error: 'unknown course' }, 400);

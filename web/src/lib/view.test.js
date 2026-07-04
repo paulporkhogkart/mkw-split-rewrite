@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { viewFromPath, playerSlugFromPath } from "./view.js";
+import { viewFromPath, playerSlugFromPath, courseSlugFromPath } from "./view.js";
 
 describe("viewFromPath", () => {
   it("defaults to the live card wall at the root or an unknown path", () => {
@@ -28,5 +28,17 @@ describe("players routing", () => {
     expect(playerSlugFromPath("/players")).toBeNull();
     expect(playerSlugFromPath("/players/paul")).toBe("paul");
     expect(playerSlugFromPath("/turf")).toBeNull();
+  });
+});
+
+describe("tracks routing", () => {
+  it("routes /tracks and /tracks/:slug to the courses view", () => {
+    expect(viewFromPath("/tracks")).toBe("courses");
+    expect(viewFromPath("/tracks/rainbow_road")).toBe("courses");
+  });
+  it("extracts the course slug (null on the index)", () => {
+    expect(courseSlugFromPath("/tracks")).toBeNull();
+    expect(courseSlugFromPath("/tracks/rainbow_road")).toBe("rainbow_road");
+    expect(courseSlugFromPath("/players/paul")).toBeNull();
   });
 });

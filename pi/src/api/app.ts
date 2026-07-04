@@ -39,10 +39,12 @@ export function createApp(db: DatabaseSync, hub: EventHub,
   const readCors = cors({ origin: '*', allowMethods: ['GET'] });
   for (const p of PUBLIC_READS) app.use(p, readCors);
   app.use('/v1/players/:slug', readCors);   // single-segment player summary is public
+  app.use('/v1/courses/:slug', readCors);   // single-segment course summary is public
 
   const OPEN = new Set(['/health', '/v1/events', '/v1/presence', '/v1/activity/stream', ...PUBLIC_READS]);
   const PLAYER_SUMMARY = /^\/v1\/players\/[^/]+$/;   // NOT /v1/players/:id/pbs|trails (two segments — stay gated)
-  const isOpen = (path: string) => OPEN.has(path) || PLAYER_SUMMARY.test(path);
+  const COURSE_SUMMARY = /^\/v1\/courses\/[^/]+$/;   // Plan 2 extends this for /model|/trails|/heatmap
+  const isOpen = (path: string) => OPEN.has(path) || PLAYER_SUMMARY.test(path) || COURSE_SUMMARY.test(path);
   app.use('*', (c, next) => (isOpen(c.req.path) ? next() : requireTokenAny(db)(c, next)));
   const activity = opts?.activity ?? new ActivityHub();
   // A default no-op tracker keeps runsRoutes working in tests; server.ts passes the real one
