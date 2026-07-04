@@ -51,17 +51,26 @@ renaming the whole backend/DB/desktop surface buys nothing. Switching the public
 
 ## Index page (`/tracks`)
 
-Grid of all 30 track cards in **canonical order** (sort by `course_id`, which follows the
-canonical `CANONICAL_COURSES` insert order — better than the alphabetical `/v1/territory`
-default), each: thumbnail (`spriteUrl(slug)` → `/map/sprites/<slug>.png`),
-track name, and current #1 holder. Reuses `/v1/territory` (all courses + owner + colour) —
-**no new endpoint**, exactly like `PlayersIndex`.
+**Leaderboard-first — the index is a wall of track leaderboards, not a thumbnail picker.**
+The most important information (who is fastest on each track) is visible immediately, with **no
+hover interaction**.
 
-**Hover → full leaderboard.** Reuse the turf **`CoursePopup.svelte`** on card hover to show
-that track's whole leaderboard, assembled by the existing `courseData.js`, sourced the same
-way the turf map does (territory timeline → standings) or via a lazy per-track
-`/v1/leaderboard?course=<slug>` fetch — implementation picks the lighter path. Whole card is
-an `<a href="/tracks/:slug">` (App's `navigate` intercepts the click).
+A grid of **persistent leaderboard cards** in canonical order (sort by `course_id`, which
+follows the `CANONICAL_COURSES` insert order — better than the alphabetical `/v1/territory`
+default), one per track. **Each card *is* the turf `CoursePopup` rendered inline** (not on
+hover): track name + WR + the leader's figure strip + the **full leaderboard** (rank · player ·
+time · gap, with on-fire flames). The whole card is an `<a href="/tracks/:slug">` to the detail
+hub (App's `navigate` intercepts the click). The track sprite (`spriteUrl(slug)`) may sit as a
+small marker in the card header, but the leaderboard is the substance.
+
+**Data (no new endpoint).** Fetch `/v1/territory/timeline` **once** — the same public source
+the turf map uses — and derive all 30 tracks' standings + colours + current WR client-side
+(`lib/timeline.js` → `courseData.js buildCourseView`). No per-card fetch, no popups. (The
+timeline is a biggish payload, but the turf map already downloads it; a dedicated "all current
+boards" endpoint is a possible later optimization, not needed for v1.)
+
+`CoursePopup` is currently styled as a floating popup; used as a persistent grid card it needs
+only **light style adaptation** (drop the shadow/float, fit the grid cell), not structural change.
 
 ## Detail page (`/tracks/:slug`) — the track hub
 
@@ -178,8 +187,9 @@ Edited:
 - `web/src/lib/api.js` (+ `courseSummaryUrl`, `courseModelUrl`, `courseTrailsUrl`, `courseHeatmapUrl`)
 - `pi/src/api/reads.ts` (+ the four `/v1/courses/...` routes), `pi/src/api/app.ts` (CORS + regex)
 
-Reused unchanged: `src/lib/overlay.js`, `src/lib/trailSettings.js`, `web/src/CoursePopup.svelte`,
-`web/src/lib/courseData.js`, `web/src/lib/chips.js`, `web/src/lib/map.js`, `web/src/lib/fireModel.js`.
+Reused: `src/lib/overlay.js`, `src/lib/trailSettings.js`, `web/src/lib/courseData.js`,
+`web/src/lib/timeline.js`, `web/src/lib/chips.js`, `web/src/lib/map.js`, `web/src/lib/fireModel.js`
+(all unchanged); `web/src/CoursePopup.svelte` reused with **light restyle** (float → grid card).
 
 ## Testing
 
