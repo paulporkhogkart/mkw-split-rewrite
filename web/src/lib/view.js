@@ -7,6 +7,7 @@ export function viewFromPath(pathname) {
   if (p === "heat") return "heat";
   if (p === "version") return "version";
   if (p === "players" || p.startsWith("players/")) return "players";
+  if (p === "tracks" || p.startsWith("tracks/")) return "courses";
   return "live";
 }
 
@@ -14,5 +15,12 @@ export function viewFromPath(pathname) {
 export function playerSlugFromPath(pathname) {
   const p = (pathname || "/").replace(/^\/+/, "").replace(/\/+$/, "");
   const m = /^players\/([^/]+)/.exec(p);
+  return m ? m[1] : null;
+}
+
+/** The course slug from /tracks/:slug, or null on /tracks (index) and non-track paths. */
+export function courseSlugFromPath(pathname) {
+  const p = (pathname || "/").replace(/^\/+/, "").replace(/\/+$/, "");
+  const m = /^tracks\/([^/]+)/.exec(p);
   return m ? m[1] : null;
 }
