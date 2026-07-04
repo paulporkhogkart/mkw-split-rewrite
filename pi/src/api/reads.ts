@@ -34,7 +34,7 @@ export function readsRoutes(db: DatabaseSync): Hono<Env> {
     return s ? c.json(s) : c.json({ error: 'unknown player' }, 404);
   });
   r.get('/v1/courses/:slug', (c) => {
-    const s = courseSummary(db, season(c), num(c.req.query('cc'), 150), c.req.param('slug'));
+    const s = courseSummary(db, num(c.req.query('cc'), 150), c.req.param('slug'));
     return s ? c.json(s) : c.json({ error: 'unknown course' }, 404);
   });
   r.get('/v1/world-records', (c) => {

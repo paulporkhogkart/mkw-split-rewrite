@@ -1,6 +1,6 @@
 <!-- web/src/CoursesIndex.svelte -->
 <script>
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import { territoryUrl, territoryTimelineUrl, API_BASE } from "./lib/api.js";
   import { leaderboardAt, wrAsOf } from "./lib/timeline.js";
   import { buildCourseView, preloadPlayerGifs, freshGifUrl } from "./lib/courseData.js";
@@ -11,15 +11,19 @@
   let overall = [];      // [{ player, total_ms, tracks, rank }]
   let query = "";
   let error = null;
+  let mintedUrls = [];   // blob: object URLs minted for card figures, revoked on destroy
 
   const fmt = (ms) => { if (ms == null) return "—"; const s = ms/1000, m = Math.floor(s/60); return `${m}:${(s-m*60<10?"0":"")}${(s-m*60).toFixed(3)}`; };
 
+  const fetchJson = async (url) => {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`${url} -> ${r.status}`);
+    return r.json();
+  };
+
   onMount(async () => {
     try {
-      const [courses, tl] = await Promise.all([
-        fetch(territoryUrl()).then((r) => r.json()),
-        fetch(territoryTimelineUrl()).then((r) => r.json()),
-      ]);
+      const [courses, tl] = await Promise.all([fetchJson(territoryUrl()), fetchJson(territoryTimelineUrl())]);
       const { events, colors, wrHistory } = tl;
       const ordered = [...courses].sort((a, b) => a.course_id - b.course_id);
       const boards = ordered.map((c) => ({ slug: c.slug, name: c.display_name, standings: leaderboardAt(events, c.slug, Infinity) }));
@@ -30,9 +34,15 @@
       }));
       overall = overallBoard(boards).map((o, i) => ({ ...o, rank: i + 1, color: colors[o.player] || "#888" }));
       await preloadPlayerGifs(API_BASE);
-      cards = cards.map((c) => ({ ...c, figUrl: c.view.gifUrl ? freshGifUrl(c.view.gifUrl) : "" }));
+      cards = cards.map((c) => {
+        const figUrl = c.view.gifUrl ? freshGifUrl(c.view.gifUrl) : "";
+        if (figUrl.startsWith("blob:")) mintedUrls.push(figUrl);
+        return { ...c, figUrl };
+      });
     } catch (e) { error = String(e); }
   });
+
+  onDestroy(() => { for (const u of mintedUrls) URL.revokeObjectURL(u); });
 
   $: filtered = cards.filter((c) => c.name.toLowerCase().includes(query.trim().toLowerCase()));
 </script>

@@ -1,21 +1,23 @@
 import type { DatabaseSync } from 'node:sqlite';
 
 type FinRow = { name: string; ms: number; ended_at: string };
-function finishedRuns(db: DatabaseSync, seasonId: number, courseId: number, cc: number): FinRow[] {
+/** All-time (cross-season), excluding carryover: those duplicate a prior best at the original
+ *  time and would otherwise phantom-flip #1 ownership. Matches the website's timeline model. */
+function finishedRuns(db: DatabaseSync, courseId: number, cc: number): FinRow[] {
   return db.prepare(
     `SELECT p.display_name AS name, r.total_time_ms AS ms, r.ended_at AS ended_at
      FROM runs r JOIN players p ON p.id = r.player_id
-     WHERE r.season_id=? AND r.course_id=? AND r.cc=? AND r.status='finished'
+     WHERE r.course_id=? AND r.cc=? AND r.status='finished' AND r.provenance!='carryover'
        AND r.total_time_ms IS NOT NULL AND r.ended_at IS NOT NULL
      ORDER BY r.ended_at ASC, r.id ASC`
-  ).all(seasonId, courseId, cc) as FinRow[];
+  ).all(courseId, cc) as FinRow[];
 }
 
 export interface ProgressionPoint { t: number; player: string; ms: number; }
-export function recordProgression(db: DatabaseSync, seasonId: number, courseId: number, cc: number): ProgressionPoint[] {
+export function recordProgression(db: DatabaseSync, courseId: number, cc: number): ProgressionPoint[] {
   const out: ProgressionPoint[] = [];
   let best = Infinity;
-  for (const r of finishedRuns(db, seasonId, courseId, cc)) {
+  for (const r of finishedRuns(db, courseId, cc)) {
     const t = Date.parse(r.ended_at);
     if (r.ms < best && Number.isFinite(t)) { best = r.ms; out.push({ t, player: r.name, ms: r.ms }); }
   }
@@ -23,11 +25,11 @@ export function recordProgression(db: DatabaseSync, seasonId: number, courseId: 
 }
 
 export interface Reign { player: string; from: number; to: number | null; ms: number | null; }
-export function courseReigns(db: DatabaseSync, seasonId: number, courseId: number, cc: number): Reign[] {
+export function courseReigns(db: DatabaseSync, courseId: number, cc: number): Reign[] {
   const best = new Map<string, number>();
   let leader: string | null = null, reignStart = 0;
   const reigns: Reign[] = [];
-  for (const r of finishedRuns(db, seasonId, courseId, cc)) {
+  for (const r of finishedRuns(db, courseId, cc)) {
     const t = Date.parse(r.ended_at);
     if (!Number.isFinite(t)) continue;
     const cur = best.get(r.name);

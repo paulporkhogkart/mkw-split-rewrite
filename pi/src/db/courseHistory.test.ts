@@ -21,7 +21,7 @@ function seeded() {
 
 describe('recordProgression', () => {
   it('emits an entry each time the local record falls', () => {
-    const p = recordProgression(seeded(), 1, 1, 150);
+    const p = recordProgression(seeded(), 1, 150);
     expect(p.map(e => [e.player, e.ms])).toEqual([['Paul', 110000], ['Luke', 109000], ['Paul', 108000]]);
     expect(p[0].t).toBe(Date.parse('2026-01-01T00:00:00Z'));
   });
@@ -29,7 +29,7 @@ describe('recordProgression', () => {
 
 describe('courseReigns', () => {
   it('spans #1 ownership, last reign ongoing', () => {
-    const r = courseReigns(seeded(), 1, 1, 150);
+    const r = courseReigns(seeded(), 1, 150);
     expect(r.map(x => x.player)).toEqual(['Paul', 'Luke', 'Paul']);
     expect(r[0].to).toBe(Date.parse('2026-01-02T00:00:00Z'));
     expect(r[0].ms).toBe(Date.parse('2026-01-02T00:00:00Z') - Date.parse('2026-01-01T00:00:00Z'));

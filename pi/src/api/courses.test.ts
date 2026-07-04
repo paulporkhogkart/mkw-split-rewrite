@@ -28,4 +28,9 @@ describe('GET /v1/courses/:slug', () => {
     const res = await appWithData().request('/v1/courses/nope');
     expect(res.status).toBe(404);
   });
+
+  it('keeps a two-segment course path token-gated (401 without a token)', async () => {
+    const res = await appWithData().request('/v1/courses/rr/model');
+    expect(res.status).toBe(401);
+  });
 });

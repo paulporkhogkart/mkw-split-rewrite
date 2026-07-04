@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { openDb, applySchema } from './connect';
 import { courseSplits, courseSummary } from './courseSummary';
-import { currentWr } from './reads';
 
 function seededLaps() {
   const db = openDb(':memory:');
@@ -24,7 +23,7 @@ function seededLaps() {
 
 describe('courseSplits', () => {
   it('takes each player\'s fastest lap per index and the per-lap field ideal', () => {
-    const s = courseSplits(seededLaps(), 1, 1, 150);
+    const s = courseSplits(seededLaps(), 1, 150);
     expect(s.laps).toBe(3);
     const paul = s.perPlayer.find(p => p.display_name === 'Paul')!;
     expect(paul.color).toBe('#f00');
@@ -38,7 +37,7 @@ describe('courseSplits', () => {
     const db = openDb(':memory:');
     applySchema(db);
     db.exec("INSERT INTO courses(id,slug,display_name) VALUES (1,'rr','Rainbow Road')");
-    expect(courseSplits(db, 1, 1, 150)).toEqual({ laps: 0, perPlayer: [], fieldIdeal: [] });
+    expect(courseSplits(db, 1, 150)).toEqual({ laps: 0, perPlayer: [], fieldIdeal: [] });
   });
 });
 
@@ -59,7 +58,7 @@ describe('courseSummary', () => {
   }
 
   it('assembles profile, wr, coloured leaderboard, splits, and history', () => {
-    const s = courseSummary(seeded(), 1, 150, 'rr')!;
+    const s = courseSummary(seeded(), 150, 'rr')!;
     expect(s.profile.display_name).toBe('Rainbow Road');
     expect(s.wr!.record_ms).toBe(100000);
     expect(s.wr!.video_url).toBe('http://v');
@@ -70,6 +69,27 @@ describe('courseSummary', () => {
   });
 
   it('returns null for an unknown slug', () => {
-    expect(courseSummary(seeded(), 1, 150, 'nope')).toBeNull();
+    expect(courseSummary(seeded(), 150, 'nope')).toBeNull();
+  });
+
+  it('leaderboard is all-time: a player\'s best from a second season counts', () => {
+    const db = seeded();
+    db.exec("INSERT INTO seasons(id,name,is_active) VALUES (2,'S2',0)");
+    // Luke's S1 best is 108000; a faster S2 run should surface here, proving the board spans
+    // seasons rather than being scoped to the active one (which is still S1).
+    db.exec(`INSERT INTO runs(id,season_id,player_id,course_id,cc,status,provenance,total_time_ms,is_pb,ended_at) VALUES
+      (3,2,2,1,150,'finished','live',95000,0,'2026-02-01T00:00:00Z')`);
+    const s = courseSummary(db, 150, 'rr')!;
+    expect(s.leaderboard.map(r => [r.display_name, r.total_time_ms, r.rank])).toEqual([['Luke', 95000, 1], ['Paul', 110000, 2]]);
+  });
+
+  it('excludes provenance=carryover runs from the all-time leaderboard', () => {
+    const db = seeded();
+    // A carryover run duplicates a prior best at the original time; it's faster than anyone's
+    // real run here, so if it leaked in Paul would rank #1 at 50000 instead of #2 at 110000.
+    db.exec(`INSERT INTO runs(id,season_id,player_id,course_id,cc,status,provenance,total_time_ms,is_pb,ended_at) VALUES
+      (3,1,1,1,150,'finished','carryover',50000,0,'2026-01-01T00:00:00Z')`);
+    const s = courseSummary(db, 150, 'rr')!;
+    expect(s.leaderboard.map(r => [r.display_name, r.total_time_ms, r.rank])).toEqual([['Luke', 108000, 1], ['Paul', 110000, 2]]);
   });
 });

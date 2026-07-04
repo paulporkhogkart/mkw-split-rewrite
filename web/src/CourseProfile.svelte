@@ -104,15 +104,15 @@
   <div class="hist">
     <div class="col">
       <h2>Record progression</h2>
-      {#each s.history.recordProgression as e}<div class="hrow"><span>{date(e.t)}</span><span>{e.player}</span><span class="num">{fmtTime(e.ms)}</span></div>{/each}
+      {#each s.history.recordProgression as e, i (i)}<div class="hrow"><span>{date(e.t)}</span><span>{e.player}</span><span class="num">{fmtTime(e.ms)}</span></div>{/each}
     </div>
     <div class="col">
       <h2>#1 reigns</h2>
-      {#each s.history.reigns as r}<div class="hrow"><span>{r.player}</span><span>{date(r.from)} → {r.to == null ? "now" : date(r.to)}</span><span>{days(r.ms)}</span></div>{/each}
+      {#each s.history.reigns as r, i (i)}<div class="hrow"><span>{r.player}</span><span>{date(r.from)} → {r.to == null ? "now" : date(r.to)}</span><span>{days(r.ms)}</span></div>{/each}
     </div>
     <div class="col">
       <h2>World record history</h2>
-      {#each s.history.wrHistory as w}<div class="hrow"><span>{date(w.t)}</span><span>{w.holder_name ?? "—"}</span><span class="num">{fmtTime(w.record_ms)}</span>{#if w.video_url}<a href={w.video_url} target="_blank" rel="noopener">↗</a>{/if}</div>{/each}
+      {#each s.history.wrHistory as w, i (i)}<div class="hrow"><span>{date(w.t)}</span><span>{w.holder_name ?? "—"}</span><span class="num">{fmtTime(w.record_ms)}</span>{#if w.video_url}<a href={w.video_url} target="_blank" rel="noopener">↗</a>{/if}</div>{/each}
     </div>
   </div>
 </section>
