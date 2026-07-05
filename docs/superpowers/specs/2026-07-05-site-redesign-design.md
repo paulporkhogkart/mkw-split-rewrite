@@ -18,8 +18,10 @@ fire + territory, A/B-gated), and the Players and Tracks sections — which addi
 functionality that was cut from their v1s (track map with replays/heatmap/death spots, flavor
 stats, trends, head-to-head, loadout).
 
-Nothing is off-limits except: the wordmark (locked), URL structure, the data model, the desktop
-app, and non-additive Pi changes. Previously-dismissed ideas may be re-explored.
+Nothing is off-limits except: URL structure, the data model, the desktop app, and non-additive Pi
+changes. Previously-dismissed ideas may be re-explored. The wordmark is NOT locked — it stays as-is
+through the initial builds, but the user is open to alternatives if it stops fitting once the new
+language lands (revisit after P1's mockups establish the look; its own small round).
 
 ## 2. The design language ("KART-OFF print")
 
@@ -31,8 +33,9 @@ Codified from the turf cards; all six rules apply site-wide:
 2. **Print physicality.** Registration-offset colour borders (mirroring by side), hard un-blurred
    shadows, keyline-stroked type (`-webkit-text-stroke` + `paint-order`), torn clip-path edges,
    fixed per-item rotations (±1–2°), halftone dot fields as texture.
-3. **Type.** Inter only (wordmark-locked). Inter 900 italic for hero numbers/identity; tabular
-   figures for data. Hero numbers keep per-digit ransom jank.
+3. **Type.** Inter only (the language is built on it; a wordmark revisit, if it happens, is its
+   own later round). Inter 900 italic for hero numbers/identity; tabular figures for data. Hero
+   numbers keep per-digit ransom jank.
 4. **Deterministic jank.** All raggedness is a pure function of identity (player key / slug /
    index) — never `Math.random()`. Nothing wobbles between renders.
 5. **Kinetics on state-change only.** Overshoot slams, FLIP slides, scale-pops on value change.
@@ -70,8 +73,18 @@ digits, generalised from `lib/turf.js`), `HalftoneField`, `StatTile`, `InkTable`
 `FigureMask` (head-pop masking), `Chip`, motion utils (slam / pop / streak). Proof of the kit:
 `TurfLeaderboard` refactors ONTO it with zero visual change.
 
-**Shell/nav:** wordmark unchanged. Tabs re-cut in the language; active marker becomes a colour
-slab / torn treatment (mockup decides). The random per-load player accent stays.
+**Shell/nav:** wordmark unchanged for now (alternatives explicitly allowed later — §1). Tabs
+re-cut in the language; active marker becomes a colour slab / torn treatment (mockup decides).
+The random per-load player accent stays.
+
+**Sharpness requirement (kit-level, P1):** some turf-card content currently renders slightly
+blurry rather than totally sharp. Audit and fix in the kit so every primitive renders crisp at any
+`--s`: suspects are fractional-pixel transforms on rotated, `will-change`-promoted layers
+(rasterized then resampled), subpixel translateY slots, and stroke-on-italic at fractional font
+sizes. Kit rule: snap layout transforms to device pixels where possible and document the crisp
+pattern. Honest boundary: edge antialiasing on rotated/clipped shapes is correct smooth AA and
+stays; the target is eliminating *resampling* blur. If some residual softness proves inherent to
+rotated rasterization, document why and minimise it.
 
 **Live:** desktop `PlayerCard` retired from the site (desktop app keeps it). New site-native loud
 card: torn slab, offset colour border, figure with head pop, name tag, big italic timer, halftone
@@ -124,9 +137,9 @@ the whole registration/calibration tool.) If replacement artwork ever changes fr
 re-registration is per-course minutes, not a project.
 
 Below the map, quiet-voice sections: leaderboard, lap splits + theoretical best, history
-(progression / reigns / WR history), **Loadout** (recommended character/kart from the now-public
-stats surface; composed server-side or client-side — plan decides), on-fire target as loud callout
-with the new fire, optional recent-runs (see §8).
+(progression / reigns / WR history), on-fire target as loud callout with the new fire, optional
+recent-runs (see §8). **Loadout: DROPPED** (user 2026-07-05) — the WR line and WR history already
+show the character/kart each record was set with, which answers the question.
 
 ## 6. Project 3 — Players
 
@@ -162,8 +175,7 @@ new endpoints.
    + cached) + a death-spots source (own endpoint or a field on trails/summary — plan decides).
 3. **Flavor:** `GET /v1/players/:slug/flavor` — one composed payload (most-played char/kart via
    breakdown, coins/attempts/finishes/reset-rate/driving-time values, weekly-activity +
-   PB-improvement series) so a profile isn't 8 round-trips. Loadout may reuse the same composition
-   pattern per course.
+   PB-improvement series) so a profile isn't 8 round-trips.
 4. **Recent runs (conditional, see §8):** trivial curated reads, e.g.
    `GET /v1/courses/:slug/runs?limit=N` / `GET /v1/players/:slug/runs?limit=N`.
 
@@ -202,13 +214,16 @@ new endpoints.
 - Streak/shimmer, fire, territory treatments: decided in A/B mockup rounds, incumbent wins ties.
 - Icon sourcing from mariowiki (manual-ish, 30 files) — fallback name-slab tiles keeps the index
   unblocked.
+- Turf-card sharpness audit (§4) may hit a rendering-engine floor on rotated layers — fix what's
+  resampling blur, document any inherent remainder.
+- Wordmark fit: revisit (alternatives round) only after the new language is live, if it clashes.
 
 ## 11. Deliverables / order
 
 1. **Project 1:** auth flip (pi) + kit + shell/nav + new Live cards + activity log + turf chrome
    (+ fire/territory A/Bs) + dev-page sweep. Reference HTML: kit sampler, live card, turf chrome.
-2. **Project 2:** Tracks — index tiles, hub, track map (model/trails/heatmap/death), loadout,
-   optional recent-runs, ROI export script. Reference HTML: index tile/wall, hub, map.
+2. **Project 2:** Tracks — index tiles, hub, track map (model/trails/heatmap/death), optional
+   recent-runs, ROI export script. Reference HTML: index tile/wall, hub, map.
 3. **Project 3:** Players — index, profile (flavor + trends), strategy re-presentation,
    head-to-head, optional recent-runs. Reference HTML: index card, profile, strategy, versus.
 
