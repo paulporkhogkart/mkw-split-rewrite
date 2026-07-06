@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { openDb, applySchema } from './connect';
 import { upsertRun, OVER_LIMIT_MS, findGhostMatch, enrichRunFromGhost } from './ingest';
+import { getRunPoints, insertTrail } from './trails';
 import type { AttemptPayload } from './types';
 
 function base() {
@@ -49,7 +50,8 @@ describe('upsertRun', () => {
     expect(run.provenance).toBe('live');
     expect(run.total_time_ms).toBe(120000);
     expect((db.prepare('SELECT COUNT(*) c FROM run_laps WHERE run_id=?').get(runId) as any).c).toBe(2);
-    expect((db.prepare('SELECT COUNT(*) c FROM run_points WHERE run_id=?').get(runId) as any).c).toBe(2);
+    expect((db.prepare('SELECT COUNT(*) c FROM run_trails WHERE run_id=?').get(runId) as any).c).toBe(1);
+    expect(getRunPoints(db, runId).length).toBe(2);
   });
 
   it('stores the per-point lap stamp (null when a legacy 4-tuple omits it)', () => {
@@ -58,8 +60,7 @@ describe('upsertRun', () => {
       attempt_id: 'L1', course: 'Rainbow Road', status: 'reset',
       points: [[0, 1, 2, 0.9, 1], [16, 1.1, 2.1, 0.95, 2], [32, 1.2, 2.2, 0.8]],   // last omits lap
     } as any, 1, 1);
-    const rows = db.prepare('SELECT lap FROM run_points WHERE run_id=? ORDER BY t_ms').all(runId) as { lap: number | null }[];
-    expect(rows.map((r) => r.lap)).toEqual([1, 2, null]);
+    expect(getRunPoints(db, runId).map((r) => r.lap)).toEqual([1, 2, null]);
   });
 
   it('is idempotent by attempt_id (re-send replaces, no dup)', () => {
@@ -100,7 +101,7 @@ describe('upsertRun', () => {
     } as any, 1, 1);
     expect((db.prepare('SELECT COUNT(*) c FROM runs WHERE id=?').get(runId) as any).c).toBe(1);
     expect((db.prepare('SELECT COUNT(*) c FROM run_laps WHERE run_id=?').get(runId) as any).c).toBe(1);
-    expect((db.prepare('SELECT COUNT(*) c FROM run_points WHERE run_id=?').get(runId) as any).c).toBe(0);
+    expect(getRunPoints(db, runId)).toEqual([]);
   });
 
   it('keeps the trail when the recording is within the 11min limit (boundary inclusive)', () => {
@@ -109,7 +110,17 @@ describe('upsertRun', () => {
       attempt_id: 'ok1', course: 'Rainbow Road', status: 'finished',
       points: [[0, 1, 2, 0.9, 1], [OVER_LIMIT_MS, 3, 4, 0.9, 1]],   // exactly at the limit -> kept
     } as any, 1, 1);
-    expect((db.prepare('SELECT COUNT(*) c FROM run_points WHERE run_id=?').get(runId) as any).c).toBe(2);
+    expect(getRunPoints(db, runId).length).toBe(2);
+  });
+
+  it('drops a malformed (non-monotonic t) trail but keeps the run', () => {
+    const db = base();
+    const runId = upsertRun(db, {
+      attempt_id: 'm1', course: 'Rainbow Road', status: 'reset',
+      points: [[100, 1, 2, 0.9, 1], [100, 1.1, 2.1, 0.9, 1]],   // duplicate t_ms
+    } as any, 1, 1);
+    expect((db.prepare('SELECT COUNT(*) c FROM runs WHERE id=?').get(runId) as any).c).toBe(1);
+    expect(getRunPoints(db, runId)).toEqual([]);
   });
 });
 
@@ -138,7 +149,7 @@ describe('ghost dedup + enrich', () => {
     expect(run.character).toBe('Mario');
     expect(run.source).toBe('ghost');
     expect((db.prepare('SELECT COUNT(*) c FROM run_laps WHERE run_id=50').get() as any).c).toBe(1);
-    expect((db.prepare('SELECT COUNT(*) c FROM run_points WHERE run_id=50').get() as any).c).toBe(1);
+    expect(getRunPoints(db, 50).length).toBe(1);
     expect(res.trailAdded).toBe(true);
   });
 
@@ -163,13 +174,13 @@ describe('ghost dedup + enrich', () => {
     const db = base();
     db.exec("INSERT INTO runs(id,attempt_id,season_id,player_id,course_id,cc,status,provenance,total_time_ms) " +
             "VALUES (61,'lp',1,1,1,150,'finished','live',100000)");
-    db.exec("INSERT INTO run_points(run_id,t_ms,cx,cy,score,lap) VALUES (61,0,5,5,1,1)");
+    insertTrail(db, 61, [{ t_ms: 0, cx: 5, cy: 5, score: 1, lap: 1 }]);
     const res = enrichRunFromGhost(db, 61, {
       attempt_id: 'g3', course: 'Rainbow Road', status: 'finished',
       points: [[0, 9, 9, 1, 1], [16, 8, 8, 1, 1]], source: 'ghost',
     } as any);
     expect(res.trailAdded).toBe(false);                        // already had a trail
-    expect((db.prepare('SELECT COUNT(*) c FROM run_points WHERE run_id=61').get() as any).c).toBe(1);
-    expect((db.prepare('SELECT cx FROM run_points WHERE run_id=61').get() as any).cx).toBe(5);  // original intact
+    expect(getRunPoints(db, 61).length).toBe(1);
+    expect(getRunPoints(db, 61)[0].cx).toBe(5);  // original intact
   });
 });

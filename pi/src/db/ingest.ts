@@ -1,11 +1,27 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { AttemptPayload } from './types';
 import { slugify } from './slug';
+import { insertTrail } from './trails';
+import type { TrailPoint } from './trailCodec';
 
 
 /** Recordings longer than this (ms) are runaway captures (e.g. a stuck screen), not real
  *  attempts. Keep the run + laps for the record, but drop the (huge) trail. 11 minutes. */
 export const OVER_LIMIT_MS = 11 * 60 * 1000;
+
+/** Store a payload trail as a run_trails blob. A malformed trail (e.g. non-monotonic
+ *  t_ms — the engine never emits one) is dropped like a runaway: the run + laps
+ *  persist, the trail doesn't, with a loud log. Returns whether a trail was stored. */
+function storeTrail(db: DatabaseSync, runId: number, pts: NonNullable<AttemptPayload['points']>): boolean {
+  const rows: TrailPoint[] = pts.map(([t, cx, cy, score, lap]) => ({ t_ms: t, cx, cy, score, lap: lap ?? null }));
+  try {
+    insertTrail(db, runId, rows);
+    return true;
+  } catch (e) {
+    console.error(`[ingest] dropping malformed trail for run ${runId}:`, e);
+    return false;
+  }
+}
 
 export function timeToMs(t?: string | null): number | null {
   if (!t) return null;
@@ -51,10 +67,7 @@ export function upsertRun(db: DatabaseSync, p: AttemptPayload, playerId: number,
     // but don't store its trail. Boundary inclusive (exactly at the limit is still stored).
     const pts = p.points ?? [];
     const maxT = pts.reduce((m, pt) => Math.max(m, pt[0]), 0);
-    if (maxT <= OVER_LIMIT_MS) {
-      const ptStmt = db.prepare('INSERT INTO run_points(run_id, t_ms, cx, cy, score, lap) VALUES (?,?,?,?,?,?)');
-      for (const [t, cx, cy, sc, lap] of pts) ptStmt.run(runId, t, cx, cy, sc, lap ?? null);
-    }
+    if (pts.length > 0 && maxT <= OVER_LIMIT_MS) storeTrail(db, runId, pts);
 
     db.exec('COMMIT');
     return runId;
@@ -103,15 +116,11 @@ export function enrichRunFromGhost(db: DatabaseSync, runId: number, p: AttemptPa
       for (const lap of p.laps ?? []) lapStmt.run(runId, lap.lap, lap.time_ms, lap.time_str ?? null, lap.coins ?? null, lap.shrooms ?? null);
     }
 
-    const hasPts = (db.prepare('SELECT COUNT(*) c FROM run_points WHERE run_id=?').get(runId) as { c: number }).c > 0;
+    const hasPts = (db.prepare('SELECT COUNT(*) c FROM run_trails WHERE run_id=?').get(runId) as { c: number }).c > 0;
     const pts = p.points ?? [];
     const maxT = pts.reduce((m, pt) => Math.max(m, pt[0]), 0);
     let trailAdded = false;
-    if (!hasPts && pts.length > 0 && maxT <= OVER_LIMIT_MS) {
-      const ptStmt = db.prepare('INSERT INTO run_points(run_id, t_ms, cx, cy, score, lap) VALUES (?,?,?,?,?,?)');
-      for (const [t, cx, cy, sc, lap] of pts) ptStmt.run(runId, t, cx, cy, sc, lap ?? null);
-      trailAdded = true;
-    }
+    if (!hasPts && pts.length > 0 && maxT <= OVER_LIMIT_MS) trailAdded = storeTrail(db, runId, pts);
     db.exec('COMMIT');
     return { trailAdded };
   } catch (e) {
