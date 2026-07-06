@@ -76,4 +76,19 @@ describe('migrateTrails', () => {
     expect(migrateTrails(db)).toEqual({ migrated: 1, failed: 0, orphaned: 1, dropped: false });
     expect((db.prepare('SELECT COUNT(*) c FROM run_points').get() as any).c).toBe(1);
   });
+
+  it('rolls back the partial blob insert when the transaction fails mid-way', () => {
+    const db = legacyDb(2, 10);
+    // Fail run 2's row-delete AFTER its blob insert succeeded in the same txn:
+    db.exec(`CREATE TRIGGER fail_del BEFORE DELETE ON run_points WHEN OLD.run_id = 2
+             BEGIN SELECT RAISE(ABORT, 'simulated mid-txn failure'); END`);
+    const res = migrateTrails(db);
+    expect(res.migrated).toBe(1);
+    expect(res.failed).toBe(1);
+    expect(res.dropped).toBe(false);
+    // ROLLBACK undid run 2's in-txn blob insert and kept all its rows:
+    expect(db.prepare('SELECT COUNT(*) c FROM run_trails WHERE run_id=2').get()).toEqual({ c: 0 });
+    expect(db.prepare('SELECT COUNT(*) c FROM run_points WHERE run_id=2').get()).toEqual({ c: 10 });
+    expect(getRunPoints(db, 1).length).toBe(10);   // run 1 migrated normally
+  });
 });

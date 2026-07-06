@@ -40,6 +40,17 @@ export function migrateTrails(db: DatabaseSync): TrailMigration {
   if (!(db.prepare('SELECT EXISTS(SELECT 1 FROM run_points) e').get() as { e: number }).e) {
     db.exec('DROP TABLE run_points');
     res.dropped = true;
+  } else {
+    // Anomaly visibility: rows for a run that ALREADY has a blob should be impossible
+    // (insert+delete share one transaction) — if any exist, say so instead of leaving
+    // an unexplained dropped:false. They are kept, never deleted here.
+    const stranded = (db.prepare(
+      `SELECT COUNT(DISTINCT rp.run_id) c FROM run_points rp
+       WHERE EXISTS (SELECT 1 FROM run_trails rt WHERE rt.run_id = rp.run_id)`
+    ).get() as { c: number }).c;
+    if (stranded) console.error(
+      `[trails] ${stranded} run_id(s) have BOTH a blob and leftover run_points rows — ` +
+      'investigate before dropping the table manually; rows kept.');
   }
   if (res.migrated || res.failed || res.orphaned)
     console.log(`[trails] migration: ${res.migrated} migrated, ${res.failed} failed, ${res.orphaned} orphaned run_ids; `
