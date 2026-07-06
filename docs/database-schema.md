@@ -67,11 +67,21 @@ don't build on them.
   upload payload but **not persisted**.
 - **`run_laps`** — PK `(run_id, lap_index)`, `run_id` FK ON DELETE CASCADE, `lap_time_ms`,
   `lap_time_str`, `coins`, `shrooms`.
-- **`run_points`** (trail) — `run_id` FK CASCADE, `t_ms`, `cx REAL`, `cy REAL`,
-  `score REAL DEFAULT 1.0`, **`lap INTEGER`** (nullable, 1-based HUD lap). No PK; indexed by
-  `idx_run_points_run`. **No decimation** — one point per detection frame (~25.6 Hz, ~50 B/pt).
-  The only volume guard: if `max(t_ms) > OVER_LIMIT_MS` (11 min) the run+laps are kept but the
-  **whole trail is dropped** (`ingest.ts`). See `docs/replay-format.md`.
+
+### `run_trails` — minimap trail, one compressed blob per run
+
+| column | type | notes |
+|---|---|---|
+| `run_id` | INTEGER PK | FK → `runs(id)` ON DELETE CASCADE |
+| `codec` | INTEGER | `1` = v1 payload + brotli (see `docs/replay-format.md`) |
+| `n` | INTEGER | point count |
+| `max_t_ms` | INTEGER | final race-clock ms (SQL aggregates use this, not a decode) |
+| `data` | BLOB | lossless packed trail — full-resolution floats, bit-exact |
+
+Replaces the legacy `run_points` row-per-point table (~4× smaller); existing DBs are
+converted by a bit-verified boot migration (`pi/src/db/trailMigrate.ts`). Read/write only
+via `pi/src/db/trails.ts`.
+
 - **`world_records`** — full WR mirror + history (`record_ms`, `holder_name`, `is_current`,
   `removed_at` [soft-delete — consumers must filter `removed_at IS NULL`], `provenance`,
   `character_slug`/`kart_slug`/`costume_slug`, `lap_splits_ms`, …). Partial unique index
@@ -84,5 +94,4 @@ don't build on them.
 
 **Schema evolution note:** `connect.ts` still runs additive `ALTER`s for columns that `schema.sql`
 has since caught up to (redundant but harmless — they exist for already-migrated DBs). The one
-genuine divergence to remember is `runs.was_pb` (ALTER-only). The old "`ingest.ts` writes a `lap`
-column not in schema.sql" note is **resolved** — `schema.sql` now declares `run_points.lap`.
+genuine divergence to remember is `runs.was_pb` (ALTER-only).

@@ -19,7 +19,7 @@ engine); the others have their own `CLAUDE.md` where noted.
 | **Schema + importer** | `server/` (Python) | Owns the canonical DB DDL `server/schema.sql` (which the Pi loads at boot) and the legacy-data importer (`python -m server.importer`). NOT an HTTP server. |
 
 **Data flow:** desktop engine → Rust upload → `POST /v1/runs` on the Pi → Pi's SQLite (`runs`,
-`run_laps`, `run_points`, …) → served to the website + Discord bot. The desktop app's own
+`run_laps`, `run_trails`, …) → served to the website + Discord bot. The desktop app's own
 `mkw_tracker.db` holds only config + minimap detection tuning (race data moved to the Pi).
 Deploy is pull-based off git **tags** (`deploy/update.sh`); see `docs/pi-deploy.md`.
 

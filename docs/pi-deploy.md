@@ -190,6 +190,19 @@ Within ~2 minutes the Pi fetches the tag, checks it out, `npm install`s, and res
 journalctl -u mkw-updater -f
 ```
 
+### One-time: trail storage migration (v2.7)
+
+The first boot after this deploy converts `run_points` rows into `run_trails` blobs
+(bit-verified per run; resumable; logs `[trails] migration: …`). Order of operations:
+
+1. Back up the DB first: `cp /home/pi/mkw-data/mkw.db /home/pi/mkw-data/mkw.db.pretrails-bak`
+2. Deploy the tag as usual; watch the boot log for `[trails] migration: N migrated, 0 failed`.
+3. Spot-check trails on the site, then reclaim the space (server stopped, once):
+   `cd /home/pi/mkw/pi && npm run migrate-trails -- /home/pi/mkw-data/mkw.db --vacuum`
+   (the migration itself is already done; this just VACUUMs — needs free disk ≈ the old DB size).
+4. Rollback = restore the backup. Blobs also decode back to exact rows at any time
+   (`npm run diff-trails` proves equality), so nothing is unrecoverable.
+
 ## 11. Rollback
 
 The updater only ever moves to the highest tag. To roll back, delete the bad tag on GitHub and
