@@ -5,6 +5,7 @@
 // so both clocks share the race-clock origin (t=0=GO) and the same completion frame.
 import type { DatabaseSync } from 'node:sqlite';
 import { loadCourseModel, loadPlayerAlignment } from '../db/courseModels';
+import { getRunPoints } from '../db/trails';
 import { prepareModel, projectStep, type Prepared } from '../progress/project';
 import type { CourseModel, ProjState } from '../progress/types';
 import { activeSeasonId, courseIdBySlug } from '../db/seasons';
@@ -59,8 +60,7 @@ export function makePaceDelta(db: DatabaseSync, cc = 150): PaceDelta {
   const buildCurve = (courseId: number, playerId: number, runId: number, totalMs: number): Curve | null => {
     const entry = model(courseId);
     if (!entry) return null;
-    const pts = db.prepare('SELECT t_ms, cx, cy, lap FROM run_points WHERE run_id=? ORDER BY t_ms')
-      .all(runId) as { t_ms: number; cx: number; cy: number; lap: number | null }[];
+    const pts = getRunPoints(db, runId);
     if (pts.length === 0) return null;
     const lapRows = db.prepare('SELECT lap_time_ms FROM run_laps WHERE run_id=? ORDER BY lap_index')
       .all(runId) as { lap_time_ms: number }[];

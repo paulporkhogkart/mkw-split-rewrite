@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { applySchema } from '../db/connect';
 import { saveCourseModel } from '../db/courseModels';
+import { insertTrail } from '../db/trails';
 import { resolveCompletion } from './completion';
 import { resolvePeriod } from './period';
 import type { CourseModel } from '../progress/types';
@@ -30,7 +31,8 @@ function addRun(d: DatabaseSync, id: number, status: string) {
              VALUES(?,1,1,1,150,?,'live','2026-06-10T00:00:00+00:00',?)`).run(id, status, status === 'finished' ? 200000 : null);
 }
 function addPoints(d: DatabaseSync, runId: number, pts: { cx: number; cy: number; t_ms: number }[]) {
-  for (const p of pts) d.prepare('INSERT INTO run_points(run_id,t_ms,cx,cy,score) VALUES(?,?,?,?,1)').run(runId, p.t_ms, p.cx, p.cy);
+  if (pts.length === 0) return;   // old row-loop was a no-op on []; keep that
+  insertTrail(d, runId, pts.map((p) => ({ t_ms: p.t_ms, cx: p.cx, cy: p.cy, score: 1, lap: null })));
 }
 function addLaps(d: DatabaseSync, runId: number, times: number[]) {
   times.forEach((t, i) => d.prepare('INSERT INTO run_laps(run_id,lap_index,lap_time_ms) VALUES(?,?,?)').run(runId, i, t));
