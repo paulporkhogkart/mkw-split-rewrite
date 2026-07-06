@@ -153,6 +153,18 @@ def test_kart_flourish_excludes_recorder_fade_frames():
     assert el.KART_FLOURISH == 62
 
 
+def test_char_flourish_is_uniform_length():
+    # ALL character flourishes export the same length: the flourish is motion + a HELD
+    # pose until the recorder advances, so a fixed window from motion onset (the dip
+    # start, f619-625 on every one of the 153 roster clips) is always available. The
+    # length is the smallest real motion-start->swap window on the roster (mario: 56,
+    # constant across his costumes) minus the 2f crossfade guard. The old variable
+    # dip-run end exported 34f for bowser (motion only, hold dropped) and the naive
+    # swap-spike clamp cut baby_daisy__pro_racer to 23f (her own motion read as the
+    # swap) — both replaced by this constant.
+    assert el.CHAR_FLOURISH_LEN == 54
+
+
 def test_clamp_flourish_end_backs_off_detected_fade():
     # fade_start's 0.5-luma corner gate fires ~2f after the brighter subject visibly dims,
     # so the clamp must back the detected fade off by the guard.
