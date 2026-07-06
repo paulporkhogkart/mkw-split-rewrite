@@ -60,4 +60,11 @@ describe('insertTrail / getRunPoints', () => {
     db.exec('DELETE FROM runs WHERE id=10');
     expect((db.prepare('SELECT COUNT(*) c FROM run_trails').get() as { c: number }).c).toBe(0);
   });
+
+  it('throws on an unknown codec value (future format bump)', () => {
+    const db = base();
+    insertTrail(db, 10, PTS);
+    db.exec('UPDATE run_trails SET codec=99 WHERE run_id=10');
+    expect(() => getRunPoints(db, 10)).toThrow('unknown trail codec');
+  });
 });
