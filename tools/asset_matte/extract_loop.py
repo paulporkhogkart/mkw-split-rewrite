@@ -174,6 +174,20 @@ def burst_flourish_start(jump, b, thr, limit):
     return fs if fs < limit else b + 1
 
 
+# The spin ONSET is a step: across the 44-clip survey the idle ||dF|| never exceeded 506
+# (bowser_bruiser, the worst spinning-idle kart) while the first spin frame is always
+# >= 1007. 750 sits mid-band: 1.48x above the worst idle, 1.34x below the weakest onset.
+KART_BURST_CAP = 750.0
+
+
+def burst_threshold(idle_med):
+    """Burst gate for the flourish scan: 4x the idle median, capped at KART_BURST_CAP.
+    Uncapped, a spinning-idle kart's 4x (~1820) lands INSIDE the flourish's motion range,
+    so the scan fires mid-spin (sailor bowser_bruiser started 13f into the rotation,
+    missing the windup) or never (base variant collapsed to the fallback)."""
+    return min(4.0 * idle_med, KART_BURST_CAP)
+
+
 def fade_start(bg, a, b, thr=_FADE_THR):
     """First frame at/after the idle-band end where BOTH backdrop corners deviate from
     their idle baseline = the scene fade-out (a subject crossing one corner is not a fade).
@@ -351,7 +365,7 @@ def find_segments(clip):
     else:
         jump = np.concatenate([[0.0], np.linalg.norm(np.diff(F, axis=0), axis=1)])
         idle_jump = float(np.median(jump[a:b])) if b > a else 0.0
-        thr = 4.0 * idle_jump
+        thr = burst_threshold(idle_jump)
         fs = burst_flourish_start(jump, b, thr, min(len(jump) - 1, fade_start(bg, a, b)))
         fell_back = bool(jump[fs] <= thr)   # returned frame never cleared -> band-edge fallback
         fe = fs + (KART_FLOURISH if kart else CHAR_FLOURISH)

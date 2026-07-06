@@ -100,6 +100,21 @@ def test_burst_start_never_scans_past_the_limit():
     assert el.burst_flourish_start(jump, b=200, thr=400.0, limit=300) == 201
 
 
+def test_burst_threshold_is_relative_for_calm_idle():
+    # Normal kart: 4x the idle median, well under the cap.
+    assert el.burst_threshold(54.4) == 4.0 * 54.4
+
+
+def test_burst_threshold_capped_for_spinning_idle():
+    # Spinning-idle karts (bowser_bruiser: idle median ~455) push 4x to ~1820, INSIDE the
+    # flourish's own motion range — the scan then fires mid-spin (sailor variant started
+    # 13f into the rotation, missing the whole windup) or not at all. The spin ONSET is a
+    # step (idle <=506 -> first spin frame >=1007 across all 44 surveyed clips), so the
+    # cap sits in the empty band between them and the scan fires on the onset frame.
+    assert el.burst_threshold(455.2) == el.KART_BURST_CAP
+    assert el.KART_BURST_CAP == 750.0
+
+
 def test_kart_flourish_excludes_recorder_fade_frames():
     # The in-game kart flourish is 64f but the sweep recording's fade-out owns the last 2
     # (measured f62/f63 dimming on all 4 dirval karts) -> the fixed window stops at 62.
