@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { openDb, applySchema } from '../db/connect';
+import { insertTrail } from '../db/trails';
 import { EventHub } from './events';
 import { createApp } from './app';
 import { mintToken } from '../db/players';
@@ -55,7 +56,8 @@ function trailsDb() {
   db.exec("INSERT INTO courses(id,slug,display_name) VALUES (1,'rainbow_road','Rainbow Road')");
   db.exec("INSERT INTO runs(id,season_id,player_id,course_id,cc,status,provenance,total_time_ms,is_pb) VALUES (10,1,1,1,150,'finished','live',108000,1),(20,1,2,1,150,'finished','live',112000,1)");
   db.exec("INSERT INTO run_laps(run_id,lap_index,lap_time_ms) VALUES (10,1,36000),(10,2,72000),(10,3,108000)");
-  db.exec("INSERT INTO run_points(run_id,t_ms,cx,cy,score) VALUES (10,0,100,200,0.9),(20,0,300,400,0.8)");
+  insertTrail(db, 10, [{ t_ms: 0, cx: 100, cy: 200, score: 0.9, lap: null }]);
+  insertTrail(db, 20, [{ t_ms: 0, cx: 300, cy: 400, score: 0.8, lap: null }]);
   return db;
 }
 
@@ -112,7 +114,8 @@ describe('GET /v1/players/:id/trails (token)', () => {
     db.exec("INSERT INTO players(id,display_name) VALUES (1,'Paul')");
     db.exec("INSERT INTO courses(id,slug,display_name) VALUES (1,'rainbow_road','Rainbow Road')");
     db.exec("INSERT INTO runs(id,season_id,player_id,course_id,cc,status,provenance,total_time_ms,started_at,ended_at,is_pb) VALUES (10,1,1,1,150,'finished','live',108000,'a','a1',1),(20,1,1,1,150,'finished','live',110000,'b','b1',0)");
-    db.exec("INSERT INTO run_points(run_id,t_ms,cx,cy,score) VALUES (10,0,1,1,0.9),(20,0,2,2,0.9)");
+    insertTrail(db, 10, [{ t_ms: 0, cx: 1, cy: 1, score: 0.9, lap: null }]);
+    insertTrail(db, 20, [{ t_ms: 0, cx: 2, cy: 2, score: 0.9, lap: null }]);
     const app = createApp(db, new EventHub());
     const token = mintToken(db, 'Paul');
     expect((await app.request('/v1/players/1/trails?course=Rainbow%20Road&mode=pbs')).status).toBe(401);
