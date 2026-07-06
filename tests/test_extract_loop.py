@@ -73,6 +73,33 @@ def test_first_sustained_dip_none_returns_none():
     assert el.first_sustained_dip(r, 20, 240) is None
 
 
+def test_burst_start_finds_first_clearing_frame():
+    # Normal kart: near-static idle, the flourish spin's ||dF|| clears 4x the idle
+    # median within a few frames of the band end.
+    jump = np.full(300, 50.0)
+    jump[203:260] = 1600.0            # the spin burst
+    assert el.burst_flourish_start(jump, b=200, thr=4.0 * 50.0, limit=280) == 203
+
+
+def test_burst_start_spinning_idle_falls_back_to_band_edge():
+    # bowser_bruiser regime: jagged wheels spin AT IDLE, inflating the idle median
+    # (measured 455 vs b_dasher's 54) so 4x it (1820) sits ABOVE the real flourish
+    # peak (1590). The scan must not run past the flourish onto the fade/map screen
+    # (that produced a 1-frame flourish export); the kart idle band already ends AT
+    # the flourish, so the band edge is the correct start.
+    jump = np.full(400, 455.0)
+    jump[203:260] = 1590.0            # real flourish: under thr=1820
+    jump[310:] = 2500.0               # map screen after the fade: over thr
+    assert el.burst_flourish_start(jump, b=200, thr=4.0 * 455.0, limit=300) == 201
+
+
+def test_burst_start_never_scans_past_the_limit():
+    # No burst inside [b, limit) at all -> band edge, never a frame at/after limit.
+    jump = np.full(400, 100.0)
+    jump[350] = 9000.0                # only spike lives beyond the limit
+    assert el.burst_flourish_start(jump, b=200, thr=400.0, limit=300) == 201
+
+
 def test_kart_flourish_excludes_recorder_fade_frames():
     # The in-game kart flourish is 64f but the sweep recording's fade-out owns the last 2
     # (measured f62/f63 dimming on all 4 dirval karts) -> the fixed window stops at 62.

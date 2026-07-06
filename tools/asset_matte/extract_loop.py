@@ -160,6 +160,20 @@ def first_sustained_dip(r, a, b, drop=0.05, min_run=16):
     return None
 
 
+def burst_flourish_start(jump, b, thr, limit):
+    """First frame in [b, limit) whose ||dF|| clears thr = the flourish motion burst;
+    band edge (b + 1) when none does. `limit` (the scene fade / feature-window end)
+    bounds the scan: a kart whose wheels spin AT IDLE (bowser_bruiser's jagged tyres)
+    inflates the idle median so the real spin never reaches 4x it, and an unbounded
+    scan then ran past the whole flourish onto the fade/map screen (the flourish span
+    collapsed to 1 frame). The kart idle band ends AT the flourish (recurrence breaks
+    when the spin starts), so the band edge is the correct start when no burst clears."""
+    fs = b
+    while fs < limit and jump[fs] <= thr:
+        fs += 1
+    return fs if fs < limit else b + 1
+
+
 def fade_start(bg, a, b, thr=_FADE_THR):
     """First frame at/after the idle-band end where BOTH backdrop corners deviate from
     their idle baseline = the scene fade-out (a subject crossing one corner is not a fade).
@@ -275,7 +289,10 @@ def _colour_feats(clip, wh, upto):
 
 
 def find_segments(clip):
-    """{seg: (start, end)} half-open spans for 'spawn'/'idle'/'flourish' (+ fps, kart).
+    """{seg: (start, end)} half-open spans for 'spawn'/'idle'/'flourish' (+ fps, kart, fell_back).
+
+    fell_back=True flags a burst scan that never cleared its threshold (spinning-idle kart) and
+    took the band edge — surfaced in the sweep log so those items get a spot eyetest.
 
     idle  = the seam-searched loop [start, start+P], with start inside the band's FIRST cycle.
     spawn = KARTS ONLY. The swap = the biggest consecutive COLOUR change in the ~45f before idle
@@ -317,6 +334,7 @@ def find_segments(clip):
     # capped at CHAR_FLOURISH_MAX because right before the swap the recurrence can't fully
     # recover (too few idle frames left), which would otherwise bleed the run into the next item.
     # Scanning from the band edge skips a character's long trailing idle to the jump.
+    fell_back = False
     dip = None if kart else first_sustained_dip(_smooth(recurrence(F)), a, b)
     if dip is not None:
         fs, fe = dip
@@ -334,18 +352,15 @@ def find_segments(clip):
         jump = np.concatenate([[0.0], np.linalg.norm(np.diff(F, axis=0), axis=1)])
         idle_jump = float(np.median(jump[a:b])) if b > a else 0.0
         thr = 4.0 * idle_jump
-        fs = b
-        while fs < len(jump) - 1 and jump[fs] <= thr:
-            fs += 1
-        if fs >= len(jump) - 1:                     # burst not in the feature window -> band edge
-            fs = b + 1
+        fs = burst_flourish_start(jump, b, thr, min(len(jump) - 1, fade_start(bg, a, b)))
+        fell_back = bool(jump[fs] <= thr)   # returned frame never cleared -> band-edge fallback
         fe = fs + (KART_FLOURISH if kart else CHAR_FLOURISH)
     fe = clamp_flourish_end(fe, fade_start(bg, a, b), len(bg), fs)   # never include fade-out frames
 
     segs = {"idle": (start, start + P), "flourish": (fs, fe)}
     if spawn:
         segs["spawn"] = spawn
-    return segs, fps, kart
+    return segs, fps, kart, fell_back
 
 
 def _fresh_dir(d):
@@ -360,7 +375,7 @@ def _fresh_dir(d):
 def extract_segments(clip, out_base, name):
     """Write prod-crop PNG sequences for each detected segment to <out_base>/<name>__<seg>/NNN.png.
     Returns {seg: frame_count}."""
-    segs, fps, kart = find_segments(clip)
+    segs, fps, kart, fell_back = find_segments(clip)
     want = {}
     for seg, (s, e) in segs.items():
         for f in range(s, e):
@@ -383,7 +398,8 @@ def extract_segments(clip, out_base, name):
         idx += 1
     cap.release()
     print(f"{os.path.basename(clip)}: " +
-          " ".join(f"{nm}={e0 - s0}f" for nm, (s0, e0) in segs.items()), flush=True)
+          " ".join(f"{nm}={e0 - s0}f" for nm, (s0, e0) in segs.items()) +
+          (" flourish=FALLBACK(band-edge)" if fell_back else ""), flush=True)
     return {seg: (e - s) for seg, (s, e) in segs.items()}
 
 
