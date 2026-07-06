@@ -115,6 +115,38 @@ def test_burst_threshold_capped_for_spinning_idle():
     assert el.KART_BURST_CAP == 750.0
 
 
+def test_fade_anchored_start_is_fixed_gap_before_fade():
+    # The recorder is deterministic: across the 164-clip survey (3 characters x 40 karts
+    # + the baby_daisy roster) the fade starts exactly 27f after the flourish ends, so
+    # the flourish START is fade - 27 - 62. Threshold-free — immune to spinning-idle
+    # karts (bowser_bruiser) and to big-rider idle blips (bowser on calm karts cleared
+    # the low 4x-median gate mid-idle and exported pure idle).
+    assert el.fade_anchored_start(fade=830, n=960, band_b=738) == 830 - el.KART_FADE_GAP - el.KART_FLOURISH
+
+
+def test_fade_anchored_start_none_without_fade_in_window():
+    # fade == n means fade_start found nothing inside the decoded window (baby_daisy
+    # big_horn: flourish at f911, fade beyond the 16s cap) -> caller falls back to the
+    # burst scan.
+    assert el.fade_anchored_start(fade=960, n=960, band_b=738) is None
+
+
+def test_fade_anchored_start_rejects_start_before_band_end():
+    # Sanity: an anchored start landing before the idle-band end means the fade fired
+    # spuriously early -> fall back to the scan rather than export idle.
+    assert el.fade_anchored_start(fade=500, n=960, band_b=738) is None
+
+
+def test_kart_burst_floor_rejects_big_rider_idle_blips():
+    # Bowser's in-kart idle blips reach ~250 ||dF|| — above 4x a calm kart's median
+    # (~220 on cute_scoot/fin_twin/pipe_frame, which misfired in trailing idle) but far
+    # below the weakest real spin onset (994 across 164 clips). The kart threshold
+    # floors at 600.
+    assert el.kart_burst_threshold(56.0) == el.KART_BURST_FLOOR
+    assert el.KART_BURST_FLOOR == 600.0
+    assert el.kart_burst_threshold(455.2) == el.KART_BURST_CAP
+
+
 def test_kart_flourish_excludes_recorder_fade_frames():
     # The in-game kart flourish is 64f but the sweep recording's fade-out owns the last 2
     # (measured f62/f63 dimming on all 4 dirval karts) -> the fixed window stops at 62.

@@ -174,10 +174,16 @@ def burst_flourish_start(jump, b, thr, limit):
     return fs if fs < limit else b + 1
 
 
-# The spin ONSET is a step: across the 44-clip survey the idle ||dF|| never exceeded 506
-# (bowser_bruiser, the worst spinning-idle kart) while the first spin frame is always
-# >= 1007. 750 sits mid-band: 1.48x above the worst idle, 1.34x below the weakest onset.
+# The spin ONSET is a step: across the 164-clip survey (baby_daisy/bowser/waluigi/
+# fish_bone x the kart roster) the idle ||dF|| never exceeded 506 (bowser_bruiser's
+# spinning tyres) and big-rider idle blips reach ~250 (bowser head-turns), while the
+# weakest real spin onset is 994. The floor/cap bracket sits in that empty band.
 KART_BURST_CAP = 750.0
+KART_BURST_FLOOR = 600.0
+# The sweep recorder is deterministic: the scene fade starts exactly this many frames
+# after the 62f kart flourish ends (27 on 117/120 survey clips; one 26 = fade-gate
+# jitter of a single frame).
+KART_FADE_GAP = 27
 
 
 def burst_threshold(idle_med):
@@ -186,6 +192,28 @@ def burst_threshold(idle_med):
     so the scan fires mid-spin (sailor bowser_bruiser started 13f into the rotation,
     missing the windup) or never (base variant collapsed to the fallback)."""
     return min(4.0 * idle_med, KART_BURST_CAP)
+
+
+def kart_burst_threshold(idle_med):
+    """Kart burst gate: burst_threshold with a floor. On a calm kart (idle median ~55)
+    4x sits near 220, which bowser's in-kart idle blips (~250) cleared — three clips
+    exported trailing idle as the flourish. The floor rejects rider blips; real spin
+    onsets (>= 994 surveyed) clear it everywhere."""
+    return max(burst_threshold(idle_med), KART_BURST_FLOOR)
+
+
+def fade_anchored_start(fade, n, band_b):
+    """Kart flourish start anchored BACKWARDS from the scene fade: the recorder timing
+    is deterministic, so the flourish occupies the fixed [fade - KART_FADE_GAP -
+    KART_FLOURISH, fade - KART_FADE_GAP) window. Threshold-free, so it is immune to
+    spinning-idle karts and big-rider idle blips. Returns None when the fade is not
+    inside the decoded window (fade == n; e.g. an unusually late flourish pushes it
+    past the decode cap) or when the anchored start lands at/before the idle-band end
+    (a spuriously early fade) — the caller then falls back to the burst scan."""
+    if fade >= n:
+        return None
+    fs = fade - KART_FADE_GAP - KART_FLOURISH
+    return fs if fs > band_b else None
 
 
 def fade_start(bg, a, b, thr=_FADE_THR):
@@ -363,11 +391,16 @@ def find_segments(clip):
             if float(diffs.max()) > 4.0 * float(np.median(diffs) + 1e-6):   # a real spike, not noise
                 fe = min(fe, swap - 2)                 # crossfade blends a couple of frames early
     else:
-        jump = np.concatenate([[0.0], np.linalg.norm(np.diff(F, axis=0), axis=1)])
-        idle_jump = float(np.median(jump[a:b])) if b > a else 0.0
-        thr = burst_threshold(idle_jump)
-        fs = burst_flourish_start(jump, b, thr, min(len(jump) - 1, fade_start(bg, a, b)))
-        fell_back = bool(jump[fs] <= thr)   # returned frame never cleared -> band-edge fallback
+        # KART primary: anchor backwards from the deterministic recorder fade (threshold-
+        # free). Burst scan only when the fade is outside the decoded window.
+        fade = fade_start(bg, a, b)
+        fs = fade_anchored_start(fade, len(bg), b) if kart else None
+        if fs is None:
+            jump = np.concatenate([[0.0], np.linalg.norm(np.diff(F, axis=0), axis=1)])
+            idle_jump = float(np.median(jump[a:b])) if b > a else 0.0
+            thr = kart_burst_threshold(idle_jump) if kart else burst_threshold(idle_jump)
+            fs = burst_flourish_start(jump, b, thr, min(len(jump) - 1, fade))
+            fell_back = bool(jump[fs] <= thr)   # frame never cleared -> band-edge fallback
         fe = fs + (KART_FLOURISH if kart else CHAR_FLOURISH)
     fe = clamp_flourish_end(fe, fade_start(bg, a, b), len(bg), fs)   # never include fade-out frames
 
