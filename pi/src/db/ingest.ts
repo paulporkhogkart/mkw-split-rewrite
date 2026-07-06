@@ -90,8 +90,8 @@ export function findGhostMatch(db: DatabaseSync, seasonId: number, playerId: num
 }
 
 /** Gap-fill an existing run from a ghost payload: fill null character/kart/costume,
- *  add run_laps + run_points ONLY if the run has none, set coin/mushroom totals only
- *  where null, and mark source='ghost'. Never overwrites existing data. */
+ *  add run_laps + a trail (run_trails) ONLY if the run has none, set coin/mushroom totals
+ *  only where null, and mark source='ghost'. Never overwrites existing data. */
 export function enrichRunFromGhost(db: DatabaseSync, runId: number, p: AttemptPayload): { trailAdded: boolean } {
   db.exec('BEGIN');
   try {
