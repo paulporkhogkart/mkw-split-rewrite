@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { openDb, applySchema } from './connect';
 
-const TABLES = ['seasons','players','season_rosters','courses','runs','run_laps','run_points','world_records','ghost_imports'];
+const TABLES = ['seasons','players','season_rosters','courses','runs','run_laps','run_points','run_trails','world_records','ghost_imports'];
 
 describe('applySchema', () => {
   it('creates every canonical table + the auth column', () => {

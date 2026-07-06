@@ -63,6 +63,14 @@ CREATE TABLE IF NOT EXISTS run_laps (
     PRIMARY KEY (run_id, lap_index)
 );
 
+CREATE TABLE IF NOT EXISTS run_trails (
+    run_id   INTEGER PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    codec    INTEGER NOT NULL,          -- 1 = v1 packed payload, brotli-compressed
+    n        INTEGER NOT NULL,          -- point count (SQL-visible)
+    max_t_ms INTEGER NOT NULL,          -- final t_ms (SQL-visible; replaces MAX(t_ms) scans)
+    data     BLOB NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS run_points (
     run_id   INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
     t_ms     INTEGER NOT NULL,
