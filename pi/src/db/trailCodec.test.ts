@@ -63,4 +63,10 @@ describe('trailCodec', () => {
     expect(() => packTrail(p({ lap: 255 }))).toThrow('bad lap');
     expect(() => packTrail(p({ cx: Infinity }))).toThrow('finite');
   });
+
+  it('rejects a nonzero reserved flags byte', () => {
+    const buf = Buffer.from(GOLDEN_HEX, 'hex');
+    buf[1] = 1;
+    expect(() => unpackTrail(buf)).toThrow('unsupported flags byte');
+  });
 });

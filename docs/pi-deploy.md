@@ -195,7 +195,7 @@ journalctl -u mkw-updater -f
 The first boot after this deploy converts `run_points` rows into `run_trails` blobs
 (bit-verified per run; resumable; logs `[trails] migration: …`). Order of operations:
 
-1. Back up the DB first: `cp /home/pi/mkw-data/mkw.db /home/pi/mkw-data/mkw.db.pretrails-bak`
+1. Back up the DB first: `sqlite3 /home/pi/mkw-data/mkw.db ".backup '/home/pi/mkw-data/mkw.db.pretrails-bak'"` (safe while the server runs — .backup snapshots the WAL state too; a bare cp of a live WAL DB can miss recent commits)
 2. Deploy the tag as usual; watch the boot log for `[trails] migration: N migrated, 0 failed`.
 3. Spot-check trails on the site, then reclaim the space (server stopped, once):
    `cd /home/pi/mkw/pi && npm run migrate-trails -- /home/pi/mkw-data/mkw.db --vacuum`

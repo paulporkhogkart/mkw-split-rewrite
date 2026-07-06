@@ -84,7 +84,8 @@ export function unpackTrail(buf: Buffer): TrailPoint[] {
   const pos = { i: 0 };
   const n = readVarint(buf, pos);
   if (n === 0) throw new Error('empty trail blob');
-  pos.i++;                                            // flags (reserved)
+  const flags = buf[pos.i++];
+  if (flags !== 0) throw new Error(`unsupported flags byte ${flags} (v1 expects 0)`);
   const t = new Array<number>(n);
   for (let k = 0; k < n; k++) t[k] = k === 0 ? readVarint(buf, pos) : t[k - 1] + readVarint(buf, pos);
   const lap = new Array<number | null>(n);

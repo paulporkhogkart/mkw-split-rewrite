@@ -12,7 +12,7 @@ npm run bot          # the Discord bot (separate process, same package, shared D
 npm test             # vitest run  (colocated *.test.ts — dense; add tests beside new modules)
 npm run typecheck    # tsc --noEmit — NON-GATING (not in CI); keep source AND tests tsc-clean
 # ops CLIs (via tsx): mint-token, set-color, scrape-wr, scrape-wr-history, wr-flags,
-#                     build-course-model, wipe-runs, recompute-pbs
+#                     build-course-model, wipe-runs, recompute-pbs, migrate-trails, diff-trails
 ```
 
 ## Layout (`pi/src/`)
