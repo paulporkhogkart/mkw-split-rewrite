@@ -172,10 +172,10 @@ def _cut_track(n=200, idle_med=50.0, cut_at=None, cut_size=2000.0):
 
 def test_char_cut_finds_hard_cut_after_hold():
     # The end of a char flourish is a single-frame HARD CUT to the char-in-kart: a huge
-    # colour change PRECEDED BY STILLNESS (the held pose). Measured on 9 probe clips:
-    # cut diff 984-3153, pre-cut 4-frame max 10-63, exactly one hit per clip.
+    # colour change PRECEDED BY STILLNESS (the held pose). Measured on 13 probe clips:
+    # cut diff 984-3153, pre-cut 4-frame max 10-91, exactly one real hit per clip.
     d = _cut_track(cut_at=140)
-    assert el.char_cut(d, ds=60, idle_med=50.0) == 140
+    assert el.char_cut(d, ds=60) == 140
 
 
 def test_char_cut_rejects_the_characters_own_motion():
@@ -184,7 +184,33 @@ def test_char_cut_rejects_the_characters_own_motion():
     # gate rejects them even when they are the biggest diff in the clip.
     d = _cut_track(cut_at=140)
     d[65] = 3000.0                    # dramatic motion spike, bigger than the cut
-    assert el.char_cut(d, ds=60, idle_med=50.0) == 140
+    assert el.char_cut(d, ds=60) == 140
+
+
+def test_char_cut_gates_are_absolute_not_relative():
+    # Roster survey caught 4 clips where RELATIVE (x idle-median) gates failed: high-
+    # motion characters (cataquack idle_med 326) inflated the stillness allowance until
+    # semi-moving frames passed as "still" (hammer_bro pre4=260 squeaked under 3x261 ->
+    # false 20f flourish; king_boo__pro_racer pre4=530 under 550 -> false 36f) and lifted
+    # the spike bar above the real cut (cataquack's 1939 < 6x327). Real cuts separate on
+    # ABSOLUTE numbers alone: pre4 <= 91 vs false candidates >= 260.
+    d = _cut_track(cut_at=140)
+    d[112:116] = 260.0                # in-window semi-motion: "still" under 3x-median, not ours
+    d[116] = 1300.0                   # the hammer_bro/coin_coffer-style false cut
+    assert el.char_cut(d, ds=60) == 140
+    assert el.CHAR_CUT_STILL == 150.0 and el.CHAR_CUT_SPIKE == 500.0
+
+
+def test_char_cut_scans_only_the_roster_window():
+    # king_boo's pause-then-tongue-lunge (+37) is gate-indistinguishable from a real cut
+    # on some costumes — but real cuts land +56..+95 after the onset on all 153 roster
+    # clips, so the scan starts at +50. It also ends at +120: the clip tail's kart-select
+    # screen transition must never read as the flourish end.
+    d = _cut_track(cut_at=140)        # +80: in window
+    d[95] = 2000.0                    # perfect-looking "cut" at +35 (the lunge) — ignored
+    assert el.char_cut(d, ds=60) == 140
+    tail_only = _cut_track(n=260, cut_at=190)   # +130: past the window -> no cut
+    assert el.char_cut(tail_only, ds=60) is None
 
 
 def test_char_cut_rejects_small_blips_after_stillness():
@@ -192,12 +218,12 @@ def test_char_cut_rejects_small_blips_after_stillness():
     # below the absolute cut floor (weakest real cut: 984).
     d = _cut_track(cut_at=140)
     d[120] = 300.0                    # blip during the hold
-    assert el.char_cut(d, ds=60, idle_med=50.0) == 140
+    assert el.char_cut(d, ds=60) == 140
 
 
 def test_char_cut_none_when_no_cut():
     d = _cut_track(cut_at=None)
-    assert el.char_cut(d, ds=60, idle_med=50.0) is None
+    assert el.char_cut(d, ds=60) is None
 
 
 def test_char_cut_guard_is_two_frames():

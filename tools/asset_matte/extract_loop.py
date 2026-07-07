@@ -322,29 +322,43 @@ CHAR_FLOURISH_LEN = 54
 # captured item). The incoming item's nameplate text blends in ~2f before the subject
 # cut, so the export stops CHAR_CUT_GUARD frames short of it.
 CHAR_CUT_GUARD = 2
-# Cut-detector gates (9-clip probe: real cuts 984-3153 preceded by 4f stillness <= 63;
-# character motion spikes always have moving neighbours; hold blips/blinks stay small).
-_CUT_SPIKE_FLOOR = 500.0    # absolute: half the weakest real cut
-_CUT_STILL_CEIL = 100.0     # absolute stillness allowance during the held pose
+# Cut-detector gates — ABSOLUTE, deliberately not idle-relative: relative gates failed on
+# high-motion characters (cataquack idle_med 326 lifted 6x above its real 1939 cut;
+# hammer_bro/king_boo__pro_racer/coin_coffer semi-moving frames at pre4 260-530 squeaked
+# under a 3x-median stillness allowance -> false early cuts). Absolutes separate cleanly
+# on the 13-clip probe: real cuts d=984-3153 with pre-cut 4f max 10-91; false candidates
+# pre4 >= 260; hold blips/blinks d < ~350.
+CHAR_CUT_SPIKE = 500.0      # ~half the weakest real cut
+CHAR_CUT_STILL = 150.0      # geometric midpoint of real-hold max (91) and false min (260)
+# Scan window relative to the motion onset: real cuts land +56..+95 on the 153-clip
+# roster (per-character recorder-deterministic). The window is the tie-breaker the gates
+# can't provide: king_boo's pause-then-tongue-lunge (+37) is gate-indistinguishable from
+# a real cut on some costumes (pre4 < 150, d up to 1101), and anything past +120 is the
+# tail's kart-select screen transition, not the flourish end.
+CHAR_CUT_MIN = 50
+CHAR_CUT_MAX = 120
 # fade_start's 0.5-luma gate sits on the DARK backdrop corners, which dim less per frame than the
 # bright subject — it fires ~2 frames after the fade is visible on the kart. Back the clamp off.
 _FADE_GUARD = 2
 
 
-def char_cut(d, ds, idle_med, still_n=4):
+def char_cut(d, ds, still_n=4):
     """Index of the HARD CUT that ends a character flourish, scanning the colour-diff
     track d from just after the motion onset ds; None when no cut is found.
 
     The cut is the standing character being replaced by the char-in-kart in ONE frame:
-    a huge colour change (relative to idle AND above an absolute floor) whose preceding
-    still_n frames are near-still (the held pose). The character's own motion — however
-    dramatic (mario's jump, conkdor's head-slam, swoop's flip) — always has moving
-    neighbours, so it can't pass the stillness gate; blinks/nameplate shimmer during the
-    hold pass the stillness gate but sit far below the spike floor."""
-    spike = max(6.0 * (idle_med + 1.0), _CUT_SPIKE_FLOOR)
-    still = max(3.0 * (idle_med + 1.0), _CUT_STILL_CEIL)
-    for t in range(ds + still_n, len(d)):
-        if d[t] > spike and float(np.max(d[t - still_n:t])) < still:
+    a colour change above CHAR_CUT_SPIKE whose preceding still_n frames are all under
+    CHAR_CUT_STILL (the held pose). The character's own motion — however dramatic
+    (mario's jump, conkdor's head-slam, swoop's flip) — always has moving neighbours,
+    so it can't pass the stillness gate; blinks/nameplate shimmer during the hold pass
+    the stillness gate but sit far below the spike floor. Gates are absolute (see the
+    constants above for why relative gates failed), and the scan is bounded to the
+    roster-measured [CHAR_CUT_MIN, CHAR_CUT_MAX) window after the onset — the only
+    discriminator for a pause-then-lunge flourish beat that mimics a cut."""
+    lo = ds + max(CHAR_CUT_MIN, still_n)
+    hi = min(len(d), ds + CHAR_CUT_MAX)
+    for t in range(lo, hi):
+        if d[t] > CHAR_CUT_SPIKE and float(np.max(d[t - still_n:t])) < CHAR_CUT_STILL:
             return t
     return None
 
@@ -401,8 +415,8 @@ def find_segments(clip):
     if dip is not None:
         fs = dip[0]
         d = np.concatenate([[0.0], np.linalg.norm(np.diff(C, axis=0), axis=1)])
-        cut = char_cut(d, fs, float(np.median(d[a:b])) if b > a else 0.0)
-        if cut is not None and cut - CHAR_CUT_GUARD - fs >= 16:
+        cut = char_cut(d, fs)
+        if cut is not None:                   # windowed scan guarantees cut >= fs + 50
             fe = cut - CHAR_CUT_GUARD
         else:
             fe = fs + CHAR_FLOURISH_LEN   # roster-safe fixed fallback
