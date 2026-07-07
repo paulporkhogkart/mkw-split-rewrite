@@ -18,6 +18,7 @@ import os
 import shutil
 import sys
 import time
+from concurrent.futures import ProcessPoolExecutor
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _REPO = os.path.abspath(os.path.join(_HERE, "..", ".."))
@@ -28,6 +29,13 @@ for _p in (_HERE, _REPO):                              # extract_loop needs mkw_
 import extract_loop as el
 import matte_blankplate as mb
 import matte_matanyone as mm
+
+
+def _seg_task(clip, seg_base, name):
+    """Prefetch worker: CPU-only segmentation of an upcoming clip. Runs in a child
+    process (Windows spawn re-imports this module, so sys.path is bootstrapped) while
+    the parent's GPU mattes the current clip — the GPU never waits on a decode."""
+    return el.extract_segments(clip, seg_base, name)
 
 
 def clip_names(clips_dir):
@@ -62,6 +70,10 @@ def main():
     ap.add_argument("--manifest", default=None, help="default <out>/manifest.json")
     ap.add_argument("--limit", type=int, default=0, help="process at most N pending clips (0 = all)")
     ap.add_argument("--keep-loopframes", action="store_true", help="keep intermediate raw frames")
+    ap.add_argument("--prefetch", type=int, default=2,
+                    help="segment upcoming clips in N worker processes while the GPU mattes "
+                         "the current one (0 = old serial behaviour; worker span-lines may "
+                         "interleave with matte logs)")
     a = ap.parse_args()
 
     out = os.path.abspath(a.out)
@@ -82,22 +94,32 @@ def main():
     base_done = done_count(manifest, names)
     print(f"START total={total} already_done={base_done} clips={a.clips} out={out}", flush=True)
 
+    pending = [n for n in names if manifest.get(n, {}).get("status") != "done"]
+    ex = ProcessPoolExecutor(max_workers=a.prefetch) if a.prefetch > 0 else None
+    futures = {}
+
+    def _submit(n):
+        if ex is not None and n not in futures:
+            futures[n] = ex.submit(_seg_task, os.path.join(a.clips, n + ".mkv"),
+                                   os.path.join(loopdir, n), n)
+
     processed = 0
-    for name in names:
-        if manifest.get(name, {}).get("status") == "done":
-            continue
+    for i, name in enumerate(pending):
         if os.path.exists(stop_file):                  # clean stop BETWEEN clips
             print(f"STOPPED stop-file present ({base_done + processed}/{total} done)", flush=True)
             break
         if a.limit and processed >= a.limit:
             print(f"LIMIT {a.limit} reached", flush=True)
             break
+        for nxt in pending[i:i + 1 + a.prefetch]:      # current + the next N in flight
+            _submit(nxt)
         clip = os.path.join(a.clips, name + ".mkv")
         seg_base = os.path.join(loopdir, name)
         t0 = time.time()
         print(f"--- {name} ({base_done + processed + 1}/{total}) segmenting...", flush=True)
         try:
-            counts = el.extract_segments(clip, seg_base, name)      # spawn / idle / flourish spans
+            counts = (futures.pop(name).result() if ex is not None
+                      else el.extract_segments(clip, seg_base, name))   # spawn/idle/flourish spans
             kart = el.is_kart_combo(name)
             matted = {}
             for seg in ("spawn", "idle", "flourish"):
@@ -125,6 +147,8 @@ def main():
             print(f"ERROR {name}: {exc}", flush=True)
             traceback.print_exc()
 
+    if ex is not None:
+        ex.shutdown(cancel_futures=True)               # queued prefetches die; running ones finish
     print(f"DONE processed={processed} done_total={done_count(manifest, names)}/{total}", flush=True)
 
 
