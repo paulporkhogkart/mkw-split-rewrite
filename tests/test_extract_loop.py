@@ -73,10 +73,96 @@ def test_first_sustained_dip_none_returns_none():
     assert el.first_sustained_dip(r, 20, 240) is None
 
 
+def test_burst_start_finds_first_clearing_frame():
+    # Normal kart: near-static idle, the flourish spin's ||dF|| clears 4x the idle
+    # median within a few frames of the band end.
+    jump = np.full(300, 50.0)
+    jump[203:260] = 1600.0            # the spin burst
+    assert el.burst_flourish_start(jump, b=200, thr=4.0 * 50.0, limit=280) == 203
+
+
+def test_burst_start_spinning_idle_falls_back_to_band_edge():
+    # bowser_bruiser regime: jagged wheels spin AT IDLE, inflating the idle median
+    # (measured 455 vs b_dasher's 54) so 4x it (1820) sits ABOVE the real flourish
+    # peak (1590). The scan must not run past the flourish onto the fade/map screen
+    # (that produced a 1-frame flourish export); the kart idle band already ends AT
+    # the flourish, so the band edge is the correct start.
+    jump = np.full(400, 455.0)
+    jump[203:260] = 1590.0            # real flourish: under thr=1820
+    jump[310:] = 2500.0               # map screen after the fade: over thr
+    assert el.burst_flourish_start(jump, b=200, thr=4.0 * 455.0, limit=300) == 201
+
+
+def test_burst_start_never_scans_past_the_limit():
+    # No burst inside [b, limit) at all -> band edge, never a frame at/after limit.
+    jump = np.full(400, 100.0)
+    jump[350] = 9000.0                # only spike lives beyond the limit
+    assert el.burst_flourish_start(jump, b=200, thr=400.0, limit=300) == 201
+
+
+def test_burst_threshold_is_relative_for_calm_idle():
+    # Normal kart: 4x the idle median, well under the cap.
+    assert el.burst_threshold(54.4) == 4.0 * 54.4
+
+
+def test_burst_threshold_capped_for_spinning_idle():
+    # Spinning-idle karts (bowser_bruiser: idle median ~455) push 4x to ~1820, INSIDE the
+    # flourish's own motion range — the scan then fires mid-spin (sailor variant started
+    # 13f into the rotation, missing the whole windup) or not at all. The spin ONSET is a
+    # step (idle <=506 -> first spin frame >=1007 across all 44 surveyed clips), so the
+    # cap sits in the empty band between them and the scan fires on the onset frame.
+    assert el.burst_threshold(455.2) == el.KART_BURST_CAP
+    assert el.KART_BURST_CAP == 750.0
+
+
+def test_fade_anchored_start_is_fixed_gap_before_fade():
+    # The recorder is deterministic: across the 164-clip survey (3 characters x 40 karts
+    # + the baby_daisy roster) the fade starts exactly 27f after the flourish ends, so
+    # the flourish START is fade - 27 - 62. Threshold-free — immune to spinning-idle
+    # karts (bowser_bruiser) and to big-rider idle blips (bowser on calm karts cleared
+    # the low 4x-median gate mid-idle and exported pure idle).
+    assert el.fade_anchored_start(fade=830, n=960, band_b=738) == 830 - el.KART_FADE_GAP - el.KART_FLOURISH
+
+
+def test_fade_anchored_start_none_without_fade_in_window():
+    # fade == n means fade_start found nothing inside the decoded window (baby_daisy
+    # big_horn: flourish at f911, fade beyond the 16s cap) -> caller falls back to the
+    # burst scan.
+    assert el.fade_anchored_start(fade=960, n=960, band_b=738) is None
+
+
+def test_fade_anchored_start_rejects_start_before_band_end():
+    # Sanity: an anchored start landing before the idle-band end means the fade fired
+    # spuriously early -> fall back to the scan rather than export idle.
+    assert el.fade_anchored_start(fade=500, n=960, band_b=738) is None
+
+
+def test_kart_burst_floor_rejects_big_rider_idle_blips():
+    # Bowser's in-kart idle blips reach ~250 ||dF|| — above 4x a calm kart's median
+    # (~220 on cute_scoot/fin_twin/pipe_frame, which misfired in trailing idle) but far
+    # below the weakest real spin onset (994 across 164 clips). The kart threshold
+    # floors at 600.
+    assert el.kart_burst_threshold(56.0) == el.KART_BURST_FLOOR
+    assert el.KART_BURST_FLOOR == 600.0
+    assert el.kart_burst_threshold(455.2) == el.KART_BURST_CAP
+
+
 def test_kart_flourish_excludes_recorder_fade_frames():
     # The in-game kart flourish is 64f but the sweep recording's fade-out owns the last 2
     # (measured f62/f63 dimming on all 4 dirval karts) -> the fixed window stops at 62.
     assert el.KART_FLOURISH == 62
+
+
+def test_char_flourish_is_uniform_length():
+    # ALL character flourishes export the same length: the flourish is motion + a HELD
+    # pose until the recorder advances, so a fixed window from motion onset (the dip
+    # start, f619-625 on every one of the 153 roster clips) is always available. The
+    # length is the smallest real motion-start->swap window on the roster (mario: 56,
+    # constant across his costumes) minus the 2f crossfade guard. The old variable
+    # dip-run end exported 34f for bowser (motion only, hold dropped) and the naive
+    # swap-spike clamp cut baby_daisy__pro_racer to 23f (her own motion read as the
+    # swap) — both replaced by this constant.
+    assert el.CHAR_FLOURISH_LEN == 54
 
 
 def test_clamp_flourish_end_backs_off_detected_fade():

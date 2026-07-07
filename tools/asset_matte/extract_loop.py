@@ -160,6 +160,62 @@ def first_sustained_dip(r, a, b, drop=0.05, min_run=16):
     return None
 
 
+def burst_flourish_start(jump, b, thr, limit):
+    """First frame in [b, limit) whose ||dF|| clears thr = the flourish motion burst;
+    band edge (b + 1) when none does. `limit` (the scene fade / feature-window end)
+    bounds the scan: a kart whose wheels spin AT IDLE (bowser_bruiser's jagged tyres)
+    inflates the idle median so the real spin never reaches 4x it, and an unbounded
+    scan then ran past the whole flourish onto the fade/map screen (the flourish span
+    collapsed to 1 frame). The kart idle band ends AT the flourish (recurrence breaks
+    when the spin starts), so the band edge is the correct start when no burst clears."""
+    fs = b
+    while fs < limit and jump[fs] <= thr:
+        fs += 1
+    return fs if fs < limit else b + 1
+
+
+# The spin ONSET is a step: across the 164-clip survey (baby_daisy/bowser/waluigi/
+# fish_bone x the kart roster) the idle ||dF|| never exceeded 506 (bowser_bruiser's
+# spinning tyres) and big-rider idle blips reach ~250 (bowser head-turns), while the
+# weakest real spin onset is 994. The floor/cap bracket sits in that empty band.
+KART_BURST_CAP = 750.0
+KART_BURST_FLOOR = 600.0
+# The sweep recorder is deterministic: the scene fade starts exactly this many frames
+# after the 62f kart flourish ends (27 on 117/120 survey clips; one 26 = fade-gate
+# jitter of a single frame).
+KART_FADE_GAP = 27
+
+
+def burst_threshold(idle_med):
+    """Burst gate for the flourish scan: 4x the idle median, capped at KART_BURST_CAP.
+    Uncapped, a spinning-idle kart's 4x (~1820) lands INSIDE the flourish's motion range,
+    so the scan fires mid-spin (sailor bowser_bruiser started 13f into the rotation,
+    missing the windup) or never (base variant collapsed to the fallback)."""
+    return min(4.0 * idle_med, KART_BURST_CAP)
+
+
+def kart_burst_threshold(idle_med):
+    """Kart burst gate: burst_threshold with a floor. On a calm kart (idle median ~55)
+    4x sits near 220, which bowser's in-kart idle blips (~250) cleared — three clips
+    exported trailing idle as the flourish. The floor rejects rider blips; real spin
+    onsets (>= 994 surveyed) clear it everywhere."""
+    return max(burst_threshold(idle_med), KART_BURST_FLOOR)
+
+
+def fade_anchored_start(fade, n, band_b):
+    """Kart flourish start anchored BACKWARDS from the scene fade: the recorder timing
+    is deterministic, so the flourish occupies the fixed [fade - KART_FADE_GAP -
+    KART_FLOURISH, fade - KART_FADE_GAP) window. Threshold-free, so it is immune to
+    spinning-idle karts and big-rider idle blips. Returns None when the fade is not
+    inside the decoded window (fade == n; e.g. an unusually late flourish pushes it
+    past the decode cap) or when the anchored start lands at/before the idle-band end
+    (a spuriously early fade) — the caller then falls back to the burst scan."""
+    if fade >= n:
+        return None
+    fs = fade - KART_FADE_GAP - KART_FLOURISH
+    return fs if fs > band_b else None
+
+
 def fade_start(bg, a, b, thr=_FADE_THR):
     """First frame at/after the idle-band end where BOTH backdrop corners deviate from
     their idle baseline = the scene fade-out (a subject crossing one corner is not a fade).
@@ -246,8 +302,13 @@ _SWAP_ROI_720 = (760, 90, 1230, 560)     # generous hero box @720p; scaled to th
 # The in-game kart flourish is a 64f anim, but the sweep recording's fade-out owns its last 2
 # frames (measured: f62/f63 subject dimming on all 4 dirval karts, recorder timing deterministic).
 KART_FLOURISH = 62
-CHAR_FLOURISH = 48          # burst-fallback length when no recurrence dip is found
-CHAR_FLOURISH_MAX = 64      # cap on the dip run (pre-swap frames can't fully recover)
+# ALL character flourishes export the same length: the anim is motion + a HELD pose until
+# the recorder advances, so a fixed window from motion onset always exists. 54 = the
+# smallest real motion-start->swap window on the 153-clip roster survey (mario: 56,
+# constant across his costumes; everyone else 59-95) minus the 2f crossfade guard.
+# Long anims (wario's 95f laugh) are cut by the RECORDER at their swap anyway — 54 is
+# the most any uniform export can carry.
+CHAR_FLOURISH_LEN = 54
 # fade_start's 0.5-luma gate sits on the DARK backdrop corners, which dim less per frame than the
 # bright subject — it fires ~2 frames after the fade is visible on the kart. Back the clamp off.
 _FADE_GUARD = 2
@@ -275,7 +336,10 @@ def _colour_feats(clip, wh, upto):
 
 
 def find_segments(clip):
-    """{seg: (start, end)} half-open spans for 'spawn'/'idle'/'flourish' (+ fps, kart).
+    """{seg: (start, end)} half-open spans for 'spawn'/'idle'/'flourish' (+ fps, kart, fell_back).
+
+    fell_back=True flags a burst scan that never cleared its threshold (spinning-idle kart) and
+    took the band edge — surfaced in the sweep log so those items get a spot eyetest.
 
     idle  = the seam-searched loop [start, start+P], with start inside the band's FIRST cycle.
     spawn = KARTS ONLY. The swap = the biggest consecutive COLOUR change in the ~45f before idle
@@ -284,13 +348,13 @@ def find_segments(clip):
             animation) -> no spawn segment. The spawn runs through the settle up to the idle-loop
             start, so spawn's last frame is the source frame right before idle's first: the
             spawn->idle handoff plays frame-contiguously.
-    flourish = a fixed-length anim (kart 62f / char 48f) starting at the first MOTION BURST after the
-            idle band -- the kart 3D-spin / the character's jump. Band-end alone suffices for karts
-            (the band ends at the flourish) but NOT for characters, whose idle band can end early
-            while the standing idle keeps going; scanning forward for the burst handles both.
-            The end is clamped to the scene FADE-OUT (backdrop corners leaving their idle
-            baseline): the fixed length can overshoot into the fade by a few frames.
-    Ports the method validated against hand-marks (memory `asset-clip-segmentation`)."""
+    flourish = a fixed-length window (kart 62f / char 54f). KART: anchored backwards from the
+            deterministic recorder fade (fade - KART_FADE_GAP - KART_FLOURISH); the burst scan
+            + band-edge fallback covers fade-outside-window clips, clamped to the fade. CHAR:
+            starts at the recurrence-dip motion onset and runs CHAR_FLOURISH_LEN flat (motion +
+            held pose; the roster-surveyed window always fits).
+    Ports the method validated against hand-marks (memory `asset-clip-segmentation`) +
+    the 2026-07-07 164-kart-clip / 153-char-clip surveys."""
     start, P, fps, wh, kart, a, b, F, bg = _loop_impl(clip)
 
     # ── spawn-in (KARTS only): colour-spike swap in the ~45f before idle settles ──────────────
@@ -307,45 +371,41 @@ def find_segments(clip):
         if a - sp >= 4:
             spawn = (sp, start)                        # run through the settle to the loop start
 
-    # ── flourish span after the idle band: kart = motion burst, char = recurrence dip ─────────
-    # KART: the spin is a big pose change — first jump ||dF|| over 4x the idle median nails
-    # the start (validated across the sweep) and the window is the fixed KART_FLOURISH. CHAR: the
-    # jump's magnitude scales with body size and a baby-size character never clears the burst threshold
-    # (the scan then ran on to the SWAP to the next captured item) — so take the first SUSTAINED
-    # low-recurrence run instead, which is size-free and covers windup -> jump -> landing
-    # (anim length varies per character: wario's laugh outruns mario's 48f jump). The run is
-    # capped at CHAR_FLOURISH_MAX because right before the swap the recurrence can't fully
-    # recover (too few idle frames left), which would otherwise bleed the run into the next item.
-    # Scanning from the band edge skips a character's long trailing idle to the jump.
+    # ── flourish span after the idle band: kart = fade-anchor, char = recurrence dip ──────────
+    # CHAR: burst magnitude scales with body size (a baby character never clears a burst
+    # threshold), so the START is the first SUSTAINED low-recurrence run — size-free, and
+    # constant on the roster (motion onset f619-625 on all 153 surveyed clips). The END is
+    # fs + CHAR_FLOURISH_LEN flat: the flourish is motion + a HELD pose, so the fixed window
+    # always exists (roster min real window 56 > 54). The old dip-run end exported the
+    # motion only (bowser 34f vs waluigi 38f — inconsistent), and the old swap-spike clamp
+    # false-fired on the character's OWN motion crossing the colour ROI (mario's jump at
+    # +8f, conkdor's head-slam at +16f, swoop's flip at +24f; baby_daisy__pro_racer was cut
+    # to 23f) — the roster-surveyed invariant replaces both. No fade clamp here either: a
+    # char's jump can cover BOTH backdrop corners (false fades as early as onset+20), while
+    # a real fade always lands past the swap (>= onset+56).
+    fell_back = False
     dip = None if kart else first_sustained_dip(_smooth(recurrence(F)), a, b)
     if dip is not None:
-        fs, fe = dip
-        fe = min(fe, fs + CHAR_FLOURISH_MAX)
-        # The char's landing->swap gap can be too short for the recurrence to recover, so the
-        # dip run (and even the cap) can reach the SWAP to the next captured item. Bound the end
-        # at the tail colour spike = the swap crossfade (mario's kart showed inside his jump span).
-        C = _colour_feats(clip, wh, len(F))
-        if len(C) > fs + 2:
-            diffs = np.array([float(np.linalg.norm(C[t] - C[t - 1])) for t in range(fs + 1, len(C))])
-            swap = fs + 1 + int(np.argmax(diffs))
-            if float(diffs.max()) > 4.0 * float(np.median(diffs) + 1e-6):   # a real spike, not noise
-                fe = min(fe, swap - 2)                 # crossfade blends a couple of frames early
+        fs = dip[0]
+        fe = fs + CHAR_FLOURISH_LEN
     else:
-        jump = np.concatenate([[0.0], np.linalg.norm(np.diff(F, axis=0), axis=1)])
-        idle_jump = float(np.median(jump[a:b])) if b > a else 0.0
-        thr = 4.0 * idle_jump
-        fs = b
-        while fs < len(jump) - 1 and jump[fs] <= thr:
-            fs += 1
-        if fs >= len(jump) - 1:                     # burst not in the feature window -> band edge
-            fs = b + 1
-        fe = fs + (KART_FLOURISH if kart else CHAR_FLOURISH)
-    fe = clamp_flourish_end(fe, fade_start(bg, a, b), len(bg), fs)   # never include fade-out frames
+        # KART primary: anchor backwards from the deterministic recorder fade (threshold-
+        # free). Burst scan only when the fade is outside the decoded window.
+        fade = fade_start(bg, a, b)
+        fs = fade_anchored_start(fade, len(bg), b) if kart else None
+        if fs is None:
+            jump = np.concatenate([[0.0], np.linalg.norm(np.diff(F, axis=0), axis=1)])
+            idle_jump = float(np.median(jump[a:b])) if b > a else 0.0
+            thr = kart_burst_threshold(idle_jump) if kart else burst_threshold(idle_jump)
+            fs = burst_flourish_start(jump, b, thr, min(len(jump) - 1, fade))
+            fell_back = bool(jump[fs] <= thr)   # frame never cleared -> band-edge fallback
+        fe = fs + (KART_FLOURISH if kart else CHAR_FLOURISH_LEN)
+        fe = clamp_flourish_end(fe, fade, len(bg), fs)   # never include fade-out frames
 
     segs = {"idle": (start, start + P), "flourish": (fs, fe)}
     if spawn:
         segs["spawn"] = spawn
-    return segs, fps, kart
+    return segs, fps, kart, fell_back
 
 
 def _fresh_dir(d):
@@ -360,7 +420,7 @@ def _fresh_dir(d):
 def extract_segments(clip, out_base, name):
     """Write prod-crop PNG sequences for each detected segment to <out_base>/<name>__<seg>/NNN.png.
     Returns {seg: frame_count}."""
-    segs, fps, kart = find_segments(clip)
+    segs, fps, kart, fell_back = find_segments(clip)
     want = {}
     for seg, (s, e) in segs.items():
         for f in range(s, e):
@@ -383,7 +443,8 @@ def extract_segments(clip, out_base, name):
         idx += 1
     cap.release()
     print(f"{os.path.basename(clip)}: " +
-          " ".join(f"{nm}={e0 - s0}f" for nm, (s0, e0) in segs.items()), flush=True)
+          " ".join(f"{nm}={e0 - s0}f" for nm, (s0, e0) in segs.items()) +
+          (" flourish=FALLBACK(band-edge)" if fell_back else ""), flush=True)
     return {seg: (e - s) for seg, (s, e) in segs.items()}
 
 
