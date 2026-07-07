@@ -2,12 +2,15 @@ import numpy as np
 import nametag_core as nc        # FLAT import — conftest adds tools/asset_matte to sys.path
 
 def test_constants():
-    assert nc.PROD_CROP_4K == (2100, 36, 3720, 1806)
-    assert (nc.OUT_W, nc.OUT_H) == (988, 1080)
+    # Crop widened 2026-07-07 (user-picked on peach-aviator/yoshi-dread_sled stills):
+    # full frame top + right edge so tall flourish peaks (bowser's fist-pump) and wide
+    # poses (DK's gauntlets, big_horn's horns) stop clipping. Chip output 1024x1080.
+    assert nc.PROD_CROP_4K == (2128, 0, 3840, 1806)
+    assert (nc.OUT_W, nc.OUT_H) == (1024, 1080)
     assert nc.CHAR_ROI == (2378, 1604, 1178, 226)
     assert nc.PLATE_ROI == (2360, 1602, 1378, 226)
     assert nc.FULL_4K == (3840, 2160)
-    assert nc.NAMEPLATE_HERO_ROI == (1050, 18, 1860, 903)
+    assert nc.NAMEPLATE_HERO_ROI == (1064, 0, 1920, 903)
 
 
 def test_extract_loop_crop_matches_prod_crop():

@@ -6,9 +6,12 @@ import cv2
 PLATE_ROI = (2360, 1602, 1378, 226)        # kart-screen plate, native 4K x,y,w,h
 CHAR_ROI = (2378, 1604, 1178, 226)         # character-screen plate (narrower, no 1-UP badge)
 FULL_4K = (3840, 2160)                     # w, h
-PROD_CROP_4K = (2100, 36, 3720, 1806)      # x1,y1,x2,y2 — validated combo crop at 4K
-OUT_W, OUT_H = 988, 1080                   # production loopframe/matte size
-NAMEPLATE_HERO_ROI = (1050, 18, 1860, 903)  # PROD_CROP at 1080p ref (for extract_loop.scale_roi)
+# Crop widened 2026-07-07 (was (2100,36,3720,1806) -> 988x1080): full frame top + right
+# edge, user-picked on peach-aviator / yoshi-dread_sled stills — tall flourish peaks
+# (bowser's fist-pump) and wide poses (DK's gauntlets, big_horn's horns) were clipping.
+PROD_CROP_4K = (2128, 0, 3840, 1806)       # x1,y1,x2,y2 — production crop at 4K
+OUT_W, OUT_H = 1024, 1080                  # production loopframe/matte size
+NAMEPLATE_HERO_ROI = (1064, 0, 1920, 903)  # PROD_CROP at 1080p ref (for extract_loop.scale_roi)
 
 
 def _majority(mask, win):
