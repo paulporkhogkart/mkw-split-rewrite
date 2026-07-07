@@ -85,6 +85,12 @@ def idle_band(F):
 
 
 def _decode_features(clip, roi):
+    """One sequential decode -> ALL per-frame signals: grayscale features F (loop/burst),
+    backdrop-corner luma bg (fade), and 24x24 swap-ROI colour C (spawn swap / char hard
+    cut). Decode dominates segmentation cost (4K60 HEVC ~100fps software), so everything
+    is collected in a single pass — the old separate _colour_feats pass doubled it.
+    (GPU/NVDEC decode was measured SLOWER here: 46fps vs 102fps software on the 9800X3D —
+    the 4K NV12 PCIe download + CPU colour conversion outweighs the decode offload.)"""
     cap = cv2.VideoCapture(clip)
     if not cap.isOpened():
         raise RuntimeError(f"cannot open {clip!r}")
@@ -96,8 +102,11 @@ def _decode_features(clip, roi):
     # subject crossing ONE of them (flourish jump peak) can't read as a fade.
     ch, cw = int(0.12 * (y2 - y1)), int(0.22 * (x2 - x1))
     corners = ((y1, y1 + ch, x1, x1 + cw), (y1, y1 + ch, x2 - cw, x2))
+    rx, ry = w / 1280.0, h / 720.0
+    sx1, sy1, sx2, sy2 = (int(_SWAP_ROI_720[0] * rx), int(_SWAP_ROI_720[1] * ry),
+                          int(_SWAP_ROI_720[2] * rx), int(_SWAP_ROI_720[3] * ry))
     cap_frames = int(MAX_DECODE_S * fps)
-    feats, bg, idx = [], [], 0
+    feats, bg, col, idx = [], [], [], 0
     while idx < cap_frames:
         ok, fr = cap.read()
         if not ok:
@@ -105,11 +114,13 @@ def _decode_features(clip, roi):
         feats.append(frame_feature(fr, roi, 48))
         bg.append([float(cv2.cvtColor(fr[cy1:cy2, cx1:cx2], cv2.COLOR_BGR2GRAY).mean())
                    for cy1, cy2, cx1, cx2 in corners])
+        col.append(cv2.resize(fr[sy1:sy2, sx1:sx2], (24, 24), interpolation=cv2.INTER_AREA)
+                   .astype(np.float32).reshape(-1))
         idx += 1
     cap.release()
     if not feats:
         raise RuntimeError(f"no frames decoded from {clip!r}")
-    return fps, np.stack(feats), (w, h), np.array(bg)
+    return fps, np.stack(feats), (w, h), np.array(bg), np.stack(col)
 
 
 def find_loop(clip):
@@ -117,7 +128,7 @@ def find_loop(clip):
 
     Importable by the batch driver so it can stamp the period/start without re-decoding.
     """
-    best_s, P, fps, wh, kart, _a, _b, _F, _bg = _loop_impl(clip)
+    best_s, P, fps, wh, kart, _a, _b, _F, _bg, _C = _loop_impl(clip)
     return best_s, P, fps, wh, kart
 
 
@@ -240,11 +251,12 @@ def clamp_flourish_end(fe, fade, n, fs):
 
 def _loop_impl(clip):
     """find_loop internals, also returning the idle band (a, b), the decoded features F
-    (needed by find_segments to place spawn relative to where idling actually starts) and
-    the backdrop-corner luma track bg (needed to clamp the flourish before the fade-out)."""
+    (needed by find_segments to place spawn relative to where idling actually starts),
+    the backdrop-corner luma track bg (fade clamp) and the swap-ROI colour feats C
+    (spawn swap / char hard cut) — all from the single decode."""
     name = os.path.splitext(os.path.basename(clip))[0]
     kart = is_kart_combo(name)
-    fps, F, wh, bg = _decode_features(clip, KART_FEAT_ROI if kart else CHAR_FEAT_ROI)
+    fps, F, wh, bg, C = _decode_features(clip, KART_FEAT_ROI if kart else CHAR_FEAT_ROI)
     a, b = idle_band(F)
     if kart:
         P = int(round(KART_PERIOD_S * fps))            # baked rule: forced 2.0s
@@ -253,7 +265,7 @@ def _loop_impl(clip):
         lags, scores = autocorr_by_lag(F[a:b + 1], lo, hi)
         P, _conf, _ = find_period(lags, scores)
     P = int(max(2, min(P, (b - a) - 2)))               # keep one full cycle inside the band
-    return seam_start(F, a, b, P), P, fps, wh, kart, a, b, F, bg
+    return seam_start(F, a, b, P), P, fps, wh, kart, a, b, F, bg, C
 
 
 def extract(clip, outdir):
@@ -302,43 +314,46 @@ _SWAP_ROI_720 = (760, 90, 1230, 560)     # generous hero box @720p; scaled to th
 # The in-game kart flourish is a 64f anim, but the sweep recording's fade-out owns its last 2
 # frames (measured: f62/f63 subject dimming on all 4 dirval karts, recorder timing deterministic).
 KART_FLOURISH = 62
-# ALL character flourishes export the same length: the anim is motion + a HELD pose until
-# the recorder advances, so a fixed window from motion onset always exists. 54 = the
-# smallest real motion-start->swap window on the 153-clip roster survey (mario: 56,
-# constant across his costumes; everyone else 59-95) minus the 2f crossfade guard.
-# Long anims (wario's 95f laugh) are cut by the RECORDER at their swap anyway — 54 is
-# the most any uniform export can carry.
+# Char flourish FALLBACK length (also the burst-branch char window): the smallest real
+# motion-start->cut window on the 153-clip roster survey (mario: 56) minus the 2f guard —
+# safe for any character when the hard cut can't be found.
 CHAR_FLOURISH_LEN = 54
+# The char flourish ends with a single-frame HARD CUT to the char-in-kart (the next
+# captured item). The incoming item's nameplate text blends in ~2f before the subject
+# cut, so the export stops CHAR_CUT_GUARD frames short of it.
+CHAR_CUT_GUARD = 2
+# Cut-detector gates (9-clip probe: real cuts 984-3153 preceded by 4f stillness <= 63;
+# character motion spikes always have moving neighbours; hold blips/blinks stay small).
+_CUT_SPIKE_FLOOR = 500.0    # absolute: half the weakest real cut
+_CUT_STILL_CEIL = 100.0     # absolute stillness allowance during the held pose
 # fade_start's 0.5-luma gate sits on the DARK backdrop corners, which dim less per frame than the
 # bright subject — it fires ~2 frames after the fade is visible on the kart. Back the clamp off.
 _FADE_GUARD = 2
 
 
-def _colour_feats(clip, wh, upto):
-    """24x24 BGR colour features of the swap ROI for frames [0, upto) (sequential decode —
-    HEVC seek is flaky). Colour is the swap discriminator: grayscale can't tell two karts
-    (or a char vs char-in-kart) apart."""
-    w, h = wh
-    rx, ry = w / 1280.0, h / 720.0
-    x1, y1, x2, y2 = (int(_SWAP_ROI_720[0] * rx), int(_SWAP_ROI_720[1] * ry),
-                      int(_SWAP_ROI_720[2] * rx), int(_SWAP_ROI_720[3] * ry))
-    cap = cv2.VideoCapture(clip)
-    C, idx = [], 0
-    while idx < upto:
-        ok, fr = cap.read()
-        if not ok:
-            break
-        C.append(cv2.resize(fr[y1:y2, x1:x2], (24, 24), interpolation=cv2.INTER_AREA)
-                 .astype(np.float32).reshape(-1))
-        idx += 1
-    cap.release()
-    return np.stack(C)
+def char_cut(d, ds, idle_med, still_n=4):
+    """Index of the HARD CUT that ends a character flourish, scanning the colour-diff
+    track d from just after the motion onset ds; None when no cut is found.
+
+    The cut is the standing character being replaced by the char-in-kart in ONE frame:
+    a huge colour change (relative to idle AND above an absolute floor) whose preceding
+    still_n frames are near-still (the held pose). The character's own motion — however
+    dramatic (mario's jump, conkdor's head-slam, swoop's flip) — always has moving
+    neighbours, so it can't pass the stillness gate; blinks/nameplate shimmer during the
+    hold pass the stillness gate but sit far below the spike floor."""
+    spike = max(6.0 * (idle_med + 1.0), _CUT_SPIKE_FLOOR)
+    still = max(3.0 * (idle_med + 1.0), _CUT_STILL_CEIL)
+    for t in range(ds + still_n, len(d)):
+        if d[t] > spike and float(np.max(d[t - still_n:t])) < still:
+            return t
+    return None
 
 
 def find_segments(clip):
     """{seg: (start, end)} half-open spans for 'spawn'/'idle'/'flourish' (+ fps, kart, fell_back).
 
-    fell_back=True flags a burst scan that never cleared its threshold (spinning-idle kart) and
+    fell_back=True flags a flourish end that used a fallback: a char whose hard cut wasn't
+    found (fixed 54f window used), or a kart burst scan that never cleared its threshold and
     took the band edge — surfaced in the sweep log so those items get a spot eyetest.
 
     idle  = the seam-searched loop [start, start+P], with start inside the band's FIRST cycle.
@@ -355,12 +370,11 @@ def find_segments(clip):
             held pose; the roster-surveyed window always fits).
     Ports the method validated against hand-marks (memory `asset-clip-segmentation`) +
     the 2026-07-07 164-kart-clip / 153-char-clip surveys."""
-    start, P, fps, wh, kart, a, b, F, bg = _loop_impl(clip)
+    start, P, fps, wh, kart, a, b, F, bg, C = _loop_impl(clip)
 
     # ── spawn-in (KARTS only): colour-spike swap in the ~45f before idle settles ──────────────
     spawn = None
     if kart:
-        C = _colour_feats(clip, wh, a + 1)
         w0 = max(1, a - 45)
         if len(C) > a and a - w0 >= 1:
             diffs = np.array([float(np.linalg.norm(C[t] - C[t - 1])) for t in range(w0, a)])
@@ -371,23 +385,28 @@ def find_segments(clip):
         if a - sp >= 4:
             spawn = (sp, start)                        # run through the settle to the loop start
 
-    # ── flourish span after the idle band: kart = fade-anchor, char = recurrence dip ──────────
+    # ── flourish span after the idle band: kart = fade-anchor, char = dip start -> hard cut ───
     # CHAR: burst magnitude scales with body size (a baby character never clears a burst
     # threshold), so the START is the first SUSTAINED low-recurrence run — size-free, and
     # constant on the roster (motion onset f619-625 on all 153 surveyed clips). The END is
-    # fs + CHAR_FLOURISH_LEN flat: the flourish is motion + a HELD pose, so the fixed window
-    # always exists (roster min real window 56 > 54). The old dip-run end exported the
-    # motion only (bowser 34f vs waluigi 38f — inconsistent), and the old swap-spike clamp
-    # false-fired on the character's OWN motion crossing the colour ROI (mario's jump at
-    # +8f, conkdor's head-slam at +16f, swoop's flip at +24f; baby_daisy__pro_racer was cut
-    # to 23f) — the roster-surveyed invariant replaces both. No fade clamp here either: a
-    # char's jump can cover BOTH backdrop corners (false fades as early as onset+20), while
-    # a real fade always lands past the swap (>= onset+56).
+    # the HARD CUT to the char-in-kart (the next captured item), minus CHAR_CUT_GUARD:
+    # flourish length is per-character (mario 54f ... king_boo 92f), each anim playing out
+    # to its own recorder-deterministic cut. char_cut's stillness gate is what the old
+    # argmax swap clamp lacked — the char's own motion (mario's jump at +8f, conkdor's
+    # head-slam at +16f, swoop's flip at +24f) false-fired it (baby_daisy__pro_racer was
+    # cut to 23f). No fade clamp for chars: a jump can cover BOTH backdrop corners (false
+    # fades as early as onset+20) while a real fade always lands past the cut.
     fell_back = False
     dip = None if kart else first_sustained_dip(_smooth(recurrence(F)), a, b)
     if dip is not None:
         fs = dip[0]
-        fe = fs + CHAR_FLOURISH_LEN
+        d = np.concatenate([[0.0], np.linalg.norm(np.diff(C, axis=0), axis=1)])
+        cut = char_cut(d, fs, float(np.median(d[a:b])) if b > a else 0.0)
+        if cut is not None and cut - CHAR_CUT_GUARD - fs >= 16:
+            fe = cut - CHAR_CUT_GUARD
+        else:
+            fe = fs + CHAR_FLOURISH_LEN   # roster-safe fixed fallback
+            fell_back = True
     else:
         # KART primary: anchor backwards from the deterministic recorder fade (threshold-
         # free). Burst scan only when the fade is outside the decoded window.
@@ -431,8 +450,8 @@ def extract_segments(clip, out_base, name):
     cap = cv2.VideoCapture(clip)
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)); h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     x1, y1, x2, y2, out_w = _prod_crop_params(w, h)
-    idx = 0
-    while True:
+    idx, last_wanted = 0, max(want)
+    while idx <= last_wanted:                # segments end well before EOF — stop there
         ok, fr = cap.read()
         if not ok:
             break
@@ -444,7 +463,7 @@ def extract_segments(clip, out_base, name):
     cap.release()
     print(f"{os.path.basename(clip)}: " +
           " ".join(f"{nm}={e0 - s0}f" for nm, (s0, e0) in segs.items()) +
-          (" flourish=FALLBACK(band-edge)" if fell_back else ""), flush=True)
+          (" flourish=FALLBACK" if fell_back else ""), flush=True)
     return {seg: (e - s) for seg, (s, e) in segs.items()}
 
 

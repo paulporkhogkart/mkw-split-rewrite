@@ -153,16 +153,56 @@ def test_kart_flourish_excludes_recorder_fade_frames():
     assert el.KART_FLOURISH == 62
 
 
-def test_char_flourish_is_uniform_length():
-    # ALL character flourishes export the same length: the flourish is motion + a HELD
-    # pose until the recorder advances, so a fixed window from motion onset (the dip
-    # start, f619-625 on every one of the 153 roster clips) is always available. The
-    # length is the smallest real motion-start->swap window on the roster (mario: 56,
-    # constant across his costumes) minus the 2f crossfade guard. The old variable
-    # dip-run end exported 34f for bowser (motion only, hold dropped) and the naive
-    # swap-spike clamp cut baby_daisy__pro_racer to 23f (her own motion read as the
-    # swap) — both replaced by this constant.
+def test_char_flourish_fallback_length():
+    # Fallback span when no hard cut is found (and the burst-branch char length): the
+    # smallest real motion-start->cut window on the roster (mario: 56) minus the 2f
+    # guard — safe for any character.
     assert el.CHAR_FLOURISH_LEN == 54
+
+
+def _cut_track(n=200, idle_med=50.0, cut_at=None, cut_size=2000.0):
+    """Synthetic colour-diff track: idle noise, motion burst at 60-90, hold, optional cut."""
+    d = np.full(n, idle_med)
+    d[60:90] = 900.0                  # the flourish motion: big diffs, moving neighbours
+    d[90:] = 40.0                     # held pose: near-still
+    if cut_at is not None:
+        d[cut_at] = cut_size
+    return d
+
+
+def test_char_cut_finds_hard_cut_after_hold():
+    # The end of a char flourish is a single-frame HARD CUT to the char-in-kart: a huge
+    # colour change PRECEDED BY STILLNESS (the held pose). Measured on 9 probe clips:
+    # cut diff 984-3153, pre-cut 4-frame max 10-63, exactly one hit per clip.
+    d = _cut_track(cut_at=140)
+    assert el.char_cut(d, ds=60, idle_med=50.0) == 140
+
+
+def test_char_cut_rejects_the_characters_own_motion():
+    # mario's jump (+8f), conkdor's head-slam (+16f) and swoop's flip (+24f) fooled the
+    # old argmax swap detector. Motion frames have MOVING neighbours, so the stillness
+    # gate rejects them even when they are the biggest diff in the clip.
+    d = _cut_track(cut_at=140)
+    d[65] = 3000.0                    # dramatic motion spike, bigger than the cut
+    assert el.char_cut(d, ds=60, idle_med=50.0) == 140
+
+
+def test_char_cut_rejects_small_blips_after_stillness():
+    # A blink / nameplate shimmer during the hold is preceded by stillness but far
+    # below the absolute cut floor (weakest real cut: 984).
+    d = _cut_track(cut_at=140)
+    d[120] = 300.0                    # blip during the hold
+    assert el.char_cut(d, ds=60, idle_med=50.0) == 140
+
+
+def test_char_cut_none_when_no_cut():
+    d = _cut_track(cut_at=None)
+    assert el.char_cut(d, ds=60, idle_med=50.0) is None
+
+
+def test_char_cut_guard_is_two_frames():
+    # The incoming item's nameplate text blends in ~2f before the subject cut.
+    assert el.CHAR_CUT_GUARD == 2
 
 
 def test_clamp_flourish_end_backs_off_detected_fade():
