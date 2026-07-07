@@ -4,7 +4,9 @@ import { DatabaseSync } from 'node:sqlite';
 import { applySchema } from './connect';
 import { saveCourseModel, loadCourseModel, savePlayerAlignment, loadPlayerAlignment,
          rebuildCourseModel } from './courseModels';
+import { insertTrail } from './trails';
 import type { CourseModel } from '../progress/types';
+import type { TrailPoint } from './trailCodec';
 
 function db() {
   const d = new DatabaseSync(':memory:'); applySchema(d);
@@ -42,11 +44,13 @@ describe('courseModels repo', () => {
     d.exec(`INSERT INTO runs(id,attempt_id,season_id,player_id,course_id,cc,status,provenance,total_time_ms)
             VALUES (1,'a',1,1,5,150,'finished','live',60000)`);
     d.exec('INSERT INTO run_laps(run_id,lap_index,lap_time_ms) VALUES (1,1,30000),(1,2,30000)');
-    const pts = d.prepare('INSERT INTO run_points(run_id,t_ms,cx,cy,score,lap) VALUES (1,?,?,?,1.0,?)');
+    const pts: TrailPoint[] = [];
     for (let i = 0; i < 600; i++) {        // two 30s laps around a circle
       const t = i * 100, lap = t < 30000 ? 1 : 2, f = (t % 30000) / 30000;
-      pts.run(t, 200 + 100 * Math.cos(2 * Math.PI * f), 200 + 100 * Math.sin(2 * Math.PI * f), lap);
+      pts.push({ t_ms: t, cx: 200 + 100 * Math.cos(2 * Math.PI * f),
+                 cy: 200 + 100 * Math.sin(2 * Math.PI * f), score: 1, lap });
     }
+    insertTrail(d, 1, pts);
     const res = rebuildCourseModel(d, 5, 150);
     expect(res).not.toBeNull();
     expect(res!.laps).toBe(2);

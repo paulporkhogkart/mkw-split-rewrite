@@ -1,5 +1,5 @@
 // pi/src/scripts/wipeRuns.ts
-// Deletes ALL recorded runs (run_laps/run_points cascade), course models and
+// Deletes ALL recorded runs (run_laps/run_trails cascade), course models and
 // player alignments. Players/seasons/rosters/courses/world_records survive.
 // Usage: npm run wipe-runs -- --confirm
 import { openDb, applySchema } from '../db/connect';
@@ -16,11 +16,11 @@ function main() {
   }
   const db = openDb(process.env.MKW_DB ?? 'mkw.db');
   applySchema(db);
-  const tables = ['runs', 'run_laps', 'run_points', 'course_models', 'player_alignment'];
+  const tables = ['runs', 'run_laps', 'run_trails', 'course_models', 'player_alignment'];
   const before = Object.fromEntries(tables.map((t) => [t, count(db, t)]));
   db.exec('BEGIN');
   try {
-    db.exec('DELETE FROM runs');             // run_laps + run_points cascade
+    db.exec('DELETE FROM runs');             // run_laps + run_trails cascade
     db.exec('DELETE FROM course_models');
     db.exec('DELETE FROM player_alignment');
     db.exec('COMMIT');

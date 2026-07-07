@@ -13,6 +13,8 @@
     "wr-flags": "node --no-warnings --import tsx src/scripts/wrFlags.ts",
     "build-course-model": "node --no-warnings --import tsx src/scripts/buildCourseModel.ts",
     "wipe-runs": "node --no-warnings --import tsx src/scripts/wipeRuns.ts",
+    "migrate-trails": "node --no-warnings --import tsx src/scripts/migrateTrailsCli.ts",
+    "diff-trails": "node --no-warnings --import tsx src/scripts/diffTrails.ts",
     "recompute-pbs": "node --no-warnings --import tsx src/scripts/recomputePbs.ts",
     "projector-lab": "node --no-warnings --import tsx src/scripts/projectorLab.ts",
     "bot": "node --env-file=.env --no-warnings --import tsx src/bot/index.ts"

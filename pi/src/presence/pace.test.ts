@@ -3,6 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { applySchema } from '../db/connect';
 import { makePaceDelta } from './pace';
 import { saveCourseModel, savePlayerAlignment } from '../db/courseModels';
+import { insertTrail } from '../db/trails';
 import type { CourseModel } from '../progress/types';
 
 const COURSE = 'Bowsers Castle';
@@ -53,8 +54,8 @@ function insertRun(d: DatabaseSync, id: number, player: number, totalMs: number,
              VALUES(?,1,?,?,150,'finished',?,?,'live')`).run(id, player, CID, totalMs, isPb);
   const lapStmt = d.prepare('INSERT INTO run_laps(run_id,lap_index,lap_time_ms) VALUES (?,?,?)');
   lapMs.forEach((ms, i) => lapStmt.run(id, i + 1, ms));
-  const ptStmt = d.prepare('INSERT INTO run_points(run_id,t_ms,cx,cy,score,lap) VALUES (?,?,?,?,1.0,?)');
-  for (const [t, x, y, lap] of pts) ptStmt.run(id, t, x, y, lap);
+  if (pts.length === 0) return;   // old row-loop was a no-op on []; keep that (Luke's PB w/ no trail)
+  insertTrail(d, id, pts.map(([t, x, y, lap]) => ({ t_ms: t, cx: x, cy: y, score: 1, lap })));
 }
 
 // Linear PB: 1px/s, 80s total, laps 40s+40s -> pb_time_at(c) = 80000*c.

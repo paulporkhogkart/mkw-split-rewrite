@@ -13,7 +13,7 @@ from server.db import connect, init_schema
 
 EXPECTED_TABLES = {
     "seasons", "players", "season_rosters", "courses",
-    "runs", "run_laps", "run_points", "world_records",
+    "runs", "run_laps", "run_trails", "world_records",
 }
 
 

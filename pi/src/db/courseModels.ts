@@ -3,6 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { CourseModel, Transform, RunInput } from '../progress/types';
 import { buildCourseModel } from '../progress/build';
 import { activeSeasonId } from './seasons';
+import { getRunPoints } from './trails';
 
 export function saveCourseModel(db: DatabaseSync, courseId: number, cc: number, m: CourseModel, sourceRuns: number): void {
   db.prepare(`INSERT INTO course_models(course_id, cc, model_json, lap_length_px, status, source_run_count, version, built_at)
@@ -40,16 +41,15 @@ export function rebuildCourseModel(db: DatabaseSync, courseId: number, cc: numbe
   const runs = db.prepare(
     `SELECT r.id, r.player_id FROM runs r
      WHERE r.season_id=? AND r.course_id=? AND r.cc=? AND r.status='finished'
-       AND EXISTS (SELECT 1 FROM run_points p WHERE p.run_id=r.id)
+       AND EXISTS (SELECT 1 FROM run_trails p WHERE p.run_id=r.id)
      ORDER BY r.id DESC LIMIT ?`).all(season, courseId, cc, window) as { id: number; player_id: number }[];
   if (runs.length === 0) return null;
-  const ptsStmt = db.prepare('SELECT t_ms, cx, cy, score, lap FROM run_points WHERE run_id=? ORDER BY t_ms');
   const lapStmt = db.prepare('SELECT lap_time_ms FROM run_laps WHERE run_id=? ORDER BY lap_index');
   const inputs: RunInput[] = runs.map((r) => {
     // run_laps.lap_time_ms is a per-lap DURATION; foldRun's `f` expects cumulative end-times.
     let c = 0;
     const cum = (lapStmt.all(r.id) as { lap_time_ms: number }[]).map((l) => (c += l.lap_time_ms));
-    return { playerId: r.player_id, lapCumMs: cum, points: ptsStmt.all(r.id) as RunInput['points'] };
+    return { playerId: r.player_id, lapCumMs: cum, points: getRunPoints(db, r.id) as RunInput['points'] };
   });
   const res = buildCourseModel(inputs);
   if (!res) return null;

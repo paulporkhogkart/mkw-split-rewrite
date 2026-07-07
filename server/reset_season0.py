@@ -8,12 +8,12 @@ Run on the Pi from the repo root (default = DRY RUN, writes nothing):
 What it does, and the ONE invariant it guards:
   * Season 0 = the corrected Discord reconstruction (server/data/season0_recovery.json);
     today becomes the S0/S1 boundary; each player's all-time best carries over to seed S1.
-  * INVARIANT: a run that has positional mapping (run_points) or lap data (run_laps) is
+  * INVARIANT: a run that has positional mapping (run_trails) or lap data (run_laps) is
     NEVER deleted or duplicated. The only rows replaced are the point-LESS S0 reconstruction
     and the point-less carryover seeds. Live pbenguin runs (which hold the trails) are left
     exactly in place. The reconstruction is de-duped against live runs so a real attempt with
     a trail is never shadowed by a point-less copy, and is_pb ties break toward the row that
-    HAS a trail. A run_points/run_laps row-count check gates the commit.
+    HAS a trail. A run_trails/run_laps count check gates the commit.
 """
 import sqlite3, json, shutil, os, sys, datetime
 
@@ -25,10 +25,10 @@ NOW      = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 def recompute_is_pb(db, season_id):
     """Fastest finished run per (player,course,cc) wins is_pb; ties break toward a run that
-    HAS run_points (so the canonical PB keeps its trail), then earliest."""
+    HAS run_trails (so the canonical PB keeps its trail), then earliest."""
     db.execute("UPDATE runs SET is_pb=0 WHERE season_id=?", (season_id,))
     rows = db.execute(
-        """WITH pts AS (SELECT run_id, COUNT(*) n FROM run_points GROUP BY run_id),
+        """WITH pts AS (SELECT run_id, n FROM run_trails),
                 ranked AS (
                   SELECT r.id, ROW_NUMBER() OVER (
                     PARTITION BY r.player_id, r.course_id, r.cc
@@ -72,7 +72,7 @@ def main():
     s0 = db.execute("SELECT id FROM seasons WHERE name='Season 0'").fetchone()["id"]
     s1 = db.execute("SELECT id FROM seasons WHERE name='Season 1'").fetchone()["id"]
 
-    pts_before  = db.execute("SELECT COUNT(*) FROM run_points").fetchone()[0]
+    pts_before  = db.execute("SELECT COALESCE(SUM(n),0) FROM run_trails").fetchone()[0]
     laps_before = db.execute("SELECT COUNT(*) FROM run_laps").fetchone()[0]
     live_before = db.execute("SELECT COUNT(*) FROM runs WHERE provenance='live'").fetchone()[0]
 
@@ -80,10 +80,10 @@ def main():
     # the reconstruction has none — but never delete positional data).
     s0_pointed = db.execute(
         """SELECT COUNT(*) FROM runs WHERE season_id=? AND
-             (id IN (SELECT run_id FROM run_points) OR id IN (SELECT run_id FROM run_laps))""",
+             (id IN (SELECT run_id FROM run_trails) OR id IN (SELECT run_id FROM run_laps))""",
         (s0,)).fetchone()[0]
     if s0_pointed:
-        print(f"ABORT: {s0_pointed} Season-0 rows carry run_points/run_laps — refusing to replace them.")
+        print(f"ABORT: {s0_pointed} Season-0 rows carry run_trails/run_laps — refusing to replace them.")
         return
 
     # de-dup target: attempts already recorded as live runs (these hold the trails). The
@@ -136,12 +136,12 @@ def main():
     recompute_is_pb(db, s1); recompute_was_pb(db, s1)
 
     # ---- post-change report (inside the txn) ----
-    pts_after  = db.execute("SELECT COUNT(*) FROM run_points").fetchone()[0]
+    pts_after  = db.execute("SELECT COALESCE(SUM(n),0) FROM run_trails").fetchone()[0]
     laps_after = db.execute("SELECT COUNT(*) FROM run_laps").fetchone()[0]
     live_after = db.execute("SELECT COUNT(*) FROM runs WHERE provenance='live'").fetchone()[0]
-    orphan_pts = db.execute("SELECT COUNT(*) FROM run_points WHERE run_id NOT IN (SELECT id FROM runs)").fetchone()[0]
+    orphan_pts = db.execute("SELECT COUNT(*) FROM run_trails WHERE run_id NOT IN (SELECT id FROM runs)").fetchone()[0]
     pb_pointless_over_pointed = db.execute(
-        """WITH pts AS (SELECT run_id,COUNT(*) n FROM run_points GROUP BY run_id)
+        """WITH pts AS (SELECT run_id, n FROM run_trails)
            SELECT COUNT(*) FROM runs pb LEFT JOIN pts pp ON pp.run_id=pb.id
            WHERE pb.is_pb=1 AND COALESCE(pp.n,0)=0 AND EXISTS (
              SELECT 1 FROM runs r2 JOIN pts x ON x.run_id=r2.id
@@ -149,7 +149,7 @@ def main():
                AND r2.cc=pb.cc AND r2.status='finished' AND r2.total_time_ms<=pb.total_time_ms)""").fetchone()[0]
     sample("AFTER ")
     print(f"  S0 inserted={ins}  deduped-against-live={dup}  unmapped={unmapped}  carryover seeds={len(seeds)}")
-    print(f"  run_points {pts_before}->{pts_after}  run_laps {laps_before}->{laps_after}  live runs {live_before}->{live_after}  orphan_points={orphan_pts}")
+    print(f"  trail points {pts_before}->{pts_after}  run_laps {laps_before}->{laps_after}  live runs {live_before}->{live_after}  orphan_points={orphan_pts}")
     print(f"  PBs on a point-less row while a trail-bearing run ties/beats it: {pb_pointless_over_pointed}")
 
     integrity_ok = (pts_after == pts_before and laps_after == laps_before

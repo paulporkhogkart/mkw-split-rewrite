@@ -4,7 +4,7 @@ How a race and its minimap trail travel from the desktop engine to the Pi server
 
 The engine does **not** write a `.mkwreplay` file. On race end it emits an IPC `run_finalized`
 message (`mkw_tracker/lifecycle/race.py` → `mkw_tracker/ipc/protocol.py`); Rust uploads that
-payload to `POST /v1/runs` on the Pi, which stores it across `runs` / `run_laps` / `run_points`
+payload to `POST /v1/runs` on the Pi, which stores it across `runs` / `run_laps` / `run_trails`
 (see `docs/database-schema.md`).
 
 ## `run_finalized` / upload payload (`AttemptPayload`)
@@ -53,11 +53,40 @@ Wire type: `pi/src/db/types.ts` — `Point = [number, number, number, number, (n
 ## Notes / gotchas
 
 - One point per detection frame (~25.6 Hz); **no decimation** — full-res float is a deliberate
-  choice (decimation was explored and rejected; see the memory archive). `run_points` is ~63% of
-  the live DB and grows unbounded on the Pi by design.
+  choice (decimation was explored and rejected; see the memory archive). Trails dominate the live
+  DB and grow unbounded by design; at rest they're stored ~4× smaller as per-run `run_trails`
+  blobs (below), still bit-exact.
 - 11-minute runaway guard: if the trail exceeds `OVER_LIMIT_MS` the run+laps are stored but the
   entire `points` array is dropped at ingest.
 - `reset` and `dnf` runs still store their full trail. `run_laps.lap_time_ms` is a per-lap
   **duration**, not cumulative.
 - Stale reference: the `protocol.py` `emit_run_finalized` docstring still shows a 4-tuple — the
   emitted data is the 5-tuple above.
+
+## At-rest storage on the Pi (`run_trails`)
+
+Points are stored per run as a single compressed blob — **losslessly** (identical float64
+bits, order, laps). One row per run:
+
+| column | meaning |
+|---|---|
+| `run_id` | PK, FK → `runs(id)` ON DELETE CASCADE |
+| `codec` | `1` = v1 payload, brotli-compressed |
+| `n` | point count |
+| `max_t_ms` | final `t_ms` (feeds `driving_time` etc. without decoding) |
+| `data` | blob |
+
+v1 payload (before brotli, little-endian; varint = unsigned LEB128):
+
+```
+varint n | u8 flags (0) | varint t0, varint Δt ×(n−1) | lap RLE (u8 value, varint count; 255=NULL)
+| cx: n×f64 byte-plane-transposed (planes LSB→MSB) | cy: same | score: same
+```
+
+Codec: `pi/src/db/trailCodec.ts` (golden-vector test pins the format). Access:
+`pi/src/db/trails.ts` (`insertTrail` / `getRunPoints`). The legacy one-row-per-point
+`run_points` table is converted at boot by `pi/src/db/trailMigrate.ts` — each run is
+encoded, decoded, **bit-compared against its own rows**, then swapped in one transaction;
+the table is dropped when empty. `npm run diff-trails -- a.db b.db` bit-compares two DBs.
+Measured ~13 B/pt vs ~53 B/pt as rows (dev DB 68→18 MiB). Do NOT add lossy steps —
+see the spec's dead-ends list (`docs/superpowers/specs/2026-07-07-trail-storage-compression-design.md`).

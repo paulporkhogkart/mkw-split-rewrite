@@ -54,7 +54,7 @@ const RACE: RaceMetric[] = [
   { id: 'coins',           kind: 'race', value: 'SUM(r.coins_gained)',                                     statuses: 'all',        joins: [] },
   { id: 'coins_lost',      kind: 'race', value: 'SUM(r.coins_lost)',                                       statuses: 'all',        joins: [] },
   { id: 'mushrooms',       kind: 'race', value: 'SUM(r.mushrooms_used)',                                   statuses: 'all',        joins: [] },
-  { id: 'driving_time',    kind: 'race', value: 'SUM(pt.maxt)',                                            statuses: 'all',        joins: ['points'] },
+  { id: 'driving_time',    kind: 'race', value: 'SUM(pt.max_t_ms)',                                       statuses: 'all',        joins: ['points'] },
   { id: 'best_time',       kind: 'race', value: 'MIN(r.total_time_ms)',                                    statuses: ['finished'], joins: [] },
   { id: 'avg_finish_time', kind: 'race', value: 'AVG(r.total_time_ms)',                                    statuses: ['finished'], joins: [] },
   { id: 'pb_count',        kind: 'race', value: 'COUNT(*)',                                                statuses: ['finished'], joins: [], pbOnly: true },

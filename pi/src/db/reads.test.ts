@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { openDb, applySchema } from './connect';
 import { courseLeaderboard, friendsPbs, currentWr, myPbs, myPbSplits, courseTrails, roster, playerTrails, territoryOwners, territoryTimeline } from './reads';
+import { insertTrail } from './trails';
 
 function seeded() {
   const db = openDb(':memory:');
@@ -76,8 +77,11 @@ describe('courseTrails', () => {
     db.exec("INSERT INTO courses(id,slug,display_name) VALUES (1,'rr','RR')");
     // Paul + Luke: live PBs with points; Alex: legacy PB, no points.
     db.exec("INSERT INTO runs(id,season_id,player_id,course_id,cc,status,provenance,total_time_ms,is_pb) VALUES (10,1,1,1,150,'finished','live',108000,1),(20,1,2,1,150,'finished','live',112000,1),(30,1,3,1,150,'finished','legacy_import',95000,1)");
-    db.exec("INSERT INTO run_points(run_id,t_ms,cx,cy,score) VALUES (10,0,100,200,0.9),(10,16,101,201,0.95)");
-    db.exec("INSERT INTO run_points(run_id,t_ms,cx,cy,score) VALUES (20,0,300,400,0.8)");
+    insertTrail(db, 10, [
+      { t_ms: 0, cx: 100, cy: 200, score: 0.9, lap: null },
+      { t_ms: 16, cx: 101, cy: 201, score: 0.95, lap: null },
+    ]);
+    insertTrail(db, 20, [{ t_ms: 0, cx: 300, cy: 400, score: 0.8, lap: null }]);
     return db;
   }
   it('returns roster PB trails with points, omitting legacy (point-less) PBs', () => {
@@ -118,7 +122,9 @@ describe('playerTrails', () => {
       "(20,1,1,1,150,'finished','live',110000,'2026-01-02T00:00','2026-01-02T00:02',0)," +
       "(30,1,1,1,150,'finished','live',109000,'2026-01-03T00:00','2026-01-03T00:02',0)," +
       "(40,1,1,1,150,'finished','legacy_import',107000,NULL,NULL,0)");
-    db.exec("INSERT INTO run_points(run_id,t_ms,cx,cy,score) VALUES (10,0,1,1,0.9),(20,0,2,2,0.9),(30,0,3,3,0.9)");
+    insertTrail(db, 10, [{ t_ms: 0, cx: 1, cy: 1, score: 0.9, lap: null }]);
+    insertTrail(db, 20, [{ t_ms: 0, cx: 2, cy: 2, score: 0.9, lap: null }]);
+    insertTrail(db, 30, [{ t_ms: 0, cx: 3, cy: 3, score: 0.9, lap: null }]);
     return db;
   }
   it('pbs returns the PB run only', () => {

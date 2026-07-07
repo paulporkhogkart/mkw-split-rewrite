@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
+import { getRunPoints } from './trails';
 
 export type LeaderRow = { player_id: number; display_name: string; total_time_ms: number; total_time_str: string | null; rank: number };
 
@@ -94,9 +95,8 @@ export function courseTrails(db: DatabaseSync, seasonId: number, courseId: numbe
      ORDER BY r.total_time_ms ASC`
   ).all(seasonId, courseId, cc) as { id: number; player_id: number; display_name: string; total_time_ms: number | null }[];
   const out: Trail[] = [];
-  const ptStmt = db.prepare(`SELECT t_ms, cx, cy, score FROM run_points WHERE run_id=? ORDER BY t_ms`);
   for (const r of runs) {
-    const pts = ptStmt.all(r.id) as { t_ms: number; cx: number; cy: number; score: number }[];
+    const pts = getRunPoints(db, r.id);
     if (pts.length === 0) continue;   // legacy / point-less PB: no trail
     out.push({
       player_id: r.player_id, player: r.display_name, total_ms: r.total_time_ms ?? null,
@@ -193,7 +193,7 @@ export function playerTrails(db: DatabaseSync, seasonId: number, playerId: numbe
   // (legacy total-only runs have no points and must not consume a best/last slot).
   const base = `SELECT id, total_time_ms, status, is_pb FROM runs
                 WHERE season_id=? AND player_id=? AND course_id=? AND cc=?
-                  AND EXISTS (SELECT 1 FROM run_points rp WHERE rp.run_id = runs.id)`;
+                  AND EXISTS (SELECT 1 FROM run_trails rt WHERE rt.run_id = runs.id)`;
   const key = [seasonId, playerId, courseId, cc];
   const lim = Math.max(1, n);
   let rows: TrailRow[];
@@ -210,10 +210,9 @@ export function playerTrails(db: DatabaseSync, seasonId: number, playerId: numbe
       if (pb) rows.push(pb);   // append the PB when it's older than the last N
     }
   }
-  const ptStmt = db.prepare(`SELECT t_ms, cx, cy, score FROM run_points WHERE run_id=? ORDER BY t_ms`);
   const out: PlayerTrailRun[] = [];
   for (const r of rows) {
-    const pts = ptStmt.all(r.id) as { t_ms: number; cx: number; cy: number; score: number }[];
+    const pts = getRunPoints(db, r.id);
     if (pts.length === 0) continue;   // legacy / point-less run: no trail
     out.push({ run_id: r.id, total_ms: r.total_time_ms ?? null, status: r.status, is_pb: r.is_pb === 1,
                points: pts.map((p) => [p.t_ms, p.cx, p.cy, p.score]) });

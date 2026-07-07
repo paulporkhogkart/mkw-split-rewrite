@@ -13,7 +13,7 @@ export interface RaceQuery {
   bodyConditionSql?: { join: string; where: string; params: unknown[] };
 }
 
-const POINTS_JOIN = 'LEFT JOIN (SELECT run_id, MAX(t_ms) AS maxt FROM run_points GROUP BY run_id) pt ON pt.run_id = r.id';
+const POINTS_JOIN = 'LEFT JOIN run_trails pt ON pt.run_id = r.id';
 const LAPS_JOIN = 'JOIN run_laps rl ON rl.run_id = r.id';
 
 /** SQL expression + label join for a group-by dimension. */

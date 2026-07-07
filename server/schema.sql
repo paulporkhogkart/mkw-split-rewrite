@@ -63,13 +63,12 @@ CREATE TABLE IF NOT EXISTS run_laps (
     PRIMARY KEY (run_id, lap_index)
 );
 
-CREATE TABLE IF NOT EXISTS run_points (
-    run_id   INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
-    t_ms     INTEGER NOT NULL,
-    cx       REAL NOT NULL,
-    cy       REAL NOT NULL,
-    score    REAL NOT NULL DEFAULT 1.0,
-    lap      INTEGER
+CREATE TABLE IF NOT EXISTS run_trails (
+    run_id   INTEGER PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    codec    INTEGER NOT NULL,          -- 1 = v1 packed payload, brotli-compressed
+    n        INTEGER NOT NULL,          -- point count (SQL-visible)
+    max_t_ms INTEGER NOT NULL,          -- final t_ms (SQL-visible; replaces MAX(t_ms) scans)
+    data     BLOB NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS ghost_imports (
@@ -153,7 +152,6 @@ CREATE TABLE IF NOT EXISTS service_status (
 CREATE INDEX IF NOT EXISTS idx_runs_leaderboard ON runs(season_id, course_id, cc, is_pb);
 CREATE INDEX IF NOT EXISTS idx_runs_player      ON runs(season_id, player_id, course_id, cc);
 CREATE INDEX IF NOT EXISTS idx_run_laps_run     ON run_laps(run_id);
-CREATE INDEX IF NOT EXISTS idx_run_points_run   ON run_points(run_id);
 CREATE INDEX IF NOT EXISTS idx_wr_course        ON world_records(course_id, cc, achieved_at);
 
 CREATE TABLE IF NOT EXISTS screen_intervals (

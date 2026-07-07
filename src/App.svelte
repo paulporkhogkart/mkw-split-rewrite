@@ -904,13 +904,25 @@
           _fetchedThisRace = false;
         }
         break;
-      case "selection_update":
+      case "selection_update": {
+        // The course-keyed server reads (PB splits + trails + friends' PBs) belong to the
+        // PREVIOUS course the moment the detected course changes - clear them now, or
+        // FeedOverlay draws the old course's trail dots (clamped to its start-line pixels)
+        // over the new track's minimap for the first frames of the next race, until the
+        // async loadCourseReads lands (cleared-state emission rule). A same-course re-race
+        // sees no change here, so its dots still appear instantly on RACING entry.
+        const nextCourse = msg.course ?? null;
+        if (nextCourse !== selCourse) {
+          pbSplitsStore.set(null);  pbTotalStore.set(null);
+          trailRunsStore.set([]);   friendsPbsStore.set([]);
+        }
         selChar    = msg.character ?? null; selCharConf    = msg.char_conf    ?? 0;
         selCostume = msg.costume   ?? null; selCostumeConf = msg.costume_conf ?? 0;
         selKart    = msg.kart      ?? null; selKartConf    = msg.kart_conf    ?? 0;
-        selCourse  = msg.course    ?? null; selCourseConf  = msg.course_conf  ?? 0;
+        selCourse  = nextCourse;            selCourseConf  = msg.course_conf  ?? 0;
         pushLog(`[sel] ${msg.character ?? "-"} / ${msg.kart ?? "-"} / ${msg.course ?? "-"}${msg.costume ? ` / ${msg.costume}` : ""}`);
         break;
+      }
       case "lap_update":
         // Reset splits when lap 1 starts - marks the beginning of a fresh race
         if (msg.current === 1) { raceSplits = {}; raceFinishTime = null; raceDnf = false; raceInvalidated = false; raceInvalidReason = null; }

@@ -2,6 +2,7 @@ import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import type { Dimension, Period, StatResult, StatRow } from './types';
 import { getMetric } from './metrics';
 import { loadCourseModel } from '../db/courseModels';
+import { getRunPoints } from '../db/trails';
 import { prepareModel, projectStep, type Prepared } from '../progress/project';
 import type { CourseModel, ProjState } from '../progress/types';
 
@@ -51,7 +52,6 @@ export function resolveCompletion(db: DatabaseSync, q: CompletionQuery): StatRes
     return entry;
   };
 
-  const ptsStmt = db.prepare('SELECT cx, cy, t_ms, lap FROM run_points WHERE run_id=? ORDER BY t_ms');
   const lapsStmt = db.prepare('SELECT lap_time_ms FROM run_laps WHERE run_id=? ORDER BY lap_index');
 
   const byKey = new Map<string, { sum: number; n: number }>();
@@ -63,7 +63,7 @@ export function resolveCompletion(db: DatabaseSync, q: CompletionQuery): StatRes
 
   for (const reset of resets) {
     const entry = getModel(reset.course_id);
-    const pts = ptsStmt.all(reset.id) as { cx: number; cy: number; t_ms: number; lap: number | null }[];
+    const pts = getRunPoints(db, reset.id);
     if (!entry || pts.length === 0) { unevaluable++; continue; }
     const laps = lapsStmt.all(reset.id) as { lap_time_ms: number }[];
     let c = 0; const cum = laps.map((l) => (c += l.lap_time_ms));
