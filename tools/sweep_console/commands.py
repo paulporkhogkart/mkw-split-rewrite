@@ -27,11 +27,17 @@ def sweep_cmd(py, at_dir, capture_ws, agent_port, start_from, stop_file,
     return cmd
 
 
-def process_cmd(gpu_py, repo_root, clips_dir, out_dir, stop_file):
+def process_cmd(gpu_py, repo_root, clips_dir, out_dir, stop_file, claims_dir=None, ship_dir=None):
     """Headless extract+matte batch driver. Runs in the GPU venv (rembg/CUDA), not the
-    console's build python; process_all.py sets its own sys.path so no PYTHONPATH is needed."""
-    return [gpu_py, os.path.join(repo_root, "tools", "asset_matte", "process_all.py"),
-            "--clips", clips_dir, "--out", out_dir, "--stop-file", stop_file]
+    console's build python; process_all.py sets its own sys.path so no PYTHONPATH is needed.
+    claims_dir/ship_dir enable the multi-machine claimed-queue + ship-and-delete mode."""
+    cmd = [gpu_py, os.path.join(repo_root, "tools", "asset_matte", "process_all.py"),
+           "--clips", clips_dir, "--out", out_dir, "--stop-file", stop_file]
+    if claims_dir:
+        cmd += ["--claims-dir", claims_dir]
+    if ship_dir:
+        cmd += ["--ship-dir", ship_dir]
+    return cmd
 
 
 def viewer_cmd(py, repo_root, matte_dir, title="asset chips - all segments"):

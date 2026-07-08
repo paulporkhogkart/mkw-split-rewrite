@@ -10,6 +10,7 @@ import sys
 import threading
 
 import commands
+import claims
 
 _NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0     # CREATE_NO_WINDOW
 _CHAR_RE = re.compile(r"-- char:\s*(\S+)\s*--")
@@ -87,9 +88,11 @@ class ProcessSupervisor:
                                               sample_chars=sample_chars, sample_karts=sample_karts),
                            on_exit=on_exit)
 
-    def start_processing(self, clips_dir, out_dir, stop_file, on_exit=None):
+    def start_processing(self, clips_dir, out_dir, stop_file, on_exit=None,
+                         claims_dir=None, ship_dir=None):
         """Spawn the headless extract+matte batch driver in the GPU venv. Resumable: it skips
-        clips already 'done' in <out_dir>/manifest.json, so RESUME just relaunches this."""
+        clips already 'done' in <out_dir>/manifest.json, so RESUME just relaunches this.
+        claims_dir/ship_dir enable multi-machine mode (shared claims + ship-and-delete)."""
         try:
             if os.path.exists(stop_file):
                 os.remove(stop_file)                 # clear any stale pause/stop flag
@@ -99,7 +102,8 @@ class ProcessSupervisor:
         # forward-only matte (engine default) — the user-validated configuration (spawn-dip fix
         # eyetest 2026-07-02); the earlier console bidir opt-in is dropped with it.
         return self._spawn("process",
-                           commands.process_cmd(self.gpu_py, self.repo_root, clips_dir, out_dir, stop_file),
+                           commands.process_cmd(self.gpu_py, self.repo_root, clips_dir, out_dir,
+                                                 stop_file, claims_dir=claims_dir, ship_dir=ship_dir),
                            on_exit=on_exit)
 
     def wait_processing(self, timeout=120.0):
@@ -170,8 +174,12 @@ class ProcessSupervisor:
         except OSError:
             return 0
 
-    def process_done_count(self, manifest_path):
-        """How many clips the batch driver has finished matting (from its manifest)."""
+    def process_done_count(self, manifest_path, claims_dir=None):
+        """How many clips are finished. In multi-machine mode (claims_dir set) this is the GLOBAL
+        count of .done markers on the share so both consoles show the same batch progress;
+        otherwise it's this machine's manifest 'done' count."""
+        if claims_dir:
+            return claims.count_done(claims_dir)
         try:
             import json
             with open(manifest_path) as f:
