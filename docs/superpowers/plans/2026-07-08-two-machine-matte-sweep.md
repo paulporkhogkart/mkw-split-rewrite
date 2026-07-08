@@ -66,7 +66,7 @@ Create `tests/test_asset_claims.py`:
 ```python
 import os
 import time
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 
 import claims
 
@@ -78,17 +78,20 @@ def test_try_claim_is_exclusive(tmp_path):
     assert claims.try_claim(d, "clipB", "m2") is True
 
 
-def _race_worker(args):
-    d, name, who = args
+def _claim(d_name_who):
+    d, name, who = d_name_who
     return claims.try_claim(d, name, who)
 
 
 def test_try_claim_race_exactly_one_winner(tmp_path):
+    # 8 threads race for the same name. os.open(O_CREAT|O_EXCL) is atomic in the
+    # kernel, so exactly one wins regardless of the GIL — this exercises our
+    # FileExistsError->False path. (True cross-machine atomicity is validated live.)
     d = str(tmp_path / "claims")
     os.makedirs(d, exist_ok=True)
-    with ProcessPoolExecutor(max_workers=8) as ex:
-        results = list(ex.map(_race_worker, [(d, "x", f"m{i}") for i in range(8)]))
-    assert sum(results) == 1                              # exactly one process won
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        results = list(ex.map(_claim, [(d, "x", f"m{i}") for i in range(8)]))
+    assert sum(results) == 1                              # exactly one thread won
 
 
 def test_done_and_counts(tmp_path):
@@ -286,7 +289,7 @@ with:
 - [ ] **Step 5: Run tests to verify they pass**
 
 Run: `python -m pytest tests/test_asset_claims.py -v`
-Expected: PASS — 6 passed. (The race test spawns 8 processes; on Windows spawn each re-imports `claims`, which is stdlib-only, so it is fast.)
+Expected: PASS — 6 passed. (The race test uses 8 threads sharing the already-imported `claims`; the OS makes `os.open(O_EXCL)` atomic so exactly one wins.)
 
 - [ ] **Step 6: Commit**
 
