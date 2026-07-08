@@ -6,8 +6,10 @@ Per clip: extract_loop.extract (baked 2.0s-kart / detected-char loop rule) -> ma
 stop-file aware: the stop-file is checked BETWEEN clips, so a stop never leaves a half-matted
 clip and a resume just skips everything already marked done.
 
-  temp/asset-venv-gpu/Scripts/python.exe tools/asset_matte/process_all.py \
+  temp/asset-venv-matte/Scripts/python.exe tools/asset_matte/process_all.py \
       --clips captures_sdr/en_uk/clips --out temp/asset_chips
+  # NB: run under asset-venv-matte (onnxruntime birefnet + torch cu128). The matanyone
+  # worker spawns via sys.executable, so asset-venv-gpu (no torch) would fail the default engine.
   ... --limit 1            # process at most N pending clips then exit (dry-run)
   ... --keep-loopframes    # don't delete the intermediate raw frames after matting
 """
@@ -29,6 +31,8 @@ for _p in (_HERE, _REPO):                              # extract_loop needs mkw_
 import extract_loop as el
 import matte_blankplate as mb
 import matte_matanyone as mm
+import claims
+import ship
 
 
 def _seg_task(clip, seg_base, name):
@@ -62,7 +66,7 @@ def done_count(manifest, names):
     return sum(1 for n in names if manifest.get(n, {}).get("status") == "done")
 
 
-def main():
+def main(argv=None):
     ap = argparse.ArgumentParser(description="Batch extract+matte transparent idle-loop chips.")
     ap.add_argument("--clips", default=os.path.join(_REPO, "captures_sdr", "en_uk", "clips"))
     ap.add_argument("--out", default=os.path.join(_REPO, "temp", "asset_chips"))
@@ -74,7 +78,16 @@ def main():
                     help="segment upcoming clips in N worker processes while the GPU mattes "
                          "the current one (0 = old serial behaviour; worker span-lines may "
                          "interleave with matte logs)")
-    a = ap.parse_args()
+    ap.add_argument("--claims-dir", default=None,
+                    help="shared dir of atomic per-clip claim files (enables multi-machine mode)")
+    ap.add_argument("--ship-dir", default=None,
+                    help="move each finished clip's matte/<name>__* here then delete local")
+    ap.add_argument("--machine-id", default=None, help="claim owner id (default: hostname)")
+    ap.add_argument("--reclaim-orphans", action="store_true",
+                    help="one-shot: clear stale in-progress claims (a crashed box) then exit")
+    ap.add_argument("--stale-secs", type=float, default=1800,
+                    help="orphan-claim age threshold for --reclaim-orphans")
+    a = ap.parse_args(argv)
 
     out = os.path.abspath(a.out)
     loopdir = os.path.join(out, "loopframes")
@@ -82,6 +95,23 @@ def main():
     os.makedirs(mattedir, exist_ok=True)
     stop_file = a.stop_file or os.path.join(out, ".process_stop")
     manifest_path = a.manifest or os.path.join(out, "manifest.json")
+
+    machine_id = a.machine_id or claims.default_machine_id()
+    if a.reclaim_orphans:
+        if not a.claims_dir:
+            print("ERROR --reclaim-orphans needs --claims-dir", flush=True)
+            return
+        n = claims.reclaim_orphans(a.claims_dir, a.stale_secs)
+        print(f"RECLAIMED {n} orphan claim(s)", flush=True)
+        return
+    os.makedirs(loopdir, exist_ok=True)
+    if a.claims_dir:
+        os.makedirs(a.claims_dir, exist_ok=True)
+        freed = claims.reclaim_own(a.claims_dir, machine_id)
+        if freed:
+            print(f"RECLAIMED {freed} own in-progress claim(s) from a prior run", flush=True)
+    if a.ship_dir:
+        os.makedirs(os.path.join(a.ship_dir, "matte"), exist_ok=True)
 
     try:                                               # never die on console encoding
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -94,7 +124,9 @@ def main():
     base_done = done_count(manifest, names)
     print(f"START total={total} already_done={base_done} clips={a.clips} out={out}", flush=True)
 
-    pending = [n for n in names if manifest.get(n, {}).get("status") != "done"]
+    own_done = {n for n in names if manifest.get(n, {}).get("status") == "done"}
+    pending = (claims.pending_names(names, a.claims_dir, own_done) if a.claims_dir
+               else [n for n in names if n not in own_done])
     ex = ProcessPoolExecutor(max_workers=a.prefetch) if a.prefetch > 0 else None
     futures = {}
 
@@ -103,16 +135,36 @@ def main():
             futures[n] = ex.submit(_seg_task, os.path.join(a.clips, n + ".mkv"),
                                    os.path.join(loopdir, n), n)
 
+    pend = iter(pending)
+    queue = []                                    # clips we OWN, segmentation submitted, awaiting matte
+    depth = 1 + (a.prefetch or 0)
+
+    def _refill():
+        while len(queue) < depth:
+            n = next(pend, None)
+            if n is None:
+                break
+            if a.claims_dir and not claims.try_claim(a.claims_dir, n, machine_id):
+                continue                          # another machine owns it
+            queue.append(n)
+            _submit(n)
+
     processed = 0
-    for i, name in enumerate(pending):
-        if os.path.exists(stop_file):                  # clean stop BETWEEN clips
+    while True:
+        if os.path.exists(stop_file):             # clean stop BETWEEN clips
             print(f"STOPPED stop-file present ({base_done + processed}/{total} done)", flush=True)
+            if a.claims_dir:                      # release our pre-claimed, un-matted clips
+                for n in queue:
+                    claims.release(a.claims_dir, n)
+                    shutil.rmtree(os.path.join(loopdir, n), ignore_errors=True)
             break
         if a.limit and processed >= a.limit:
             print(f"LIMIT {a.limit} reached", flush=True)
             break
-        for nxt in pending[i:i + 1 + a.prefetch]:      # current + the next N in flight
-            _submit(nxt)
+        _refill()
+        if not queue:
+            break
+        name = queue.pop(0)
         clip = os.path.join(a.clips, name + ".mkv")
         seg_base = os.path.join(loopdir, name)
         t0 = time.time()
@@ -128,15 +180,19 @@ def main():
                 segname = f"{name}__{seg}"
                 fd = os.path.join(seg_base, segname)
                 print(f"    matting {segname} ({counts[seg]}f)...", flush=True)
-                matted[seg] = int(mb.matte_loopframes(   # only the KART flourish drops the plate -> no predark;
-                    fd, segname, mattedir, clip=clip,    # the char keeps its nameplate through its flourish
+                matted[seg] = int(mb.matte_loopframes(
+                    fd, segname, mattedir, clip=clip,
                     apply_predark=not (kart and seg == "flourish"), is_kart=kart,
-                    direction=mm.segment_direction(kart, seg)))  # kart: spawn=bwd, flourish=split
+                    direction=mm.segment_direction(kart, seg)))
             if not a.keep_loopframes:
                 shutil.rmtree(seg_base, ignore_errors=True)
             manifest[name] = {"status": "done", "kart": kart,
                               "segments": matted, "secs": round(time.time() - t0, 1)}
             save_manifest(manifest_path, manifest)
+            if a.ship_dir:                        # ship BEFORE marking done: bytes on share first
+                ship.ship_clip(mattedir, os.path.join(a.ship_dir, "matte"), name)
+            if a.claims_dir:
+                claims.mark_done(a.claims_dir, name)
             processed += 1
             print(f"PROCESSED {name} ({base_done + processed}/{total}) {matted} "
                   f"{time.time() - t0:.0f}s", flush=True)
@@ -148,8 +204,9 @@ def main():
             traceback.print_exc()
 
     if ex is not None:
-        ex.shutdown(cancel_futures=True)               # queued prefetches die; running ones finish
-    print(f"DONE processed={processed} done_total={done_count(manifest, names)}/{total}", flush=True)
+        ex.shutdown(cancel_futures=True)          # queued prefetches die; running ones finish
+    done_total = claims.count_done(a.claims_dir) if a.claims_dir else done_count(manifest, names)
+    print(f"DONE processed={processed} done_total={done_total}/{total}", flush=True)
 
 
 if __name__ == "__main__":
