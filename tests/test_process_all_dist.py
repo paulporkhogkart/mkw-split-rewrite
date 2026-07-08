@@ -53,7 +53,7 @@ def test_optout_processes_all_in_order(tmp_path, monkeypatch):
     _make_clips(clips, ["a__b", "a__c", "a__d"])
     pa.main(["--clips", clips, "--out", out, "--prefetch", "0"])
     m = pa.load_manifest(os.path.join(out, "manifest.json"))
-    assert set(m) == {"a__b", "a__c", "a__d"}
+    assert list(m) == ["a__b", "a__c", "a__d"]   # sorted processing order (crux of opt-out equivalence)
     assert all(v["status"] == "done" for v in m.values())
     assert os.path.exists(os.path.join(out, "matte", "a__b__idle_loop.webp"))
     assert not os.path.isdir(os.path.join(out, "claims"))   # no claims artifacts in opt-out

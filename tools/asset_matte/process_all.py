@@ -153,10 +153,6 @@ def main(argv=None):
     while True:
         if os.path.exists(stop_file):             # clean stop BETWEEN clips
             print(f"STOPPED stop-file present ({base_done + processed}/{total} done)", flush=True)
-            if a.claims_dir:                      # release our pre-claimed, un-matted clips
-                for n in queue:
-                    claims.release(a.claims_dir, n)
-                    shutil.rmtree(os.path.join(loopdir, n), ignore_errors=True)
             break
         if a.limit and processed >= a.limit:
             print(f"LIMIT {a.limit} reached", flush=True)
@@ -204,7 +200,11 @@ def main(argv=None):
             traceback.print_exc()
 
     if ex is not None:
-        ex.shutdown(cancel_futures=True)          # queued prefetches die; running ones finish
+        ex.shutdown(cancel_futures=True)          # cancel queued prefetches; wait for running ones
+    if a.claims_dir:                              # release clips we claimed but didn't matte (stop/
+        for n in queue:                           # limit break); AFTER shutdown so no worker re-creates
+            claims.release(a.claims_dir, n)        # a loopframe dir we're deleting. queue is [] on a
+            shutil.rmtree(os.path.join(loopdir, n), ignore_errors=True)  # natural finish -> no-op.
     done_total = claims.count_done(a.claims_dir) if a.claims_dir else done_count(manifest, names)
     print(f"DONE processed={processed} done_total={done_total}/{total}", flush=True)
 
