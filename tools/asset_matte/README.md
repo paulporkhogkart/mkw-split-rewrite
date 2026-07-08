@@ -12,6 +12,9 @@ and `chip-video-animation`.
 
 ---
 
+> **Running the matte batch on two machines:** see `docs/two-machine-sweep.md` (shared claim
+> queue + ship-and-delete; either box Start/Stops independently).
+
 ## The pipeline
 
 ```
