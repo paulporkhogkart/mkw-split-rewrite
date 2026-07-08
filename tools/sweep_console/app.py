@@ -14,7 +14,7 @@ import tkinter as tk
 from tkinter import ttk
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-for _d in (_HERE, os.path.join(_HERE, "..", "autotemplate")):
+for _d in (_HERE, os.path.join(_HERE, "..", "autotemplate"), os.path.join(_HERE, "..", "asset_matte")):
     _p = os.path.abspath(_d)
     if _p not in sys.path:
         sys.path.insert(0, _p)
@@ -30,17 +30,24 @@ from wsconsumer import WsConsumer
 
 REPO_ROOT = os.path.abspath(os.path.join(_HERE, "..", ".."))
 # Clips + matte output live on the DATA drive (large SSD), NOT in the repo on C:. The app, venv,
-# birefnet model + templates stay on C: (read-only at startup, no perf impact). Override the root
-# with the KARTOFF_DATA_ROOT env var (e.g. to fall back to C: on a machine without D:).
+# birefnet model + templates stay on C: (read-only at startup, no perf impact). Paths resolve from
+# the environment (procconfig): default = today's single-machine layout under KARTOFF_DATA_ROOT;
+# the 2nd box overrides KARTOFF_CLIPS_DIR/PROCESS_OUT/CLAIMS_DIR/SHIP_DIR to run against the rig.
+import procconfig
+_CFG = procconfig.resolve_process_config(os.environ)
 DATA_ROOT = os.environ.get("KARTOFF_DATA_ROOT", r"D:\kartoff")
-CLIPS_DIR = os.path.join(DATA_ROOT, "captures_sdr", "en_uk", "clips")   # rig records here + processing reads here
+CLIPS_DIR = _CFG.clips                          # rig records here + processing reads here
 TOTAL = 6273
 WS_URL = "ws://127.0.0.1:8766"
 # Asset processing (extract+matte) — independent of the rig; runs the GPU-venv batch driver.
-PROCESS_OUT = os.path.join(DATA_ROOT, "asset_chips")
-PROCESS_STOP = os.path.join(PROCESS_OUT, ".process_stop")
-PROCESS_MANIFEST = os.path.join(PROCESS_OUT, "manifest.json")
+PROCESS_OUT = _CFG.out
+PROCESS_STOP = _CFG.stop
+PROCESS_MANIFEST = _CFG.manifest
+CLAIMS_DIR = _CFG.claims                        # None = single-machine; set = multi-machine coordinator
+SHIP_DIR = _CFG.ship                            # None = write in place; set = ship-and-delete to share
 PP_W, PP_H = 200, 219                          # processing-preview box (matched to the 988x1080 chip crop)
+PP_BG = (0, 177, 64)                           # greenscreen chroma-key green behind the chip preview
+PP_BG_HEX = "#%02x%02x%02x" % PP_BG            # same colour for the Tk box, so the whole pane keys green
 
 
 def _fmt_eta(s):
@@ -63,7 +70,12 @@ class ConsoleApp:
         self.pprogress = ProgressModel(0)            # total set per-tick from the clip count
         self.sup = ProcessSupervisor(REPO_ROOT, self._on_line)
         self.sup.set_clips_dir(CLIPS_DIR)            # rig records + sweep control files live on the data drive
-        for _d in (CLIPS_DIR, PROCESS_OUT):          # ensure the data-drive dirs exist up front
+        _bootstrap = [CLIPS_DIR, PROCESS_OUT]
+        if CLAIMS_DIR:
+            _bootstrap.append(CLAIMS_DIR)
+        if SHIP_DIR:
+            _bootstrap.append(os.path.join(SHIP_DIR, "matte"))
+        for _d in _bootstrap:                        # ensure the data-drive dirs exist up front
             try:
                 os.makedirs(_d, exist_ok=True)
             except OSError:
@@ -121,9 +133,9 @@ class ConsoleApp:
                        command=lambda k=key: self._manual(k)).pack(side="left", padx=1)
         self.man_frame = man
         pp = ttk.LabelFrame(left, text="Processing preview"); pp.pack(fill="x")
-        ppbox = tk.Frame(pp, width=PP_W, height=PP_H, background="#2b2b2b")
+        ppbox = tk.Frame(pp, width=PP_W, height=PP_H, background=PP_BG_HEX)
         ppbox.pack(padx=4, pady=4); ppbox.pack_propagate(False)
-        self.pthumb = tk.Label(ppbox, background="#2b2b2b")
+        self.pthumb = tk.Label(ppbox, background=PP_BG_HEX)
         self.pthumb.pack(fill="both", expand=True)
         self.pcap = ttk.Label(pp, text="—", font=("Consolas", 8))
         self.pcap.pack(anchor="w", padx=4, pady=(0, 4))
@@ -248,7 +260,8 @@ class ConsoleApp:
     def _do_process(self, action):
         if action == "start_processing":
             self.sup.start_processing(CLIPS_DIR, PROCESS_OUT, PROCESS_STOP,
-                                      on_exit=self._process_exited)
+                                      on_exit=self._process_exited,
+                                      claims_dir=CLAIMS_DIR, ship_dir=SHIP_DIR)
         elif action == "request_process_stop":
             self.sup.request_stop_file(PROCESS_STOP)
         elif action == "completed":
@@ -260,7 +273,8 @@ class ConsoleApp:
     def _after_process_exit(self):
         for act in self.pstate.on_event(ps.EXITED):
             self._do_process(act)
-        msg = self.sup.build_viewer(os.path.join(PROCESS_OUT, "matte"))   # regenerate the chip viewer
+        _viewer_matte = os.path.join(SHIP_DIR or PROCESS_OUT, "matte")
+        msg = self.sup.build_viewer(_viewer_matte)   # regenerate the chip viewer over the full set
         if msg:
             self._on_line("process", f"[console] {msg}")
         self._refresh_buttons()
@@ -310,7 +324,7 @@ class ConsoleApp:
                 return
             im = Image.open(max(pngs)).convert("RGBA")        # zero-padded names: max == newest frame
             im.thumbnail((PP_W, PP_H))
-            bg = Image.new("RGB", (PP_W, PP_H), (43, 43, 43))  # flat neutral bg shows alpha holes/halos
+            bg = Image.new("RGB", (PP_W, PP_H), PP_BG)  # greenscreen bg: alpha holes/halos + edge fringe pop
             bg.paste(im, ((PP_W - im.width) // 2, (PP_H - im.height) // 2), im)
             self._pphoto = ImageTk.PhotoImage(bg)
             self.pthumb.configure(image=self._pphoto)
@@ -335,7 +349,8 @@ class ConsoleApp:
             f"clips {pr['done']}/{pr['total']}  {pr['pct']*100:4.1f}%   ETA {_fmt_eta(pr['eta_seconds'])}\n"
             f"last clip {('%.0fs' % age) if age is not None else '-'}   fps {h['fps'] or '-'}   disk {('%.0f GB' % gb) if gb is not None else '-'}"))
         self.pprogress.total = self.sup.clip_count()
-        self.pprogress.update(self.sup.process_done_count(PROCESS_MANIFEST), time.monotonic())
+        self.pprogress.update(self.sup.process_done_count(PROCESS_MANIFEST, claims_dir=CLAIMS_DIR),
+                              time.monotonic())
         pp = self.pprogress.snapshot()
         self.phl.configure(text=(
             f"processed {pp['done']}/{pp['total']}  {pp['pct'] * 100:4.1f}%   "
