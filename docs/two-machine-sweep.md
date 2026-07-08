@@ -63,9 +63,8 @@ no manual mkdir.
 Its claims for un-finished clips would otherwise stay held. Clear stale ones (older than 30 min,
 not done) from the **rig** so they get redone:
 
-```bash
-temp\asset-venv-matte\Scripts\python.exe tools\asset_matte\process_all.py ^
-    --reclaim-orphans --claims-dir D:\kartoff\asset_chips\claims
+```powershell
+temp\asset-venv-matte\Scripts\python.exe tools\asset_matte\process_all.py --reclaim-orphans --claims-dir D:\kartoff\asset_chips\claims
 ```
 
 ## When the batch is done
