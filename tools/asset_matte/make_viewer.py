@@ -113,9 +113,12 @@ function play(frames, loop, onDone){
       frame(frames[i++]); }
     raf=requestAnimationFrame(tick); })(performance.now());
 }
-function startIdle(){
+function startIdle(startOff){
   const frames=segRange("idle"); flourPending=false; stopRaf(); setPlaying();
-  let i=0, prev=performance.now(), acc=0;
+  // startOff = idle phase to begin at (the flourish->idle handoff frame); guarded because
+  // startIdle is also used bare as a click/onDone handler, which would pass an Event.
+  let i=(typeof startOff==="number"?((startOff%frames.length)+frames.length)%frames.length:0);
+  let prev=performance.now(), acc=0;
   (function tick(now){ acc+=now-prev; prev=now; const MS=MS0/speed;
     while(acc>=MS){ acc-=MS; frame(frames[i]);
       if(flourPending && i===frames.length-1){ raf=null; doFlourNow(); return; }
@@ -125,13 +128,16 @@ function startIdle(){
 }
 function doFlour(){ if(state!==S.IDLE||!segByKind("flourish")) return; flourPending=true; setState(S.QUEUED); $("btnFlour").disabled=true; }
 function doFlourNow(){ if(!segByKind("flourish")) return; flourPending=false; setState(S.FLOUR);
-  play(segRange("flourish"), false, ()=>{ continueIdle?startIdle():setState(S.FROZEN); }); }
+  play(segRange("flourish"), false, ()=>{ continueIdle?startIdle(cur?cur.idleResume:0):setState(S.FROZEN); }); }
 function replaySpawn(){ if(segByKind("spawn")){ setState(S.SPAWN); play(segRange("spawn"), false, startIdle); } else startIdle(); }
 function pause(){ stopRaf(); paused=true; $("btnPause").textContent="▶ Play"; setState(S.SCRUB); }
 function step(d){ if(!paused)pause(); frame(Math.max(0,Math.min(total-1,curFrame+d))); }
 
+function setContinueIdle(v){ continueIdle=v;
+  $("btnCont").textContent="↻ continue idle: "+(v?"on":"off"); $("btnCont").classList.toggle("on",v); }
 function loadCombo(c){ cur=c; $("veh").textContent=`${c.char} · ${c.kart}`;
-  buildTimeline(c); preload(); $("scrub").max=total-1; curFrame=0; applyZoom(); replaySpawn(); }
+  buildTimeline(c); preload(); $("scrub").max=total-1; curFrame=0; applyZoom();
+  setContinueIdle(!!c.isKart); replaySpawn(); }   // karts settle back into idle; chars hard-cut
 function onPick(){ const c=findCombo($("charSel").value,$("kartSel").value); if(c)loadCombo(c); }
 function syncTo(c){ $("charSel").value=c.char; fillKarts(c.char); $("kartSel").value=c.kart; }
 function jumpCombo(d){ const i=COMBOS.indexOf(cur), n=COMBOS[(i+d+COMBOS.length)%COMBOS.length]; syncTo(n); loadCombo(n); }
@@ -142,8 +148,7 @@ $("btnSpawn").onclick=replaySpawn;
 $("btnFlour").onclick=doFlour;
 $("btnFlourNow").onclick=doFlourNow;
 $("btnIdle").onclick=startIdle;
-$("btnCont").onclick=()=>{ continueIdle=!continueIdle;
-  $("btnCont").textContent="↻ continue idle: "+(continueIdle?"on":"off"); $("btnCont").classList.toggle("on",continueIdle); };
+$("btnCont").onclick=()=>setContinueIdle(!continueIdle);
 $("btnRand").onclick=()=>{ let c; do{c=COMBOS[Math.floor(Math.random()*COMBOS.length)];}while(COMBOS.length>1&&c===cur); syncTo(c); loadCombo(c); };
 $("btnPrevC").onclick=()=>jumpCombo(-1);
 $("btnNextC").onclick=()=>jumpCombo(1);
@@ -197,6 +202,19 @@ def main():
     out = os.path.abspath(a.out) if a.out else os.path.join(matte, "index.html")
     outdir = os.path.dirname(out)
 
+    # idle_resume (the post-flourish idle handoff phase) is stamped per combo by the batch
+    # (process_all) into the manifest, which sits one dir up from the matte dir. Absent (an
+    # older run, or a share without the manifest) -> 0 = resume at the loop start as before.
+    manifest = {}
+    for mp in (os.path.join(os.path.dirname(matte), "manifest.json"),
+               os.path.join(matte, "manifest.json")):
+        try:
+            with open(mp, encoding="utf-8") as f:
+                manifest = json.load(f)
+            break
+        except (OSError, ValueError):
+            continue
+
     def count(d):
         return len(glob.glob(os.path.join(d, "*.png")))
 
@@ -212,8 +230,10 @@ def main():
         if "idle" not in entry:
             continue
         parts = base.split("__")
-        char, kart = ("__".join(parts[:2]), "__".join(parts[2:])) if len(parts) >= 3 else (base, "(standing)")
-        entry.update({"name": base, "char": char, "kart": kart})
+        is_kart = len(parts) >= 3
+        char, kart = ("__".join(parts[:2]), "__".join(parts[2:])) if is_kart else (base, "(standing)")
+        entry.update({"name": base, "char": char, "kart": kart, "isKart": is_kart,
+                      "idleResume": int(manifest.get(base, {}).get("idle_resume", 0))})
         combos.append(entry)
     if not combos:
         print(f"no <base>__idle_frames/ sequences found in {matte}", flush=True)

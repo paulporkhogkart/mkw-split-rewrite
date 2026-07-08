@@ -256,3 +256,19 @@ def test_fresh_dir_clears_stale_frames(tmp_path):
     el._fresh_dir(str(d))
     import os
     assert os.path.isdir(str(d)) and os.listdir(str(d)) == []
+
+
+def test_idle_resume_offset_picks_phase_after_best_match():
+    # Kart handoff: the flourish's last frame sits at a known idle phase (a full cycle
+    # later, so it recurs inside the idle band). Resume ONE frame PAST the matching phase
+    # so the bob keeps moving instead of repeating the matched pose.
+    F = _periodic_features(n=500, P=50)
+    start, P = 40, 50
+    # flourish_end-1 = 150 ≡ idle frame 50 (both phase 0 mod P) -> best match j=50 -> resume 11.
+    assert el.idle_resume_offset(F, start, P, flourish_end=151) == 11
+
+
+def test_idle_resume_offset_out_of_window_returns_zero():
+    # Flourish end past the decoded feature window: nothing to match -> resume at loop start.
+    F = _periodic_features(n=100, P=50)
+    assert el.idle_resume_offset(F, 10, 50, flourish_end=500) == 0

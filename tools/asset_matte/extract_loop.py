@@ -145,6 +145,30 @@ def seam_start(F, a, b, P):
     return best_s
 
 
+def idle_resume_offset(F, start, P, flourish_end):
+    """Idle-loop frame (0-based WITHIN the exported idle segment) to resume at after a KART
+    flourish. The kart flourish is a motion burst that settles the rider back into the idle
+    bob, so playback should hand off flourish -> idle at the idle phase whose pose best
+    CONTINUES from the flourish's last frame -- not at the loop's self-closure seam (frame 0,
+    chosen by seam_start to close the loop on itself, which knows nothing about the flourish).
+
+    Match on the same whole-hero grayscale features F the loop seam uses (so a bright spinning
+    wheel biases this the same accepted way it biases seam_start), then resume ONE frame past
+    the best match so motion continues rather than repeating the matched pose. The exported
+    idle is a full seam-matched cycle, so starting at any phase and wrapping stays seamless.
+    Returns 0 when the flourish end is outside the decoded feature window (nothing to match)."""
+    last = flourish_end - 1
+    if last < 0 or last >= len(F):
+        return 0
+    ref = F[last]
+    best_j, best_d = start, 1e18
+    for j in range(start, start + P):
+        d = float(np.sum((F[j] - ref) ** 2))
+        if d < best_d:
+            best_d, best_j = d, j
+    return (best_j - start + 1) % P
+
+
 def first_sustained_dip(r, a, b, drop=0.05, min_run=16):
     """(start, end) of the first at/after-band run where the recurrence r stays below the
     idle plateau for >= min_run frames = the character's one-shot flourish. Recurrence is
@@ -364,7 +388,8 @@ def char_cut(d, ds, still_n=4):
 
 
 def find_segments(clip):
-    """{seg: (start, end)} half-open spans for 'spawn'/'idle'/'flourish' (+ fps, kart, fell_back).
+    """{seg: (start, end)} half-open spans for 'spawn'/'idle'/'flourish' (+ fps, kart, fell_back,
+    idle_resume). idle_resume = the post-flourish idle handoff phase (karts; 0 for chars).
 
     fell_back=True flags a flourish end that used a fallback: a char whose hard cut wasn't
     found (fixed 54f window used), or a kart burst scan that never cleared its threshold and
@@ -435,10 +460,14 @@ def find_segments(clip):
         fe = fs + (KART_FLOURISH if kart else CHAR_FLOURISH_LEN)
         fe = clamp_flourish_end(fe, fade, len(bg), fs)   # never include fade-out frames
 
+    # KART ONLY: idle phase to resume at after the flourish settles back into the bob
+    # (chars hard-cut to the char-in-kart, so their idle never continues -> 0/unused).
+    idle_resume = idle_resume_offset(F, start, P, fe) if kart else 0
+
     segs = {"idle": (start, start + P), "flourish": (fs, fe)}
     if spawn:
         segs["spawn"] = spawn
-    return segs, fps, kart, fell_back
+    return segs, fps, kart, fell_back, idle_resume
 
 
 def _fresh_dir(d):
@@ -452,8 +481,9 @@ def _fresh_dir(d):
 
 def extract_segments(clip, out_base, name):
     """Write prod-crop PNG sequences for each detected segment to <out_base>/<name>__<seg>/NNN.png.
-    Returns {seg: frame_count}."""
-    segs, fps, kart, fell_back = find_segments(clip)
+    Returns {seg: frame_count}; kart combos also carry {"idle_resume": phase} (the post-flourish
+    idle handoff frame) — a reserved non-segment key the seg loops here/downstream never iterate."""
+    segs, fps, kart, fell_back, idle_resume = find_segments(clip)
     want = {}
     for seg, (s, e) in segs.items():
         for f in range(s, e):
@@ -478,7 +508,10 @@ def extract_segments(clip, out_base, name):
     print(f"{os.path.basename(clip)}: " +
           " ".join(f"{nm}={e0 - s0}f" for nm, (s0, e0) in segs.items()) +
           (" flourish=FALLBACK" if fell_back else ""), flush=True)
-    return {seg: (e - s) for seg, (s, e) in segs.items()}
+    counts = {seg: (e - s) for seg, (s, e) in segs.items()}
+    if kart:
+        counts["idle_resume"] = idle_resume
+    return counts
 
 
 if __name__ == "__main__":

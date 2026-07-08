@@ -169,6 +169,7 @@ def main(argv=None):
             counts = (futures.pop(name).result() if ex is not None
                       else el.extract_segments(clip, seg_base, name))   # spawn/idle/flourish spans
             kart = el.is_kart_combo(name)
+            idle_resume = counts.get("idle_resume", 0)   # kart post-flourish idle handoff phase
             matted = {}
             for seg in ("spawn", "idle", "flourish"):
                 if seg not in counts:
@@ -183,7 +184,8 @@ def main(argv=None):
             if not a.keep_loopframes:
                 shutil.rmtree(seg_base, ignore_errors=True)
             manifest[name] = {"status": "done", "kart": kart,
-                              "segments": matted, "secs": round(time.time() - t0, 1)}
+                              "segments": matted, "idle_resume": idle_resume,
+                              "secs": round(time.time() - t0, 1)}
             save_manifest(manifest_path, manifest)
             if a.ship_dir:                        # ship BEFORE marking done: bytes on share first
                 ship.ship_clip(mattedir, os.path.join(a.ship_dir, "matte"), name)
