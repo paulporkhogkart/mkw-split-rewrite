@@ -171,12 +171,21 @@ When set, after a clip is fully matted + manifested:
   `_write_chip` emits is prefixed `"<name>__<seg>"` (matte_blankplate.py:278–297 →
   `<name>__<seg>_frames/`, `<name>__<seg>_loop.webp`, `<name>__<seg>_checker.webp`), and clip
   names never nest (`char__costume__kart`), so `<name>__*` cannot match a different clip.
+- **Idempotent re-ship:** before moving, delete any same-named target already under
+  `<ship-dir>/matte/` (`rmtree`/`remove` per artifact). This makes a re-ship after an interrupted
+  copy (network drop / hard power-off) cleanly overwrite a partial target rather than error on a
+  half-copied dir.
 - Machine-2→share is cross-volume, so the move is copy-then-delete (`shutil.move`). Order is
   **ship → then write `.done`**: if the ship fails (network blip), `.done` is not written, the
   local output stays, and a retry (this run's later pass or a restart's own-reclaim) re-ships it.
   A clip is never marked complete to the cluster until its bytes are on the share.
 - When unset (machine 1): output is written in place under `<out>/matte/` — today's behaviour —
   because `<out>` *is* the shared final dir on machine 1.
+
+**Directory bootstrap:** on startup the driver `makedirs(exist_ok=True)` for `<out>` (+
+`<out>/matte`, `<out>/loopframes`), `<ship-dir>/matte`, and `<claims-dir>` — so machine 2's
+`C:\kartoff_scratch` and the share's `claims\` are created automatically if missing. (The console
+already does this for `<out>` and clips; app.py:68–72.)
 
 Loop-frames stay local automatically: `loopdir = <out>/loopframes` (process_all.py:82), and on
 machine 2 `<out>` is the local scratch — so the big transient frames never touch the network,
@@ -258,9 +267,14 @@ Wiring (all mechanical):
 - **Orphaned claim (a box crashed mid-clip):** that one clip is skipped until own-restart-reclaim
   (same box) or a manual `--reclaim-orphans` (other box). `STALE_SECS=1800` ≫ clip time, so a
   merely-slow clip is never falsely reclaimed.
-- **Stop mid-clip:** the stop-file is checked *between* clips (process_all.py:110), so the
-  in-flight clip finishes and ships; Stop is per-machine (local stop-file) so it never touches
-  the other box.
+- **Safe stop / powering off machine 2:** the console's **Stop** (and window-close) writes the
+  local stop-file, checked at the top of the loop (process_all.py:110), so the in-flight clip
+  **finishes matting, ships, and marks `.done`** before the process exits — after which machine 2
+  is idle and safe to power off. Stop is per-machine (local stop-file) so it never touches the
+  other box. If instead machine 2 is **hard powered off** mid-clip, its claim orphans (no
+  `.done`); on next startup the box's **own-reclaim** clears it and the idempotent re-ship cleanly
+  redoes that one clip — no corruption, nothing half-published (the interrupted clip was never
+  marked `.done`, so nothing downstream ever saw it).
 - **Scratch disk fills on machine 2:** ship-and-delete caps it at ~1–2 GB; a runaway (ship
   lagging badly) surfaces as write errors — acceptable for a supervised run, and far under the
   50 GB headroom.
@@ -288,11 +302,39 @@ Wiring (all mechanical):
 
 ## Runbook / docs
 
-A short `docs/two-machine-sweep.md`: the per-machine `.bat` contents, one-time machine-2 setup
-(clone repo + stand up `temp/asset-venv-matte`: py3.12 + onnxruntime-gpu 1.22/CUDA 12 + torch
-cu128 + MatAnyone2 — the one real cost; SMB-share `D:\kartoff` read-write to machine 2), the
-start/stop/`--reclaim-orphans` commands, and the "delete machine-2 scratch when done" note.
-`tools/asset_matte/README.md` + the chip-asset-matting memory get a pointer.
+A `docs/two-machine-sweep.md` is a **first-class deliverable of this plan**, because the two
+enabling steps are one-time **manual** setup the app cannot do for you:
+
+1. **Share `D:\kartoff` from machine 1 (SMB) — step by step.** Not automatic. The guide gives the
+   concrete commands, e.g.:
+   ```powershell
+   # On machine 1 (elevated PowerShell). Grant the machine-2 account read/write.
+   New-SmbShare -Name kartoff -Path D:\kartoff -FullAccess "PAUL-AM5-DT\<user>"
+   # (or -ChangeAccess for a dedicated account; -FullAccess "Everyone" only on a trusted LAN)
+   Get-SmbShare kartoff                     # verify
+   ```
+   plus: enabling File & Printer Sharing through the firewall for the Private profile, setting the
+   network to **Private** (not Public), and — from machine 2 — testing access and (if accounts
+   differ) storing credentials:
+   ```powershell
+   # On machine 2
+   Test-Path \\PAUL-AM5-DT\kartoff\captures_sdr\en_uk\clips
+   cmdkey /add:PAUL-AM5-DT /user:<user> /pass         # if machine-2 login != machine-1 account
+   ```
+   The GUI equivalent (right-click `D:\kartoff` → Properties → Sharing → Advanced Sharing →
+   Permissions) is documented as the fallback. NTFS *and* share permissions both must allow the
+   machine-2 account write access to `asset_chips\` and `claims\`.
+2. **Stand up the GPU venv on machine 2** (the one real cost): clone/copy the repo + build
+   `temp/asset-venv-matte` (py3.12 + onnxruntime-gpu 1.22/CUDA 12 + torch cu128 + MatAnyone2,
+   per `tools/asset_matte/README.md` and the chip-asset-matting memory). The 2080 Ti (Turing) is
+   CUDA-12 fine.
+
+Plus the operational bits: the per-machine `run_console_m1.bat` / `run_console_m2.bat` contents
+(env vars from the config table), how to Start/Stop each box (and that **Stop → wait for exit** is
+the safe way to power machine 2 off), the `--reclaim-orphans` command (only if a box crashed
+mid-run), and "delete `C:\kartoff_scratch` on machine 2 when the batch is done." `C:\kartoff_scratch`
+itself is created automatically by the driver/console — no manual mkdir needed.
+`tools/asset_matte/README.md` + the chip-asset-matting memory get a pointer to this doc.
 
 ## Alternatives considered
 
