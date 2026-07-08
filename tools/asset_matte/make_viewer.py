@@ -203,17 +203,18 @@ def main():
     outdir = os.path.dirname(out)
 
     # idle_resume (the post-flourish idle handoff phase) is stamped per combo by the batch
-    # (process_all) into the manifest, which sits one dir up from the matte dir. Absent (an
-    # older run, or a share without the manifest) -> 0 = resume at the loop start as before.
+    # (process_all) into the manifest, one dir up from the matte dir. In a multi-machine sweep each
+    # box publishes its OWN manifest file to the share (box 1 = manifest.json, box 2 =
+    # manifest.<host>.json — disjoint clips, no clobber), so UNION every manifest*.json. Absent (an
+    # older run, no manifest) -> idle_resume 0 = resume at the loop start, as before.
     manifest = {}
-    for mp in (os.path.join(os.path.dirname(matte), "manifest.json"),
-               os.path.join(matte, "manifest.json")):
-        try:
-            with open(mp, encoding="utf-8") as f:
-                manifest = json.load(f)
-            break
-        except (OSError, ValueError):
-            continue
+    for d in (os.path.dirname(matte), matte):
+        for mp in sorted(glob.glob(os.path.join(d, "manifest*.json"))):
+            try:
+                with open(mp, encoding="utf-8") as f:
+                    manifest.update(json.load(f))
+            except (OSError, ValueError):
+                continue
 
     def count(d):
         return len(glob.glob(os.path.join(d, "*.png")))

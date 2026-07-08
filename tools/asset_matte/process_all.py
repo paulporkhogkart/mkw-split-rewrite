@@ -207,6 +207,12 @@ def main(argv=None):
         for n in queue:                           # limit break); AFTER shutdown so no worker re-creates
             claims.release(a.claims_dir, n)        # a loopframe dir we're deleting. queue is [] on a
             shutil.rmtree(os.path.join(loopdir, n), ignore_errors=True)  # natural finish -> no-op.
+    if a.ship_dir:                                # publish OUR manifest to the share so per-clip data
+        try:                                      # (idle_resume) reaches box 1's viewer. Own file per
+            save_manifest(os.path.join(             # machine (disjoint clips, no clobber); make_viewer
+                a.ship_dir, f"manifest.{machine_id}.json"), manifest)  # unions every manifest*.json.
+        except OSError:                           # a share hiccup here must never fail the run
+            pass
     done_total = claims.count_done(a.claims_dir) if a.claims_dir else done_count(manifest, names)
     print(f"DONE processed={processed} done_total={done_total}/{total}", flush=True)
 

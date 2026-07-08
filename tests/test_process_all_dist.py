@@ -77,6 +77,12 @@ def test_claims_skips_clip_owned_by_other(tmp_path, monkeypatch):
     # a__c was skipped: never done by us, no output shipped
     assert not claims.is_done(claims_dir, "a__c")
     assert not os.path.exists(os.path.join(share, "matte", "a__c__idle_loop.webp"))
+    # our manifest is published to the share under our own machine-id (so idle_resume reaches the
+    # viewer) — carrying exactly the clips we did, not the one the other box owns
+    import json
+    sm = json.load(open(os.path.join(share, "manifest.ME.json")))
+    assert set(sm) == {"a__b", "a__d"}
+    assert all("idle_resume" in v for v in sm.values())
 
 
 def test_reclaim_orphans_mode(tmp_path, monkeypatch):
