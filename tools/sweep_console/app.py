@@ -21,6 +21,7 @@ for _d in (_HERE, os.path.join(_HERE, "..", "autotemplate"), os.path.join(_HERE,
         sys.path.insert(0, _p)
 
 import controlstate as cs
+import cuda_recovery                                  # shared exit-code contract with process_all
 import procstate as ps
 from controller_bridge import ControllerBridge
 from health import HealthModel
@@ -87,6 +88,7 @@ class ConsoleApp:
         self._proc_last = ""                         # latest batch-driver log line (shown in headline)
         self._proc_seg = None                        # current matte segment dir name (for the preview)
         self._proc_frac = ""                         # 'done/total' of the current segment
+        self._proc_wedged = 0                        # consecutive no-progress CUDA-context losses (restart guard)
         self._pphoto = None                          # keep a ref so Tk doesn't GC the preview image
         self._build()
         root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -244,7 +246,7 @@ class ConsoleApp:
             if self.ws: self.ws.close(); self.ws = None
             if self.manual: self.manual.close(); self.manual = None
 
-    def _sweep_exited(self):
+    def _sweep_exited(self, code=None):
         self.q.put(lambda: self._after_sweep_exit())
 
     def _after_sweep_exit(self):
@@ -256,6 +258,7 @@ class ConsoleApp:
     def _click_process(self, key):
         if key == "pstart" and self.pstate.state == ps.IDLE:
             self.pprogress = ProgressModel(self.sup.clip_count())   # fresh run: reset ETA samples
+            self._proc_wedged = 0                                   # fresh run: reset the restart guard
         event = {"pstart": ps.START, "pstop": ps.STOP}.get(key)
         if key == "ppause":
             event = ps.RESUME if self.pstate.state == ps.PAUSED else ps.PAUSE
@@ -273,16 +276,44 @@ class ConsoleApp:
         elif action == "completed":
             self._on_line("process", "[console] all clips processed")
 
-    def _process_exited(self):
-        self.q.put(self._after_process_exit)
+    def _process_exited(self, code=None):
+        self.q.put(lambda: self._after_process_exit(code))
 
-    def _after_process_exit(self):
+    def _after_process_exit(self, code=None):
+        # A birefnet CUDA-context loss the driver couldn't rebuild in-process makes process_all exit
+        # 75/76 (see cuda_recovery). A fresh PROCESS = fresh context, so auto-restart instead of
+        # reporting completion — unless the user requested stop/pause (then pstate isn't RUNNING and
+        # classify returns NORMAL). GIVE_UP after too many no-progress losses (GPU likely wedged).
+        decision, self._proc_wedged = cuda_recovery.classify_process_exit(
+            code, running=self.pstate.state == ps.RUNNING, wedged=self._proc_wedged)
+        if decision == cuda_recovery.RESTART:
+            self._on_line("process", f"[console] CUDA context lost (exit {code}) — resuming with a "
+                                     "fresh process in 20s (manifest keeps the finished clips)...")
+            self.root.after(20000, self._restart_processing)
+            return
+        if decision == cuda_recovery.GIVE_UP:
+            self._on_line("process", "[console] CUDA context lost repeatedly with no progress — the "
+                                     "GPU driver is likely wedged. Reboot, then press Process again.")
+            self.pstate.on_event(ps.EXITED)          # RUNNING -> IDLE; drop 'completed' (this failed)
+            self._refresh_buttons()
+            return
         for act in self.pstate.on_event(ps.EXITED):
             self._do_process(act)
         if not (CLAIMS_DIR or SHIP_DIR):             # single-machine: keep the convenient auto-build.
             msg = self.sup.build_viewer(os.path.join(PROCESS_OUT, "matte"))   # multi-machine is
             if msg:                                  # unreliable on exit (the other box may not have
                 self._on_line("process", f"[console] {msg}")   # published yet) -> use Build viewer.
+        self._refresh_buttons()
+
+    def _restart_processing(self):
+        """Relaunch the batch after a CUDA-context-loss exit — a fresh process gets a fresh CUDA
+        context. If the user pressed Stop/Pause during the 20s settle, the process already exited, so
+        settle the state machine (the EXITED it awaits won't come from a dead process) instead."""
+        if self.pstate.state == ps.RUNNING:
+            self._do_process("start_processing")     # manifest resumes; the clip that died stays pending
+        else:
+            for act in self.pstate.on_event(ps.EXITED):
+                self._do_process(act)
         self._refresh_buttons()
 
     def _click_build_viewer(self):

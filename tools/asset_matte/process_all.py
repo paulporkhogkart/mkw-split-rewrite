@@ -32,6 +32,7 @@ import extract_loop as el
 import matte_blankplate as mb
 import matte_matanyone as mm
 import claims
+import cuda_recovery
 import ship
 
 
@@ -150,6 +151,7 @@ def main(argv=None):
             _submit(n)
 
     processed = 0
+    exit_code = 0
     while True:
         if os.path.exists(stop_file):             # clean stop BETWEEN clips
             print(f"STOPPED stop-file present ({base_done + processed}/{total} done)", flush=True)
@@ -194,6 +196,19 @@ def main(argv=None):
             processed += 1
             print(f"PROCESSED {name} ({base_done + processed}/{total}) {matted} "
                   f"{time.time() - t0:.0f}s", flush=True)
+        except cuda_recovery.CudaContextLost as exc:
+            # NOT this clip's fault: the birefnet CUDA context died (a TDR / GPU driver reset) and an
+            # in-process rebuild+retry didn't recover it. Leave the clip PENDING (don't mark error),
+            # put it back on the queue so the post-loop cleanup releases its claim + loopframes, and
+            # stop cleanly so a FRESH process (guaranteed-fresh context) resumes from the manifest.
+            # run_matte.bat auto-restarts on exit 75 (progress made) / 76 (no progress -> maybe wedged).
+            queue.insert(0, name)
+            print(f"CUDA_CONTEXT_LOST on {name}: {exc}", flush=True)
+            print(f"STOPPING for a fresh process ({base_done + processed}/{total} done); "
+                  f"{name} stays pending and retries on restart.", flush=True)
+            exit_code = (cuda_recovery.EXIT_CUDA_LOST_PROGRESS if processed > 0
+                         else cuda_recovery.EXIT_CUDA_LOST_NOPROG)
+            break
         except Exception as exc:
             import traceback
             manifest[name] = {"status": "error", "error": str(exc)}
@@ -215,7 +230,8 @@ def main(argv=None):
             pass
     done_total = claims.count_done(a.claims_dir) if a.claims_dir else done_count(manifest, names)
     print(f"DONE processed={processed} done_total={done_total}/{total}", flush=True)
+    return exit_code
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main() or 0)

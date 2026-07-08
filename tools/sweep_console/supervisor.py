@@ -61,7 +61,7 @@ class ProcessSupervisor:
             self.on_line(name, line)
         p.wait()
         if on_exit:
-            on_exit()
+            on_exit(p.returncode)                    # exit code drives the console's restart policy
 
     def start_agent(self):
         return self._spawn("agent", commands.agent_cmd(self.py, self.at_dir))

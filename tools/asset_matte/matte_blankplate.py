@@ -36,6 +36,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pre_darken as pd
 import nametag_core as nc
 from extract_loop import is_kart_combo
+from cuda_recovery import call_with_cuda_recovery
 
 
 def _setup_cuda():
@@ -99,6 +100,14 @@ def _session():
     return _SESSION
 
 
+def _reset_session():
+    """Drop the birefnet session so the next _session() builds a FRESH CUDA context. Recovery hook
+    for a TDR / GPU driver reset (see cuda_recovery): once the context dies, onnxruntime fails every
+    later call with `CUDA failure 999` on a trivial memcpy, so the dead session must be rebuilt."""
+    global _SESSION
+    _SESSION = None
+
+
 # ── kart blank-plate setup (once) — faithfully from tune_blankplate.py ─────────
 _t_kart, _C_kart, _A_kart, _MASK_kart = pd.load_template(False)
 _IN_PLATE = _MASK_kart > 0.05
@@ -159,7 +168,9 @@ _t_char, _C_char, _A_char, _MASK_char = pd.load_template(True)
 # ── birefnet + decontam, hybrid hole-repair (char) ─────────────────────────────
 def _birefnet(bgr):
     rgb = cv2.cvtColor(bgr.astype(np.uint8), cv2.COLOR_BGR2RGB)
-    out = np.array(remove(Image.fromarray(rgb), session=_session(), post_process_mask=True))
+    out = call_with_cuda_recovery(
+        lambda: np.array(remove(Image.fromarray(rgb), session=_session(), post_process_mask=True)),
+        _reset_session)
     a = out[..., 3].astype(np.float64) / 255.0
     rgbf = rgb.astype(np.float64) / 255.0
     if DECONTAM and _HAVE_PM and a.max() > 0.02:
