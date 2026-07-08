@@ -10,29 +10,45 @@ Design: `docs/superpowers/specs/2026-07-08-two-machine-matte-sweep-design.md`.
 
 ### 1. Share `D:\kartoff` from the rig (SMB) — MANUAL
 
-This is not automatic. On the **rig**, in an elevated PowerShell:
+Not automatic, and it needs care: local accounts don't cross machines, so the second box must
+authenticate to the rig as a **rig-local account**. Use a rig account **with a password** — here
+the existing **`vr`** account — which sidesteps blank-password network-logon problems entirely.
+Box 2's own login account is irrelevant to this.
+
+On the **rig** (`PAUL-AM5-DT`), elevated PowerShell:
 
 ```powershell
-# Grant the second box's account read/write to the share.
-New-SmbShare -Name kartoff -Path D:\kartoff -FullAccess "PAUL-AM5-DT\<user>"
-Get-SmbShare kartoff                         # verify it exists
+# Create the share granting vr. If it already exists ("The name has already been shared"),
+# skip New-SmbShare and just add vr to the existing share with Grant-SmbShareAccess instead:
+New-SmbShare -Name kartoff -Path D:\kartoff -FullAccess "PAUL-AM5-DT\vr"
+Grant-SmbShareAccess -Name kartoff -AccountName "PAUL-AM5-DT\vr" -AccessRight Full -Force
+Get-SmbShareAccess -Name kartoff                 # confirm PAUL-AM5-DT\vr = Full
+
+# vr isn't the folder owner, so grant it NTFS read+write on the tree (reads clips, writes
+# chips/claims). (OI)(CI)=inherit to new files, M=Modify, /T=apply to the existing tree.
+icacls D:\kartoff /grant "PAUL-AM5-DT\vr:(OI)(CI)M" /T /C /Q
+
+# Network must be Private with File & Printer Sharing allowed through the firewall:
+Set-NetFirewallRule -DisplayGroup "File and Printer Sharing" -Enabled True -Profile Private
 ```
 
-- If the two boxes use different accounts, either add that account with `-FullAccess`, or use a
-  dedicated account with `-ChangeAccess`. `-FullAccess "Everyone"` works only on a trusted LAN.
-- Set the rig's network profile to **Private** (not Public) and allow **File and Printer
-  Sharing** through the firewall for the Private profile (Settings → Network → Properties →
-  Private; Windows Defender Firewall → Allow an app → File and Printer Sharing / Private).
-- Both **share** permissions (above) and **NTFS** permissions on `D:\kartoff\asset_chips` and
-  `…\claims` must allow the second box's account to **write**. GUI fallback: right-click
-  `D:\kartoff` → Properties → Sharing → Advanced Sharing → Permissions.
-
-On the **second box**, confirm access (and store credentials if the logins differ):
+On the **second box**, store the `vr` credential once (so the console is never prompted) and test:
 
 ```powershell
-Test-Path \\PAUL-AM5-DT\kartoff\captures_sdr\en_uk\clips     # -> True
-cmdkey /add:PAUL-AM5-DT /user:<rig-user> /pass               # only if logins differ
+# If box 2 already holds a connection to the rig: net use \\PAUL-AM5-DT\kartoff /delete
+net use \\PAUL-AM5-DT\kartoff /user:PAUL-AM5-DT\vr * /persistent:yes   # * prompts for vr's password
+Test-Path \\PAUL-AM5-DT\kartoff\captures_sdr\en_uk\clips              # -> True
 ```
+
+Nothing else references `vr`: the `.bat` files use the `\\PAUL-AM5-DT\kartoff` path, and claims
+key off `COMPUTERNAME` (distinct per box), so exactly-once coordination is unaffected by the login.
+
+> **Blank-password trap (bit us once).** A local account with a **blank** password can't do *any*
+> network logon — SMB, RDP, WinRM — by default (the `LimitBlankPasswordUse` policy). The passworded
+> `vr` account avoids this, so **leave that policy alone.** If you ever set it to `1` on a
+> **headless** box whose only account is blank-password, you lock yourself out of RDP ("a user
+> account restriction is preventing you from logging on") with **no remote fix** — every network
+> path is blocked, so you'd need a monitor + keyboard on that box to set it back to `0`.
 
 ### 2. Stand up the GPU venv on the second box
 
@@ -41,6 +57,18 @@ rig (py3.12 + onnxruntime-gpu 1.22/CUDA 12 + torch cu128 + MatAnyone2). See
 `tools/asset_matte/README.md` and the chip-asset-matting memory for the venv recipe. The
 2080 Ti (Turing) runs the CUDA 12 wheels fine. `C:\kartoff_scratch` is created automatically —
 no manual mkdir.
+
+## Before a fresh sweep — clear stale output
+
+The production crop widened (chips are 1024×1080 now), so any earlier `asset_chips` output is
+invalid and the old `manifest.json` would make `process_all` skip those clips. On the rig, wipe the
+previous run before a fresh sweep:
+
+```powershell
+Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
+  D:\kartoff\asset_chips\matte, D:\kartoff\asset_chips\claims, `
+  D:\kartoff\asset_chips\loopframes, D:\kartoff\asset_chips\manifest.json
+```
 
 ## Running
 
@@ -67,8 +95,19 @@ not done) from the **rig** so they get redone:
 temp\asset-venv-matte\Scripts\python.exe tools\asset_matte\process_all.py --reclaim-orphans --claims-dir D:\kartoff\asset_chips\claims
 ```
 
-## When the batch is done
+## Building the index / when the batch is done
 
-- The full chip set + `index.html` viewer are in `D:\kartoff\asset_chips\matte\` on the rig.
+In a two-box sweep **nobody auto-builds the viewer** (the other box may not have published its
+manifest yet). Each box publishes its own `manifest.<hostname>.json` to the share when it cleanly
+Stops/finishes, and `make_viewer` unions every `manifest*.json` — so the flourish→idle handoff
+(`idle_resume`) comes out right for the whole roster, not just the rig's half.
+
+- Make sure **box 2 has cleanly Stopped at least once** (that's when its manifest lands on the share).
+- On the rig, press **Build viewer** (the asset-processing bar) — it builds over local `D:\` and
+  unions both manifests into `D:\kartoff\asset_chips\matte\index.html`. Safe to press any time for a
+  mid-run snapshot; it just shows whatever's finished so far.
 - Delete the second box's scratch: `Remove-Item -Recurse -Force C:\kartoff_scratch`.
-- Optionally delete `D:\kartoff\asset_chips\claims\` (only after you're sure the batch finished).
+- Optionally delete `D:\kartoff\asset_chips\claims\` — only once you're sure the batch finished
+  **and** you've built the index.
+
+(Single-machine `run_console.bat` runs are unchanged: they still auto-build the viewer on exit.)
