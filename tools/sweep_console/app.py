@@ -9,6 +9,7 @@ import os
 import queue
 import shutil
 import sys
+import threading
 import time
 import tkinter as tk
 from tkinter import ttk
@@ -108,6 +109,11 @@ class ConsoleApp:
         for key, label in [("pstart", "Process"), ("ppause", "Pause"), ("pstop", "Stop")]:
             b = ttk.Button(bar2, text=label, command=lambda k=key: self._click_process(k))
             b.pack(side="left", padx=2); self.pbtn[key] = b
+        # Always-clickable: rebuild the chip viewer/index over the FINAL matte dir, unioning every
+        # manifest*.json (box 1 + box 2). Press it on the rig once both boxes have stopped. Runs off
+        # the Tk thread so a large (or over-SMB) glob never freezes the UI.
+        self.btn_viewer = ttk.Button(bar2, text="Build viewer", command=self._click_build_viewer)
+        self.btn_viewer.pack(side="left", padx=(12, 2))
         self.pstatus = ttk.Label(bar2, text="● idle"); self.pstatus.pack(side="right")
 
         body = ttk.Frame(self.root); body.pack(fill="both", expand=True)
@@ -273,11 +279,30 @@ class ConsoleApp:
     def _after_process_exit(self):
         for act in self.pstate.on_event(ps.EXITED):
             self._do_process(act)
-        _viewer_matte = os.path.join(SHIP_DIR or PROCESS_OUT, "matte")
-        msg = self.sup.build_viewer(_viewer_matte)   # regenerate the chip viewer over the full set
-        if msg:
-            self._on_line("process", f"[console] {msg}")
+        if not (CLAIMS_DIR or SHIP_DIR):             # single-machine: keep the convenient auto-build.
+            msg = self.sup.build_viewer(os.path.join(PROCESS_OUT, "matte"))   # multi-machine is
+            if msg:                                  # unreliable on exit (the other box may not have
+                self._on_line("process", f"[console] {msg}")   # published yet) -> use Build viewer.
         self._refresh_buttons()
+
+    def _click_build_viewer(self):
+        """Rebuild the chip viewer/index over the final matte dir, off the Tk thread. Always
+        available (read-only over the matte); a click while one is running is skipped, not doubled."""
+        if getattr(self, "_building_viewer", False):
+            self._on_line("process", "[console] viewer build already running")
+            return
+        self._building_viewer = True
+        matte = os.path.join(SHIP_DIR or PROCESS_OUT, "matte")
+        self._on_line("process", f"[console] building viewer over {matte} ...")
+        threading.Thread(target=self._build_viewer_worker, args=(matte,), daemon=True).start()
+
+    def _build_viewer_worker(self, matte):
+        msg = self.sup.build_viewer(matte)           # unions every manifest*.json (make_viewer)
+
+        def done():
+            self._building_viewer = False
+            self._on_line("process", f"[console] {msg or 'viewer build produced no output'}")
+        self.q.put(done)
 
     def _manual(self, key):
         if self.manual and self.state.state in (cs.RIG_WARM, cs.PAUSED):
