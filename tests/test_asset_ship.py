@@ -42,3 +42,16 @@ def test_ship_is_idempotent_overwrites_partial_target(tmp_path):
     assert os.path.exists(os.path.join(dst, "clip__idle_frames", "000.png"))
     assert not os.path.exists(os.path.join(dst, "clip__idle_frames", "999_partial.png"))
     assert not os.path.exists(os.path.join(out, "clip__idle_frames"))
+
+
+def test_ship_overwrites_stale_file_target(tmp_path):
+    out = str(tmp_path / "out" / "matte")
+    dst = str(tmp_path / "share" / "matte")
+    os.makedirs(dst, exist_ok=True)
+    with open(os.path.join(dst, "clip__idle_loop.webp"), "wb") as f:
+        f.write(b"STALE")                            # a leftover from a prior ship
+    _seed_clip(out, "clip")                          # fresh source loop.webp is empty
+    ship.ship_clip(out, dst, "clip")
+    with open(os.path.join(dst, "clip__idle_loop.webp"), "rb") as f:
+        assert f.read() == b""                       # overwritten by the fresh (empty) source
+    assert not os.path.exists(os.path.join(out, "clip__idle_loop.webp"))

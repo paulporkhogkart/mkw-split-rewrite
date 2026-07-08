@@ -18,7 +18,7 @@ def ship_clip(out_matte_dir, ship_matte_dir, name):
     for src in glob.glob(os.path.join(out_matte_dir, name + "__*")):
         dst = os.path.join(ship_matte_dir, os.path.basename(src))
         if os.path.isdir(dst):
-            shutil.rmtree(dst, ignore_errors=True)
+            shutil.rmtree(dst)                     # let a real failure raise -> ship aborts + retries
         elif os.path.exists(dst):
             try:
                 os.remove(dst)
