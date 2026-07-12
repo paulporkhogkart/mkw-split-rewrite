@@ -71,6 +71,8 @@ class CallSession:
         self._pump_task = asyncio.create_task(self._pump())
 
     def on_phone_hungup(self) -> None:
+        if self._ending:
+            return
         self._spawn(self.end(
             "completed" if self._answered_at is not None else "dropped"))
 
@@ -82,7 +84,7 @@ class CallSession:
             self._grace_task = asyncio.create_task(self._grace())
 
     def on_caller_recovered(self) -> None:
-        if self._grace_task is not None:
+        if self._grace_task is not None and not self._ending:
             self._grace_task.cancel()
             self._grace_task = None
 
@@ -154,20 +156,23 @@ class CallSession:
             return
         self._ending = True
         self.outcome = outcome
-        for task in (self._pump_task, self._grace_task):
-            if task and task is not asyncio.current_task():
+        try:
+            for task in (self._pump_task, self._grace_task):
+                if task and task is not asyncio.current_task():
+                    task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await task
+            for task in list(self._side_tasks):
+                if task is asyncio.current_task():
+                    continue
                 task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
+                with contextlib.suppress(asyncio.CancelledError, Exception):
                     await task
-        for task in list(self._side_tasks):
-            if task is asyncio.current_task():
-                continue
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await task
-        with contextlib.suppress(Exception):
-            await self._phone.hangup()
-        self._recorder.close()
-        self._bus.publish({"type": "call_ended", "call_id": self.call_id,
-                           "outcome": outcome})
-        self.done.set()
+            with contextlib.suppress(Exception):
+                await self._phone.hangup()
+            with contextlib.suppress(Exception):
+                self._recorder.close()
+        finally:
+            self._bus.publish({"type": "call_ended", "call_id": self.call_id,
+                               "outcome": outcome})
+            self.done.set()

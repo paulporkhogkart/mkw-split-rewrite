@@ -150,3 +150,23 @@ async def test_caller_tones_mixed_not_doubled(tmp_path):
     assert loudest > 5000
     await sess.end("test")
     await bus.stop()
+
+
+async def test_recovered_during_end_does_not_zombie(tmp_path):
+    bus, phone, sess, _ = make_session(tmp_path, seconds=30, grace_s=0.05)
+    await bus.start()
+    release = asyncio.Event()
+
+    async def slow_hangup() -> None:
+        await release.wait()
+
+    phone.hangup = slow_hangup  # type: ignore[method-assign]
+    await sess.start()
+    sess.on_phone_answered()
+    sess.on_caller_lost()
+    await asyncio.sleep(0.15)   # grace fired; end() is suspended inside hangup
+    sess.on_caller_recovered()  # must NOT cancel the ending grace task
+    release.set()
+    await asyncio.wait_for(sess.done.wait(), 2)
+    assert sess.outcome == "dropped"
+    await bus.stop()
