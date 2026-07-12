@@ -3,9 +3,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 from typing import Callable, Optional
 
 import aiohttp
+
+logger = logging.getLogger(__name__)
 
 
 class AriClient:
@@ -29,11 +32,23 @@ class AriClient:
         self._ws_task = asyncio.create_task(self._listen(ws))
 
     async def _listen(self, ws: aiohttp.ClientWebSocketResponse) -> None:
-        async for msg in ws:
-            if msg.type == aiohttp.WSMsgType.TEXT:
-                event = json.loads(msg.data)
+        try:
+            async for msg in ws:
+                if msg.type != aiohttp.WSMsgType.TEXT:
+                    continue
+                try:
+                    event = json.loads(msg.data)
+                except ValueError:
+                    logger.warning("ari: non-JSON event frame dropped")
+                    continue
                 for cb in self._listeners:
-                    cb(event)
+                    try:
+                        cb(event)
+                    except Exception:
+                        logger.exception("ari: event listener failed")
+        except asyncio.CancelledError:
+            raise
+        logger.warning("ari: events websocket closed by remote")
 
     async def close(self) -> None:
         if self._ws_task:
@@ -66,11 +81,18 @@ class AriClient:
         data = await self._post("/ari/bridges", {"type": "mixing"})
         bridge_id = data["id"]
         assert self._session is not None
-        async with self._session.post(
-            f"{self._base}/ari/bridges/{bridge_id}/addChannel",
-            params={"channel": ",".join(channel_ids)},
-        ) as resp:
-            resp.raise_for_status()
+        try:
+            async with self._session.post(
+                f"{self._base}/ari/bridges/{bridge_id}/addChannel",
+                params={"channel": ",".join(channel_ids)},
+            ) as resp:
+                resp.raise_for_status()
+        except Exception:
+            with contextlib.suppress(Exception):
+                async with self._session.delete(
+                        f"{self._base}/ari/bridges/{bridge_id}"):
+                    pass
+            raise
         return bridge_id
 
     async def hangup(self, channel_id: str) -> None:

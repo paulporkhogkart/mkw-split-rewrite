@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 
+import aiohttp
+import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 
@@ -79,5 +81,72 @@ async def test_ari_flow():
 
     await client.hangup("ch-1")
     assert record["hungup"] == "ch-1"
+    await client.close()
+    await server.close()
+
+
+async def test_listener_exception_does_not_kill_pipe():
+    app = web.Application()
+
+    async def events_ws(request: web.Request):
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        await ws.send_str(json.dumps({"type": "one"}))
+        await ws.send_str(json.dumps({"type": "two"}))
+        async for _ in ws:
+            pass
+        return ws
+
+    app.router.add_get("/ari/events", events_ws)
+    server = TestServer(app)
+    await server.start_server()
+    got: list[str] = []
+
+    def bad(_e: dict) -> None:
+        raise RuntimeError("boom")
+
+    client = AriClient(f"http://127.0.0.1:{server.port}", "u", "p")
+    client.on_event(bad)
+    client.on_event(lambda e: got.append(e["type"]))
+    await client.connect()
+    await asyncio.sleep(0.1)
+    assert got == ["one", "two"]  # second listener unaffected, pipe alive
+    await client.close()
+    await server.close()
+
+
+async def test_bridge_cleans_up_on_addchannel_failure():
+    record: dict = {}
+    app = web.Application()
+
+    async def bridges(_request: web.Request):
+        return web.json_response({"id": "br-9"})
+
+    async def add_channel(_request: web.Request):
+        return web.Response(status=500)
+
+    async def delete_bridge(request: web.Request):
+        record["deleted"] = request.match_info["bid"]
+        return web.Response(status=204)
+
+    async def events_ws(request: web.Request):
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        async for _ in ws:
+            pass
+        return ws
+
+    app.router.add_get("/ari/events", events_ws)
+    app.router.add_post("/ari/bridges", bridges)
+    app.router.add_post("/ari/bridges/{bid}/addChannel", add_channel)
+    app.router.add_delete("/ari/bridges/{bid}", delete_bridge)
+    server = TestServer(app)
+    await server.start_server()
+
+    client = AriClient(f"http://127.0.0.1:{server.port}", "u", "p")
+    await client.connect()
+    with pytest.raises(aiohttp.ClientResponseError):
+        await client.bridge(["ch-1", "ch-em"])
+    assert record["deleted"] == "br-9"
     await client.close()
     await server.close()
