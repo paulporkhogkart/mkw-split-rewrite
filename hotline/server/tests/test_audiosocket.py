@@ -64,3 +64,50 @@ async def test_unknown_uuid_terminated(unused_tcp_port):
     assert kind == aus.KIND_TERMINATE
     writer.close()
     await server.stop()
+
+
+async def test_on_session_exception_fails_closed(unused_tcp_port):
+    async def on_session(_sess: aus.AudioSocketSession) -> bool:
+        raise RuntimeError("db down")
+
+    server = aus.AudioSocketServer(unused_tcp_port, on_session)
+    await server.start()
+    reader, writer = await _connect(unused_tcp_port, uuid.uuid4())
+    kind, _ = await aus.read_frame(reader)
+    assert kind == aus.KIND_TERMINATE
+    writer.close()
+    await server.stop()
+
+
+async def test_stop_completes_session_cleanup(unused_tcp_port):
+    closed = asyncio.Event()
+
+    async def on_session(sess: aus.AudioSocketSession) -> bool:
+        sess.on_closed(closed.set)
+        return True
+
+    server = aus.AudioSocketServer(unused_tcp_port, on_session)
+    await server.start()
+    _reader, writer = await _connect(unused_tcp_port, uuid.uuid4())
+    await asyncio.sleep(0.05)  # session task is running
+    await server.stop()
+    assert closed.is_set()  # cleanup finished BEFORE stop returned
+    writer.close()
+
+
+async def test_send_audio_survives_peer_disconnect(unused_tcp_port):
+    sessions: list[aus.AudioSocketSession] = []
+
+    async def on_session(sess: aus.AudioSocketSession) -> bool:
+        sessions.append(sess)
+        return True
+
+    server = aus.AudioSocketServer(unused_tcp_port, on_session)
+    await server.start()
+    _reader, writer = await _connect(unused_tcp_port, uuid.uuid4())
+    await asyncio.sleep(0.05)
+    writer.close()  # peer vanishes mid-call
+    await asyncio.sleep(0.05)
+    for _ in range(3):  # the 20 ms pump keeps sending — must not raise
+        await sessions[0].send_audio(SILENCE_FRAME)
+    await server.stop()

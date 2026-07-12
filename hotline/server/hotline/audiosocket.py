@@ -42,8 +42,11 @@ class AudioSocketSession:
     async def send_audio(self, frame: bytes) -> None:
         if self._closed:
             return
-        self._writer.write(encode_frame(KIND_AUDIO, frame))
-        await self._writer.drain()
+        try:
+            self._writer.write(encode_frame(KIND_AUDIO, frame))
+            await self._writer.drain()
+        except ConnectionError:
+            self._close()
 
     async def terminate(self) -> None:
         if self._closed:
@@ -91,9 +94,13 @@ class AudioSocketServer:
     async def stop(self) -> None:
         if self._server:
             self._server.close()
-            await self._server.wait_closed()
-        for t in list(self._tasks):
+        tasks = list(self._tasks)
+        for t in tasks:
             t.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        if self._server:
+            await self._server.wait_closed()
 
     async def _handle(self, reader: asyncio.StreamReader,
                       writer: asyncio.StreamWriter) -> None:
@@ -107,7 +114,10 @@ class AudioSocketServer:
             writer.close()
             return
         sess = AudioSocketSession(uuidlib.UUID(bytes=payload), reader, writer)
-        accepted = await self._on_session(sess)
+        try:
+            accepted = await self._on_session(sess)
+        except Exception:
+            accepted = False
         if not accepted:
             await sess.terminate()
             return
