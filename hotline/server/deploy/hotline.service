@@ -2,7 +2,7 @@
 [Unit]
 Description=Pork Phone hotline service
 After=network-online.target asterisk.service
-Wants=network-online.target
+Wants=network-online.target asterisk.service
 
 [Service]
 Type=simple

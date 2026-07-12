@@ -9,6 +9,7 @@ bind=__PI_LAN_IP__:5060      ; LAN interface only — never the tunnel
 [ata]
 type=endpoint
 context=pork
+acl=ata-acl
 disallow=all
 allow=ulaw,alaw,slin
 auth=ata-auth

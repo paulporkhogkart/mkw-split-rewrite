@@ -2,9 +2,10 @@
 # Pork Phone hotline — Pi install. Run from repo root as a sudoer.
 set -euo pipefail
 
-sudo useradd --system --home /var/lib/hotline --create-home hotline 2>/dev/null || true
+sudo useradd --system --home /var/lib/hotline --create-home --shell /usr/sbin/nologin hotline 2>/dev/null || true
 sudo mkdir -p /opt/hotline /etc/hotline /var/lib/hotline
-sudo rsync -a --delete hotline/server/ /opt/hotline/server/
+sudo apt-get install -y python3-venv rsync
+sudo rsync -a --delete --exclude tests --exclude .pytest_cache --exclude __pycache__ --exclude requirements-dev.txt --exclude pytest.ini hotline/server/ /opt/hotline/server/
 sudo python3 -m venv /opt/hotline/venv
 sudo /opt/hotline/venv/bin/pip install -r /opt/hotline/server/requirements.txt
 

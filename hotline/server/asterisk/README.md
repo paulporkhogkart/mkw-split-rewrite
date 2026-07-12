@@ -1,9 +1,21 @@
 # Asterisk config for the Pork Phone (Pi)
 
-Install: `sudo apt install asterisk` (Asterisk 20 on Bookworm). Copy each
-`*.tmpl` into /etc/asterisk/ (merge, don't clobber existing dialplan if any),
-substituting __ATA_IP__, __PI_LAN_IP__, __SIP_PASSWORD__, __ARI_PASSWORD__,
-__AUDIOSOCKET_PORT__ (default 9101). Then `sudo systemctl restart asterisk`.
+Install: Asterisk is NOT in Raspberry Pi OS / Debian Bookworm's default repos
+(pulled during the bookworm freeze). Pick at deploy time, in order of preference:
+  1. `sudo apt install asterisk` — works only if a repo provides it
+     (check first: `apt-cache policy asterisk`).
+  2. Debian sid/unstable pin or a maintained third-party repo (verify signing).
+  3. Build from source (asterisk.org LTS tarball, ./configure && make menuselect
+     — enable res_ari, res_audiosocket, chan_audiosocket — && make && make install).
+Record which route was taken + `asterisk -rx "core show version"` below at Task 15.
+
+Copy each `*.tmpl` into /etc/asterisk/ (merge, don't clobber existing dialplan
+if any), substituting __ATA_IP__, __PI_LAN_IP__, __SIP_PASSWORD__,
+__ARI_PASSWORD__, __AUDIOSOCKET_PORT__ (default 9101). Then
+`sudo systemctl restart asterisk`.
+
+Note: HOTLINE_ARI_PASSWORD in /etc/hotline/hotline.env MUST equal
+__ARI_PASSWORD__ in ari.conf — two files, one secret.
 
 Verify at install (Task 15):
 1. `asterisk -rx "core show version"` — record it.
