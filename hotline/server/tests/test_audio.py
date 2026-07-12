@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import wave
+
 import numpy as np
+import pytest
 
 from hotline import audio
 
@@ -29,3 +32,14 @@ def test_mix_clips_not_wraps():
     mixed = audio.mix_frames(loud, loud)
     pcm = np.frombuffer(mixed, dtype=np.int16)
     assert pcm.max() == 32767  # saturated, not wrapped negative
+
+
+def test_wav_read_rejects_partial_frames(tmp_path):
+    p = tmp_path / "bad.wav"
+    with wave.open(str(p), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(audio.SAMPLE_RATE)
+        w.writeframes(b"\x00\x00" * 100)  # 200 bytes: not a whole frame
+    with pytest.raises(ValueError, match="whole 20 ms frames"):
+        audio.wav_read_frames(p)

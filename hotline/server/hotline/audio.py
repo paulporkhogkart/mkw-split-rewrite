@@ -38,7 +38,9 @@ def wav_read_frames(path: Path) -> list[bytes]:
         assert r.getnchannels() == 1 and r.getsampwidth() == 2
         assert r.getframerate() == SAMPLE_RATE
         raw = r.readframes(r.getnframes())
-    return [raw[i : i + FRAME_BYTES] for i in range(0, len(raw) - len(raw) % FRAME_BYTES, FRAME_BYTES)]
+    if len(raw) % FRAME_BYTES:
+        raise ValueError(f"{path}: {len(raw)} bytes is not whole 20 ms frames")
+    return [raw[i : i + FRAME_BYTES] for i in range(0, len(raw), FRAME_BYTES)]
 
 
 def mix_frames(a: bytes, b: bytes) -> bytes:
