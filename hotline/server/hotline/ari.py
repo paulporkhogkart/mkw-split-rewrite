@@ -1,0 +1,82 @@
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import json
+from typing import Callable, Optional
+
+import aiohttp
+
+
+class AriClient:
+    def __init__(self, base_url: str, user: str, password: str,
+                 app: str = "pork") -> None:
+        self._base = base_url.rstrip("/")
+        self._auth_header = {"Authorization": aiohttp.encode_basic_auth(user, password)}
+        self._api_key = f"{user}:{password}"
+        self.app = app
+        self._session: Optional[aiohttp.ClientSession] = None
+        self._ws_task: Optional[asyncio.Task] = None
+        self._listeners: list[Callable[[dict], None]] = []
+
+    def on_event(self, cb: Callable[[dict], None]) -> None:
+        self._listeners.append(cb)
+
+    async def connect(self) -> None:
+        self._session = aiohttp.ClientSession(headers=self._auth_header)
+        url = f"{self._base}/ari/events?app={self.app}&api_key={self._api_key}"
+        ws = await self._session.ws_connect(url)
+        self._ws_task = asyncio.create_task(self._listen(ws))
+
+    async def _listen(self, ws: aiohttp.ClientWebSocketResponse) -> None:
+        async for msg in ws:
+            if msg.type == aiohttp.WSMsgType.TEXT:
+                event = json.loads(msg.data)
+                for cb in self._listeners:
+                    cb(event)
+
+    async def close(self) -> None:
+        if self._ws_task:
+            self._ws_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._ws_task
+        if self._session:
+            await self._session.close()
+
+    async def _post(self, path: str, payload: dict) -> dict:
+        assert self._session is not None
+        async with self._session.post(self._base + path, json=payload) as resp:
+            resp.raise_for_status()
+            return await resp.json() if resp.status != 204 else {}
+
+    async def originate_phone(self, caller_id: str, channel_var_uuid: str) -> str:
+        data = await self._post("/ari/channels", {
+            "endpoint": "PJSIP/ata", "app": self.app, "callerId": caller_id,
+            "appArgs": "phone", "variables": {"PORK_UUID": channel_var_uuid}})
+        return data["id"]
+
+    async def external_media(self, audiosocket_uuid: str, host: str) -> str:
+        data = await self._post("/ari/channels/externalMedia", {
+            "app": self.app, "external_host": host,
+            "encapsulation": "audiosocket", "transport": "tcp",
+            "format": "slin", "data": audiosocket_uuid})
+        return data["id"]
+
+    async def bridge(self, channel_ids: list[str]) -> str:
+        data = await self._post("/ari/bridges", {"type": "mixing"})
+        bridge_id = data["id"]
+        assert self._session is not None
+        async with self._session.post(
+            f"{self._base}/ari/bridges/{bridge_id}/addChannel",
+            params={"channel": ",".join(channel_ids)},
+        ) as resp:
+            resp.raise_for_status()
+        return bridge_id
+
+    async def hangup(self, channel_id: str) -> None:
+        assert self._session is not None
+        async with self._session.delete(
+            f"{self._base}/ari/channels/{channel_id}"
+        ) as resp:
+            if resp.status not in (204, 404):
+                resp.raise_for_status()
