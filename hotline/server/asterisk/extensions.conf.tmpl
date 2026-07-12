@@ -1,0 +1,9 @@
+; Calls are ARI-originated into the 'pork' Stasis app; the dialplan is a
+; fallback landing context only. AudioSocket dialplan fallback (if ARI
+; externalMedia audiosocket is unavailable on this Asterisk version):
+;   exten => 100,1,Answer()
+;    same => n,AudioSocket(${PORK_UUID},127.0.0.1:__AUDIOSOCKET_PORT__)
+[pork]
+exten => _X.,1,NoOp(Pork Phone inbound ${EXTEN})
+ same => n,Stasis(pork)
+ same => n,Hangup()

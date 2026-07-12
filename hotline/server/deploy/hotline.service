@@ -1,0 +1,23 @@
+# Pork Phone hotline — systemd unit (spec §4.3 sandboxing)
+[Unit]
+Description=Pork Phone hotline service
+After=network-online.target asterisk.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hotline
+Group=hotline
+WorkingDirectory=/opt/hotline/server
+EnvironmentFile=/etc/hotline/hotline.env
+ExecStart=/opt/hotline/venv/bin/python -m hotline
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/hotline
+
+[Install]
+WantedBy=multi-user.target
