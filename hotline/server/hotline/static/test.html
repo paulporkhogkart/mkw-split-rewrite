@@ -9,7 +9,8 @@
 </style>
 <h1>THE PORK PHONE — bench test</h1>
 <p>token <input id="token" value="dev-token">
-   <button id="connect">CONNECT MIC</button>
+   <label><input type="checkbox" id="echomode"> echo-test mode (AEC/NS off — wear headphones)</label></p>
+<p><button id="connect">CONNECT MIC</button>
    <button id="ring" disabled>RING PHONE</button>
    <button id="hang" disabled>HANG UP</button></p>
 <pre id="log"></pre>
@@ -20,48 +21,68 @@ const log = (m) => {
 };
 let audioWs = null;
 document.getElementById("connect").onclick = async () => {
+  const btn = document.getElementById("connect");
+  btn.disabled = true;
   const token = document.getElementById("token").value;
-  const ctx = new AudioContext({ sampleRate: 48000 });
-  await ctx.audioWorklet.addModule("/static/capture-worklet.js");
-  await ctx.audioWorklet.addModule("/static/playback-worklet.js");
-  const mic = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: true, noiseSuppression: true } });
-  const src = ctx.createMediaStreamSource(mic);
-  const lp1 = new BiquadFilterNode(ctx, { type: "lowpass", frequency: 3400 });
-  const lp2 = new BiquadFilterNode(ctx, { type: "lowpass", frequency: 3400 });
-  const cap = new AudioWorkletNode(ctx, "capture-worklet");
-  src.connect(lp1).connect(lp2).connect(cap);
-  const play = new AudioWorkletNode(ctx, "playback-worklet");
-  const lp3 = new BiquadFilterNode(ctx, { type: "lowpass", frequency: 3400 });
-  play.connect(lp3).connect(ctx.destination);
+  const echoMode = document.getElementById("echomode").checked;
+  try {
+    const ctx = new AudioContext({ sampleRate: 48000 });
+    log("audio context sampleRate=" + ctx.sampleRate);
+    await ctx.audioWorklet.addModule("/static/capture-worklet.js");
+    await ctx.audioWorklet.addModule("/static/playback-worklet.js");
+    const mic = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1,
+               echoCancellation: !echoMode,
+               noiseSuppression: !echoMode } });
+    const src = ctx.createMediaStreamSource(mic);
+    const lp1 = new BiquadFilterNode(ctx, { type: "lowpass", frequency: 3400 });
+    const lp2 = new BiquadFilterNode(ctx, { type: "lowpass", frequency: 3400 });
+    const cap = new AudioWorkletNode(ctx, "capture-worklet");
+    src.connect(lp1).connect(lp2).connect(cap);
+    const play = new AudioWorkletNode(ctx, "playback-worklet",
+                                      { outputChannelCount: [1] });
+    const lp3 = new BiquadFilterNode(ctx, { type: "lowpass", frequency: 3400 });
+    play.connect(lp3).connect(ctx.destination);
 
-  const proto = location.protocol === "https:" ? "wss" : "ws";
-  audioWs = new WebSocket(
-    `${proto}://${location.host}/ws/audio?token=${encodeURIComponent(token)}`);
-  audioWs.binaryType = "arraybuffer";
-  audioWs.onopen = () => { log("audio WS open"); };
-  audioWs.onclose = (e) => log(`audio WS closed (${e.code})`);
-  audioWs.onmessage = (e) => play.port.postMessage(e.data);
-  cap.port.onmessage = (e) => {
-    if (audioWs && audioWs.readyState === 1) audioWs.send(e.data);
-  };
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    audioWs = new WebSocket(
+      `${proto}://${location.host}/ws/audio?token=${encodeURIComponent(token)}`);
+    audioWs.binaryType = "arraybuffer";
+    audioWs.onopen = () => log("audio WS open");
+    audioWs.onclose = (e) => log(`audio WS closed (${e.code})`);
+    audioWs.onerror = () => log("audio WS error");
+    audioWs.onmessage = (e) => play.port.postMessage(e.data);
+    cap.port.onmessage = (e) => {
+      if (audioWs && audioWs.readyState === 1) audioWs.send(e.data);
+    };
 
-  const evWs = new WebSocket(
-    `${proto}://${location.host}/ws/events?feed=rt&token=${encodeURIComponent(token)}`);
-  evWs.onmessage = (e) => log("event " + e.data);
-  document.getElementById("ring").disabled = false;
-  document.getElementById("hang").disabled = false;
+    const evWs = new WebSocket(
+      `${proto}://${location.host}/ws/events?feed=rt&token=${encodeURIComponent(token)}`);
+    evWs.onopen = () => log("events WS open");
+    evWs.onclose = (e) => log(`events WS closed (${e.code})`);
+    evWs.onerror = () => log("events WS error");
+    evWs.onmessage = (e) => log("event " + e.data);
+    document.getElementById("ring").disabled = false;
+    document.getElementById("hang").disabled = false;
+  } catch (err) {
+    log("SETUP FAILED: " + err);
+    btn.disabled = false;
+  }
 };
 document.getElementById("ring").onclick = async () => {
   const token = document.getElementById("token").value;
-  const r = await fetch(`/admin/test-ring?token=${encodeURIComponent(token)}`,
-                        { method: "POST" });
-  log("test-ring -> " + r.status);
+  try {
+    const r = await fetch(`/admin/test-ring?token=${encodeURIComponent(token)}`,
+                          { method: "POST" });
+    log("test-ring -> " + r.status + " " + await r.text());
+  } catch (err) { log("test-ring FAILED: " + err); }
 };
 document.getElementById("hang").onclick = async () => {
   const token = document.getElementById("token").value;
-  const r = await fetch(`/admin/hangup?token=${encodeURIComponent(token)}`,
-                        { method: "POST" });
-  log("hangup -> " + r.status);
+  try {
+    const r = await fetch(`/admin/hangup?token=${encodeURIComponent(token)}`,
+                          { method: "POST" });
+    log("hangup -> " + r.status + " " + await r.text());
+  } catch (err) { log("hangup FAILED: " + err); }
 };
 </script>
