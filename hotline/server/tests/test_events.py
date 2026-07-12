@@ -32,3 +32,17 @@ async def test_unsubscribe_stops_delivery():
     await asyncio.sleep(0.05)
     assert q.empty()
     await bus.stop()
+
+
+async def test_delay_decrease_takes_effect_immediately():
+    bus = EventBus(delay_n=5.0)
+    await bus.start()
+    delayed = bus.subscribe("delayed")
+    bus.publish({"type": "a"})
+    bus.publish({"type": "b"})
+    await asyncio.sleep(0.05)
+    bus.delay_n = 0.05  # dial the knob down mid-flight
+    ev1 = await asyncio.wait_for(delayed.get(), 1.0)
+    ev2 = await asyncio.wait_for(delayed.get(), 1.0)
+    assert [ev1["type"], ev2["type"]] == ["a", "b"]
+    await bus.stop()
