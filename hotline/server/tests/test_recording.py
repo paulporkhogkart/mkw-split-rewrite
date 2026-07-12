@@ -35,3 +35,20 @@ def test_sweep_retention(tmp_path):
 
 def test_free_space_positive(tmp_path):
     assert free_space_gib(tmp_path) > 0
+
+
+def test_free_space_probes_without_creating(tmp_path):
+    missing = tmp_path / "not" / "yet" / "here"
+    gib = free_space_gib(missing)
+    assert gib > 0
+    assert not missing.exists() and not (tmp_path / "not").exists()
+
+
+def test_close_is_idempotent(tmp_path):
+    rec = CallRecorder(tmp_path / "call1")
+    rec.add_caller(audio.SILENCE_FRAME)
+    out = rec.close()
+    first_mix = (out / "mix.wav").read_bytes()
+    rec.add_caller(audio.SILENCE_FRAME)  # stray frame after close
+    assert rec.close() == out            # no-op, same dir
+    assert (out / "mix.wav").read_bytes() == first_mix  # evidence unchanged
