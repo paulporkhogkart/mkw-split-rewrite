@@ -115,6 +115,18 @@ async def test_listener_exception_does_not_kill_pipe():
     await server.close()
 
 
+async def test_off_event_removes_listener():
+    client = AriClient("http://127.0.0.1:1", "u", "p")
+
+    def cb(_e: dict) -> None:
+        return None
+
+    client.on_event(cb)
+    client.off_event(cb)
+    client.off_event(cb)  # idempotent
+    assert client._listeners == []
+
+
 async def test_bridge_cleans_up_on_addchannel_failure():
     record: dict = {}
     app = web.Application()

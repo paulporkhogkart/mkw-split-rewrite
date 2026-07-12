@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 
 import aiohttp
 
-from hotline.__main__ import build_and_run
+from hotline.__main__ import AriPhoneLeg, build_and_run
 from hotline.config import Config
 
 
@@ -24,3 +25,78 @@ async def test_boots_serves_and_stops(tmp_path, unused_tcp_port_factory):
             assert resp.status == 200
     stop.set()
     await asyncio.wait_for(task, 5)
+
+
+class FakeAri:
+    def __init__(self, fail_bridge: bool = False) -> None:
+        self.listeners: list = []
+        self.hungup: list[str] = []
+        self.fail_bridge = fail_bridge
+        self.bridged = None
+
+    def on_event(self, cb) -> None:
+        self.listeners.append(cb)
+
+    def off_event(self, cb) -> None:
+        if cb in self.listeners:
+            self.listeners.remove(cb)
+
+    async def originate_phone(self, caller_id: str, u: str) -> str:
+        return "ch-7"
+
+    async def external_media(self, u: str, host: str) -> str:
+        return "ch-em"
+
+    async def bridge(self, ids: list[str]) -> str:
+        if self.fail_bridge:
+            raise RuntimeError("bridge failed")
+        self.bridged = ids
+        return "br"
+
+    async def hangup(self, ch: str) -> None:
+        self.hungup.append(ch)
+
+
+class FakeSession:
+    def __init__(self) -> None:
+        self.call_id = uuid.uuid4().hex
+        self.answered = False
+        self.hungup = False
+
+    def on_phone_answered(self) -> None:
+        self.answered = True
+
+    def on_phone_hungup(self) -> None:
+        self.hungup = True
+
+
+async def test_ari_leg_happy_answer():
+    ari = FakeAri()
+    sess = FakeSession()
+    leg = AriPhoneLeg(sess, ari, 9101)
+    await leg.ring("PORK")
+    ari.listeners[0]({"type": "StasisStart", "channel": {"id": "ch-7"}})
+    await asyncio.sleep(0.05)
+    assert sess.answered and ari.bridged == ["ch-7", "ch-em"]
+
+
+async def test_ari_leg_bridge_failure_frees_call():
+    ari = FakeAri(fail_bridge=True)
+    sess = FakeSession()
+    leg = AriPhoneLeg(sess, ari, 9101)
+    await leg.ring("PORK")
+    ari.listeners[0]({"type": "StasisStart", "channel": {"id": "ch-7"}})
+    await asyncio.sleep(0.05)
+    assert not sess.answered
+    assert sess.hungup            # call slot freed
+    assert "ch-7" in ari.hungup   # phone channel not left dangling
+    assert ari.listeners == []    # leg disposed/unsubscribed
+
+
+async def test_ari_leg_hangup_disposes_listener():
+    ari = FakeAri()
+    sess = FakeSession()
+    leg = AriPhoneLeg(sess, ari, 9101)
+    await leg.ring("PORK")
+    await leg.hangup()
+    assert ari.listeners == []

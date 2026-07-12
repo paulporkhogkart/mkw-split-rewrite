@@ -25,6 +25,10 @@ class AriClient:
     def on_event(self, cb: Callable[[dict], None]) -> None:
         self._listeners.append(cb)
 
+    def off_event(self, cb: Callable[[dict], None]) -> None:
+        with contextlib.suppress(ValueError):
+            self._listeners.remove(cb)
+
     async def connect(self) -> None:
         self._session = aiohttp.ClientSession(headers=self._auth_header)
         url = f"{self._base}/ari/events?app={self.app}&api_key={self._api_key}"

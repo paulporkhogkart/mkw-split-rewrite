@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import os
 import signal
 from typing import Awaitable, Callable, Optional
@@ -16,10 +17,14 @@ from .db import Db
 from .events import EventBus
 from .http import make_app
 
+logger = logging.getLogger(__name__)
+
 
 class AriPhoneLeg:
     """Real phone leg: rings PJSIP/ata via ARI; audio flows over the
-    controller's AudioSocket session (Asterisk externalMedia dials us)."""
+    controller's AudioSocket session (Asterisk externalMedia dials us).
+    No-answer is covered by Asterisk's originate timeout (~30 s default):
+    the channel dies -> ChannelDestroyed -> on_phone_hungup."""
 
     def __init__(self, session: CallSession, ari: AriClient,
                  audiosocket_port: int) -> None:
@@ -28,6 +33,8 @@ class AriPhoneLeg:
         self._port = audiosocket_port
         self._channel_id: Optional[str] = None
         self._send_audio: Optional[Callable[[bytes], Awaitable[None]]] = None
+        self._answered_task: Optional[asyncio.Task] = None
+        self._disposed = False
         ari.on_event(self._on_ari_event)
 
     def set_audio_sender(self, cb: Callable[[bytes], Awaitable[None]]) -> None:
@@ -38,25 +45,49 @@ class AriPhoneLeg:
             caller_name, self._session.call_id)
 
     def _on_ari_event(self, event: dict) -> None:
+        if self._channel_id is None:
+            return
         ch = (event.get("channel") or {}).get("id")
         if ch != self._channel_id:
             return
-        if event.get("type") == "StasisStart":
-            asyncio.create_task(self._on_answered())
-        elif event.get("type") in ("StasisEnd", "ChannelDestroyed"):
+        etype = event.get("type")
+        if etype == "StasisStart" and self._answered_task is None:
+            self._answered_task = asyncio.create_task(self._on_answered())
+        elif etype in ("StasisEnd", "ChannelDestroyed"):
             self._session.on_phone_hungup()
+            self._dispose()
 
     async def _on_answered(self) -> None:
-        em = await self._ari.external_media(
-            self._session.call_id, f"127.0.0.1:{self._port}")
-        assert self._channel_id is not None
-        await self._ari.bridge([self._channel_id, em])
+        try:
+            em = await self._ari.external_media(
+                self._session.call_id, f"127.0.0.1:{self._port}")
+            assert self._channel_id is not None
+            await self._ari.bridge([self._channel_id, em])
+        except Exception:
+            logger.exception("answer wiring failed for call %s",
+                             self._session.call_id)
+            if self._channel_id:
+                with contextlib.suppress(Exception):
+                    await self._ari.hangup(self._channel_id)
+            self._session.on_phone_hungup()  # frees the call slot
+            self._dispose()
+            return
         self._session.on_phone_answered()
 
     async def hangup(self) -> None:
         if self._channel_id:
             with contextlib.suppress(Exception):
                 await self._ari.hangup(self._channel_id)
+        self._dispose()
+
+    def _dispose(self) -> None:
+        if self._disposed:
+            return
+        self._disposed = True
+        self._ari.off_event(self._on_ari_event)
+        task = self._answered_task
+        if task and task is not asyncio.current_task():
+            task.cancel()
 
     async def send_frame(self, frame: bytes) -> None:
         if self._send_audio:
