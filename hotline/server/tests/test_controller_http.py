@@ -85,3 +85,27 @@ async def test_echo_call_roundtrip(tmp_path, unused_tcp_port):
 
     await ws.close(); await ev.close()
     await client.close(); await ctl.stop(); await bus.stop(); db.close()
+
+
+async def test_events_ws_unsubscribes_on_idle_disconnect(tmp_path, unused_tcp_port):
+    _, bus, db, ctl, client = await make_stack(tmp_path, unused_tcp_port)
+    ev = await client.ws_connect("/ws/events?feed=rt&token=dev-token")
+    await asyncio.sleep(0.05)
+    assert len(bus._subs["rt"]) == 1
+    await ev.close()  # idle disconnect: no events flowing
+    await asyncio.sleep(0.2)
+    assert len(bus._subs["rt"]) == 0  # handler exited, subscription gone
+    await client.close(); await ctl.stop(); await bus.stop(); db.close()
+
+
+async def test_stop_joins_reap_before_returning(tmp_path, unused_tcp_port):
+    _, bus, db, ctl, client = await make_stack(tmp_path, unused_tcp_port)
+    ws = await client.ws_connect("/ws/audio?token=dev-token")
+    resp = await client.post("/admin/test-ring?token=dev-token&seconds=30")
+    call_id = (await resp.json())["call_id"]
+    await asyncio.sleep(0.1)  # call active
+    await ctl.stop()  # must not return until _reap finalized the row
+    row = db._conn.execute(
+        "SELECT outcome FROM calls WHERE call_id=?", (call_id,)).fetchone()
+    assert row and row[0] == "dropped"
+    await ws.close(); await client.close(); await bus.stop(); db.close()

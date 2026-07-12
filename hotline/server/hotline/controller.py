@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import uuid
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
@@ -44,6 +45,7 @@ class Controller:
         self._caller_send: Optional[Callable[[bytes], Awaitable[None]]] = None
         self._call: Optional[CallSession] = None
         self._phone_sess: Optional[AudioSocketSession] = None
+        self._reap_task: Optional[asyncio.Task] = None
 
     # -- lifecycle -----------------------------------------------------------
     async def start(self) -> None:
@@ -54,6 +56,9 @@ class Controller:
     async def stop(self) -> None:
         if self._call:
             await self._call.end("dropped")
+        if self._reap_task:
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(self._reap_task, 10)
         await self._audiosocket.stop()
 
     def _recordings_root(self) -> Path:
@@ -106,7 +111,7 @@ class Controller:
         if phone is None:
             call._phone = self._factory(call)  # real leg needs the session
         self._call = call
-        asyncio.create_task(self._reap(call))
+        self._reap_task = asyncio.create_task(self._reap(call))
         await call.start()
         return call_id
 

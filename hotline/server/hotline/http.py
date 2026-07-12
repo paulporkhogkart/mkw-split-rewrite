@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import hmac
 from pathlib import Path
 
@@ -83,13 +85,26 @@ async def _ws_events(request: web.Request) -> web.WebSocketResponse:
     ws = web.WebSocketResponse()
     await ws.prepare(request)
     q = bus.subscribe(feed)
+    receive_task = asyncio.create_task(ws.receive())  # resolves on close/any msg
     try:
-        while not ws.closed:
-            event = await q.get()
-            await ws.send_json(event)
+        while True:
+            get_task = asyncio.create_task(q.get())
+            done, _ = await asyncio.wait(
+                {get_task, receive_task}, return_when=asyncio.FIRST_COMPLETED)
+            if get_task in done:
+                await ws.send_json(get_task.result())
+            else:
+                get_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await get_task
+            if receive_task in done:
+                break  # client closed or spoke — either way we're done
     except (ConnectionError, RuntimeError):
         pass
     finally:
+        receive_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await receive_task
         bus.unsubscribe(feed, q)
     return ws
 
