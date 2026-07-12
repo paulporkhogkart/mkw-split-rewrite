@@ -41,8 +41,12 @@ class AriPhoneLeg:
         self._send_audio = cb
 
     async def ring(self, caller_name: str) -> None:
-        self._channel_id = await self._ari.originate_phone(
-            caller_name, self._session.call_id)
+        try:
+            self._channel_id = await self._ari.originate_phone(
+                caller_name, self._session.call_id)
+        except Exception:
+            self._dispose()
+            raise
 
     def _on_ari_event(self, event: dict) -> None:
         if self._channel_id is None:
@@ -78,6 +82,7 @@ class AriPhoneLeg:
         if self._channel_id:
             with contextlib.suppress(Exception):
                 await self._ari.hangup(self._channel_id)
+        self._session.on_phone_hungup()  # PhoneLeg contract: hangup() ends the call
         self._dispose()
 
     def _dispose(self) -> None:

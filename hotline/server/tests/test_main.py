@@ -4,6 +4,7 @@ import asyncio
 import uuid
 
 import aiohttp
+import pytest
 
 from hotline.__main__ import AriPhoneLeg, build_and_run
 from hotline.config import Config
@@ -99,4 +100,18 @@ async def test_ari_leg_hangup_disposes_listener():
     leg = AriPhoneLeg(sess, ari, 9101)
     await leg.ring("PORK")
     await leg.hangup()
+    assert sess.hungup            # PhoneLeg contract: hangup() ends the call
+    assert ari.listeners == []
+
+
+async def test_ari_leg_ring_failure_disposes():
+    class FailingAri(FakeAri):
+        async def originate_phone(self, caller_id: str, u: str) -> str:
+            raise RuntimeError("asterisk down")
+
+    ari = FailingAri()
+    sess = FakeSession()
+    leg = AriPhoneLeg(sess, ari, 9101)
+    with pytest.raises(RuntimeError):
+        await leg.ring("PORK")
     assert ari.listeners == []
