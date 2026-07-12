@@ -44,6 +44,7 @@ class Controller:
                                               self._on_audiosocket_session)
         self._caller_send: Optional[Callable[[bytes], Awaitable[None]]] = None
         self._call: Optional[CallSession] = None
+        self._call_phone_leg: Optional[PhoneLeg] = None
         self._phone_sess: Optional[AudioSocketSession] = None
         self._reap_task: Optional[asyncio.Task] = None
 
@@ -109,10 +110,22 @@ class Controller:
                            recorder=recorder, send_to_caller=send_to_caller)
         holder.append(call)
         if phone is None:
-            call._phone = self._factory(call)  # real leg needs the session
+            phone = self._factory(call)  # real leg needs the session
+            call._phone = phone
         self._call = call
+        self._call_phone_leg = phone
         self._reap_task = asyncio.create_task(self._reap(call))
-        await call.start()
+        try:
+            await call.start()
+        except Exception:
+            # a real leg's ring() can raise (e.g. Asterisk down) -- without
+            # this the slot wedges: self._call stays set and every future
+            # test_ring() 409s forever.
+            await call.end("dropped")
+            self._call = None
+            self._call_phone_leg = None
+            self._reap_task = None
+            raise
         return call_id
 
     async def _reap(self, call: CallSession) -> None:
@@ -122,6 +135,7 @@ class Controller:
             int(call.seconds_used), f"recordings/{call.call_id}")
         if self._call is call:
             self._call = None
+            self._call_phone_leg = None
         if self._phone_sess:
             await self._phone_sess.terminate()
             self._phone_sess = None
@@ -140,4 +154,7 @@ class Controller:
         self._phone_sess = sess
         sess.on_audio(call.on_phone_frame)
         sess.on_closed(call.on_phone_hungup)
+        leg = self._call_phone_leg
+        if leg is not None and hasattr(leg, "set_audio_sender"):
+            leg.set_audio_sender(sess.send_audio)
         return True
