@@ -4,6 +4,7 @@ import asyncio
 import uuid as uuidlib
 
 import aiohttp
+import numpy as np
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
@@ -54,7 +55,11 @@ async def test_full_pipeline_wav_both_directions(tmp_path, unused_tcp_port):
                     await asyncio.sleep(0.02)
 
             async def listen():
-                while len(phone_got) < 15:
+                # 25 frames: the pump's first ~5 are jitter pre-buffer silence
+                # (target_ms=100 -> 5 frames; plus a few dropped during the
+                # set_audio_sender handshake), then the 20-frame caller tone
+                # -- 25 guarantees tone frames land inside the window.
+                while len(phone_got) < 25:
                     kind, payload = await aus.read_frame(reader)
                     if kind == aus.KIND_AUDIO:
                         phone_got.append(payload)
@@ -83,6 +88,7 @@ async def test_full_pipeline_wav_both_directions(tmp_path, unused_tcp_port):
     await ctl.start()
     client = TestClient(TestServer(make_app(cfg, ctl)))
     await client.start_server()
+    rt = bus.subscribe("rt")
 
     ws = await client.ws_connect("/ws/audio?token=dev-token")
     resp = await client.post("/admin/test-ring?token=dev-token&seconds=30")
@@ -104,16 +110,29 @@ async def test_full_pipeline_wav_both_directions(tmp_path, unused_tcp_port):
 
     await asyncio.gather(send_caller(), recv_caller())
 
-    # phone->caller direction arrived at the caller WS
+    # phone->caller direction arrived at the caller WS -- and carried the
+    # 220 Hz tone's energy, not just live-but-silent plumbing
     assert len(caller_got) >= 10 * audio.FRAME_BYTES
+    caller_pcm = np.frombuffer(bytes(caller_got), dtype=np.int16)
+    assert np.abs(caller_pcm).max() > 5000  # phone tone actually reached the caller
 
     # caller->phone direction arrived at the fake Asterisk client, via the
-    # controller's set_audio_sender wiring
+    # controller's set_audio_sender wiring -- and carried the 440 Hz tone
     await asyncio.wait_for(fake_done.wait(), 5)
-    assert len(phone_got) >= 15
+    assert len(phone_got) >= 25
+    phone_pcm = np.frombuffer(b"".join(phone_got), dtype=np.int16)
+    assert np.abs(phone_pcm).max() > 5000  # caller tone actually crossed the pipe
 
     await client.post("/admin/hangup?token=dev-token")
     await asyncio.sleep(0.2)
+
+    # events observed, in order: ringing and active seen, ended is last
+    seen = []
+    while not rt.empty():
+        seen.append((await rt.get())["type"])
+    assert "call_ringing" in seen and "call_active" in seen
+    assert seen[-1] == "call_ended"
+    bus.unsubscribe("rt", rt)
 
     # recordings exist and phone leg audio was recorded
     rec = tmp_path / "recordings" / call_id
@@ -130,11 +149,12 @@ async def test_full_pipeline_wav_both_directions(tmp_path, unused_tcp_port):
 
 
 async def test_ring_unwedges_slot_when_start_raises(tmp_path, unused_tcp_port, monkeypatch):
-    """If a real leg's ring() raises inside CallSession.start() (e.g. Asterisk
-    is down), test_ring must free self._call / self._call_phone_leg /
-    self._reap_task before re-raising -- otherwise the single call slot
-    wedges forever and every subsequent test_ring() 409s with "call already
-    active"."""
+    """Echo-mode session with CallSession.start monkeypatched to raise --
+    exercises test_ring's unwind path: on a start() failure it must free
+    self._call / self._call_phone_leg / self._reap_task before re-raising,
+    or the single call slot wedges and every subsequent test_ring() 409s
+    with "call already active". A real leg's ring() failure (e.g. Asterisk
+    down) propagates through start() and takes this same path."""
     cfg = Config.from_env({
         "HOTLINE_ENV": "dev", "HOTLINE_DATA_DIR": str(tmp_path),
         "HOTLINE_AUDIOSOCKET_PORT": str(unused_tcp_port),
