@@ -175,8 +175,15 @@ rev-2/3 research rounds:
   ATA** so mid-call dial-spinning or hook bounce does nothing.
 - **Handset cord is hardwired internally** (no modular jack; era cords may share a return
   conductor) — this is why the stream tap is **line-side** (§7.1), not handset-side.
-- **Adapter — direction matters:** buy an **RJ11-plug → 605-SOCKET adaptor** (the phone's
-  605 plug goes INTO it; ~A$5–10 eBay AU). The common reverse adaptor is useless here.
+- **Adapter — naming verified 2026-07-12:** in the AU 600-series the **605 is the plug** on
+  the phone's cord; the socket that receives it is a **610**. Buy an **RJ11-to-610-SOCKET
+  adaptor** — the phone's 605 plug goes into the 610 socket, RJ11 end to the ATA. Old
+  Phones Australia sells exactly this (~A$15), marketed specifically for Grandstream
+  HT-series ATAs "so no need to modify your telephone to make the bells ring again" —
+  preferred pick; generic eBay equivalents ~A$5–10. If the 802 still won't ring, the mode-3
+  bell strap above remains the fix. **Avoid the common reverse product** ("605 plug to RJ11
+  socket" — a male 605 with an RJ11 hole, for plugging modern phones into old wall sockets;
+  useless here).
 
 ### 5.2 The ATA: Grandstream HT802V2
 
@@ -235,7 +242,7 @@ viewer browser ──mic frames (20 ms PCM/Opus) over WSS──► Cloudflare �
                                                             ▼ AudioSocket (8 kHz PCM, localhost TCP)
                                                           Asterisk (same Pi)
                                                             ▼ SIP/RTP — SERVICES ↔ PHONE zones only
-                                                          HT802V2 ATA ──RJ11→605──► Telecom 802 🔔
+                                                          HT802V2 ATA ──RJ11→610──► Telecom 802 🔔
                                                                     └─(line coupler → §7 analog chain)
 ```
 
@@ -463,7 +470,8 @@ only guarantees the move stays mechanical.)
 monthly):**
 
 1. Grandstream **HT802V2** — ~A$63–89 (AV Mart et al.).
-2. **RJ11-plug → 605-socket adaptor** — ~A$5–10, eBay AU (direction matters, §5.1).
+2. **RJ11-to-610-socket adaptor** — Old Phones Australia ~A$15 (sold for Grandstream HT
+   ATAs; nomenclature + direction in §5.1); generic eBay AU equivalents ~A$5–10.
 3. **Line coupler** — baseline ~A$30–80; premium JK-class ~US$250–300 (§5.3; verify pricing
    at purchase). Small inline pad (~A$10) on standby for the DI input.
 4. **DUMP button** — Stream Deck key/pedal, foot switch, or big red USB button (~A$15–130).
@@ -522,8 +530,9 @@ rung of a named ladder gets used.
 Primary sources carried from rev 3 (Telecom 802 reference incl. bell/inset/receiver specs ·
 ACMA class-licence + spectrum pages · Cloudflare Tunnel protocol docs (HTTP+WS to anonymous
 visitors; the no-VPS basis) · Grandstream HT80x admin guide + AU listings · Cisco SPA112 EOL
-notice · Twitch Helix + EventSub references · eBay AU 605-adaptor listings). New in this
-rebuild: Paul's network inventory (UDM-Pro + UniFi PoE switching + inter-building bridge,
+notice · Twitch Helix + EventSub references · Old Phones Australia RJ11-to-610-socket
+adaptor listing + Access Communications 605/610/RJ plugs-and-sockets guide (nomenclature
+verified 2026-07-12)). New in this rebuild: Paul's network inventory (UDM-Pro + UniFi PoE switching + inter-building bridge,
 Telstra 5G CGNAT) and audio inventory (Audient iD4 MkII, SM58), gathered 2026-07-12.
 
 Lineage: rev 1 (2026-07-11, DECT + VPS + call-path bleep) → rev 2.x (spectrum research;
