@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import uuid as uuidlib
 from typing import Awaitable, Callable, Optional
+
+logger = logging.getLogger(__name__)
 
 KIND_TERMINATE = 0x00
 KIND_UUID = 0x01
@@ -81,9 +84,11 @@ class AudioSocketSession:
 
 class AudioSocketServer:
     def __init__(self, port: int,
-                 on_session: Callable[[AudioSocketSession], Awaitable[bool]]) -> None:
+                 on_session: Callable[[AudioSocketSession], Awaitable[bool]],
+                 on_session_timeout: float = 5.0) -> None:
         self._port = port
         self._on_session = on_session
+        self._on_session_timeout = on_session_timeout
         self._server: Optional[asyncio.base_events.Server] = None
         self._tasks: set[asyncio.Task] = set()
 
@@ -98,7 +103,10 @@ class AudioSocketServer:
         for t in tasks:
             t.cancel()
         if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for r in results:
+                if isinstance(r, Exception):
+                    logger.warning("audiosocket session task died: %r", r)
         if self._server:
             await self._server.wait_closed()
 
@@ -115,7 +123,8 @@ class AudioSocketServer:
             return
         sess = AudioSocketSession(uuidlib.UUID(bytes=payload), reader, writer)
         try:
-            accepted = await self._on_session(sess)
+            accepted = await asyncio.wait_for(
+                self._on_session(sess), self._on_session_timeout)
         except Exception:
             accepted = False
         if not accepted:

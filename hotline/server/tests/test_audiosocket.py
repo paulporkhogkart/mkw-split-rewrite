@@ -106,8 +106,29 @@ async def test_send_audio_survives_peer_disconnect(unused_tcp_port):
     await server.start()
     _reader, writer = await _connect(unused_tcp_port, uuid.uuid4())
     await asyncio.sleep(0.05)
-    writer.close()  # peer vanishes mid-call
-    await asyncio.sleep(0.05)
-    for _ in range(3):  # the 20 ms pump keeps sending — must not raise
-        await sessions[0].send_audio(SILENCE_FRAME)
+    sess = sessions[0]
+
+    async def dead_drain() -> None:
+        raise ConnectionResetError("peer gone")
+
+    sess._writer.drain = dead_drain  # deterministic mid-call hangup
+    await sess.send_audio(SILENCE_FRAME)  # exercises the except-branch: no raise
+    assert sess._closed
+    await sess.send_audio(SILENCE_FRAME)  # guard branch: still no raise
+    writer.close()
+    await server.stop()
+
+
+async def test_stalled_on_session_terminated(unused_tcp_port):
+    async def on_session(_sess: aus.AudioSocketSession) -> bool:
+        await asyncio.sleep(10)
+        return True
+
+    server = aus.AudioSocketServer(unused_tcp_port, on_session,
+                                   on_session_timeout=0.05)
+    await server.start()
+    reader, writer = await _connect(unused_tcp_port, uuid.uuid4())
+    kind, _ = await aus.read_frame(reader)
+    assert kind == aus.KIND_TERMINATE
+    writer.close()
     await server.stop()
