@@ -1,7 +1,12 @@
 # The Pork Phone — viewer call-in hotline (design)
 
+> **SUPERSEDED (2026-07-12), pre-sign-off** — replaced by the security-first rebuild in
+> [`2026-07-12-pork-phone-hotline-design.md`](2026-07-12-pork-phone-hotline-design.md).
+> Product behavior defined here carried into the new spec as requirements; the architecture
+> was re-derived from scratch. Kept for lineage.
+
 **Date:** 2026-07-11 · **rev 3** 2026-07-12 (three review rounds folded in) · **Status:**
-DRAFT — awaiting Paul's sign-off · **Surface:** new `hotline/` service (on the Pi host) + a
+SUPERSEDED (was DRAFT — awaiting Paul's sign-off) · **Surface:** new `hotline/` service (on the Pi host) + a
 bleeper daemon (streaming PC) + unlisted `web/` page + one ATA + **Paul's Telecom 802 rotary
 phone**. No VPS, no new monthly cost, no radio anywhere in the design.
 
