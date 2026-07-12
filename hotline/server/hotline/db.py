@@ -14,6 +14,7 @@ class Db:
         path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(path, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA foreign_keys=ON")
 
     def init(self) -> None:
         schema = resources.files("hotline").joinpath("schema.sql").read_text()

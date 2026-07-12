@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import sqlite3
+
+import pytest
+
 from hotline.db import Db
 
 
@@ -31,4 +35,12 @@ def test_settings(tmp_path):
     assert db.get_setting("delay_n", "4") == "4"
     db.set_setting("delay_n", "2")
     assert db.get_setting("delay_n", "4") == "2"
+    db.close()
+
+
+def test_strikes_require_existing_call(tmp_path):
+    db = Db(tmp_path / "h.db")
+    db.init()
+    with pytest.raises(sqlite3.IntegrityError):
+        db.add_strike("nope", 0, 100, "dump")
     db.close()
