@@ -1,0 +1,67 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>PORK PHONE — bench test page</title>
+<style>
+  body { font-family: monospace; max-width: 640px; margin: 2rem auto; }
+  button { font: inherit; padding: .5rem 1rem; margin-right: .5rem; }
+  #log { background: #111; color: #0f0; padding: 1rem; height: 16rem;
+         overflow-y: scroll; white-space: pre-wrap; }
+</style>
+<h1>THE PORK PHONE — bench test</h1>
+<p>token <input id="token" value="dev-token">
+   <button id="connect">CONNECT MIC</button>
+   <button id="ring" disabled>RING PHONE</button>
+   <button id="hang" disabled>HANG UP</button></p>
+<pre id="log"></pre>
+<script>
+const log = (m) => {
+  const el = document.getElementById("log");
+  el.textContent += m + "\n"; el.scrollTop = el.scrollHeight;
+};
+let audioWs = null;
+document.getElementById("connect").onclick = async () => {
+  const token = document.getElementById("token").value;
+  const ctx = new AudioContext({ sampleRate: 48000 });
+  await ctx.audioWorklet.addModule("/static/capture-worklet.js");
+  await ctx.audioWorklet.addModule("/static/playback-worklet.js");
+  const mic = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true } });
+  const src = ctx.createMediaStreamSource(mic);
+  const lp1 = new BiquadFilterNode(ctx, { type: "lowpass", frequency: 3400 });
+  const lp2 = new BiquadFilterNode(ctx, { type: "lowpass", frequency: 3400 });
+  const cap = new AudioWorkletNode(ctx, "capture-worklet");
+  src.connect(lp1).connect(lp2).connect(cap);
+  const play = new AudioWorkletNode(ctx, "playback-worklet");
+  const lp3 = new BiquadFilterNode(ctx, { type: "lowpass", frequency: 3400 });
+  play.connect(lp3).connect(ctx.destination);
+
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  audioWs = new WebSocket(
+    `${proto}://${location.host}/ws/audio?token=${encodeURIComponent(token)}`);
+  audioWs.binaryType = "arraybuffer";
+  audioWs.onopen = () => { log("audio WS open"); };
+  audioWs.onclose = (e) => log(`audio WS closed (${e.code})`);
+  audioWs.onmessage = (e) => play.port.postMessage(e.data);
+  cap.port.onmessage = (e) => {
+    if (audioWs && audioWs.readyState === 1) audioWs.send(e.data);
+  };
+
+  const evWs = new WebSocket(
+    `${proto}://${location.host}/ws/events?feed=rt&token=${encodeURIComponent(token)}`);
+  evWs.onmessage = (e) => log("event " + e.data);
+  document.getElementById("ring").disabled = false;
+  document.getElementById("hang").disabled = false;
+};
+document.getElementById("ring").onclick = async () => {
+  const token = document.getElementById("token").value;
+  const r = await fetch(`/admin/test-ring?token=${encodeURIComponent(token)}`,
+                        { method: "POST" });
+  log("test-ring -> " + r.status);
+};
+document.getElementById("hang").onclick = async () => {
+  const token = document.getElementById("token").value;
+  const r = await fetch(`/admin/hangup?token=${encodeURIComponent(token)}`,
+                        { method: "POST" });
+  log("hangup -> " + r.status);
+};
+</script>
