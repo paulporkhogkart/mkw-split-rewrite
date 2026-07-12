@@ -6,7 +6,11 @@ Install: Asterisk is NOT in Raspberry Pi OS / Debian Bookworm's default repos
      (check first: `apt-cache policy asterisk`).
   2. Debian sid/unstable pin or a maintained third-party repo (verify signing).
   3. Build from source (asterisk.org LTS tarball, ./configure && make menuselect
-     — enable res_ari, res_audiosocket, chan_audiosocket — && make && make install).
+     — enable res_ari, res_audiosocket, chan_audiosocket, app_audiosocket
+     (res_=core, chan_=externalMedia driver, app_=the dialplan AudioSocket()
+     app the fallback route uses) — && make && make install). A source build
+     installs no systemd unit: run `make config` to add one, or the
+     `systemctl restart asterisk` below has nothing to restart.
 Record which route was taken + `asterisk -rx "core show version"` below at Task 15.
 
 Copy each `*.tmpl` into /etc/asterisk/ (merge, don't clobber existing dialplan

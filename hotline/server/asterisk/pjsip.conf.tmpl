@@ -9,7 +9,8 @@ bind=__PI_LAN_IP__:5060      ; LAN interface only — never the tunnel
 [ata]
 type=endpoint
 context=pork
-acl=ata-acl
+deny=0.0.0.0/0.0.0.0
+permit=__ATA_IP__/255.255.255.255
 disallow=all
 allow=ulaw,alaw,slin
 auth=ata-auth
@@ -29,6 +30,11 @@ type=aor
 max_contacts=1
 qualify_frequency=30
 
+; NOTE: type=acl sections are enforced GLOBALLY by res_pjsip_acl on all inbound
+; SIP — no endpoint acl= reference needed (endpoint acl= resolves against
+; acl.conf, a DIFFERENT registry; referencing this section there would mark an
+; undefined ACL and reject everything). The endpoint above also carries inline
+; deny/permit as a second layer.
 [ata-acl]
 type=acl
 deny=0.0.0.0/0.0.0.0
