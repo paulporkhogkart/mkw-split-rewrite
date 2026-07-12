@@ -1,7 +1,7 @@
 # The Pork Phone — viewer call-in hotline (security-first rebuild)
 
-**Date:** 2026-07-12 · **Status:** DRAFT — awaiting Paul's sign-off (HARD GATE: no
-implementation before approval) · **Supersedes:** `2026-07-11-pork-phone-hotline-design.md`
+**Date:** 2026-07-12 · **Status:** **APPROVED 2026-07-12** (Paul's sign-off; decisions
+recorded in §15) · **Supersedes:** `2026-07-11-pork-phone-hotline-design.md`
 (rev 3, kept in history) · **Surfaces:** new `hotline/` service (Pi) + bleeper daemon
 (streaming PC) + unlisted `web/` page + one ATA + **Paul's Telecom 802 rotary phone**.
 No VPS, no monthly cost, no radio anywhere in the design, **no inbound connection to the
@@ -248,7 +248,8 @@ viewer browser ──mic frames (20 ms PCM/Opus) over WSS──► Cloudflare �
 
 - **Hotline app** (one asyncio service on the Pi; Python vs Node decided at build): serves
   the `/phone` page APIs, `/console`, both event feeds, Twitch OAuth + EventSub
-  (HMAC-verified), the queue + credit ledger (own SQLite), the browser-audio bridge (~100 ms
+  (HMAC-verified), the queue (pluggable ring policy — manual v1, pbenguin-screen auto-answer
+  seam, §15) + credit ledger (own SQLite), the browser-audio bridge (~100 ms
   jitter buffer, decode, resample), per-call recording, and call control via ARI
   ("originate PJSIP/ata, AudioSocket me the audio").
 - **Asterisk** (same Pi): the ATA's registrar, G.711 to the phone, AU ring cadence, CNAM =
@@ -502,12 +503,19 @@ Each phase lands behind the unlisted page; nothing touches existing surfaces.
 
 ## 15. Open decisions (at sign-off) & known-unverified
 
-**Open decisions:** delay N default (4 vs 2 — written default 4, runtime-tunable) · dump
-semantics (whole-buffer vs hold-to-span) + which physical button · reward economics (e.g.
-25k pts / 60 s, 1/user/stream, 120 s cooldown — console-tunable) · auto-ring vs manual
-ANSWER NEXT (recommend manual) · naming (`hotline/` + "THE PORK PHONE" placeholder) ·
-coupler model (bench pick; premium pre-approved) · interface upgrade timing (structural
-impact: none) · partial-refund policy for dropped-after-answer calls. Build-time (not
+**Decided at sign-off (2026-07-12):**
+- **Delay N = 4 s** (stays a runtime knob; 4 is the committed default).
+- **Answer mode: manual ANSWER NEXT for v1**, with a designed seam for a future
+  **auto-answer ring policy driven by pbenguin screen state** — the desktop app already
+  reports presence/activity to the Pi (verify exact event granularity at build); the queue
+  exposes `ring_policy: manual | auto(predicate)` so "auto-ring only on safe screens (e.g.
+  menus, not mid-race)" is a policy plug-in later, not a rework.
+
+**Still open, decided as needed during build:** dump semantics (whole-buffer vs
+hold-to-span) + which physical button · reward economics (e.g. 25k pts / 60 s,
+1/user/stream, 120 s cooldown — console-tunable) · naming (`hotline/` + "THE PORK PHONE"
+placeholder) · coupler model (bench pick; premium pre-approved) · interface upgrade timing
+(structural impact: none) · partial-refund policy for dropped-after-answer calls. Build-time (not
 blocking sign-off): implementation language for the app and the daemon (Python vs Node vs a
 small compiled binary — the implementation plan decides).
 
