@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import time
 from typing import Awaitable, Callable, Optional, Protocol
 
@@ -10,9 +11,15 @@ from .events import EventBus
 from .jitter import JitterBuffer
 from .recording import CallRecorder
 
+logger = logging.getLogger(__name__)
+
 WARNING_S = 10.0
 BEEP = audio.tone_frames(440.0, 200)
 TIMES_UP = audio.tone_frames(300.0, 400)
+
+# If no phone frame arrived within this window, the pump delivers caller-bound
+# tones itself (phone audio normally ticks every 20 ms and carries the tone mix).
+CALLER_TONE_FALLBACK_S = 0.04
 
 
 class PhoneLeg(Protocol):
@@ -38,11 +45,15 @@ class CallSession:
         self._send_to_caller = send_to_caller
         self._grace_s = grace_s
         self._jitter = JitterBuffer()
-        self._inject: list[bytes] = []      # tones mixed into both directions
+        self._inject_phone: list[bytes] = []    # tones bound for the phone (mixed in pump)
+        self._inject_caller: list[bytes] = []   # tones bound for the caller (mixed on forward)
         self._answered_at: Optional[float] = None
         self._warned = False
+        self._expired = False
+        self._last_phone_frame = 0.0
         self._pump_task: Optional[asyncio.Task] = None
         self._grace_task: Optional[asyncio.Task] = None
+        self._side_tasks: set[asyncio.Task] = set()
         self._ending = False
 
     # -- lifecycle ---------------------------------------------------------
@@ -52,7 +63,7 @@ class CallSession:
         await self._phone.ring(self.caller_label)
 
     def on_phone_answered(self) -> None:
-        if self._answered_at is not None:
+        if self._answered_at is not None or self._ending:
             return
         self._answered_at = time.monotonic()
         self._bus.publish({"type": "call_active", "call_id": self.call_id,
@@ -60,7 +71,7 @@ class CallSession:
         self._pump_task = asyncio.create_task(self._pump())
 
     def on_phone_hungup(self) -> None:
-        asyncio.create_task(self.end(
+        self._spawn(self.end(
             "completed" if self._answered_at is not None else "dropped"))
 
     def on_caller_frame(self, frame: bytes) -> None:
@@ -70,46 +81,73 @@ class CallSession:
         if self._grace_task is None and not self._ending:
             self._grace_task = asyncio.create_task(self._grace())
 
+    def on_caller_recovered(self) -> None:
+        if self._grace_task is not None:
+            self._grace_task.cancel()
+            self._grace_task = None
+
     async def _grace(self) -> None:
         await asyncio.sleep(self._grace_s)
         await self.end("dropped")
 
     def on_phone_frame(self, frame: bytes) -> None:
-        self._recorder.add_phone(frame)
-        asyncio.create_task(self._send_to_caller(frame))
+        if self._ending:
+            return
+        self._recorder.add_phone(frame)          # raw phone leg, pre-mix
+        self._last_phone_frame = time.monotonic()
+        out = frame
+        if self._inject_caller:
+            out = audio.mix_frames(frame, self._inject_caller.pop(0))
+        self._spawn(self._send_to_caller(out))
 
-    # -- 20 ms pump: caller->phone, timer, tone injection --------------------
+    # -- helpers -------------------------------------------------------------
+    def _spawn(self, coro: Awaitable[None]) -> None:
+        task = asyncio.create_task(coro)
+        self._side_tasks.add(task)
+        task.add_done_callback(self._side_tasks.discard)
+
+    def _queue_tones(self, frames: list[bytes]) -> None:
+        self._inject_phone.extend(frames)
+        self._inject_caller.extend(frames)
+
+    # -- 20 ms pump: caller->phone, timer, tone injection ----------------------
     async def _pump(self) -> None:
         next_t = time.monotonic()
         try:
             while not self._ending:
                 frame = self._jitter.pull()
-                if self._inject:
-                    tone = self._inject.pop(0)
-                    frame = audio.mix_frames(frame, tone)
-                    await self._send_to_caller(tone)   # both directions
-                self._recorder.add_caller(frame)
+                self._recorder.add_caller(frame)  # raw caller leg, pre-mix
+                if self._inject_phone:
+                    frame = audio.mix_frames(frame, self._inject_phone.pop(0))
                 await self._phone.send_frame(frame)
 
-                elapsed = time.monotonic() - self._answered_at
+                now = time.monotonic()
+                if (self._inject_caller
+                        and now - self._last_phone_frame > CALLER_TONE_FALLBACK_S):
+                    await self._send_to_caller(self._inject_caller.pop(0))
+
+                elapsed = now - self._answered_at
                 self.seconds_used = elapsed
                 remaining = self.seconds - elapsed
                 if not self._warned and remaining <= min(WARNING_S, self.seconds):
                     self._warned = True
                     self._bus.publish({"type": "call_warning",
                                        "call_id": self.call_id})
-                    self._inject.extend(BEEP + BEEP)
-                if remaining <= 0:
-                    for tone in TIMES_UP:
-                        await self._phone.send_frame(tone)
-                        await self._send_to_caller(tone)
+                    self._queue_tones(BEEP + BEEP)
+                if remaining <= 0 and not self._expired:
+                    self._expired = True
+                    self._queue_tones(TIMES_UP)   # drains paced through this loop
+                if self._expired and not self._inject_phone:
                     await self._phone.hangup()
                     return
 
                 next_t += audio.FRAME_MS / 1000
                 await asyncio.sleep(max(0.0, next_t - time.monotonic()))
         except asyncio.CancelledError:
-            pass
+            raise
+        except Exception:
+            logger.exception("pump failed for call %s", self.call_id)
+            await self.end("dropped")
 
     async def end(self, outcome: str) -> None:
         if self._ending:
@@ -121,6 +159,12 @@ class CallSession:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
+        for task in list(self._side_tasks):
+            if task is asyncio.current_task():
+                continue
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
         with contextlib.suppress(Exception):
             await self._phone.hangup()
         self._recorder.close()
