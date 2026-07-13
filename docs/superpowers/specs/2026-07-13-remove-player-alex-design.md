@@ -29,6 +29,9 @@ next tagged deploy (`deploy/update.sh` → restart → migrate-on-boot). No manu
 Tables holding Alex rows, keyed by `player_id` (found via `display_name = 'Alex' COLLATE NOCASE`):
 `runs` (+ `run_laps`, `run_trails` via `ON DELETE CASCADE`), `ghost_imports`, `screen_intervals`,
 `activity_events`, `player_alignment`, `season_rosters`, and finally the `players` row itself.
+The retired `run_points` table (dropped by `migrateTrails` only when fully migrated, otherwise
+**kept**) is also cleared for Alex's runs with a **guarded** delete before the `runs` delete, in case
+prod still has it with leftover rows.
 `world_records` is **not** touched — its `holder_name` is free text for external WR holders, not a
 local participant FK; Alex holds none.
 
@@ -111,6 +114,7 @@ export function purgeRemovedPlayers(db: DatabaseSync): void {
       // then the remaining player-referencing tables, then the players row.
       const del = (sql: string) => { try { db.prepare(sql).run(id); } catch { /* table may not exist on older DBs */ } };
       del('DELETE FROM ghost_imports    WHERE player_id = ?');   // references runs(id) w/o cascade — must precede runs
+      del('DELETE FROM run_points       WHERE run_id IN (SELECT id FROM runs WHERE player_id = ?)');  // retired table, may still exist on prod
       del('DELETE FROM runs             WHERE player_id = ?');   // cascades run_laps, run_trails
       del('DELETE FROM screen_intervals WHERE player_id = ?');
       del('DELETE FROM activity_events  WHERE player_id = ?');
@@ -129,16 +133,20 @@ export function purgeRemovedPlayers(db: DatabaseSync): void {
 **Delete-order rationale (foreign_keys = ON):**
 - `ghost_imports.run_id → runs(id)` has no cascade, so Alex's `ghost_imports` rows must be deleted
   before his `runs`.
+- `run_points` (retired; may still exist on prod, references `runs`) is guarded-deleted for Alex's
+  runs before the `runs` delete. Absent on fresh/migrated DBs → the guard no-ops.
 - `runs` deletion cascades `run_laps` and `run_trails` (both `ON DELETE CASCADE`).
 - `screen_intervals`, `activity_events`, `player_alignment`, `season_rosters` all reference
   `players(id)` and must be cleared before the `players` row.
 - Each statement is individually guarded so a table absent on an older DB never blocks boot.
 - Wrapped in a transaction for atomicity.
 
-**Wiring** (`pi/src/server.ts`): call `purgeRemovedPlayers(db)` **after** `migratePlayerRenames(db)`
-and **before** `migrateTrails(db)` / `backfillActivity(db)`. Ordering matters:
+**Wiring** (`pi/src/server.ts`): call `purgeRemovedPlayers(db)` **after** `migrateTrails(db)` and
+**before** `backfillActivity(db)`. Ordering matters:
 - Must run **after** `migrateSeason0Recovered` (which inserts Alex's recovered runs) so the purge
   removes anything recovery re-adds on a fresh DB.
+- Must run **after** `migrateTrails` so Alex's trail data has already moved to `run_trails` (cleared
+  by cascade) and his `run_points` rows aren't left stranded mid-migration.
 - Running **before** `backfillActivity` avoids generating Alex activity rows that would then need
   re-deleting (backfill derives from `runs`, which are already gone).
 
