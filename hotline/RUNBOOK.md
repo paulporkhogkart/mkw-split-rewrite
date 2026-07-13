@@ -74,10 +74,28 @@ for the outside-the-LAN test. ~1–2 h. We walk plan Task 15 together:
 
 ## Step 3 — Bench day (when ATA + adaptor arrive; ~1–2 h at the desk)
 
-**Before the ATA ever touches your network** — harden it on a direct PC-to-ATA cable
-(spec §4.2): change BOTH passwords · HTTPS-only UI · disable GDMS cloud, TR-069, all
-auto-provisioning, auto-firmware-upgrade · STUN/NAT helpers off · **hook-flash
-detection OFF** · strong SIP password · static/reserved IP.
+**First boot — harden before it can phone home.** Out of the box the ATA DHCPs onto
+whatever network it sees and contacts Grandstream's cloud (GDMS/provisioning) with
+default admin credentials. You do NOT need an isolated bench cable — a direct
+PC-to-ATA link has no DHCP server, and the recovery path (dialling `***` into its
+voice menu) is closed to you: the 802 is pulse-dial, no `*` key. At your current
+threat level (pre-streaming, CGNAT, trusted LAN) the network is fine. Best order:
+
+1. *(5-min UniFi task, any time before the parcel lands)* Create the **PHONE VLAN**:
+   new network on the UDM, **internet access unticked**. This is bench-grade isolation
+   (LAN-reachable, zero internet path) *and* the ATA's permanent home — spec §4.2's
+   "isolated bench connection" for free.
+2. First-boot the ATA on that VLAN (tagged desk port or any port on it), find its IP
+   in the UniFi client list, browse to the web UI from your machine.
+3. Run the hardening checklist: change BOTH passwords · HTTPS-only UI · disable GDMS
+   cloud, TR-069, all auto-provisioning, auto-firmware-upgrade · STUN/NAT helpers off ·
+   **hook-flash detection OFF** · strong SIP password · static/reserved IP.
+
+Lazy fallback (also acceptable today): plug it into the normal LAN and run the
+checklist immediately — the exposure is a few minutes of outbound-only phone-home
+behind CGNAT and a default-credential UI visible only to your own devices. Firmware
+updates are manual either way: download from grandstream.com on your PC, upload via
+the web UI — the device never needs internet.
 
 Then the Phase-0 checklist (spec §14):
 
