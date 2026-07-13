@@ -170,8 +170,11 @@ class CallSession:
                     await task
             with contextlib.suppress(Exception):
                 await self._phone.hangup()
-            with contextlib.suppress(Exception):
+            try:
                 self._recorder.close()
+            except Exception:
+                logger.exception("recorder close failed for call %s — recording LOST",
+                                 self.call_id)
         finally:
             self._bus.publish({"type": "call_ended", "call_id": self.call_id,
                                "outcome": outcome})

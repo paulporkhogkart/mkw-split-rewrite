@@ -170,3 +170,20 @@ async def test_recovered_during_end_does_not_zombie(tmp_path):
     await asyncio.wait_for(sess.done.wait(), 2)
     assert sess.outcome == "dropped"
     await bus.stop()
+
+
+async def test_recorder_failure_logged_and_call_still_ends(tmp_path, caplog):
+    bus, phone, sess, _ = make_session(tmp_path, seconds=30)
+    await bus.start()
+    await sess.start()
+    sess.on_phone_answered()
+
+    def boom() -> None:
+        raise OSError("disk full")
+
+    sess._recorder.close = boom  # type: ignore[method-assign]
+    with caplog.at_level("ERROR"):
+        await sess.end("test")
+    assert sess.done.is_set()                      # teardown still completed
+    assert any("recording LOST" in r.message for r in caplog.records)
+    await bus.stop()

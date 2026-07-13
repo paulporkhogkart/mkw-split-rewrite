@@ -21,6 +21,7 @@ class AriClient:
         self._session: Optional[aiohttp.ClientSession] = None
         self._ws_task: Optional[asyncio.Task] = None
         self._listeners: list[Callable[[dict], None]] = []
+        self._on_dead: Optional[Callable[[], None]] = None
 
     def on_event(self, cb: Callable[[dict], None]) -> None:
         self._listeners.append(cb)
@@ -28,6 +29,10 @@ class AriClient:
     def off_event(self, cb: Callable[[dict], None]) -> None:
         with contextlib.suppress(ValueError):
             self._listeners.remove(cb)
+
+    def on_dead(self, cb: Callable[[], None]) -> None:
+        """Called when the events WS dies without close() — the client is blind."""
+        self._on_dead = cb
 
     async def connect(self) -> None:
         self._session = aiohttp.ClientSession(headers=self._auth_header)
@@ -53,6 +58,8 @@ class AriClient:
         except asyncio.CancelledError:
             raise
         logger.warning("ari: events websocket closed by remote")
+        if self._on_dead:
+            self._on_dead()
 
     async def close(self) -> None:
         if self._ws_task:

@@ -8,6 +8,7 @@ from pathlib import Path
 import aiohttp
 from aiohttp import web
 
+from . import audio
 from .config import Config
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -54,7 +55,7 @@ async def _ws_audio(request: web.Request) -> web.WebSocketResponse:
     if not _authed(request):
         raise web.HTTPUnauthorized()
     controller = request.app[CONTROLLER_KEY]
-    ws = web.WebSocketResponse()
+    ws = web.WebSocketResponse(heartbeat=10)
     await ws.prepare(request)
 
     async def send(frame: bytes) -> None:
@@ -69,7 +70,8 @@ async def _ws_audio(request: web.Request) -> web.WebSocketResponse:
     try:
         async for msg in ws:
             if msg.type == aiohttp.WSMsgType.BINARY:
-                controller.on_caller_audio(msg.data)
+                if len(msg.data) == audio.FRAME_BYTES:
+                    controller.on_caller_audio(msg.data)
     finally:
         controller.detach_caller_ws()
     return ws
@@ -82,7 +84,7 @@ async def _ws_events(request: web.Request) -> web.WebSocketResponse:
     if feed not in ("rt", "delayed"):
         raise web.HTTPBadRequest()
     bus = request.app[BUS_KEY]
-    ws = web.WebSocketResponse()
+    ws = web.WebSocketResponse(heartbeat=10)
     await ws.prepare(request)
     q = bus.subscribe(feed)
     receive_task = asyncio.create_task(ws.receive())  # resolves on close/any msg

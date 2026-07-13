@@ -91,7 +91,7 @@ class Controller:
             raise RuntimeError("call already active")
         if free_space_gib(self._recordings_root()) < MIN_FREE_GIB:
             raise RuntimeError("low disk space")
-        call_id = uuid.uuid4().hex
+        call_id = str(uuid.uuid4())
         await asyncio.to_thread(
             self.db.create_call, call_id, "test", int(seconds))
 
@@ -149,7 +149,7 @@ class Controller:
     # -- AudioSocket (Asterisk dials in with the call uuid) --------------------
     async def _on_audiosocket_session(self, sess: AudioSocketSession) -> bool:
         call = self._call
-        if call is None or sess.uuid.hex != call.call_id:
+        if call is None or str(sess.uuid) != call.call_id:
             return False
         self._phone_sess = sess
         sess.on_audio(call.on_phone_frame)

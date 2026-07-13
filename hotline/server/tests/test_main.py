@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import uuid
 
 import aiohttp
@@ -34,6 +35,7 @@ class FakeAri:
         self.hungup: list[str] = []
         self.fail_bridge = fail_bridge
         self.bridged = None
+        self.em_uuid = None
 
     def on_event(self, cb) -> None:
         self.listeners.append(cb)
@@ -46,6 +48,7 @@ class FakeAri:
         return "ch-7"
 
     async def external_media(self, u: str, host: str) -> str:
+        self.em_uuid = u
         return "ch-em"
 
     async def bridge(self, ids: list[str]) -> str:
@@ -60,7 +63,7 @@ class FakeAri:
 
 class FakeSession:
     def __init__(self) -> None:
-        self.call_id = uuid.uuid4().hex
+        self.call_id = str(uuid.uuid4())
         self.answered = False
         self.hungup = False
 
@@ -79,6 +82,9 @@ async def test_ari_leg_happy_answer():
     ari.listeners[0]({"type": "StasisStart", "channel": {"id": "ch-7"}})
     await asyncio.sleep(0.05)
     assert sess.answered and ari.bridged == ["ch-7", "ch-em"]
+    assert re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+        ari.em_uuid)  # Asterisk res_audiosocket parses with libuuid: dashed form only
 
 
 async def test_ari_leg_bridge_failure_frees_call():
@@ -114,4 +120,15 @@ async def test_ari_leg_ring_failure_disposes():
     leg = AriPhoneLeg(sess, ari, 9101)
     with pytest.raises(RuntimeError):
         await leg.ring("PORK")
+    assert ari.listeners == []
+
+
+async def test_ari_leg_replays_events_stashed_during_originate():
+    ari = FakeAri()
+    sess = FakeSession()
+    leg = AriPhoneLeg(sess, ari, 9101)
+    # ChannelDestroyed arrives BEFORE originate's HTTP response assigns the id
+    leg._on_ari_event({"type": "ChannelDestroyed", "channel": {"id": "ch-7"}})
+    await leg.ring("PORK")   # originate returns ch-7; stash replays
+    assert sess.hungup       # offline-ATA fast-destroy ends the call, no wedge
     assert ari.listeners == []

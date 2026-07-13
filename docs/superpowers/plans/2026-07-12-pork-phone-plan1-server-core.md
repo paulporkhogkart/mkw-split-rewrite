@@ -1831,9 +1831,9 @@ admin endpoints, events WS, echo mode, lines-open guard.
 - Produces: `class Controller(cfg: Config, bus: EventBus, db: Db, phone_leg_factory: Callable[[CallSession], PhoneLeg])` —
   - `async start()` / `async stop()` (starts `AudioSocketServer` on `cfg.audiosocket_port`, retention sweep, publishes `lines_state` closed).
   - `async attach_caller_ws(send: Callable[[bytes], Awaitable[None]]) -> None` / `def detach_caller_ws()` / `def on_caller_audio(frame: bytes)` — one caller at a time (409 for a second).
-  - `async test_ring(seconds: float = 60) -> str` — guards: caller attached, no active call, `free_space_gib(recordings) >= 1.0`; creates `calls` row, builds `CallSession` (uuid4 hex id), `phone_leg_factory` builds the leg, starts it; returns call id. In `cfg.echo_mode` the factory is replaced by `EchoPhoneLeg` (below).
+  - `async test_ring(seconds: float = 60) -> str` — guards: caller attached, no active call, `free_space_gib(recordings) >= 1.0`; creates `calls` row, builds `CallSession` (uuid4 dashed-string id — dashed canonical form — Asterisk res_audiosocket parses with libuuid, which rejects dash-less hex), `phone_leg_factory` builds the leg, starts it; returns call id. In `cfg.echo_mode` the factory is replaced by `EchoPhoneLeg` (below).
   - `async hangup_active() -> bool`.
-  - `def on_audiosocket_session(sess) -> bool` — accepts only if `sess.uuid.hex == active call's id`; wires `sess.on_audio -> call.on_phone_frame`, session close → `call.on_phone_hungup`, and the phone leg's `send_frame` → `sess.send_audio`.
+  - `def on_audiosocket_session(sess) -> bool` — accepts only if `str(sess.uuid) == active call's id`; wires `sess.on_audio -> call.on_phone_frame`, session close → `call.on_phone_hungup`, and the phone leg's `send_frame` → `sess.send_audio`.
 - Produces: `class EchoPhoneLeg(PhoneLeg)` — `ring()` immediately calls `session.on_phone_answered()`; `send_frame(f)` loops the frame back via `session.on_phone_frame(f)`; `hangup()` no-ops. (Dev/e2e without Asterisk.)
 - Produces in `http.py`: `GET /ws/audio?token=` (binary frames in/out) · `GET /ws/events?feed=rt|delayed&token=` (JSON out) · `POST /admin/test-ring?token=&seconds=` → `{"call_id": ...}` · `POST /admin/hangup?token=` · `GET /static/*` + `GET /test` (serves `test.html`). All token checks constant-time (`hmac.compare_digest`), 401 on mismatch, 409 on slot conflicts.
 
@@ -2024,7 +2024,7 @@ class Controller:
             raise RuntimeError("call already active")
         if free_space_gib(self._recordings_root()) < MIN_FREE_GIB:
             raise RuntimeError("low disk space")
-        call_id = uuid.uuid4().hex
+        call_id = str(uuid.uuid4())
         await asyncio.to_thread(
             self.db.create_call, call_id, "test", int(seconds))
 

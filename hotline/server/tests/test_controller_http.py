@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 
 import aiohttp
 from aiohttp.test_utils import TestClient, TestServer
@@ -51,6 +52,8 @@ async def test_echo_call_roundtrip(tmp_path, unused_tcp_port):
     resp = await client.post("/admin/test-ring?token=dev-token&seconds=1")
     assert resp.status == 200
     call_id = (await resp.json())["call_id"]
+    assert re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", call_id)
 
     # stream 500 ms of tone; echo leg loops it straight back
     frames = audio.tone_frames(440.0, 500)
@@ -109,3 +112,16 @@ async def test_stop_joins_reap_before_returning(tmp_path, unused_tcp_port):
         "SELECT outcome FROM calls WHERE call_id=?", (call_id,)).fetchone()
     assert row and row[0] == "dropped"
     await ws.close(); await client.close(); await bus.stop(); db.close()
+
+
+async def test_ws_audio_drops_missized_frames(tmp_path, unused_tcp_port):
+    _, bus, db, ctl, client = await make_stack(tmp_path, unused_tcp_port)
+    ws = await client.ws_connect("/ws/audio?token=dev-token")
+    resp = await client.post("/admin/test-ring?token=dev-token&seconds=2")
+    assert resp.status == 200
+    await ws.send_bytes(b"\x01\x02\x03")            # garbage: dropped, no crash
+    await ws.send_bytes(b"\x00" * 640)              # oversized: dropped
+    await ws.send_bytes(audio.SILENCE_FRAME)        # valid: accepted
+    await asyncio.sleep(0.3)                        # pump still alive
+    assert (await client.post("/admin/hangup?token=dev-token")).status == 200
+    await ws.close(); await client.close(); await ctl.stop(); await bus.stop(); db.close()

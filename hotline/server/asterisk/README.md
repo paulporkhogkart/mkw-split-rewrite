@@ -32,6 +32,8 @@ Verify at install (Task 15):
    already passed by AriClient.originate_phone).
 4. AudioSocket frame kinds against res_audiosocket docs (0x00/0x01/0x10).
 
+Note: the AudioSocket UUID (externalMedia data= / ${PORK_UUID}) must be the canonical dashed form — res_audiosocket parses it with libuuid's uuid_parse, which rejects 32-char dash-less hex.
+
 MicroSIP stand-in for the ATA (Phase 1, no hardware): register MicroSIP on
 Paul's PC as endpoint `ata` (username ata, the SIP password, server = Pi LAN
 IP). To Asterisk it IS the ATA. Swap to the HT802V2 later by pointing the

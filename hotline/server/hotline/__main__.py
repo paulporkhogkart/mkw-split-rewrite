@@ -35,6 +35,7 @@ class AriPhoneLeg:
         self._send_audio: Optional[Callable[[bytes], Awaitable[None]]] = None
         self._answered_task: Optional[asyncio.Task] = None
         self._disposed = False
+        self._pre_ring_events: list[dict] = []
         ari.on_event(self._on_ari_event)
 
     def set_audio_sender(self, cb: Callable[[bytes], Awaitable[None]]) -> None:
@@ -47,10 +48,19 @@ class AriPhoneLeg:
         except Exception:
             self._dispose()
             raise
+        stash, self._pre_ring_events = self._pre_ring_events, []
+        for event in stash:
+            self._dispatch(event)
 
     def _on_ari_event(self, event: dict) -> None:
-        if self._channel_id is None:
+        if self._disposed:
             return
+        if self._channel_id is None:
+            self._pre_ring_events.append(event)  # originate still in flight
+            return
+        self._dispatch(event)
+
+    def _dispatch(self, event: dict) -> None:
         ch = (event.get("channel") or {}).get("id")
         if ch != self._channel_id:
             return
@@ -110,6 +120,7 @@ async def build_and_run(cfg: Config, stop: asyncio.Event) -> None:
     factory = None
     if not cfg.echo_mode:
         ari = AriClient(cfg.ari_url, cfg.ari_user, cfg.ari_password)
+        ari.on_dead(stop.set)  # blind telephony = shutdown; systemd restarts into lines-closed boot
         await ari.connect()
 
         def factory(session: CallSession) -> AriPhoneLeg:

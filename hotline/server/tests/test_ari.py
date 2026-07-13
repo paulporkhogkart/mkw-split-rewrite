@@ -127,6 +127,27 @@ async def test_off_event_removes_listener():
     assert client._listeners == []
 
 
+async def test_on_dead_fires_when_remote_closes():
+    app = web.Application()
+
+    async def events_ws(request: web.Request):
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        await ws.close()  # remote closes immediately
+        return ws
+
+    app.router.add_get("/ari/events", events_ws)
+    server = TestServer(app)
+    await server.start_server()
+    died = asyncio.Event()
+    client = AriClient(f"http://127.0.0.1:{server.port}", "u", "p")
+    client.on_dead(died.set)
+    await client.connect()
+    await asyncio.wait_for(died.wait(), 2)
+    await client.close()
+    await server.close()
+
+
 async def test_bridge_cleans_up_on_addchannel_failure():
     record: dict = {}
     app = web.Application()

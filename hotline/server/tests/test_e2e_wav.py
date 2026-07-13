@@ -41,7 +41,7 @@ async def test_full_pipeline_wav_both_directions(tmp_path, unused_tcp_port):
             reader, writer = await asyncio.open_connection(
                 "127.0.0.1", cfg.audiosocket_port)
             self._writer = writer
-            u = uuidlib.UUID(hex=self._session.call_id)
+            u = uuidlib.UUID(self._session.call_id)
             writer.write(aus.encode_frame(aus.KIND_UUID, u.bytes))
             await writer.drain()
             self._session.on_phone_answered()
