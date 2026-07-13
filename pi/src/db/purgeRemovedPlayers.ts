@@ -16,7 +16,18 @@ export function purgeRemovedPlayers(db: DatabaseSync): void {
       // FK-safe order (foreign_keys=ON): children first, then runs (cascades laps/trails),
       // then the remaining player-referencing tables, then the players row. Each statement is
       // guarded so a table absent on an older/fresh DB never blocks boot.
-      const del = (sql: string) => { try { db.prepare(sql).run(id); } catch { /* table may not exist */ } };
+      const del = (sql: string) => {
+        try {
+          db.prepare(sql).run(id);
+        } catch (e) {
+          // A table absent on an older/fresh DB (e.g. the retired run_points) is expected — skip it.
+          // Any other error (e.g. an unforeseen FK reference not in this delete list) is real:
+          // rethrow so the outer handler rolls back the whole purge and logs it, rather than
+          // silently leaving the player half-removed.
+          if (e instanceof Error && /no such table/i.test(e.message)) return;
+          throw e;
+        }
+      };
       del('DELETE FROM ghost_imports    WHERE player_id = ?');   // references runs(id) w/o cascade — precede runs
       del('DELETE FROM run_points       WHERE run_id IN (SELECT id FROM runs WHERE player_id = ?)'); // retired table; may persist on prod
       del('DELETE FROM runs             WHERE player_id = ?');   // cascades run_laps, run_trails
@@ -26,8 +37,10 @@ export function purgeRemovedPlayers(db: DatabaseSync): void {
       del('DELETE FROM season_rosters   WHERE player_id = ?');
       del('DELETE FROM players          WHERE id = ?');
       db.exec('COMMIT');
-    } catch {
-      db.exec('ROLLBACK');   // non-fatal: never block boot on the purge
+    } catch (e) {
+      db.exec('ROLLBACK');
+      console.error(`[purge] failed to remove player "${name}" (id ${id}); left intact:`, e);
+      // non-fatal: never block boot on the purge
     }
   }
 }

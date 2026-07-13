@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { openDb, applySchema } from './connect';
 import { purgeRemovedPlayers } from './purgeRemovedPlayers';
 
@@ -57,6 +57,24 @@ describe('purgeRemovedPlayers', () => {
     purgeRemovedPlayers(db);
     expect(() => purgeRemovedPlayers(db)).not.toThrow();
     expect(count(db, "SELECT COUNT(*) c FROM players WHERE display_name='Paul'")).toBe(1);
+  });
+
+  it('rolls back atomically (leaves the player intact) if an unexpected FK reference blocks deletion', () => {
+    const db = openDb(':memory:'); applySchema(db);
+    db.exec("INSERT INTO players(id,display_name) VALUES (3,'Alex')");
+    db.exec("INSERT INTO seasons(id,name,is_active) VALUES (1,'S1',1)");
+    db.exec("INSERT INTO courses(id,slug,display_name) VALUES (1,'rr','RR')");
+    db.exec("INSERT INTO runs(id,season_id,player_id,course_id,cc,status,provenance,is_pb) VALUES (20,1,3,1,150,'finished','live',1)");
+    // A table referencing players(id) that purgeRemovedPlayers does NOT know about → its row
+    // keeps a live FK to Alex, so DELETE FROM players must fail and the whole purge must roll back.
+    db.exec('CREATE TABLE extra_ref (player_id INTEGER REFERENCES players(id))');
+    db.exec('INSERT INTO extra_ref(player_id) VALUES (3)');
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    purgeRemovedPlayers(db);   // must not throw (boot-safe)
+    expect(spy).toHaveBeenCalledTimes(1);   // reported the real failure once
+    spy.mockRestore();
+    expect(count(db, "SELECT COUNT(*) c FROM players WHERE display_name='Alex'")).toBe(1);   // rolled back
+    expect(count(db, 'SELECT COUNT(*) c FROM runs WHERE player_id=3')).toBe(1);              // rolled back
   });
 
   it('is a no-op on a DB with no Alex', () => {
