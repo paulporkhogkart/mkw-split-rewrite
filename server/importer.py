@@ -52,7 +52,6 @@ def ensure_seasons(conn, legacy, cutover_iso) -> tuple[int, int]:
 PLAYER_COLORS = {
     "paul": "#a78bfa",     # violet
     "gub": "#38bdf8",      # blue
-    "alex": "#fbbf24",     # amber-gold (yellow)
     "aliias": "#4ade80",   # green
     "luke": "#f87171",     # red
 }
