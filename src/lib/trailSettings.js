@@ -36,7 +36,6 @@ export function cacheRoster(list) {
 // Locked + identical on every client; anyone not listed falls back to a stable per-id preset.
 const PLAYER_COLORS = {
   paul:   "#9b6bd0",   // purple
-  alex:   "#3d7cc2",   // blue
   luke:   "#cf5b4e",   // red
   aliias: "#5aa86a",   // green
   gub:    "#d98a3e",   // orange
