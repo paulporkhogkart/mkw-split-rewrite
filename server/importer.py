@@ -64,7 +64,12 @@ LEGACY_NAME_ALIASES = {"adymer": "Gub"}
 
 
 def map_players(conn, legacy, s0_id, s1_id) -> dict[int, int]:
-    """Map legacy player ids -> server player ids (case-insensitive), seeding rosters + colours."""
+    """Map legacy player ids -> server player ids (case-insensitive), seeding rosters + colours.
+
+    NOTE: this recreates a server player for every name in the legacy source. A player removed
+    from the kart-off (see pi/src/db/purgeRemovedPlayers.ts) must also be scrubbed from the legacy
+    hogkart DB before a fresh manual import, or this re-adds them until the next boot purge.
+    """
     mapping: dict[int, int] = {}
     for row in legacy.execute("SELECT id, name FROM players"):
         name = LEGACY_NAME_ALIASES.get(row["name"].lower(), row["name"])

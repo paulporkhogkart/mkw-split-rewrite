@@ -71,8 +71,9 @@ describe('purgeRemovedPlayers', () => {
     db.exec('INSERT INTO extra_ref(player_id) VALUES (3)');
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     purgeRemovedPlayers(db);   // must not throw (boot-safe)
-    expect(spy).toHaveBeenCalledTimes(1);   // reported the real failure once
-    spy.mockRestore();
+    const errorCalls = spy.mock.calls.length;
+    spy.mockRestore();         // restore before assertions so a throwing assertion can't leak the mock
+    expect(errorCalls).toBe(1);   // reported the real failure once
     expect(count(db, "SELECT COUNT(*) c FROM players WHERE display_name='Alex'")).toBe(1);   // rolled back
     expect(count(db, 'SELECT COUNT(*) c FROM runs WHERE player_id=3')).toBe(1);              // rolled back
   });
