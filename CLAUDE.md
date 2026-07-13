@@ -17,6 +17,7 @@ engine); the others have their own `CLAUDE.md` where noted.
 | **Pi server** | `pi/` (Node/TS, Hono + `node:sqlite`, run via `tsx`) — see `pi/CLAUDE.md` | **Canonical source of truth**, runs on a Raspberry Pi. Hosts the token-gated API, Discord bot, WR scraper, stats/`/explorer`, presence/activity. |
 | **Website thekartoff.com** | `web/` (Vite + Svelte SPA) — see `web/CLAUDE.md` | Public site, **served by the Pi**. Live cards, Turf (territory) map, activity feed. Imports shared components from the desktop `src/`. |
 | **Schema + importer** | `server/` (Python) | Owns the canonical DB DDL `server/schema.sql` (which the Pi loads at boot) and the legacy-data importer (`python -m server.importer`). NOT an HTTP server. |
+| **Pork Phone hotline** | `hotline/server/` (Python asyncio, own venv + SQLite + systemd unit on the Pi host) | Viewer call-in show: browser mic (20 ms 8 kHz PCM over WSS via the tunnel) ⇄ Asterisk (ARI + AudioSocket) ⇄ ATA ⇄ Paul's Telecom 802 rotary. **Zero imports from `pi/`**; own subdomain `phone.thekartoff.com`. Spec `docs/superpowers/specs/2026-07-12-pork-phone-hotline-design.md`; Paul's real-world setup steps in `hotline/RUNBOOK.md`. Tests: `cd hotline/server && python -m pytest`. Dev echo mode: `HOTLINE_ECHO=1 python -m hotline` → `http://127.0.0.1:9100/test`. |
 
 **Data flow:** desktop engine → Rust upload → `POST /v1/runs` on the Pi → Pi's SQLite (`runs`,
 `run_laps`, `run_trails`, …) → served to the website + Discord bot. The desktop app's own
