@@ -61,6 +61,8 @@ class AriPhoneLeg:
         self._dispatch(event)
 
     def _dispatch(self, event: dict) -> None:
+        if self._disposed:
+            return
         ch = (event.get("channel") or {}).get("id")
         if ch != self._channel_id:
             return
