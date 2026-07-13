@@ -96,27 +96,6 @@
         "rotate": 0,
         "clip": false
       }
-    },
-    "alex": {
-      "color": "#fbbf24",
-      "default": {
-        "source": "figure",
-        "frame": 0,
-        "x": 0.015,
-        "y": 0.015,
-        "scale": 0.71,
-        "rotate": 0,
-        "clip": false
-      },
-      "fire": {
-        "source": "figure",
-        "frame": 0,
-        "x": -0.015,
-        "y": 0.05,
-        "scale": 0.64,
-        "rotate": 0,
-        "clip": false
-      }
     }
   }
 }

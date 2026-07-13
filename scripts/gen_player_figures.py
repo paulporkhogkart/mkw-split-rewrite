@@ -29,13 +29,11 @@ MANIFEST = os.path.join(ROOT, "assets", "player_figures.json")
 SUFFIX = {"online": "on", "offline": "off", "onpace": "onpace"}
 
 # player (lowercased) -> (online_gif, offline_gif) heuristic fallback.
-# Alex has no art of his own -> borrows Gub's.
 MAP = {
     "paul":   ("paulPosted.gif",   "paulPosted.gif"),
     "aliias": ("aliiasPosted.gif", "aliiasBird.gif"),
     "luke":   ("lukePosted.gif",   "lukeThumbsUp.gif"),
     "gub":    ("gubPosted.gif",    "gubPosted.gif"),
-    "alex":   ("gubPosted.gif",    "gubPosted.gif"),
 }
 
 # Manual re-frame per (player, suffix), applied AFTER the alpha-bbox crop and

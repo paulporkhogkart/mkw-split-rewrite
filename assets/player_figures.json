@@ -54,19 +54,5 @@
       "gubChoke.gif",
       68
     ]
-  },
-  "alex": {
-    "online": [
-      "gubPosted.gif",
-      87
-    ],
-    "offline": [
-      "gubPosted.gif",
-      0
-    ],
-    "onpace": [
-      "gubChoke.gif",
-      68
-    ]
   }
 }

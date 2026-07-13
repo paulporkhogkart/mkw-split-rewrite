@@ -11,7 +11,6 @@ import { toEpochSeconds } from './period';
 export const PORKER_MAP: { person: string; player: string }[] = [
   { person: 'paul', player: 'paul pork' },   // must match players.display_name (renamed from 'Paul')
   { person: 'addymer', player: 'Gub' },
-  { person: 'alex', player: 'Alex' },
   { person: 'eunora', player: 'Luke' },
   { person: 'brayden', player: 'Aliias' },
 ];
