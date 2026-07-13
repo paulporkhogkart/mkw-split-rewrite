@@ -1,7 +1,6 @@
 export const ID_TO_NAME: Record<string, string> = {
   '477788220982296576': 'Gub',
   '1213316126948335636': 'paul pork',   // must match players.display_name (renamed from 'Paul')
-  '201561251963207681': 'Alex',
   '267421165625147392': 'Aliias',
   '867421622347890719': 'Luke',
 };
@@ -18,17 +17,15 @@ export const THUMBNAIL_GIFS: Record<string, string[]> = {
     'https://i.imgur.com/7vjuvuq.gif',
   ],
   Aliias: ['https://i.imgur.com/lfS1SkJ.gif', 'https://i.imgur.com/l5eJXfl.gif', 'https://i.imgur.com/eiHaLw6.gif', 'https://i.imgur.com/KV8VW7x.gif'],
-  Alex: ['https://i.imgur.com/0ZUvDVI.gif', 'https://i.imgur.com/OIPESbG.gif'],
   Luke: ['https://i.imgur.com/PcksQkq.gif', 'https://i.imgur.com/YadWWyh.gif', 'https://i.imgur.com/dK3KtfE.gif', 'https://i.imgur.com/SYlI3Tg.gif'],
   Gub: ['https://i.imgur.com/3u7SCNw.gif', 'https://i.imgur.com/nARULQI.gif'],
 };
 
-// TEMP (2026-06-23): Gub + Alex thumbnails are pinned to a single static image instead of
-// their GIFs above; everyone else keeps their GIFs. To restore, delete TEMP_THUMBNAILS and
-// the override line in gifFor().
+// TEMP (2026-06-23): Gub's thumbnail is pinned to a single static image instead of its GIFs
+// above; everyone else keeps their GIFs. To restore, delete TEMP_THUMBNAILS and the override
+// line in gifFor().
 const TEMP_THUMBNAILS: Record<string, string> = {
   Gub: 'https://i.imgur.com/FLwnRZ5.png',
-  Alex: 'https://i.imgur.com/aw8z3He.png',
 };
 
 /** Random GIF for a player, or null when none is configured (legacy KeyError fix). */
