@@ -90,6 +90,12 @@ MATTE_ENGINE = os.environ.get("MATTE_ENGINE", "matanyone")
 # head, pure-bwd tail, seam-searched switch). MATTE_MATANYONE_BIDIR=1 forces the legacy bidir
 # crossfade here too.
 MATTE_BIDIR = os.environ.get("MATTE_MATANYONE_BIDIR", "0") == "1"
+# Preview-webp generation for _write_chip: none | checker | both. DEFAULT "none" — the per-frame
+# _frames/ folders are the deliverable (the viewer globs them by path; ship.py moves them), and the
+# lossless _loop.webp roughly DOUBLED on-disk size (~50 MB/segment) with no consumer, filling the
+# sweep disk. Set MATTE_WEBP=checker for the small over-checkerboard QA thumbnail, or =both to also
+# emit the full lossless alpha loop.
+MATTE_WEBP = os.environ.get("MATTE_WEBP", "none").lower()
 
 
 def _session():
@@ -284,8 +290,10 @@ def _build_predark_frames(paths, kart, apply_predark):
 
 
 def _write_chip(pairs, name, out_base):
-    """Write RGBA frames + _loop.webp + _checker.webp from (bgr_uint8, alpha_float01) pairs. Shared
-    by both engines. Returns the frame count."""
+    """Write RGBA frames (+ optional _loop/_checker.webp) from (bgr_uint8, alpha_float01) pairs.
+    Shared by both engines. Preview webps are gated by MATTE_WEBP (none|checker|both, default none) —
+    the _frames/ folders are the real deliverable; the PIL frame list is only built when a webp is
+    actually being written. Returns the frame count."""
     fdir = os.path.join(out_base, f"{name}_frames")
     # recreate empty: frames are numbered from 000, so re-matting a SHORTER segment over a
     # previous run would leave the old tail frames behind (the viewer globs *.png)
@@ -296,16 +304,19 @@ def _write_chip(pairs, name, out_base):
         rgb = cv2.cvtColor(np.asarray(bgr).astype(np.uint8), cv2.COLOR_BGR2RGB)
         rgba = np.dstack([rgb, (np.clip(alpha, 0, 1) * 255).astype(np.uint8)])
         cv2.imwrite(os.path.join(fdir, f"{i:03d}.png"), cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGRA))
-        rgba_frames.append(Image.fromarray(rgba, "RGBA"))
+        if MATTE_WEBP != "none":
+            rgba_frames.append(Image.fromarray(rgba, "RGBA"))
         if (i + 1) % 15 == 0 or i + 1 == len(pairs):
             print(f"  matte {name} {i + 1}/{len(pairs)}", flush=True)
-    W, H = rgba_frames[0].size
-    rgba_frames[0].save(os.path.join(out_base, f"{name}_loop.webp"), save_all=True,
-                        append_images=rgba_frames[1:], duration=DUR_MS, loop=0, lossless=True, disposal=2)
-    chk = _checker_rgba(W, H)
-    comp = [Image.alpha_composite(chk, f) for f in rgba_frames]
-    comp[0].save(os.path.join(out_base, f"{name}_checker.webp"), save_all=True,
-                 append_images=comp[1:], duration=DUR_MS, loop=0)
+    if MATTE_WEBP == "both":
+        rgba_frames[0].save(os.path.join(out_base, f"{name}_loop.webp"), save_all=True,
+                            append_images=rgba_frames[1:], duration=DUR_MS, loop=0, lossless=True, disposal=2)
+    if MATTE_WEBP in ("checker", "both"):
+        W, H = rgba_frames[0].size
+        chk = _checker_rgba(W, H)
+        comp = [Image.alpha_composite(chk, f) for f in rgba_frames]
+        comp[0].save(os.path.join(out_base, f"{name}_checker.webp"), save_all=True,
+                     append_images=comp[1:], duration=DUR_MS, loop=0)
     return len(pairs)
 
 
