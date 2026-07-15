@@ -21,4 +21,19 @@ describe('flags', () => {
     expect(reportFlags(db)).toContain('Still Unknown');
     expect(reportFlags(db)).not.toContain('R.O.B. H.O.G.');
   });
+
+  it('reports isNew only on the first sighting', () => {
+    const db = freshDb();
+    expect(upsertFlag(db, { category: 'kart', rawValue: 'Tiny Titan', slugGuess: 'tiny_titan' }).isNew).toBe(true);
+    expect(upsertFlag(db, { category: 'kart', rawValue: 'Tiny Titan', slugGuess: 'tiny_titan' }).isNew).toBe(false);
+    expect(upsertFlag(db, { category: 'kart', rawValue: 'Tiny Titan', slugGuess: 'tiny_titan' }).isNew).toBe(false);
+    const row = db.prepare('SELECT occurrences FROM wr_name_flags WHERE raw_value=?').get('Tiny Titan') as any;
+    expect(row.occurrences).toBe(3);
+  });
+
+  it('keeps distinct raw values separate', () => {
+    const db = freshDb();
+    expect(upsertFlag(db, { category: 'kart', rawValue: 'A', slugGuess: 'a' }).isNew).toBe(true);
+    expect(upsertFlag(db, { category: 'kart', rawValue: 'B', slugGuess: 'b' }).isNew).toBe(true);
+  });
 });

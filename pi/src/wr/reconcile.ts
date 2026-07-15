@@ -5,6 +5,8 @@ import type { ActivityInput } from '../activity/types';
 import { resolveCourseId } from './courses';
 import type { ScrapedWr } from './parse';
 import { resolveLoadout } from './loadout';
+import type { Loadout } from './loadout';
+import { upsertFlag } from './flags';
 import { courseLeaderboard } from '../db/reads';
 import { activeSeasonId } from '../db/seasons';
 import { turfTransitions } from '../turf/transitions';
@@ -61,6 +63,20 @@ export function reconcile(db: DatabaseSync, hub: EventHub, scraped: ScrapedWr[],
   return report;
 }
 
+/** Record + announce any name in `lo` that failed to resolve. Announce only on first sighting;
+ *  an unresolved name blocks WR processing for that record, so it needs a human. */
+function flagUnresolved(db: DatabaseSync, hub: EventHub, lo: Loadout,
+                        courseName: string, courseId: number, wrId: number | null): void {
+  for (const u of lo.unresolved) {
+    const { isNew } = upsertFlag(db, {
+      category: u.category, rawValue: u.raw, slugGuess: u.slugGuess,
+      exampleCourseId: courseId, exampleWrId: wrId ?? undefined,
+    });
+    if (isNew) hub.publish({ type: 'wr_name_flag', category: u.category,
+      raw_value: u.raw, slug_guess: u.slugGuess, course: courseName });
+  }
+}
+
 function reconcileOne(db: DatabaseSync, hub: EventHub, s: ScrapedWr, courseId: number, cc: number, report: WrReport, activity?: ActivityHub): void {
   const cur = db.prepare(
     `SELECT id, holder_name, record_ms, record_str, video_url, character, vehicle
@@ -70,10 +86,13 @@ function reconcileOne(db: DatabaseSync, hub: EventHub, s: ScrapedWr, courseId: n
   // Case 1: same record as current -> backfill metadata in place, no current move.
   if (cur && cur.record_ms === s.recordMs && cur.holder_name === s.holder) {
     if (backfill(db, cur, s)) report.backfilled++; else report.unchanged++;
+    flagUnresolved(db, hub, resolveLoadout(s.character, s.vehicle), s.courseName, courseId, cur.id);
     return;
   }
 
   // Case 2: the current WR changed -> mirror the page (one transaction).
+  let insertedWrId: number | null = null;
+  let reflaggedWrId: number | null = null;
   db.exec('BEGIN');
   try {
     if (cur) db.prepare('UPDATE world_records SET is_current=0 WHERE id=?').run(cur.id);
@@ -85,10 +104,11 @@ function reconcileOne(db: DatabaseSync, hub: EventHub, s: ScrapedWr, courseId: n
     if (existing) {
       db.prepare('UPDATE world_records SET is_current=1 WHERE id=?').run(existing.id);
       backfill(db, existing, s);
+      reflaggedWrId = existing.id;
       report.reflagged++;
     } else {
       const lo = resolveLoadout(s.character, s.vehicle);
-      db.prepare(
+      const res = db.prepare(
         `INSERT INTO world_records(course_id, cc, holder_name, record_ms, record_str,
            achieved_at, video_url, character, vehicle,
            character_slug, costume_slug, kart_slug, provenance, is_current)
@@ -96,10 +116,14 @@ function reconcileOne(db: DatabaseSync, hub: EventHub, s: ScrapedWr, courseId: n
       ).run(courseId, cc, s.holder, s.recordMs, s.recordStr,
             isoDate(s.date), s.videoUrl, s.character, s.vehicle,
             lo.characterSlug, lo.costumeSlug, lo.kartSlug);
+      insertedWrId = Number(res.lastInsertRowid);
       report.inserted++;
     }
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }
+
+  flagUnresolved(db, hub, resolveLoadout(s.character, s.vehicle), s.courseName, courseId,
+                 insertedWrId ?? reflaggedWrId);
 
   // Emit only when a prior current existed (silent first-scrape establishment).
   if (cur) {

@@ -21,4 +21,6 @@ export type ServerEvent =
   | { type: 'wr_update'; course: string; cc: number; holder: string | null;
       total_time: string; prev_holder: string | null; prev_time: string | null;
       improvement_ms: number | null; character: string | null;
-      vehicle: string | null; video_url: string | null };
+      vehicle: string | null; video_url: string | null }
+  | { type: 'wr_name_flag'; category: 'character' | 'kart' | 'costume' | 'course';
+      raw_value: string; slug_guess: string | null; course: string | null };

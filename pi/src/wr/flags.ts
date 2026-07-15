@@ -10,16 +10,21 @@ export type FlagInput = {
 };
 
 /** Record an unresolved name. Idempotent on (category, raw_value): increments occurrences and
- *  clears any stale resolved_at (it is unresolved again right now). */
-export function upsertFlag(db: DatabaseSync, f: FlagInput): void {
-  db.prepare(
+ *  clears any stale resolved_at (it is unresolved again right now).
+ *  Returns `{isNew: true}` only on the very first sighting — callers alert on that alone, or a
+ *  15-minute scraper would re-announce the same broken name forever. Trade-off: a name that was
+ *  resolved and later breaks again does NOT re-alert; `npm run wr-flags` still lists it. */
+export function upsertFlag(db: DatabaseSync, f: FlagInput): { isNew: boolean } {
+  const row = db.prepare(
     `INSERT INTO wr_name_flags(category, raw_value, slug_guess, example_course_id, example_wr_id, occurrences)
      VALUES (?,?,?,?,?,1)
      ON CONFLICT(category, raw_value) DO UPDATE SET
        occurrences = occurrences + 1,
        slug_guess = excluded.slug_guess,
-       resolved_at = NULL`
-  ).run(f.category, f.rawValue, f.slugGuess ?? null, f.exampleCourseId ?? null, f.exampleWrId ?? null);
+       resolved_at = NULL
+     RETURNING occurrences`
+  ).get(f.category, f.rawValue, f.slugGuess ?? null, f.exampleCourseId ?? null, f.exampleWrId ?? null) as { occurrences: number };
+  return { isNew: row.occurrences === 1 };
 }
 
 /** Re-check every unresolved flag (non-course categories) against the current roster/aliases and

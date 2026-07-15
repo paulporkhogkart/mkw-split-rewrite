@@ -141,4 +141,27 @@ describe('reconcile', () => {
     const row = db.prepare('SELECT costume_slug FROM world_records WHERE is_current=1').get() as any;
     expect(row.costume_slug).toBeNull();
   });
+
+  it('flags + announces an unresolvable kart once, on first sighting only', () => {
+    const { db, hub, events } = setup();
+    reconcile(db, hub, [wr({ character: 'Bowser', vehicle: 'Fake Kart' })]);
+    const flags = () => events.filter((e) => e.type === 'wr_name_flag');
+    expect(flags()).toHaveLength(1);
+    expect(flags()[0]).toMatchObject({
+      type: 'wr_name_flag', category: 'kart', raw_value: 'Fake Kart',
+      slug_guess: 'fake_kart', course: 'Rainbow Road',
+    });
+    // second scrape of the same broken name -> counted, not re-announced
+    reconcile(db, hub, [wr({ character: 'Bowser', vehicle: 'Fake Kart' })]);
+    expect(flags()).toHaveLength(1);
+    const row = db.prepare('SELECT occurrences FROM wr_name_flags WHERE raw_value=?').get('Fake Kart') as any;
+    expect(row.occurrences).toBe(2);
+  });
+
+  it('does not flag a base costume', () => {
+    const { db, hub, events } = setup();
+    reconcile(db, hub, [wr({ character: 'Bowser', vehicle: 'Reel Racer' })]);
+    expect(events.filter((e) => e.type === 'wr_name_flag')).toHaveLength(0);
+    expect(db.prepare('SELECT COUNT(*) n FROM wr_name_flags').get()).toMatchObject({ n: 0 });
+  });
 });
