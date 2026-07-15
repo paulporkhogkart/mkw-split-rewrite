@@ -660,7 +660,17 @@ mod tests {
 
     #[test]
     fn checks_no_trail_before_the_time_so_the_reason_is_actionable() {
-        assert_eq!(verify(&fin(Some("9:99.999"), 0), 62934).unwrap_err(), WrError::NoTrail);
+        // The time here must be WELL-FORMED and WRONG (62934 vs 62000). That combination is
+        // the ONLY thing that can distinguish the two orderings: with the empty-trail check
+        // first this is NoTrail; with the time check first it would be TimeMismatch.
+        // A malformed time (e.g. "9:99.999", which time_to_ms rejects outright) yields
+        // NoTrail under either ordering and proves nothing — do not "simplify" it back.
+        //
+        // The distinction is load-bearing: NoTrail is retryable at a higher quality tier,
+        // TimeMismatch never is (a wrong video is wrong at any bitrate).
+        let err = verify(&fin(Some("1:02.934"), 0), 62000).unwrap_err();
+        assert_eq!(err, WrError::NoTrail,
+                   "an empty trail must report NoTrail even when the time also disagrees");
     }
 
     #[test]
