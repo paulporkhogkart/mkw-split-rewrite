@@ -60,8 +60,25 @@ pub fn sweep_orphans(dir: &std::path::Path) {
     }
 }
 
+/// Serializes `process_one` against itself. `sweep_orphans` deletes by glob, so two
+/// overlapping calls would have one delete the other's live video mid-job — and the engine
+/// is wall-clock bound (~100s per video), so an overlap is a long window, not a
+/// hypothetical. One machine does one job at a time by design (there is nothing to gain
+/// from concurrency when the work is real-time bound), so this states the existing
+/// contract rather than adding a new constraint.
+///
+/// Plan 3's polling loop inherits this: the guard is what lets it call `process_one`
+/// without re-deriving the argument that a glob delete is safe.
+static PROCESS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Claim and fully process one job.
 pub fn process_one(cfg: &ServiceCfg, cancel: &(dyn Fn() -> bool + Sync)) -> Outcome {
+    // Held for the WHOLE job (`_guard`, not `_`: the latter drops immediately and would
+    // serialize nothing). Recover from a poisoned lock rather than propagating the panic —
+    // a previous job panicking must not permanently disable the service. Same recovery
+    // pattern engine.rs uses for its watchdog child mutex.
+    let _guard = PROCESS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
     let conn = match state::open(&cfg.data_dir) { Ok(c) => c, Err(e) => return Outcome::Error(e) };
     let worker = state::worker_id(&cfg.data_dir);
     sweep_orphans(&cfg.data_dir);
@@ -130,6 +147,94 @@ fn run_job(cfg: &ServiceCfg, client: &job::Client, j: &job::WrJob,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::TcpListener;
+    use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    fn tmpdir(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("wr_service_test_{tag}"));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// A bare TCP listener that accepts, holds each connection for `hold`, then drops it
+    /// without replying.
+    ///
+    /// This is NOT a mock server: it never speaks HTTP, models no endpoint and asserts
+    /// nothing about the wire (claim() just errors, which is the point). It is an
+    /// OBSERVATION POINT, and the only one available — the lock lives INSIDE process_one,
+    /// so a counter wrapped around the CALL cannot distinguish "working" from "broken":
+    /// the blocked thread has already incremented it while waiting on the mutex. claim()'s
+    /// connection is made from inside the critical section, so concurrent connections here
+    /// mean concurrent critical sections, and nothing else does.
+    ///
+    /// `hold` also makes the window deterministic: 300ms dwarfs thread-spawn jitter, so an
+    /// unlocked overlap is a certainty rather than a race the test might lose.
+    fn stalling_listener(hold: Duration) -> (String, Arc<AtomicUsize>) {
+        let l = TcpListener::bind("127.0.0.1:0").expect("bind probe listener");
+        let addr = l.local_addr().unwrap();
+        let live = Arc::new(AtomicUsize::new(0));
+        let max = Arc::new(AtomicUsize::new(0));
+        let max_out = max.clone();
+        std::thread::spawn(move || {
+            for stream in l.incoming() {
+                let Ok(stream) = stream else { break };
+                let (live, max) = (live.clone(), max.clone());
+                // A thread PER connection. A sequential accept loop would leave the second
+                // connection sitting in the OS backlog and report a concurrency of 1 even
+                // with NO lock at all — i.e. it would pass either way and prove nothing.
+                std::thread::spawn(move || {
+                    let n = live.fetch_add(1, SeqCst) + 1;
+                    max.fetch_max(n, SeqCst);
+                    std::thread::sleep(hold);
+                    live.fetch_sub(1, SeqCst);
+                    drop(stream);
+                });
+            }
+        });
+        (format!("http://{addr}"), max_out)
+    }
+
+    #[test]
+    fn process_one_never_overlaps_itself_because_sweep_orphans_deletes_by_glob() {
+        let hold = Duration::from_millis(300);
+        let (url, max_concurrent) = stalling_listener(hold);
+        let dir = tmpdir("serialize");
+        // Pre-create the scratch DB so neither thread's state::open() can be what
+        // serializes them (or what fails under contention). The LOCK must be the only
+        // thing keeping them apart, or this test would credit the lock for SQLite's work.
+        drop(state::open(&dir).unwrap());
+
+        let started = Instant::now();
+        std::thread::scope(|s| {
+            for _ in 0..2 {
+                s.spawn(|| {
+                    let cfg = ServiceCfg {
+                        server_url: url.clone(),
+                        token: "probe".into(),
+                        data_dir: dir.clone(),
+                        engine: EnginePath::Dev,
+                    };
+                    // Both calls end in Outcome::Error (claim never gets a reply). The
+                    // RESULT is not under test — the overlap is.
+                    let _ = process_one(&cfg, &|| false);
+                });
+            }
+        });
+
+        // 0 would mean neither call ever reached claim() and the test proved nothing;
+        // 2 means both were inside the critical section at once.
+        assert_eq!(max_concurrent.load(SeqCst), 1,
+            "two process_one calls held the critical section at once: sweep_orphans deletes \
+             wr-*.mp4 by glob, so one would delete the other's actively-downloading video");
+        // Corroborates in the time domain: serialized, two 300ms stalls cannot fit into
+        // less than 600ms. Guards against a future refactor that keeps concurrency at 1 by
+        // never connecting rather than by locking.
+        assert!(started.elapsed() >= hold * 2,
+            "expected two serialized {hold:?} stalls, took only {:?}", started.elapsed());
+    }
 
     #[test]
     fn selections_map_slugs_to_engine_display_names() {
