@@ -13,6 +13,7 @@ import { versionRoutes } from './version';
 import type { LatestFn } from '../version/latest';
 import { createStatsApp } from './stats';
 import { screenRoutes } from './screen';
+import { wrJobsRoutes } from './wrJobs';
 import { presenceHandlers } from './presence';
 import { playerByToken } from '../db/players';
 import { requireTokenAny } from './auth';
@@ -57,6 +58,7 @@ export function createApp(db: DatabaseSync, hub: EventHub,
   app.route('/', versionRoutes(db, { latest: opts?.latest }));
   app.route('/', createStatsApp(db, { porkerPath: process.env.STATS_PORKER_DB ?? 'porker.db' }));
   app.route('/', screenRoutes(db));
+  app.route('/', wrJobsRoutes(db));
   app.get('/explorer', (c) => {
     try { return c.html(readFileSync(EXPLORER_HTML, 'utf8')); }
     catch { return c.text('stat-explorer.html not found', 404); }

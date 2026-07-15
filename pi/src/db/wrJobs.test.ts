@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { openDb, applySchema } from './connect';
-import { enqueueJob, seedWrJobs, claimJob, MAX_ATTEMPTS } from './wrJobs';
-import { insertWrTrail } from './wrTrails';
+import { enqueueJob, seedWrJobs, claimJob, MAX_ATTEMPTS,
+  heartbeatJob, releaseJob, completeJob, failJob } from './wrJobs';
+import { insertWrTrail, getWrTrail } from './wrTrails';
 
 function setup() {
   const db = openDb(':memory:');
@@ -136,5 +137,61 @@ describe('claimJob', () => {
     enqueueJob(db, 10); enqueueJob(db, 11);
     expect(claimJob(db, 'w1')!.wr_id).toBe(11);   // current wins
     expect(claimJob(db, 'w2')!.wr_id).toBe(10);   // superseded still processed
+  });
+});
+
+describe('lease lifecycle', () => {
+  const queued = () => { const db = setup(); addWr(db, 10); seedWrJobs(db); return db; };
+
+  it('heartbeat extends only for the lease owner', () => {
+    const db = queued(); claimJob(db, 'w1', 60);
+    expect(heartbeatJob(db, 10, 'w1', 600)).toBe(true);
+    expect(heartbeatJob(db, 10, 'w2', 600)).toBe(false);   // not the owner
+  });
+
+  it('heartbeat fails once the lease has expired', () => {
+    const db = queued(); claimJob(db, 'w1');
+    db.prepare("UPDATE wr_jobs SET lease_until = datetime('now','-1 minute') WHERE wr_id=10").run();
+    expect(heartbeatJob(db, 10, 'w1', 600)).toBe(false);
+  });
+
+  it('release clears the lease AND refunds the attempt (a pause must not burn one)', () => {
+    const db = queued(); claimJob(db, 'w1');
+    expect(releaseJob(db, 10, 'w1')).toBe(true);
+    const row = db.prepare('SELECT lease_owner, lease_until, attempts FROM wr_jobs WHERE wr_id=10').get() as any;
+    expect(row).toMatchObject({ lease_owner: null, lease_until: null, attempts: 0 });
+    expect(claimJob(db, 'w2')).not.toBeNull();             // immediately re-claimable
+  });
+
+  it('release by a non-owner does nothing', () => {
+    const db = queued(); claimJob(db, 'w1');
+    expect(releaseJob(db, 10, 'w2')).toBe(false);
+  });
+
+  it('complete stores the trail and clears the lease', () => {
+    const db = queued(); claimJob(db, 'w1');
+    expect(completeJob(db, 10, 'w1', [[14, 1635, 875, 0.79, 1], [114, 1636, 870, 0.81, 1]])).toBe(true);
+    expect(getWrTrail(db, 10)).toHaveLength(2);
+    expect(db.prepare('SELECT lease_owner FROM wr_jobs WHERE wr_id=10').get()).toMatchObject({ lease_owner: null });
+    expect(claimJob(db, 'w2')).toBeNull();                 // done: trail exists
+  });
+
+  it('complete accepts a legacy 4-tuple point (lap omitted)', () => {
+    const db = queued(); claimJob(db, 'w1');
+    expect(completeJob(db, 10, 'w1', [[14, 1635, 875, 0.79]] as any)).toBe(true);
+    expect(getWrTrail(db, 10)[0].lap).toBeNull();
+  });
+
+  it('complete by a non-owner is rejected and stores nothing', () => {
+    const db = queued(); claimJob(db, 'w1');
+    expect(completeJob(db, 10, 'w2', [[14, 1635, 875, 0.79, 1]])).toBe(false);
+    expect(getWrTrail(db, 10)).toEqual([]);
+  });
+
+  it('fail records the reason and clears the lease, keeping the attempt burned', () => {
+    const db = queued(); claimJob(db, 'w1');
+    expect(failJob(db, 10, 'w1', 'time_mismatch')).toBe(true);
+    const row = db.prepare('SELECT lease_owner, last_error, attempts FROM wr_jobs WHERE wr_id=10').get() as any;
+    expect(row).toMatchObject({ lease_owner: null, last_error: 'time_mismatch', attempts: 1 });
   });
 });

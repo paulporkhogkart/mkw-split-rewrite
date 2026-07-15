@@ -1,4 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
+import type { Point } from './types';
+import { insertWrTrail } from './wrTrails';
+import type { TrailPoint } from './trailCodec';
 
 /** Enqueue a WR for trail extraction. Idempotent and non-destructive: a repeat enqueue must not
  *  reset attempts, or a poison job would retry forever. */
@@ -101,4 +104,55 @@ export function claimJob(db: DatabaseSync, owner: string, leaseSec = DEFAULT_LEA
     db.exec('COMMIT');
     return job;
   } catch (e) { db.exec('ROLLBACK'); throw e; }
+}
+
+/** Wire 4/5-tuple -> TrailPoint. Legacy 4-tuples have no lap; null is the codec's sentinel. */
+const toTrailPoints = (pts: Point[]): TrailPoint[] =>
+  pts.map((p) => ({ t_ms: p[0], cx: p[1], cy: p[2], score: p[3], lap: p[4] ?? null }));
+
+/** Extend a live lease. Only the current owner of an UNEXPIRED lease may extend — once it has
+ *  lapsed the job is fair game and a zombie worker must not reclaim it by heartbeat. */
+export function heartbeatJob(db: DatabaseSync, wrId: number, owner: string,
+                             leaseSec = DEFAULT_LEASE_SEC): boolean {
+  const info = db.prepare(
+    `UPDATE wr_jobs SET lease_until=datetime('now', ?), updated_at=datetime('now')
+     WHERE wr_id=? AND lease_owner=? AND lease_until >= datetime('now')`
+  ).run(`+${leaseSec} seconds`, wrId, owner);
+  return Number(info.changes) > 0;
+}
+
+/** Voluntarily give a job back (pause mid-processing). Refunds the attempt claimJob charged —
+ *  a deliberate pause must not count against the cap, whereas a crash (lease expiry) does. */
+export function releaseJob(db: DatabaseSync, wrId: number, owner: string): boolean {
+  const info = db.prepare(
+    `UPDATE wr_jobs SET lease_owner=NULL, lease_until=NULL,
+       attempts=MAX(0, attempts-1), updated_at=datetime('now')
+     WHERE wr_id=? AND lease_owner=?`
+  ).run(wrId, owner);
+  return Number(info.changes) > 0;
+}
+
+/** Store the extracted trail and close the job. The wr_trails row is what marks it done. */
+export function completeJob(db: DatabaseSync, wrId: number, owner: string, pts: Point[]): boolean {
+  const owns = db.prepare('SELECT 1 FROM wr_jobs WHERE wr_id=? AND lease_owner=?').get(wrId, owner);
+  if (!owns) return false;
+  if (pts.length === 0) return false;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    insertWrTrail(db, wrId, toTrailPoints(pts));
+    db.prepare(`UPDATE wr_jobs SET lease_owner=NULL, lease_until=NULL, last_error=NULL,
+                  updated_at=datetime('now') WHERE wr_id=?`).run(wrId);
+    db.exec('COMMIT');
+    return true;
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+}
+
+/** Record a failure and free the lease. The attempt claimJob charged stays burned, so repeated
+ *  failures walk the job to the cap and stop it. */
+export function failJob(db: DatabaseSync, wrId: number, owner: string, error: string): boolean {
+  const info = db.prepare(
+    `UPDATE wr_jobs SET lease_owner=NULL, lease_until=NULL, last_error=?, updated_at=datetime('now')
+     WHERE wr_id=? AND lease_owner=?`
+  ).run(error.slice(0, 500), wrId, owner);
+  return Number(info.changes) > 0;
 }
