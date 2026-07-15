@@ -54,17 +54,35 @@ pub fn worker_id(dir: &Path) -> String {
     let path = dir.join("worker-id");
     if let Ok(s) = std::fs::read_to_string(&path) {
         let s = s.trim().to_string();
-        if !s.is_empty() { return s; }
+        if is_valid_worker_id(&s) {
+            return s;
+        }
+        if !s.is_empty() {
+            // Not cosmetic: a corrupt byte here makes every request's X-Worker-Id an
+            // INVALID HTTP header value, so every request fails forever with no self-heal.
+            // Regenerate rather than trust a stored value that fails our own rules.
+            log::warn!("[wr] stored worker id at {path:?} failed validation ({s:?}); \
+                        regenerating — any live lease under the old id simply expires \
+                        server-side rather than being actively orphaned");
+        }
     }
     let id = generate_worker_id();
-    // Verified write: this id IS our lease identity, so a silent failure to persist would
-    // mean a different id next boot and an orphaned lease. Log loudly rather than pretend.
-    match std::fs::write(&path, &id) {
+    // Atomic write: temp file + rename (mirrors ytdlp::fetch's pattern below in this
+    // module's sibling file). This id IS our lease identity, so a crash mid-write must
+    // never leave a torn value on disk to be misread as valid-but-wrong on the next boot —
+    // the temp file simply never gets renamed over the real one in that case.
+    let tmp = dir.join("worker-id.tmp");
+    match std::fs::write(&tmp, &id).and_then(|_| std::fs::rename(&tmp, &path)) {
         Ok(()) => {}
         Err(e) => log::error!("[wr] cannot persist worker id to {path:?}: {e} — each restart \
                               will orphan its previous lease until it expires"),
     }
     id
+}
+
+/// Legal HTTP header value AND the server's own limit: ≤64 chars, alphanumeric/dash only.
+fn is_valid_worker_id(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 64 && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
 /// 32 hex chars seeded from OS entropy, with no new dependency.
@@ -144,6 +162,40 @@ mod tests {
                 "degraded id must still be well-formed: {id}");
 
         let _ = std::fs::remove_file(&f);
+    }
+
+    #[test]
+    fn worker_id_regenerates_a_corrupt_stored_value() {
+        let d = tmpdir("corrupt");
+        // A byte that would make X-Worker-Id an invalid HTTP header value if trusted
+        // as-is — the exact failure mode a read-back-only-checks-non-empty bug misses.
+        std::fs::write(d.join("worker-id"), "bad\nvalue\0here").unwrap();
+        let id = worker_id(&d);
+        assert!(is_valid_worker_id(&id), "must regenerate a well-formed id, got {id:?}");
+        assert_ne!(id, "bad\nvalue\0here");
+        // Persisted: a second call must return the SAME regenerated id, not regenerate
+        // again every boot.
+        assert_eq!(worker_id(&d), id, "the regenerated id must itself persist");
+    }
+
+    #[test]
+    fn worker_id_regenerates_an_oversized_stored_value() {
+        let d = tmpdir("oversized");
+        let too_long = "a".repeat(100);
+        std::fs::write(d.join("worker-id"), &too_long).unwrap();
+        let id = worker_id(&d);
+        assert!(id.len() <= 64, "server rejects >64 chars, got len {}", id.len());
+        assert_ne!(id, too_long);
+    }
+
+    #[test]
+    fn worker_id_accepts_a_previously_persisted_valid_value_unchanged() {
+        // Guards against over-eager validation: a genuinely well-formed stored id must be
+        // returned VERBATIM, not silently replaced.
+        let d = tmpdir("valid_roundtrip");
+        let first = worker_id(&d);
+        assert!(is_valid_worker_id(&first));
+        assert_eq!(worker_id(&d), first);
     }
 
     #[test]

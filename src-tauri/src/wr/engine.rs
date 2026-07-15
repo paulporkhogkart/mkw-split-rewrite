@@ -6,9 +6,11 @@
 
 use super::WrError;
 use serde_json::json;
+use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 /// Engine DISPLAY names (not slugs). The caller maps slug -> display before constructing.
@@ -25,6 +27,10 @@ pub struct Selections {
 #[derive(Debug, Clone)]
 pub struct Finalized {
     pub total_time: Option<String>,
+    /// The engine's own run status (e.g. "finished", "reset", "dnf"). Surfaced in the
+    /// rejection log line so a run with no usable trail says WHY ("reset"/"dnf") instead
+    /// of a bare, unhelpful "no trail".
+    pub status: Option<String>,
     /// [t_ms, cx, cy, score, lap]; lap = -1.0 when the engine omitted it (legacy 4-tuple).
     pub points: Vec<[f64; 5]>,
 }
@@ -88,6 +94,7 @@ impl EngineDriver {
                 }).unwrap_or_default();
                 self.finalized = Some(Finalized {
                     total_time: v.get("total_time").and_then(|t| t.as_str()).map(str::to_string),
+                    status: v.get("status").and_then(|s| s.as_str()).map(str::to_string),
                     points,
                 });
                 vec![]
@@ -122,9 +129,17 @@ pub fn time_to_ms(s: &str) -> Option<i64> {
 
 /// Where the engine lives. Mirrors lib.rs:48's debug/release split.
 pub enum EnginePath {
-    /// Debug: `python -m mkw_tracker` from the repo root.
+    /// Debug: `python -m mkw_tracker` from the repo root. Only ever constructed when
+    /// `debug_assertions` is ON (see `resolve` below) — so a `cargo build --release`
+    /// never constructs it and dead_code would otherwise flag it there; pre-existing,
+    /// symmetric with `Bundled` below.
+    #[allow(dead_code)]
     Dev,
-    /// Release: the PyInstaller exe bundled beside us.
+    /// Release: the PyInstaller exe bundled beside us. Only ever constructed when
+    /// `debug_assertions` is off (see `resolve` below), so a plain debug `cargo build`/
+    /// `cargo test` never constructs it and dead_code would otherwise flag it — it IS
+    /// used, just not in the profile that flags it.
+    #[allow(dead_code)]
     Bundled(PathBuf),
     /// Test-only: an arbitrary program + args. `Bundled` takes no args, so it cannot
     /// express a deliberately-wedged child (`python -c "time.sleep(60)"`) — and a wedged
@@ -183,7 +198,12 @@ pub fn run_video(
         .arg("--no-display")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null());
+        // Piped, NOT null: a Python crash's stderr is the only diagnostic we get (there is
+        // no console to inherit into — this is a GUI app). Piped-without-draining would
+        // DEADLOCK the moment the engine fills the pipe buffer (~4-8KB) — that is exactly
+        // why `null` was the safe choice before — so a dedicated drain thread below empties
+        // it continuously into a bounded ring buffer.
+        .stderr(std::process::Stdio::piped());
     #[cfg(debug_assertions)]
     cmd.current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).parent().expect("repo root"));
 
@@ -191,12 +211,18 @@ pub fn run_video(
         .map_err(|e| WrError::EngineFailed(format!("spawn: {e}")))?;
     let mut stdin = child.stdin.take().expect("piped stdin");
     let stdout = child.stdout.take().expect("piped stdout");
+    let stderr = child.stderr.take().expect("piped stderr");
 
     let started = Instant::now();
-    let child = std::sync::Mutex::new(child);
+    let child = Mutex::new(child);
     let done = AtomicBool::new(false);
     let cancelled = AtomicBool::new(false);
     let timed_out = AtomicBool::new(false);
+    // Bounded ring of the engine's last STDERR_TAIL_LINES stderr lines. Bounded so a
+    // spewing engine cannot grow memory — the drain thread pops the oldest line whenever
+    // it would exceed the cap.
+    const STDERR_TAIL_LINES: usize = 50;
+    let stderr_tail: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
 
     let result = std::thread::scope(|s| {
         // WATCHDOG. The read loop below blocks inside read_line, which returns only on a
@@ -224,6 +250,18 @@ pub fn run_video(
             }
         });
 
+        // STDERR DRAIN. Runs for as long as the child's stderr stays open. Without this
+        // thread, `Stdio::piped()` above would deadlock rather than help the moment the
+        // engine writes enough to fill the OS pipe buffer.
+        s.spawn(|| {
+            for line in BufReader::new(stderr).lines() {
+                let Ok(line) = line else { break };
+                let mut tail = stderr_tail.lock().unwrap();
+                if tail.len() >= STDERR_TAIL_LINES { tail.pop_front(); }
+                tail.push_back(line);
+            }
+        });
+
         // The read loop never locks `child`, so it cannot contend with the watchdog.
         let mut driver = EngineDriver::new(sel);
         let mut result: Option<Finalized> = None;
@@ -245,9 +283,13 @@ pub fn run_video(
                 break;   // --video-once stops PLAYBACK but never exits: we must reap it.
             }
         }
-        // Retires the watchdog on every exit path, so the scope's implicit join at the end
-        // of this closure cannot block for longer than one 250ms poll.
+        // Retire the watchdog, then kill/reap the child NOW — still inside the scope.
+        // --video-once stops playback but never exits, and the stderr drain thread above
+        // stays blocked reading its pipe until that pipe closes. Deferring the kill to
+        // after this closure (as before stderr existed) would deadlock `thread::scope`'s
+        // implicit join on that thread at the end of this block.
         done.store(true, Ordering::Relaxed);
+        let _ = child.lock().unwrap().kill();
         result
     });
 
@@ -255,15 +297,63 @@ pub fn run_video(
     let _ = child.kill();
     let _ = child.wait();
 
-    // Distinguish the two: a cancel must NEVER be reported to the server as a failure (the
-    // caller release()s, refunding the attempt); a timeout must. Both are read from flags
-    // the watchdog actually set, not re-derived from elapsed() — a late but legitimate EOF
-    // (an engine crash at 299.9s of a 300s budget) is NoTrail, not a timeout we imposed.
-    match result {
+    let stderr_tail: Vec<String> =
+        stderr_tail.into_inner().unwrap_or_else(|e| e.into_inner()).into_iter().collect();
+    let label = video.file_name().and_then(|n| n.to_str()).unwrap_or("video").to_string();
+
+    // Distinguish cancel/timeout/no-trail: a cancel must NEVER be reported to the server as
+    // a failure (the caller release()s, refunding the attempt); a timeout must. Both are
+    // read from flags the watchdog actually set, not re-derived from elapsed() — a late but
+    // legitimate EOF (an engine crash at 299.9s of a 300s budget) is NoTrail-shaped, not a
+    // timeout we imposed.
+    let outcome = match result {
         Some(f) => Ok(f),
         None if cancelled.load(Ordering::Relaxed) => Err(WrError::Cancelled),
         None if timed_out.load(Ordering::Relaxed) => Err(WrError::Timeout),
-        None => Err(WrError::NoTrail),
+        None => {
+            // A genuine "no trail" (minimap never locked) is a SILENT clean exit — nothing
+            // on stderr. If the engine wrote to stderr AND produced no trail, that is an
+            // engine failure (a crash), not a marginal video: NoTrail is retryable at a
+            // higher tier by verify.rs, so misclassifying a crash as NoTrail would retry it
+            // as though the video were merely hard to track, burning attempts pointlessly.
+            let joined = stderr_tail.join("\n");
+            log::error!("[wr engine] {label}: produced no trail; captured stderr tail:\n{}",
+                if joined.is_empty() { "<empty>" } else { &joined });
+            if stderr_tail.is_empty() { Err(WrError::NoTrail) } else { Err(WrError::EngineFailed(joined)) }
+        }
+    };
+
+    // The bounded log file: ONE file, always fully overwritten (never appended), so it can
+    // never accumulate across runs — it always reflects only the most recent run. Skipped
+    // when `video` has no real parent directory (e.g. a bare relative filename in a test),
+    // so tests never scatter a stray log file into the working directory.
+    if let Some(dir) = video.parent().filter(|p| !p.as_os_str().is_empty()) {
+        let status = match &outcome { Ok(f) => f.status.as_deref(), Err(_) => None };
+        write_stderr_log(dir, &label, status, &stderr_tail);
+    }
+
+    outcome
+}
+
+/// Overwrite (never append to) `<dir>/engine-stderr.log` with this run's captured stderr
+/// tail. A single file, replaced whole every call, capped at whatever `tail` already was
+/// bounded to by the ring buffer above — so it can roll over run after run without ever
+/// growing, per-job files, or any log-rotation machinery.
+fn write_stderr_log(dir: &Path, label: &str, status: Option<&str>, tail: &[String]) {
+    let unix_ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let mut out = format!("=== {label} status={} unix_ts={unix_ts} ===\n",
+                           status.unwrap_or("<none>"));
+    if tail.is_empty() {
+        out.push_str("<no stderr output>\n");
+    } else {
+        for line in tail { out.push_str(line); out.push('\n'); }
+    }
+    let path = dir.join("engine-stderr.log");
+    if let Err(e) = std::fs::write(&path, out) {
+        log::warn!("[wr] could not write {path:?}: {e}");
     }
 }
 
@@ -359,6 +449,9 @@ mod tests {
                       "points":[[14,1635,875,0.79,1],[114,1636,870,0.81,1]]}"#);
         let f = d.finalized().expect("must capture run_finalized");
         assert_eq!(f.total_time.as_deref(), Some("1:02.934"));
+        assert_eq!(f.status.as_deref(), Some("finished"),
+            "status must be captured, not dropped — it's what lets a rejection log say \
+             'reset'/'dnf' instead of a bare, unhelpful 'no trail'");
         assert_eq!(f.points.len(), 2);
         assert_eq!(f.points[0][0], 14.0);
         assert_eq!(f.points[0][1], 1635.0);
@@ -443,6 +536,87 @@ mod tests {
             "cancel must abort promptly; took {:?}",
             started.elapsed()
         );
+    }
+
+    /// A child that writes to stderr and exits immediately with NO stdout at all — the
+    /// shape of a genuine Python crash (import error, unhandled exception before the
+    /// engine ever emits its first JSON line).
+    fn crashing_child(stderr_script: &str) -> EnginePath {
+        EnginePath::Custom("python".into(), vec!["-c".into(), stderr_script.into()])
+    }
+
+    #[test]
+    fn stderr_output_with_no_trail_is_engine_failed_not_no_trail() {
+        let engine = crashing_child("import sys; sys.stderr.write('boom crash\\n'); sys.exit(1)");
+        let err = run_video(
+            &engine, Path::new("unused.mp4"), sel(), Duration::from_secs(10), &|| false,
+        ).expect_err("a crash with no trail must be reported, not silently swallowed");
+        match err {
+            WrError::EngineFailed(msg) => assert!(msg.contains("boom crash"),
+                "the captured stderr tail must be in the error: {msg}"),
+            other => panic!("expected EngineFailed (stderr present, no trail), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn no_trail_with_no_stderr_output_stays_no_trail() {
+        // Exits cleanly (no crash signal, no stderr) but never emits run_finalized —
+        // the genuine "minimap never locked" shape, which must stay retryable as NoTrail
+        // rather than being reclassified as an engine failure.
+        let engine = crashing_child("pass");
+        let err = run_video(
+            &engine, Path::new("unused.mp4"), sel(), Duration::from_secs(10), &|| false,
+        ).expect_err("no run_finalized was ever emitted");
+        assert!(matches!(err, WrError::NoTrail),
+            "a silent exit with no stderr must stay NoTrail, got {err:?}");
+    }
+
+    #[test]
+    fn stderr_ring_buffer_is_bounded_and_keeps_the_tail_not_the_head() {
+        let engine = crashing_child(
+            "import sys\nfor i in range(200):\n    sys.stderr.write(f'line{i}\\n')\nsys.exit(1)"
+        );
+        let err = run_video(
+            &engine, Path::new("unused.mp4"), sel(), Duration::from_secs(15), &|| false,
+        ).expect_err("no trail expected");
+        match err {
+            WrError::EngineFailed(msg) => {
+                let n = msg.lines().count();
+                assert!(n <= 50, "ring buffer must cap at ~50 lines so a spewing engine \
+                                   cannot grow memory; got {n} lines");
+                assert!(msg.lines().any(|l| l == "line199"),
+                    "must keep the TAIL of the output: {msg}");
+                assert!(!msg.lines().any(|l| l == "line0"),
+                    "the earliest lines must have been dropped, not the ring's whole point: {msg}");
+            }
+            other => panic!("expected EngineFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stderr_log_file_is_overwritten_each_run_not_appended_or_accumulated() {
+        let dir = std::env::temp_dir().join("wr_engine_test_stderr_logfile");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // A real path *inside* a real directory — unlike the bare "unused.mp4" the other
+        // tests use — so run_video's `video.parent()` guard actually lets it write.
+        let video = dir.join("wr-999.mp4");
+        let log_path = dir.join("engine-stderr.log");
+
+        let run1 = crashing_child("import sys; sys.stderr.write('first run boom\\n')");
+        let _ = run_video(&run1, &video, sel(), Duration::from_secs(10), &|| false);
+        let contents1 = std::fs::read_to_string(&log_path).expect("log file must be written");
+        assert!(contents1.contains("first run boom"));
+
+        let run2 = crashing_child("import sys; sys.stderr.write('second run only\\n')");
+        let _ = run_video(&run2, &video, sel(), Duration::from_secs(10), &|| false);
+        let contents2 = std::fs::read_to_string(&log_path).unwrap();
+        assert!(contents2.contains("second run only"));
+        assert!(!contents2.contains("first run boom"),
+            "must be OVERWRITTEN, not appended — an appending log grows forever, which is \
+             exactly what the user asked NOT to happen");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The real proof. Ignored by default: it is wall-clock bound (~100s) and needs the

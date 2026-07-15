@@ -15,6 +15,12 @@ pub struct ServiceCfg {
     pub engine: EnginePath,
 }
 
+// Fields are read via `{:?}` in wr_process_one's dev-only probe result (the dead_code
+// lint deliberately does NOT count Debug-only usage as "read" — see the compiler's own
+// note on this warning) and by tests matching on the variant only. Plan 3's polling loop
+// is expected to start pattern-matching these for real (retry/backoff decisions per
+// outcome kind), at which point this allow can come off.
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum Outcome {
     /// Nothing claimable (204).
@@ -40,6 +46,16 @@ fn selections_for(j: &job::WrJob) -> Selections {
 
 fn video_path(dir: &std::path::Path, wr_id: i64) -> PathBuf {
     dir.join(format!("wr-{wr_id}.mp4"))
+}
+
+/// Only DownloadFailed could plausibly be explained by a stale yt-dlp (a network hiccup, a
+/// format-parsing regression against a specific yt-dlp release). No1080p60/VideoUnavailable/
+/// EngineFailed are permanent for this video/URL — a refresh-and-retry cannot fix a missing
+/// stream or a removed video, so retrying on those just burns ~180s (the fetch timeout)
+/// plus a second doomed download. Pulled out as its own function so this predicate can be
+/// proven directly, without needing a real yt-dlp binary or network access.
+fn is_staleness_explicable(e: &WrError) -> bool {
+    matches!(e, WrError::DownloadFailed(_))
 }
 
 /// Delete a job's video. Called on EVERY terminal outcome — a 98s video is ~55MB, so the
@@ -84,6 +100,19 @@ pub fn process_one(cfg: &ServiceCfg, cancel: &(dyn Fn() -> bool + Sync)) -> Outc
     sweep_orphans(&cfg.data_dir);
 
     let client = job::Client::new(&cfg.server_url, &cfg.token, &worker);
+
+    // Crash recovery: an inflight record left over means we died mid-job last time,
+    // before reaching the set_inflight(None) at the bottom of this function. Release it
+    // so the Pi REFUNDS that attempt rather than just letting the ~600s lease lapse and
+    // burn it silently. Best-effort: if another machine already re-claimed the job (its
+    // lease had already lapsed by the time we got here), the server correctly no-ops/
+    // rejects the release — we only need our OWN bookkeeping cleared either way.
+    if let Some(orphan_wr_id) = state::inflight(&conn) {
+        log::warn!("[wr] found crash-orphaned inflight wr_id={orphan_wr_id}, releasing");
+        let _ = client.release(orphan_wr_id);
+        state::set_inflight(&conn, None);
+    }
+
     let j = match client.claim() {
         Ok(Some(j)) => j,
         Ok(None) => return Outcome::Idle,
@@ -106,15 +135,19 @@ fn run_job(cfg: &ServiceCfg, client: &job::Client, j: &job::WrJob,
 
     let exe = match ytdlp::ensure(&cfg.data_dir) { Ok(p) => p, Err(e) => return Outcome::Error(e) };
     if let Err(e) = ytdlp::download(&exe, &j.video_url, tier, &dest) {
-        // A download failure is the classic symptom of a stale yt-dlp. Refresh once and
-        // retry before burning the job's attempt on our own rot.
-        log::warn!("[wr] download failed ({}), refreshing yt-dlp and retrying once", e.reason());
-        let retry = ytdlp::fetch(&cfg.data_dir)
-            .map_err(WrError::DownloadFailed)
-            .and_then(|exe2| ytdlp::download(&exe2, &j.video_url, tier, &dest));
-        if let Err(e2) = retry {
-            let _ = client.fail(j.wr_id, &e2);
-            return Outcome::Failed(j.wr_id, e2);
+        if is_staleness_explicable(&e) {
+            // See is_staleness_explicable's doc for why only THIS class of error retries.
+            log::warn!("[wr] download failed ({}), refreshing yt-dlp and retrying once", e.reason());
+            let retry = ytdlp::fetch(&cfg.data_dir)
+                .map_err(WrError::DownloadFailed)
+                .and_then(|exe2| ytdlp::download(&exe2, &j.video_url, tier, &dest));
+            if let Err(e2) = retry {
+                let _ = client.fail(j.wr_id, &e2);
+                return Outcome::Failed(j.wr_id, e2);
+            }
+        } else {
+            let _ = client.fail(j.wr_id, &e);
+            return Outcome::Failed(j.wr_id, e);
         }
     }
     if cancel() { let _ = client.release(j.wr_id); return Outcome::Released(j.wr_id); }
@@ -137,7 +170,10 @@ fn run_job(cfg: &ServiceCfg, client: &job::Client, j: &job::WrJob,
             Err(e) => Outcome::Error(e),
         },
         Err(e) => {
-            log::warn!("[wr] wr_id={} rejected: {}", j.wr_id, e.reason());
+            // Include the engine's own run status: it's the difference between a bare,
+            // unhelpful "no trail" and a log line that says WHY ("reset"/"dnf"/...).
+            log::warn!("[wr] wr_id={} rejected: {} (engine status={})", j.wr_id, e.reason(),
+                finalized.status.as_deref().unwrap_or("<none>"));
             let _ = client.fail(j.wr_id, &e);
             Outcome::Failed(j.wr_id, e)
         }
@@ -234,6 +270,66 @@ mod tests {
         // never connecting rather than by locking.
         assert!(started.elapsed() >= hold * 2,
             "expected two serialized {hold:?} stalls, took only {:?}", started.elapsed());
+    }
+
+    #[test]
+    fn process_one_releases_and_clears_a_crash_orphaned_inflight_job_before_claiming() {
+        let dir = tmpdir("orphan_release");
+        let conn = state::open(&dir).unwrap();
+        state::set_inflight(&conn, Some(42));
+        drop(conn);
+
+        // No live server needed to prove the LOCAL bookkeeping is cleared: release() is
+        // best-effort and its own result is ignored — connecting to a port nothing listens
+        // on fails immediately (no listener => instant refusal, no timeout to wait out), so
+        // this stays fast without a mock server.
+        let cfg = ServiceCfg {
+            server_url: "http://127.0.0.1:1".into(),
+            token: "probe".into(),
+            data_dir: dir.clone(),
+            engine: EnginePath::Dev,
+        };
+        let _ = process_one(&cfg, &|| false);
+
+        let conn2 = state::open(&dir).unwrap();
+        assert_eq!(state::inflight(&conn2), None,
+            "a crash-orphaned inflight record must be cleared even though release() itself \
+             could not reach a server — otherwise the NEXT process_one call would see the \
+             same stale wr_id forever");
+    }
+
+    #[test]
+    fn process_one_with_no_orphan_leaves_inflight_untouched_before_claiming() {
+        // Guards the other direction: process_one must not go around releasing/clearing
+        // wr_ids that were never actually left inflight.
+        let dir = tmpdir("no_orphan");
+        let conn = state::open(&dir).unwrap();
+        assert_eq!(state::inflight(&conn), None, "precondition: nothing inflight yet");
+        drop(conn);
+
+        let cfg = ServiceCfg {
+            server_url: "http://127.0.0.1:1".into(),
+            token: "probe".into(),
+            data_dir: dir.clone(),
+            engine: EnginePath::Dev,
+        };
+        let _ = process_one(&cfg, &|| false);
+
+        let conn2 = state::open(&dir).unwrap();
+        assert_eq!(state::inflight(&conn2), None);
+    }
+
+    #[test]
+    fn only_download_failed_is_treated_as_explicable_by_a_stale_yt_dlp() {
+        assert!(is_staleness_explicable(&WrError::DownloadFailed("x".into())));
+        assert!(!is_staleness_explicable(&WrError::No1080p60),
+            "a missing 1080p60 stream is permanent for this video — refreshing yt-dlp can't add a format");
+        assert!(!is_staleness_explicable(&WrError::VideoUnavailable),
+            "a removed/private video is permanent — retrying just burns the fetch timeout");
+        assert!(!is_staleness_explicable(&WrError::EngineFailed("spawn: x".into())),
+            "our own spawn failure isn't a yt-dlp staleness symptom");
+        assert!(!is_staleness_explicable(&WrError::Timeout));
+        assert!(!is_staleness_explicable(&WrError::Cancelled));
     }
 
     #[test]

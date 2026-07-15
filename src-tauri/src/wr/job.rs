@@ -9,7 +9,6 @@ use super::WrError;
 #[derive(Debug, Clone)]
 pub struct WrJob {
     pub wr_id: i64,
-    pub cc: i64,
     pub course_slug: String,
     pub course_name: String,
     pub video_url: String,
@@ -27,9 +26,18 @@ pub fn parse_job(body: &str) -> Option<WrJob> {
     let v: serde_json::Value = serde_json::from_str(body).ok()?;
     let s = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::to_string);
     let i = |k: &str| v.get(k).and_then(|x| x.as_i64());
+
+    // Strict like the required fields below: a PRESENT-but-wrong-type "attempt" (e.g.
+    // "attempt":"3") must reject the whole job, not silently coerce to the default —
+    // `unwrap_or` alone cannot tell "absent" and "wrong type" apart. Absent is fine:
+    // attempt 1 is the legitimate default for a job's first claim.
+    let attempt = match v.get("attempt") {
+        None | Some(serde_json::Value::Null) => 1,
+        Some(x) => x.as_i64()?,
+    };
+
     Some(WrJob {
         wr_id: i("wr_id")?,
-        cc: i("cc").unwrap_or(150),
         course_slug: s("course_slug")?,
         course_name: s("course_name")?,
         video_url: s("video_url")?,
@@ -38,7 +46,7 @@ pub fn parse_job(body: &str) -> Option<WrJob> {
         character_slug: s("character_slug")?,
         costume_slug: s("costume_slug"),
         kart_slug: s("kart_slug"),
-        attempt: i("attempt").unwrap_or(1),
+        attempt,
     })
 }
 
@@ -97,13 +105,22 @@ impl Client {
         parse_job(&body).map(Some).ok_or_else(|| format!("claim: unusable job: {body}"))
     }
 
-    /// false = we no longer hold the lease (409). Stop working; the job is someone else's.
+    /// Ok(false) = the request did not succeed — any non-2xx status folds to false here,
+    /// not just a 409. In practice that's almost always a 409 (we no longer hold the
+    /// lease), but a transient 5xx would read identically: treat false as "stop working,
+    /// we cannot confirm we still hold this job" rather than specifically "409".
+    ///
+    /// Unused for now (`#[allow(dead_code)]` below) — a ~600s lease against a ~110s job
+    /// needs no heartbeat; Plan 3's longer-running loop may still call this defensively.
+    #[allow(dead_code)]
     pub fn heartbeat(&self, wr_id: i64) -> Result<bool, String> {
         Ok(self.post(&format!("/v1/wr-jobs/{wr_id}/heartbeat"), None)?.status().is_success())
     }
 
     /// Hand the job back voluntarily. The Pi REFUNDS the attempt, so a pause never
     /// counts against the cap (unlike a crash, where the lease just lapses).
+    /// Ok(false) = the request did not succeed — like `heartbeat`, any non-2xx status
+    /// (not only a 409/lease-already-lapsed) folds to false here.
     pub fn release(&self, wr_id: i64) -> Result<bool, String> {
         Ok(self.post(&format!("/v1/wr-jobs/{wr_id}/release"), None)?.status().is_success())
     }
@@ -167,6 +184,25 @@ mod tests {
         // A string where a number is expected must fail parsing, not silently coerce.
         let bad = LIVE.replacen(r#""wr_id":6"#, r#""wr_id":"6""#, 1);
         assert!(parse_job(&bad).is_none());
+    }
+
+    #[test]
+    fn rejects_a_job_with_wrong_json_type_for_attempt() {
+        // "attempt":"3" must reject the whole job, not silently become 1 —
+        // `unwrap_or(1)` alone cannot distinguish "absent" from "present but wrong type".
+        let bad = LIVE.replacen(r#""attempt":1"#, r#""attempt":"3""#, 1);
+        assert!(parse_job(&bad).is_none(),
+            "a string attempt must be rejected, not silently coerced to the default");
+    }
+
+    #[test]
+    fn defaults_a_missing_attempt_to_one() {
+        // Absent is legitimately different from wrong-type: a job's first claim may simply
+        // omit attempt, and 1 is the correct default for that case.
+        let without_attempt = LIVE.replacen(r#","attempt":1"#, "", 1);
+        assert!(!without_attempt.contains("\"attempt\""), "precondition: attempt must be gone");
+        let j = parse_job(&without_attempt).expect("a missing attempt must still parse");
+        assert_eq!(j.attempt, 1);
     }
 
     #[test]

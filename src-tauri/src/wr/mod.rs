@@ -23,7 +23,11 @@ pub enum WrError {
     NoTrail,
     /// Detected time != the mkwrs record. Wrong/mislinked/truncated video.
     TimeMismatch { detected_ms: i64, expected_ms: i64 },
-    /// The engine could not be spawned or died. OUR fault, not the video's.
+    /// The engine (or yt-dlp) could not be spawned, or the engine produced stderr output
+    /// and no trail — a crash, not a merely marginal video. OUR fault, not the video's.
+    /// Distinct from `NoTrail` on purpose: `NoTrail` is retryable at a higher tier, so a
+    /// crash misclassified as `NoTrail` would get retried as though the video were just
+    /// hard to track, burning attempts on a bug rather than surfacing it.
     EngineFailed(String),
     Timeout,
     /// Aborted by a pause or the idle gate closing. NEVER reported to the Pi — the caller
@@ -51,11 +55,22 @@ impl WrError {
     }
 }
 
-/// DEV ONLY: claim and process exactly one job, then report. Plan 3 replaces this with
-/// the real loop behind the settings toggle + idle gate.
+/// PROBE, not gated to debug builds: claim and process exactly one job, then report.
+/// Plan 3 replaces this with the real loop behind the settings toggle + idle gate.
 ///
 /// Takes `server_url`/`token` explicitly rather than reading sync.rs's CONFIG, so a probe
 /// can never accidentally claim from the real Pi.
+///
+/// HONEST GATING NOTE (this used to be commented "DEV ONLY", which overstated things): this
+/// command is registered — and so webview-invokable — in every build, debug or release; it
+/// is NOT behind `#[cfg(debug_assertions)]`. It was deliberately left that way rather than
+/// runtime-gated: this module (`service`/`verify`/`ytdlp`/`job`) has no other caller yet
+/// (Plan 3 supplies the real one), so cfg-gating this command's body to debug-only would
+/// make the ENTIRE wr:: call graph unreachable dead code in a release build — trading one
+/// low-risk warning for ~40 real ones. The actual risk of staying invokable is low: it
+/// takes `server_url`/`token` as explicit caller-supplied args, so a webview call can never
+/// reach the real Pi or the real player token on its own — reaching those requires already
+/// knowing them.
 #[tauri::command]
 pub async fn wr_process_one(app: tauri::AppHandle, server_url: String, token: String)
     -> Result<String, String> {

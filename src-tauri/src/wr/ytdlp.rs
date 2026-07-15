@@ -24,8 +24,6 @@ pub fn format_selector(tier: Tier) -> &'static str {
     match tier {
         Tier::Native1080p60 =>
             "bestvideo[height=1080][fps=60][vcodec^=avc1]/bestvideo[height=1080][fps=60]",
-        Tier::Downscaled4k =>
-            "bestvideo[height=2160][fps=60]",
     }
 }
 
@@ -84,7 +82,10 @@ pub fn download(exe: &Path, url: &str, tier: Tier, dest: &Path) -> Result<(), Wr
             url,
         ])
         .output()
-        .map_err(|e| WrError::DownloadFailed(format!("spawn yt-dlp: {e}")))?;
+        // A spawn failure (missing/corrupt exe, no permission to exec) is OUR fault, not
+        // the video's — DownloadFailed would misleadingly blame the video in the Pi's
+        // last_error, and it's not something a plain retry of the same exe can fix.
+        .map_err(|e| WrError::EngineFailed(format!("spawn yt-dlp: {e}")))?;
     if out.status.success() && dest.is_file() { return Ok(()); }
     Err(classify_failure(&String::from_utf8_lossy(&out.stderr)))
 }
@@ -119,25 +120,6 @@ mod tests {
     }
 
     #[test]
-    fn four_k_selector_asks_for_2160p60() {
-        let s = format_selector(Tier::Downscaled4k);
-        assert!(s.contains("height=2160"));
-        assert!(s.contains("fps=60"));
-    }
-
-    #[test]
-    fn every_four_k_branch_still_demands_2160p60() {
-        // Same per-branch guard as the native tier. Currently vacuous (one branch), but it
-        // is the check that would catch a future "helpful" non-60fps fallback being added
-        // here — the whole-string assert above would not.
-        let s = format_selector(Tier::Downscaled4k);
-        for branch in s.split('/') {
-            assert!(branch.contains("height=2160"), "branch without 2160p: {branch}");
-            assert!(branch.contains("fps=60"), "branch without 60fps: {branch}");
-        }
-    }
-
-    #[test]
     fn classifies_a_missing_1080p60_stream() {
         assert_eq!(classify_failure("ERROR: Requested format is not available"), WrError::No1080p60);
     }
@@ -164,5 +146,18 @@ mod tests {
             WrError::DownloadFailed(s) => assert!(s.contains("nobody predicted")),
             other => panic!("expected DownloadFailed, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_spawn_failure_is_engine_failed_not_download_failed() {
+        // A real spawn failure, not a simulated one: point at an exe that cannot exist so
+        // Command::output() itself errors, exercising the actual code path rather than
+        // asserting on classify_failure() (which spawn failures never reach).
+        let missing = Path::new("this-path-definitely-does-not-exist-wr-test.exe");
+        let dest = std::env::temp_dir().join("wr_ytdlp_spawn_test_unused.mp4");
+        let err = download(missing, "https://example.invalid/video", Tier::Native1080p60, &dest)
+            .expect_err("a nonexistent exe must fail to spawn");
+        assert!(matches!(err, WrError::EngineFailed(_)),
+            "a spawn failure is OUR fault, not the video's — expected EngineFailed, got {err:?}");
     }
 }

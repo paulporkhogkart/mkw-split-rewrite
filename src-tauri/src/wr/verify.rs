@@ -4,22 +4,28 @@ use super::engine::{time_to_ms, Finalized};
 use super::WrError;
 
 /// Which source to download for this attempt (spec §6.4 retry tiers).
+///
+/// A 4K tier (`Downscaled4k`, 2160p60 downscaled to 1080p) was tried and REMOVED
+/// 2026-07-15: it was measured to raise the median badge NCC 0.796 -> 0.829 on ONE clean
+/// video, but through an ffmpeg lanczos downscale step that was never actually built —
+/// this module handed 2160p straight to the engine instead, whose `_norm()` resizes with
+/// `cv2.INTER_LINEAR`, which *aliases* on a 2:1 downscale and can be worse than native
+/// 1080p, not better. So the tier paid 3.6x the bandwidth to plausibly make things worse,
+/// on the strength of a gain that was never even measured through the code path this
+/// module runs. Its value on a genuinely marginal video was a hypothesis, not evidence.
+/// Deliberately left as a one-variant enum rather than deleted outright — a later plan
+/// may re-add a real tier, but only with evidence a specific video needed it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tier {
-    /// YouTube's native 1080p60. The default and almost always right.
+    /// YouTube's native 1080p60. The only source this module downloads.
     Native1080p60,
-    /// 2160p60 downscaled to 1080p with ffmpeg lanczos. Measured to raise the median
-    /// badge NCC 0.796 -> 0.829 but to produce an IDENTICAL trail, because
-    /// calibrate_from_race scales its margin by (1 - median) so a better image tightens
-    /// its own threshold. Costs 3.6x the bandwidth + a ~58s transcode, so it is worth it
-    /// ONLY as a last resort for a video that produced no trail at all.
-    Downscaled4k,
 }
 
-/// Escalate only for a genuinely marginal video. A time_mismatch must never escalate —
-/// a wrong video is wrong at any bitrate; it needs a human, not more pixels.
-pub fn tier_for(attempt: i64) -> Tier {
-    if attempt == 3 { Tier::Downscaled4k } else { Tier::Native1080p60 }
+/// Every attempt downloads native 1080p60 — see the `Tier` doc for why the 4K escalation
+/// tier was removed rather than fixed. Kept as a function of `attempt` (rather than a
+/// constant) so a future real tier can slot back in without changing every call site.
+pub fn tier_for(_attempt: i64) -> Tier {
+    Tier::Native1080p60
 }
 
 /// The free correctness gate: the engine read the time off the video without consulting
@@ -46,6 +52,7 @@ mod tests {
     fn fin(total: Option<&str>, n: usize) -> Finalized {
         Finalized {
             total_time: total.map(str::to_string),
+            status: Some("finished".into()),
             points: (0..n).map(|i| [i as f64, 1635.0, 875.0, 0.79, 1.0]).collect(),
         }
     }
@@ -92,11 +99,11 @@ mod tests {
     }
 
     #[test]
-    fn tier_1_and_2_are_native_1080p_and_3_escalates_to_4k() {
-        assert_eq!(tier_for(1), Tier::Native1080p60);
-        assert_eq!(tier_for(2), Tier::Native1080p60, "attempt 2 = a plain re-download (throttling/403)");
-        assert_eq!(tier_for(3), Tier::Downscaled4k);
-        assert_eq!(tier_for(4), Tier::Native1080p60, "past the escalation, back off rather than re-pay 197MB");
+    fn every_attempt_downloads_native_1080p_now_that_the_4k_tier_is_removed() {
+        for attempt in [1, 2, 3, 4, 5, 99] {
+            assert_eq!(tier_for(attempt), Tier::Native1080p60,
+                "attempt {attempt} must stay native — the 4K escalation tier was removed");
+        }
     }
 
     #[test]
