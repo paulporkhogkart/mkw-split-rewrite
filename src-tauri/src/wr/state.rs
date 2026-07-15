@@ -47,25 +47,38 @@ pub fn set_inflight(conn: &Connection, wr_id: Option<i64>) {
 /// reused forever; a plain file (not the DB) so a scratch-DB reset can't silently change
 /// our identity and orphan a live lease.
 pub fn worker_id(dir: &Path) -> String {
-    let _ = std::fs::create_dir_all(dir);
+    if let Err(e) = std::fs::create_dir_all(dir) {
+        log::error!("[wr] cannot create {dir:?}: {e} — worker id will not persist, \
+                     so each restart will orphan its previous lease until it expires");
+    }
     let path = dir.join("worker-id");
     if let Ok(s) = std::fs::read_to_string(&path) {
         let s = s.trim().to_string();
         if !s.is_empty() { return s; }
     }
     let id = generate_worker_id();
-    let _ = std::fs::write(&path, &id);
+    // Verified write: this id IS our lease identity, so a silent failure to persist would
+    // mean a different id next boot and an orphaned lease. Log loudly rather than pretend.
+    match std::fs::write(&path, &id) {
+        Ok(()) => {}
+        Err(e) => log::error!("[wr] cannot persist worker id to {path:?}: {e} — each restart \
+                              will orphan its previous lease until it expires"),
+    }
     id
 }
 
-/// 32 hex chars of OS entropy, with no new dependency.
+/// 32 hex chars seeded from OS entropy, with no new dependency.
 ///
-/// `RandomState` is std's HashMap hasher seeder, and std seeds it from the OS RNG
-/// (that is the whole point — it exists to make HashDoS attacks infeasible). Two
-/// independently-constructed hashers therefore give 128 bits of OS-derived entropy.
-/// This is a real entropy source, not a clock-derived PRNG.
+/// `RandomState` is std's HashMap hasher seeder, and std seeds it from the OS RNG (that
+/// is the whole point — it exists to make HashDoS attacks infeasible). Note this is ONE
+/// OS-seeded draw per thread, not two: std caches the seed thread-locally and merely
+/// increments it per `new()` call, so the second hasher is derived from the same seed
+/// rather than independently sourced. The output is 128 bits wide, backed by that single
+/// OS draw — it is a real entropy source, not a clock-derived PRNG, and it differs
+/// reliably across installs and processes.
 ///
-/// Not crypto: nothing here is a secret. A collision would only mean two machines
+/// That is adequate here because this is an install id, not a secret: it is never used
+/// to authenticate (the player token does that). A collision would only mean two machines
 /// contend for one lease, which is recoverable, not data loss.
 fn generate_worker_id() -> String {
     use std::collections::hash_map::RandomState;
@@ -108,6 +121,29 @@ mod tests {
         assert!(id.len() <= 64, "server rejects >64 chars");
         assert!(id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'),
                 "must be a legal HTTP header value: {id}");
+    }
+
+    #[test]
+    fn worker_id_survives_an_unwritable_dir() {
+        // A dir path *under an existing file* cannot be created, on Windows or unix.
+        let f = std::env::temp_dir().join("wr_state_test_unwritable_file");
+        let _ = std::fs::remove_dir_all(&f);
+        std::fs::write(&f, b"not a directory").unwrap();
+        let bad = f.join("sub");
+
+        // Precondition: if this ever starts succeeding, the test below would silently
+        // stop exercising the write-failure path and quietly pass forever.
+        assert!(std::fs::create_dir_all(&bad).is_err(),
+                "precondition: {bad:?} must be uncreatable for this test to mean anything");
+
+        // Must degrade, not panic: a non-persistable id still lets the service run, and
+        // the orphaned lease expires server-side.
+        let id = worker_id(&bad);
+        assert!(!id.is_empty(), "must still hand back a usable id");
+        assert!(id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'),
+                "degraded id must still be well-formed: {id}");
+
+        let _ = std::fs::remove_file(&f);
     }
 
     #[test]
