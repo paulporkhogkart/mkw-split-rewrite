@@ -5,6 +5,7 @@
 //! ships, updates, bundles the engine exe and holds the player token.
 
 pub mod engine;
+pub mod job;
 pub mod state;
 pub mod verify;
 
