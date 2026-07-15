@@ -4,7 +4,11 @@
 //! sequencing knowledge proven by the 2026-07-15 spike lives here and is unit-tested;
 //! `run_video` (Task 3) is the thin process shell around it.
 
+use super::WrError;
 use serde_json::json;
+use std::io::{BufRead, BufReader, Write};
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 /// Engine DISPLAY names (not slugs). The caller maps slug -> display before constructing.
 #[derive(Debug, Clone)]
@@ -113,6 +117,103 @@ pub fn time_to_ms(s: &str) -> Option<i64> {
     let ms: i64 = ms.parse().ok()?;
     if sec >= 60 { return None; }
     Some(m * 60_000 + sec * 1_000 + ms)
+}
+
+/// Where the engine lives. Mirrors lib.rs:48's debug/release split.
+pub enum EnginePath {
+    /// Debug: `python -m mkw_tracker` from the repo root.
+    Dev,
+    /// Release: the PyInstaller exe bundled beside us.
+    Bundled(PathBuf),
+}
+
+impl EnginePath {
+    pub fn resolve() -> EnginePath {
+        #[cfg(debug_assertions)]
+        { EnginePath::Dev }
+        #[cfg(not(debug_assertions))]
+        {
+            let dir = std::env::current_exe().ok()
+                .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+                .unwrap_or_default();
+            EnginePath::Bundled(dir.join("bin/mkw-tracker-engine.exe"))
+        }
+    }
+
+    pub fn command_parts(&self) -> (String, Vec<String>) {
+        match self {
+            EnginePath::Dev => ("python".into(), vec!["-m".into(), "mkw_tracker".into()]),
+            EnginePath::Bundled(p) => (p.to_string_lossy().into_owned(), vec![]),
+        }
+    }
+}
+
+/// Replay `video` through a throwaway engine and return what it detected.
+///
+/// Uses std::process::Command, NOT tauri-plugin-shell: the shell plugin needs an
+/// AppHandle and yields an async stream, which would drag Tauri into this module and
+/// make it untestable. lib.rs keeps using the plugin for the LIVE engine.
+///
+/// `cancel` is polled between lines; returning true aborts (a pause, or the idle gate
+/// closing because a race started). Aborting discards — tracking must happen in one
+/// unbroken pass.
+pub fn run_video(
+    engine: &EnginePath,
+    video: &Path,
+    sel: Selections,
+    timeout: Duration,
+    cancel: &dyn Fn() -> bool,
+) -> Result<Finalized, WrError> {
+    let (prog, base_args) = engine.command_parts();
+    let mut cmd = std::process::Command::new(prog);
+    cmd.args(base_args)
+        .arg("--video").arg(video)
+        .arg("--video-once")
+        .arg("--no-display")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+    #[cfg(debug_assertions)]
+    cmd.current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).parent().expect("repo root"));
+
+    let mut child = cmd.spawn()
+        .map_err(|e| WrError::EngineFailed(format!("spawn: {e}")))?;
+    let mut stdin = child.stdin.take().expect("piped stdin");
+    let stdout = child.stdout.take().expect("piped stdout");
+
+    let mut driver = EngineDriver::new(sel);
+    let started = Instant::now();
+    let mut result: Option<Finalized> = None;
+
+    for line in BufReader::new(stdout).lines() {
+        // Distinct reasons: a deliberate stop must never be reported as a timeout, or the
+        // Pi's last_error would blame the video for something we chose to do.
+        if cancel() { let _ = child.kill(); let _ = child.wait(); return Err(WrError::Cancelled); }
+        if started.elapsed() > timeout {
+            let _ = child.kill(); let _ = child.wait();
+            return Err(WrError::Timeout);
+        }
+        let line = match line { Ok(l) => l, Err(_) => break };
+
+        // The engine's own diagnostics: these are the canaries for a healthy run.
+        if line.contains("[MinimapTracker]") || line.contains("[ThresholdStore]") {
+            log::info!("[wr engine] {}", line.trim());
+        }
+
+        for cmd in driver.on_line(&line) {
+            if writeln!(stdin, "{cmd}").is_err() { break; }
+            let _ = stdin.flush();
+        }
+
+        if driver.finalized().is_some() {
+            result = driver.finalized().cloned();
+            break;   // --video-once stops PLAYBACK but never exits: we must reap it.
+        }
+    }
+
+    let _ = child.kill();
+    let _ = child.wait();
+    result.ok_or(WrError::NoTrail)
 }
 
 #[cfg(test)]
@@ -228,6 +329,44 @@ mod tests {
         assert_eq!(time_to_ms("0:18.213"), Some(18213));
         assert_eq!(time_to_ms(""), None);
         assert_eq!(time_to_ms("nonsense"), None);
+    }
+
+    #[test]
+    fn engine_path_dev_uses_the_python_module() {
+        let p = EnginePath::Dev;
+        let (prog, args) = p.command_parts();
+        assert_eq!(prog, "python");
+        assert_eq!(&args[..2], &["-m", "mkw_tracker"]);
+    }
+
+    /// The real proof. Ignored by default: it is wall-clock bound (~100s) and needs the
+    /// fixture + a working `python -m mkw_tracker`.
+    ///
+    ///   cd src-tauri && cargo test wr::engine::tests::fixture -- --ignored --nocapture
+    ///
+    /// Expected (from the 2026-07-15 spike, exact): total_time 1:02.934, ~1732 points.
+    #[test]
+    #[ignore]
+    fn fixture_video_yields_the_exact_known_trail() {
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let video = repo.join("temp/wr_mario_circuit.mp4");
+        assert!(video.is_file(), "fixture missing: {video:?} — see the plan's fixture note");
+
+        let f = run_video(
+            &EnginePath::Dev,
+            &video,
+            Selections {
+                course: "Mario Circuit".into(), character: "Toadette".into(),
+                costume: Some("Explorer".into()), kart: Some("Baby Blooper".into()),
+            },
+            std::time::Duration::from_secs(300),
+            &|| false,
+        ).expect("the fixture must produce a trail");
+
+        assert_eq!(f.total_time.as_deref(), Some("1:02.934"), "must read the WR time exactly");
+        assert!(f.points.len() > 1500, "expected ~1732 points, got {}", f.points.len());
+        let ms = time_to_ms(f.total_time.as_deref().unwrap()).unwrap();
+        assert_eq!(ms, 62934);
     }
 
     #[test]
