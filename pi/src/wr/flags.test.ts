@@ -37,3 +37,21 @@ describe('flags', () => {
     expect(upsertFlag(db, { category: 'kart', rawValue: 'B', slugGuess: 'b' }).isNew).toBe(true);
   });
 });
+
+describe('resolveFlags', () => {
+  it('resolves a course flag once the course exists', () => {
+    const d = freshDb();
+    upsertFlag(d, { category: 'course', rawValue: 'Wario Shipyard', slugGuess: 'wario_shipyard' });
+    expect(resolveFlags(d)).toBe(0);                        // no such course yet
+    d.exec("INSERT INTO courses(id,slug,display_name) VALUES (9,'warios_galleon','Warios Galleon')");
+    expect(resolveFlags(d)).toBe(1);                        // MKWRS_ALIASES maps it
+    const row = d.prepare('SELECT resolved_at FROM wr_name_flags WHERE raw_value=?').get('Wario Shipyard') as any;
+    expect(row.resolved_at).not.toBeNull();
+  });
+
+  it('still resolves item flags', () => {
+    const d = freshDb();
+    upsertFlag(d, { category: 'kart', rawValue: 'Mach Rocket', slugGuess: 'mach_rocket' });
+    expect(resolveFlags(d)).toBe(1);
+  });
+});

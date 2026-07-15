@@ -164,4 +164,22 @@ describe('reconcile', () => {
     expect(events.filter((e) => e.type === 'wr_name_flag')).toHaveLength(0);
     expect(db.prepare('SELECT COUNT(*) n FROM wr_name_flags').get()).toMatchObject({ n: 0 });
   });
+
+  it('flags + announces an unmapped course, once', () => {
+    const { db, hub, events } = setup();
+    reconcile(db, hub, [wr({ courseName: 'Brand New Track' })]);
+    const flags = events.filter((e) => e.type === 'wr_name_flag');
+    expect(flags).toHaveLength(1);
+    expect(flags[0]).toMatchObject({ category: 'course', raw_value: 'Brand New Track',
+                                     slug_guess: 'brand_new_track' });
+    reconcile(db, hub, [wr({ courseName: 'Brand New Track' })]);
+    expect(events.filter((e) => e.type === 'wr_name_flag')).toHaveLength(1);
+  });
+
+  it('does not flag a glitch category (legitimately skipped, not broken)', () => {
+    const { db, hub, events } = setup();
+    reconcile(db, hub, [wr({ courseName: 'Rainbow Road (glitch)' })]);
+    expect(events.filter((e) => e.type === 'wr_name_flag')).toHaveLength(0);
+    expect(db.prepare('SELECT COUNT(*) n FROM wr_name_flags').get()).toMatchObject({ n: 0 });
+  });
 });

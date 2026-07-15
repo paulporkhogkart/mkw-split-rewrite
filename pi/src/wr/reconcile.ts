@@ -2,7 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { EventHub } from '../api/events';
 import type { ActivityHub } from '../activity/hub';
 import type { ActivityInput } from '../activity/types';
-import { resolveCourseId } from './courses';
+import { resolveCourseId, mkwrsNameToSlug } from './courses';
 import type { ScrapedWr } from './parse';
 import { resolveLoadout } from './loadout';
 import type { Loadout } from './loadout';
@@ -56,7 +56,17 @@ export function reconcile(db: DatabaseSync, hub: EventHub, scraped: ScrapedWr[],
   const report: WrReport = { inserted: 0, reflagged: 0, backfilled: 0, unchanged: 0, unmapped: [] };
   for (const s of scraped) {
     const courseId = resolveCourseId(db, s.courseName);
-    if (courseId === null) { report.unmapped.push(s.courseName); continue; }
+    if (courseId === null) {
+      report.unmapped.push(s.courseName);
+      // A (glitch) category resolves to null by design and is not a mapping failure.
+      if (!/\(glitch\)/i.test(s.courseName)) {
+        const slugGuess = mkwrsNameToSlug(s.courseName);
+        const { isNew } = upsertFlag(db, { category: 'course', rawValue: s.courseName, slugGuess });
+        if (isNew) hub.publish({ type: 'wr_name_flag', category: 'course',
+          raw_value: s.courseName, slug_guess: slugGuess, course: null });
+      }
+      continue;
+    }
     try { reconcileOne(db, hub, s, courseId, cc, report, activity); }
     catch (e) { console.error(`[wr] reconcile failed for ${s.courseName}:`, e); }
   }

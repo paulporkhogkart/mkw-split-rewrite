@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { resolveItem, type ItemCategory } from './roster';
+import { mkwrsNameToSlug } from './courses';
 
 export type FlagInput = {
   category: ItemCategory | 'course';
@@ -27,16 +28,18 @@ export function upsertFlag(db: DatabaseSync, f: FlagInput): { isNew: boolean } {
   return { isNew: row.occurrences === 1 };
 }
 
-/** Re-check every unresolved flag (non-course categories) against the current roster/aliases and
- *  stamp resolved_at on any that now resolve. Returns the count resolved. */
+/** Re-check every unresolved flag against the current roster/aliases (items) or the courses
+ *  table (courses) and stamp resolved_at on any that now resolve. Returns the count resolved. */
 export function resolveFlags(db: DatabaseSync): number {
   const rows = db.prepare(
     `SELECT id, category, raw_value FROM wr_name_flags WHERE resolved_at IS NULL`
   ).all() as { id: number; category: string; raw_value: string }[];
   let n = 0;
   for (const r of rows) {
-    if (r.category === 'course') continue;
-    if (resolveItem(r.category as ItemCategory, r.raw_value).slug !== null) {
+    const resolved = r.category === 'course'
+      ? db.prepare('SELECT 1 FROM courses WHERE slug=?').get(mkwrsNameToSlug(r.raw_value)) != null
+      : resolveItem(r.category as ItemCategory, r.raw_value).slug !== null;
+    if (resolved) {
       db.prepare(`UPDATE wr_name_flags SET resolved_at = datetime('now') WHERE id=?`).run(r.id);
       n++;
     }
