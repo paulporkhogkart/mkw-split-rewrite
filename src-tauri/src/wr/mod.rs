@@ -4,6 +4,7 @@
 //! Lives INSIDE pbenguin rather than as a second binary (spec §6): the app already
 //! ships, updates, bundles the engine exe and holds the player token.
 
+pub mod engine;
 pub mod state;
 
 /// Terminal outcomes reported to the Pi as `{"ok":false,"error":...}`. The Pi's
