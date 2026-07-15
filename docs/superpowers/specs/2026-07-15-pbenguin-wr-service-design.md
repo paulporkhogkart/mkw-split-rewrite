@@ -223,12 +223,38 @@ Claim response:
   "cc": 150, "video_url": "https://www.youtube.com/watch?v=...",
   "record_ms": 62934, "lap_splits_ms": [18213, 20335, 24386],
   "character_slug": "toadette", "costume_slug": "explorer", "kart_slug": "baby_blooper",
-  "lease_until": "2026-07-15T00:31:00.000Z" }
+  "attempt": 1, "lease_until": "2026-07-15T00:31:00.000Z" }
 ```
 
+`attempt` is 1-based and increments on **claim**, not on failure, so a worker that dies without
+reporting still burns one and a poison job can't retry forever. It is what drives the retry tiers
+in §6.4. A voluntary `release` (pause) refunds it; a lapsed lease does not.
+
+A NULL `costume_slug` is **legitimate** — it means the base costume, which is the common case.
+Only `character_slug` is required for a job to be claimable; `kart_slug` is passed through for
+completeness but the minimap threshold keys on course + character + costume only
+(`race.py:500`).
+
 Writes take a **Bearer header only**, never `?token=` — matching the existing `POST /v1/runs`
-rule (`pi/CLAUDE.md`). Workers get a dedicated token via the existing `mint-token` CLI, distinct
-from Paul's player token, so it can be revoked independently.
+rule (`pi/CLAUDE.md`).
+
+**Auth (revised 2026-07-15): the service reuses the player token the core pbenguin app already
+stores.** No dedicated worker token, no new table, no second secret to distribute. It ships in the
+same installer and can read the same credential, and the trust model already accepts
+client-computed trails from that token via `POST /v1/runs`, so it opens no new hole. (An earlier
+draft called for minting a worker token via the `mint-token` CLI — but that CLI *throws* for an
+unknown player and `playerByToken` reads the `players` table, so it would have needed a fake player
+row, which is exactly the pollution `wr_trails` exists to avoid.)
+
+**A player token identifies a person, not a machine**, so it cannot be the lease owner: two of
+Paul's PCs would both be `lease_owner = 'Paul'` and either could complete the other's job. The
+service therefore also sends an **`X-Worker-Id` header** — a per-machine id generated once at
+install and persisted locally — and `lease_owner` stores that. Spoofing another machine's id
+requires a valid player token first, and a token holder can already `POST /v1/runs` with fabricated
+data, so this adds nothing to the existing threat model.
+
+Consequence: `/v1/wr-jobs/*` needs no special gating. It passes the app-level `requireTokenAny`
+gate and each route re-gates header-only with `requireToken` — the same double-gate `/v1/runs` uses.
 
 `GET /v1/wr-trails` joins the `PUBLIC_READS` allowlist (`api/app.ts:38`) for token-free
 cross-origin reads, consistent with `/v1/world-records`.
