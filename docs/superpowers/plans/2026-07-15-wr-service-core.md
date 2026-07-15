@@ -436,6 +436,20 @@ mod tests {
         assert_eq!(time_to_ms("1:02.934"), Some(62934));
         assert_eq!(time_to_ms("2:09.606"), Some(129606));
         assert_eq!(time_to_ms("0:18.213"), Some(18213));
+    }
+
+    #[test]
+    fn time_to_ms_rejects_anything_that_is_not_exactly_m_ss_mmm() {
+        // Each of these previously returned a plausible-but-WRONG number rather than None,
+        // which would silently fail verification against a good video.
+        assert_eq!(time_to_ms("1:02.9"), None, "a 1-digit fraction is not milliseconds");
+        assert_eq!(time_to_ms("1:02.93"), None);
+        assert_eq!(time_to_ms("1:2.934"), None, "seconds must be 2 digits");
+        assert_eq!(time_to_ms("1:60.000"), None, "60 seconds is not a valid clock reading");
+        assert_eq!(time_to_ms("1:-5.100"), None, "a negative must not read as a plausible time");
+        assert_eq!(time_to_ms("-1:02.934"), None);
+        assert_eq!(time_to_ms("102.934"), None, "no minute separator");
+        assert_eq!(time_to_ms("1:02"), None, "no fraction separator");
         assert_eq!(time_to_ms(""), None);
         assert_eq!(time_to_ms("nonsense"), None);
     }
@@ -541,13 +555,25 @@ impl EngineDriver {
 }
 
 /// Parse the engine's `M:SS.mmm` into milliseconds.
+///
+/// Strict on purpose. This is a machine-generated format, so anything that is not exactly
+/// that shape means something changed — it is not something to guess at. A
+/// plausible-but-wrong number here would silently fail verification against a GOOD video:
+/// a 1-digit fraction parsed as raw milliseconds reads "9" as 9ms rather than 900ms.
+///
+/// The all-ASCII-digit checks also reject signs, so negatives cannot read as plausible
+/// times ("1:-5.100" must not become 55100).
 pub fn time_to_ms(s: &str) -> Option<i64> {
-    let (m, rest) = s.split_once(':')?;
+    let (m, rest) = s.trim().split_once(':')?;
     let (sec, ms) = rest.split_once('.')?;
-    let m: i64 = m.trim().parse().ok()?;
+    if sec.len() != 2 || ms.len() != 3 { return None; }
+    if !m.bytes().all(|b| b.is_ascii_digit()) { return None; }
+    if !sec.bytes().all(|b| b.is_ascii_digit()) { return None; }
+    if !ms.bytes().all(|b| b.is_ascii_digit()) { return None; }
+    let m: i64 = m.parse().ok()?;
     let sec: i64 = sec.parse().ok()?;
     let ms: i64 = ms.parse().ok()?;
-    if sec >= 60 || ms >= 1000 { return None; }
+    if sec >= 60 { return None; }
     Some(m * 60_000 + sec * 1_000 + ms)
 }
 ```
