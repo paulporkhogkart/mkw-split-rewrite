@@ -31,6 +31,7 @@ export type WrJob = {
 };
 
 export const DEFAULT_LEASE_SEC = 600;   // 10 min: ~10s download + ~100s processing, wide margin
+export const MAX_ATTEMPTS = 5;          // claims per job before it is abandoned as poison
 
 type ClaimRow = {
   wr_id: number; cc: number; course_slug: string; course_name: string;
@@ -51,6 +52,12 @@ type ClaimRow = {
  * attempts increments on CLAIM, not on failure, so a worker that crashes without reporting
  * still burns an attempt and a poison job cannot retry forever. releaseJob() un-does it for a
  * voluntary pause.
+ *
+ * Two HTTP claims cannot interleave today because server.ts holds ONE DatabaseSync and this
+ * function is synchronous (no await), so Node runs it to completion. BEGIN IMMEDIATE is what
+ * guards the case that model does not cover: a second connection/process (e.g. the bot) claiming
+ * against the same file concurrently. Nothing fallible may follow COMMIT — a throw after it would
+ * strand the job leased with an attempt burned, and mask the real error behind a ROLLBACK error.
  */
 export function claimJob(db: DatabaseSync, owner: string, leaseSec = DEFAULT_LEASE_SEC): WrJob | null {
   db.exec('BEGIN IMMEDIATE');
@@ -67,10 +74,10 @@ export function claimJob(db: DatabaseSync, owner: string, leaseSec = DEFAULT_LEA
          AND w.character_slug IS NOT NULL
          AND NOT EXISTS (SELECT 1 FROM wr_trails t WHERE t.wr_id = j.wr_id)
          AND (j.lease_until IS NULL OR j.lease_until < datetime('now'))
-         AND j.attempts < 5
+         AND j.attempts < ?
        ORDER BY w.is_current DESC, w.achieved_at DESC, j.enqueued_at ASC
        LIMIT 1`
-    ).get() as ClaimRow | undefined;
+    ).get(MAX_ATTEMPTS) as ClaimRow | undefined;
 
     if (!row) { db.exec('COMMIT'); return null; }
 
@@ -81,13 +88,17 @@ export function claimJob(db: DatabaseSync, owner: string, leaseSec = DEFAULT_LEA
        RETURNING attempts, lease_until`
     ).get(owner, `+${leaseSec} seconds`, row.wr_id) as { attempts: number; lease_until: string };
 
-    db.exec('COMMIT');
-    return {
+    // Built BEFORE COMMIT: JSON.parse can throw on a malformed lap_splits_ms, and it must roll
+    // back cleanly and surface that error rather than strand a leased job with a burnt attempt.
+    const job: WrJob = {
       wr_id: row.wr_id, cc: row.cc, course_slug: row.course_slug, course_name: row.course_name,
       video_url: row.video_url, record_ms: row.record_ms,
       lap_splits_ms: row.lap_splits_ms ? (JSON.parse(row.lap_splits_ms) as number[]) : null,
       character_slug: row.character_slug, costume_slug: row.costume_slug, kart_slug: row.kart_slug,
       attempt: upd.attempts, lease_until: upd.lease_until,
     };
+
+    db.exec('COMMIT');
+    return job;
   } catch (e) { db.exec('ROLLBACK'); throw e; }
 }

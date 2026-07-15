@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { openDb, applySchema } from './connect';
-import { enqueueJob, seedWrJobs, claimJob } from './wrJobs';
+import { enqueueJob, seedWrJobs, claimJob, MAX_ATTEMPTS } from './wrJobs';
 import { insertWrTrail } from './wrTrails';
 
 function setup() {
@@ -105,8 +105,22 @@ describe('claimJob', () => {
 
   it('skips a job at the attempts cap', () => {
     const db = setup(); addWr(db, 10); seedWrJobs(db);
-    db.prepare('UPDATE wr_jobs SET attempts=5 WHERE wr_id=10').run();
+    db.prepare('UPDATE wr_jobs SET attempts=? WHERE wr_id=10').run(MAX_ATTEMPTS);
     expect(claimJob(db, 'w1')).toBeNull();
+  });
+
+  it('rolls back and surfaces the real error when the WR row is malformed', () => {
+    const db = setup(); addWr(db, 10); seedWrJobs(db);
+    db.prepare("UPDATE world_records SET lap_splits_ms='not json' WHERE id=10").run();
+    // The real JSON error must reach the caller — not a "no transaction is active" ROLLBACK error
+    // masking it, which is what happens if anything fallible runs after COMMIT.
+    expect(() => claimJob(db, 'w1')).toThrow(/JSON/i);
+    // ...and the job must NOT be stranded: no lease stamped, no attempt burned.
+    expect(db.prepare('SELECT lease_owner, attempts FROM wr_jobs WHERE wr_id=10').get())
+      .toMatchObject({ lease_owner: null, attempts: 0 });
+    // Once the data is repaired the job is claimable again, proving the rollback left it intact.
+    db.prepare("UPDATE world_records SET lap_splits_ms='[31000,62934]' WHERE id=10").run();
+    expect(claimJob(db, 'w2')).toMatchObject({ wr_id: 10, attempt: 1, lap_splits_ms: [31000, 62934] });
   });
 
   it('skips an already-trailed WR', () => {
