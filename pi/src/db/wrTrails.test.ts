@@ -68,4 +68,16 @@ describe('wr trails', () => {
     db.prepare("UPDATE world_records SET removed_at = datetime('now') WHERE id=11").run();
     expect(courseWrTrails(db, 1, 150).map((r) => r.wr_id)).toEqual([10]);
   });
+
+  it('wr_trails and wr_jobs cascade away when their world_records row is deleted', () => {
+    const db = setup();
+    addWr(db, 10, 62934, 'JaK', 1);
+    insertWrTrail(db, 10, pts);
+    db.prepare('INSERT INTO wr_jobs(wr_id) VALUES (10)').run();
+    expect((db.prepare('SELECT COUNT(*) c FROM wr_trails').get() as { c: number }).c).toBe(1);
+    expect((db.prepare('SELECT COUNT(*) c FROM wr_jobs').get() as { c: number }).c).toBe(1);
+    db.exec('DELETE FROM world_records WHERE id=10');
+    expect((db.prepare('SELECT COUNT(*) c FROM wr_trails').get() as { c: number }).c).toBe(0);
+    expect((db.prepare('SELECT COUNT(*) c FROM wr_jobs').get() as { c: number }).c).toBe(0);
+  });
 });

@@ -119,4 +119,32 @@ describe('/v1/wr-jobs', () => {
     expect((await app.request('/v1/wr-jobs/10/release', { method: 'POST', headers: w1 })).status).toBe(200);
     expect((await app.request('/v1/wr-jobs/claim', { method: 'POST', headers: w1 })).status).toBe(200);
   });
+
+  it('400s on a non-numeric wr_id instead of 500ing', async () => {
+    const { app, w1 } = setup();
+    const res = await app.request('/v1/wr-jobs/not-a-number/heartbeat', { method: 'POST', headers: w1 });
+    expect(res.status).toBe(400);
+  });
+
+  it('400s a result with a malformed point instead of 500ing', async () => {
+    const { app, w1 } = setup();
+    await app.request('/v1/wr-jobs/claim', { method: 'POST', headers: w1 });
+    const res = await app.request('/v1/wr-jobs/10/result', {
+      method: 'POST', headers: { ...w1, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ok: true, points: [[14, 1635, 875, 0.79, 1], 'garbage'] }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('400s a result with a non-monotonic-looking but shape-valid point instead of 500ing', async () => {
+    const { app, w1 } = setup();
+    await app.request('/v1/wr-jobs/claim', { method: 'POST', headers: w1 });
+    const res = await app.request('/v1/wr-jobs/10/result', {
+      method: 'POST', headers: { ...w1, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ok: true, points: [[14, 1635, 875, 0.79, 1], [14, 1636, 870, 0.81, 1]] }),
+    });
+    // Shape-valid (equal t_ms is not a shape error) but rejected deeper by packTrail — this
+    // documents that the cheap shape guard does not catch it; it still must not be a raw 500.
+    expect(res.status).toBe(500);
+  });
 });

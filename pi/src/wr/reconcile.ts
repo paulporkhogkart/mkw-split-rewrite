@@ -2,7 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { EventHub } from '../api/events';
 import type { ActivityHub } from '../activity/hub';
 import type { ActivityInput } from '../activity/types';
-import { resolveCourseId, mkwrsNameToSlug } from './courses';
+import { resolveCourseId, mkwrsNameToSlug, isGlitchCourseName } from './courses';
 import type { ScrapedWr } from './parse';
 import { resolveLoadout } from './loadout';
 import type { Loadout } from './loadout';
@@ -60,7 +60,7 @@ export function reconcile(db: DatabaseSync, hub: EventHub, scraped: ScrapedWr[],
     if (courseId === null) {
       report.unmapped.push(s.courseName);
       // A (glitch) category resolves to null by design and is not a mapping failure.
-      if (!/\(glitch\)/i.test(s.courseName)) {
+      if (!isGlitchCourseName(s.courseName)) {
         const slugGuess = mkwrsNameToSlug(s.courseName);
         const { isNew } = upsertFlag(db, { category: 'course', rawValue: s.courseName, slugGuess });
         if (isNew) hub.publish({ type: 'wr_name_flag', category: 'course',

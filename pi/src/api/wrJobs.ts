@@ -16,6 +16,18 @@ const workerIdOf = (c: Context): string | null => {
   return v && v.length > 0 && v.length <= 64 ? v : null;
 };
 
+/** Parse the `:wr_id` path param, or null if it isn't a plain integer (route 400s). */
+const parseWrId = (c: Context): number | null => {
+  const n = Number(c.req.param('wr_id'));
+  return Number.isInteger(n) ? n : null;
+};
+
+/** Wire shape is [t_ms, cx, cy, score, lap?] — shape/type only, no range validation (cheap). */
+const isValidPoint = (p: unknown): p is Point =>
+  Array.isArray(p) && (p.length === 4 || p.length === 5) &&
+  p.slice(0, 4).every((v) => typeof v === 'number' && Number.isFinite(v)) &&
+  (p.length === 4 || p[4] === null || (typeof p[4] === 'number' && Number.isFinite(p[4])));
+
 /** WR-service worker API. Auth is the ordinary player token, header-only (a ?token= in a write
  *  URL would leak into logs) — the same double-gate POST /v1/runs uses: the app-level
  *  requireTokenAny runs first, then requireToken here narrows it to header-only. */
@@ -32,21 +44,26 @@ export function wrJobsRoutes(db: DatabaseSync): Hono<Env> {
   r.post('/v1/wr-jobs/:wr_id/heartbeat', requireToken(db), (c) => {
     const worker = workerIdOf(c);
     if (!worker) return c.json({ error: 'missing X-Worker-Id' }, 400);
-    const ok = heartbeatJob(db, Number(c.req.param('wr_id')), worker, DEFAULT_LEASE_SEC);
+    const wrId = parseWrId(c);
+    if (wrId === null) return c.json({ error: 'bad wr_id' }, 400);
+    const ok = heartbeatJob(db, wrId, worker, DEFAULT_LEASE_SEC);
     return ok ? c.json({ ok: true }) : c.json({ error: 'not the lease owner, or lease expired' }, 409);
   });
 
   r.post('/v1/wr-jobs/:wr_id/release', requireToken(db), (c) => {
     const worker = workerIdOf(c);
     if (!worker) return c.json({ error: 'missing X-Worker-Id' }, 400);
-    const ok = releaseJob(db, Number(c.req.param('wr_id')), worker);
-    return ok ? c.json({ ok: true }) : c.json({ error: 'not the lease owner' }, 409);
+    const wrId = parseWrId(c);
+    if (wrId === null) return c.json({ error: 'bad wr_id' }, 400);
+    const ok = releaseJob(db, wrId, worker);
+    return ok ? c.json({ ok: true }) : c.json({ error: 'not the lease owner, or lease expired' }, 409);
   });
 
   r.post('/v1/wr-jobs/:wr_id/result', requireToken(db), async (c) => {
     const worker = workerIdOf(c);
     if (!worker) return c.json({ error: 'missing X-Worker-Id' }, 400);
-    const wrId = Number(c.req.param('wr_id'));
+    const wrId = parseWrId(c);
+    if (wrId === null) return c.json({ error: 'bad wr_id' }, 400);
     const body = (await c.req.json()) as ResultBody;
     if (typeof body?.ok !== 'boolean') return c.json({ error: 'bad payload' }, 400);
 
@@ -54,6 +71,8 @@ export function wrJobsRoutes(db: DatabaseSync): Hono<Env> {
       if (!Array.isArray(body.points) || body.points.length === 0) {
         return c.json({ error: 'empty trail' }, 400);
       }
+      const badIdx = body.points.findIndex((p) => !isValidPoint(p));
+      if (badIdx !== -1) return c.json({ error: `bad point at index ${badIdx}` }, 400);
       const stored = completeJob(db, wrId, worker, body.points);
       return stored ? c.json({ ok: true, n: body.points.length })
                     : c.json({ error: 'not the lease owner' }, 409);

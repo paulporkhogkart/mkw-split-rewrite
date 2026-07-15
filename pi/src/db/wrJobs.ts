@@ -78,6 +78,9 @@ export function claimJob(db: DatabaseSync, owner: string, leaseSec = DEFAULT_LEA
          AND NOT EXISTS (SELECT 1 FROM wr_trails t WHERE t.wr_id = j.wr_id)
          AND (j.lease_until IS NULL OR j.lease_until < datetime('now'))
          AND j.attempts < ?
+       -- achieved_at DESC: SQLite sorts NULL smallest, so NULL-dated rows sort LAST within their
+       -- current/superseded tier here — intended, not a bug (an undated WR has no basis to jump
+       -- the queue over a dated one).
        ORDER BY w.is_current DESC, w.achieved_at DESC, j.enqueued_at ASC
        LIMIT 1`
     ).get(MAX_ATTEMPTS) as ClaimRow | undefined;
@@ -122,12 +125,15 @@ export function heartbeatJob(db: DatabaseSync, wrId: number, owner: string,
 }
 
 /** Voluntarily give a job back (pause mid-processing). Refunds the attempt claimJob charged —
- *  a deliberate pause must not count against the cap, whereas a crash (lease expiry) does. */
+ *  a deliberate pause must not count against the cap, whereas a crash (lease expiry) does. The
+ *  lease_until >= datetime('now') guard (same as heartbeatJob) means a lapsed lease can no
+ *  longer be "released": once it has expired the job is fair game for reclaim and the attempt
+ *  stays burned, matching the crash-recovery path in claimJob. */
 export function releaseJob(db: DatabaseSync, wrId: number, owner: string): boolean {
   const info = db.prepare(
     `UPDATE wr_jobs SET lease_owner=NULL, lease_until=NULL,
        attempts=MAX(0, attempts-1), updated_at=datetime('now')
-     WHERE wr_id=? AND lease_owner=?`
+     WHERE wr_id=? AND lease_owner=? AND lease_until >= datetime('now')`
   ).run(wrId, owner);
   return Number(info.changes) > 0;
 }
@@ -136,9 +142,13 @@ export function releaseJob(db: DatabaseSync, wrId: number, owner: string): boole
  *  Ownership is enforced by the UPDATE's WHERE inside the transaction (same shape as
  *  heartbeat/release/fail) so the check cannot drift from the mutation. The UPDATE runs BEFORE
  *  insertWrTrail so a non-owner never gets a trail written; a throw from the insert rolls both
- *  back. Nothing fallible may follow COMMIT — see claimJob's docstring. */
+ *  back. Nothing fallible may follow COMMIT — see claimJob's docstring.
+ *
+ *  Does not special-case an empty `pts`: the route rejects that with 400 before calling in here,
+ *  and insertWrTrail's packTrail already throws "empty trail" for any other caller that skips
+ *  that guard — that throw rolls back the UPDATE too, so a lapsed check here would only have
+ *  returned false and been mistaken by the route for "not the lease owner" (409), a lie. */
 export function completeJob(db: DatabaseSync, wrId: number, owner: string, pts: Point[]): boolean {
-  if (pts.length === 0) return false;
   db.exec('BEGIN IMMEDIATE');
   try {
     const info = db.prepare(

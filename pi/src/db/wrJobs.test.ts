@@ -168,6 +168,14 @@ describe('lease lifecycle', () => {
     expect(releaseJob(db, 10, 'w2')).toBe(false);
   });
 
+  it('release on an already-lapsed lease fails and does not refund the attempt', () => {
+    const db = queued(); claimJob(db, 'w1');
+    db.prepare("UPDATE wr_jobs SET lease_until = datetime('now','-1 minute') WHERE wr_id=10").run();
+    expect(releaseJob(db, 10, 'w1')).toBe(false);
+    const row = db.prepare('SELECT lease_owner, attempts FROM wr_jobs WHERE wr_id=10').get() as any;
+    expect(row).toMatchObject({ lease_owner: 'w1', attempts: 1 });   // untouched: attempt stays burned
+  });
+
   it('complete stores the trail and clears the lease', () => {
     const db = queued(); claimJob(db, 'w1');
     expect(completeJob(db, 10, 'w1', [[14, 1635, 875, 0.79, 1], [114, 1636, 870, 0.81, 1]])).toBe(true);
