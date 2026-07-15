@@ -14,6 +14,12 @@
 - **`temp/` and `*.mp4` are gitignored.** Never commit a video. The fixture `temp/wr_mario_circuit.mp4` must already exist; if absent, STOP and escalate (re-downloading it is a documented step, not something to improvise).
 - **Rust tests are inline** `#[cfg(test)] mod tests` in the same file, matching `src-tauri/src/discord.rs:183`. Run with `cd src-tauri && cargo test`.
 - **The crate has no `[dev-dependencies]`** and must not gain any: no mock-HTTP crates, no `tokio-test`. Test pure functions; prove I/O with the fixture.
+- **Declare each new module in the SAME step that creates its file.** Rust does not compile a
+  file that no `mod` statement declares, so writing `foo.rs` without adding `pub mod foo;` to
+  `wr/mod.rs` makes `cargo test wr::foo` match **zero tests** rather than fail to compile — a
+  green-looking non-event, not a red test. Every task below writes its test file first; add that
+  task's `pub mod` line at the same moment (a bare declaration, no function bodies) so the RED
+  state is real. Found the hard way in Task 1.
 - **Use `std::process::Command` for the WR engine, NOT `tauri-plugin-shell`.** The shell plugin needs an `AppHandle` and yields an async event stream, which would make `engine.rs` untestable and drag Tauri into a module that has no reason to know about it. `lib.rs:48` uses the shell plugin for the *live* engine; that stays as-is. This is a deliberate divergence — say so in the code comment.
 - **All HTTP is `reqwest::blocking` on a dedicated OS thread**, matching `sync.rs:686`'s comment: rusqlite is sync and blocking reqwest manages its own runtime, so this avoids depending on Tauri's async runtime having a time driver.
 - **Auth:** `Authorization: Bearer <player token>` **header only**, plus `X-Worker-Id: <per-install id>`. Read the token from `sync.rs`'s `CONFIG` — do NOT add a second credential store.
