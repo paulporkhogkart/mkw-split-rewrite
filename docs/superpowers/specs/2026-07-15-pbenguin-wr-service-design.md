@@ -440,18 +440,36 @@ number already in hand. Splits provide a secondary check against `lap_splits_ms`
 Additional failure reasons: `no_1080p60`, `download_failed`, `video_unavailable`,
 `no_trail` (0 points — i.e. the minimap never locked), `time_mismatch`, `timeout`.
 
-**Retry tiers.** The `attempts` column drives escalation rather than blind repetition:
+**Retry tiers — REVISED 2026-07-15 (Paul): the 4K tier is DELETED; there is only native 1080p60.**
+
+This section was self-contradictory and that contradiction shipped a broken tier. §1.2 says "**Do
+not feed 4K to the engine directly**" (the engine's `_norm()` resizes with `cv2.INTER_LINEAR`,
+which aliases on a 2:1 downscale and can be *worse* than native 1080p) while also "retaining" 4K
+as a tier — so the plan built the download and nobody built the ffmpeg lanczos step. Tier 3
+therefore handed 2160p straight to the engine: 3.6× the bandwidth to make the image *worse* than
+the attempt it was rescuing. Every task review passed it because both 4K tests only inspected the
+selector *string*.
+
+**Resolution: `tier_for` returns `Native1080p60` for every attempt.** §1.2 *measured* that 4K buys
+nothing on a clean video; its value on a marginal one was only a hypothesis. Re-add a tier only
+with evidence that a real video needed it — and if you do, fix the `tier_for`-is-blind gap below
+at the same time, or you will have built a 197 MB escalation that fires on wrong videos.
+
+`attempts` still drives retries, but not escalation:
 
 | attempt | action |
 |---|---|
-| 1 | native 1080p60 (§6.2) |
-| 2 | re-download — covers throttling, a 403, or a since-fixed mkwrs link |
-| 3 | **2160p60 + ffmpeg lanczos → 1080p**, for the quality headroom (§1.2) |
-| 4–5 | back off; then flag for Paul |
+| 1 | native 1080p60 |
+| 2–4 | re-download — covers throttling, a 403, or a since-fixed mkwrs link |
+| 5 | cap reached; flag for Paul |
 
-Escalating to 4K only on a `no_trail` failure means the extra 197 MB and ~58 s transcode are paid
-only when a marginal video actually needs them. A `time_mismatch` should **not** escalate — a
-wrong video is wrong at any bitrate; it needs a human, not more pixels.
+**KNOWN GAP (server-side, unfixed):** `tier_for` only sees the attempt *number*, never *why* the
+last attempt failed — the claim payload carries no `last_error`. So "a `time_mismatch` must never
+escalate" is unenforceable in the client. With the 4K tier gone the blast radius is currently
+**zero** (there is nothing to escalate *to*), but a `time_mismatch` still burns all 5 attempts
+re-downloading a video that is simply the wrong video and needs a human. The real fix is on the
+Pi: make `time_mismatch` terminal so the job is not re-offered. Plan 1 is already merged, so this
+is a follow-up.
 
 ### 6.7 Local state
 
