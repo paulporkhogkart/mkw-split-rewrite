@@ -14,6 +14,12 @@
 - **`temp/` and `*.mp4` are gitignored.** Never commit a video. The fixture `temp/wr_mario_circuit.mp4` must already exist; if absent, STOP and escalate (re-downloading it is a documented step, not something to improvise).
 - **Rust tests are inline** `#[cfg(test)] mod tests` in the same file, matching `src-tauri/src/discord.rs:183`. Run with `cd src-tauri && cargo test`.
 - **The crate has no `[dev-dependencies]`** and must not gain any: no mock-HTTP crates, no `tokio-test`. Test pure functions; prove I/O with the fixture.
+- **Declare each new module in the SAME step that creates its file.** Rust does not compile a
+  file that no `mod` statement declares, so writing `foo.rs` without adding `pub mod foo;` to
+  `wr/mod.rs` makes `cargo test wr::foo` match **zero tests** rather than fail to compile — a
+  green-looking non-event, not a red test. Every task below writes its test file first; add that
+  task's `pub mod` line at the same moment (a bare declaration, no function bodies) so the RED
+  state is real. Found the hard way in Task 1.
 - **Use `std::process::Command` for the WR engine, NOT `tauri-plugin-shell`.** The shell plugin needs an `AppHandle` and yields an async event stream, which would make `engine.rs` untestable and drag Tauri into a module that has no reason to know about it. `lib.rs:48` uses the shell plugin for the *live* engine; that stays as-is. This is a deliberate divergence — say so in the code comment.
 - **All HTTP is `reqwest::blocking` on a dedicated OS thread**, matching `sync.rs:686`'s comment: rusqlite is sync and blocking reqwest manages its own runtime, so this avoids depending on Tauri's async runtime having a time driver.
 - **Auth:** `Authorization: Bearer <player token>` **header only**, plus `X-Worker-Id: <per-install id>`. Read the token from `sync.rs`'s `CONFIG` — do NOT add a second credential store.
@@ -430,6 +436,20 @@ mod tests {
         assert_eq!(time_to_ms("1:02.934"), Some(62934));
         assert_eq!(time_to_ms("2:09.606"), Some(129606));
         assert_eq!(time_to_ms("0:18.213"), Some(18213));
+    }
+
+    #[test]
+    fn time_to_ms_rejects_anything_that_is_not_exactly_m_ss_mmm() {
+        // Each of these previously returned a plausible-but-WRONG number rather than None,
+        // which would silently fail verification against a good video.
+        assert_eq!(time_to_ms("1:02.9"), None, "a 1-digit fraction is not milliseconds");
+        assert_eq!(time_to_ms("1:02.93"), None);
+        assert_eq!(time_to_ms("1:2.934"), None, "seconds must be 2 digits");
+        assert_eq!(time_to_ms("1:60.000"), None, "60 seconds is not a valid clock reading");
+        assert_eq!(time_to_ms("1:-5.100"), None, "a negative must not read as a plausible time");
+        assert_eq!(time_to_ms("-1:02.934"), None);
+        assert_eq!(time_to_ms("102.934"), None, "no minute separator");
+        assert_eq!(time_to_ms("1:02"), None, "no fraction separator");
         assert_eq!(time_to_ms(""), None);
         assert_eq!(time_to_ms("nonsense"), None);
     }
@@ -535,13 +555,25 @@ impl EngineDriver {
 }
 
 /// Parse the engine's `M:SS.mmm` into milliseconds.
+///
+/// Strict on purpose. This is a machine-generated format, so anything that is not exactly
+/// that shape means something changed — it is not something to guess at. A
+/// plausible-but-wrong number here would silently fail verification against a GOOD video:
+/// a 1-digit fraction parsed as raw milliseconds reads "9" as 9ms rather than 900ms.
+///
+/// The all-ASCII-digit checks also reject signs, so negatives cannot read as plausible
+/// times ("1:-5.100" must not become 55100).
 pub fn time_to_ms(s: &str) -> Option<i64> {
-    let (m, rest) = s.split_once(':')?;
+    let (m, rest) = s.trim().split_once(':')?;
     let (sec, ms) = rest.split_once('.')?;
-    let m: i64 = m.trim().parse().ok()?;
+    if sec.len() != 2 || ms.len() != 3 { return None; }
+    if !m.bytes().all(|b| b.is_ascii_digit()) { return None; }
+    if !sec.bytes().all(|b| b.is_ascii_digit()) { return None; }
+    if !ms.bytes().all(|b| b.is_ascii_digit()) { return None; }
+    let m: i64 = m.parse().ok()?;
     let sec: i64 = sec.parse().ok()?;
     let ms: i64 = ms.parse().ok()?;
-    if sec >= 60 || ms >= 1000 { return None; }
+    if sec >= 60 { return None; }
     Some(m * 60_000 + sec * 1_000 + ms)
 }
 ```
@@ -628,7 +660,17 @@ mod tests {
 
     #[test]
     fn checks_no_trail_before_the_time_so_the_reason_is_actionable() {
-        assert_eq!(verify(&fin(Some("9:99.999"), 0), 62934).unwrap_err(), WrError::NoTrail);
+        // The time here must be WELL-FORMED and WRONG (62934 vs 62000). That combination is
+        // the ONLY thing that can distinguish the two orderings: with the empty-trail check
+        // first this is NoTrail; with the time check first it would be TimeMismatch.
+        // A malformed time (e.g. "9:99.999", which time_to_ms rejects outright) yields
+        // NoTrail under either ordering and proves nothing — do not "simplify" it back.
+        //
+        // The distinction is load-bearing: NoTrail is retryable at a higher quality tier,
+        // TimeMismatch never is (a wrong video is wrong at any bitrate).
+        let err = verify(&fin(Some("1:02.934"), 0), 62000).unwrap_err();
+        assert_eq!(err, WrError::NoTrail,
+                   "an empty trail must report NoTrail even when the time also disagrees");
     }
 
     #[test]
@@ -989,22 +1031,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn native_selector_demands_1080p60_and_prefers_avc1() {
+    fn every_native_fallback_branch_still_demands_1080p60() {
         let s = format_selector(Tier::Native1080p60);
-        // NEVER a hardcoded format id: ids are per-video and 299 does not exist on every
-        // upload. Must be a selector expression.
+        // Per-BRANCH, not whole-string. `s.contains("fps=60")` passes even if one fallback
+        // drops it — and that branch would silently download a 1080p30 stream instead of
+        // failing the job, which is the one thing this selector exists to prevent.
+        for branch in s.split('/') {
+            assert!(branch.contains("height=1080"), "branch without 1080p: {branch}");
+            assert!(branch.contains("fps=60"), "branch without 60fps: {branch}");
+        }
+        // NEVER a hardcoded format id: ids are per-video and 299 does not exist on every upload.
         assert!(!s.contains("299"), "hardcoded format id would fail unpredictably");
-        assert!(s.contains("height=1080"));
-        assert!(s.contains("fps=60"));
-        assert!(s.contains("vcodec^=avc1"), "avc1 preferred (cheapest decode), not required");
-        assert!(s.contains('/'), "must have fallbacks");
+        assert!(s.split('/').next().unwrap().contains("vcodec^=avc1"),
+                "avc1 preferred first (cheapest decode), not required");
+        assert!(s.contains('/'), "must have a codec fallback");
     }
 
     #[test]
-    fn four_k_selector_asks_for_2160p60() {
+    fn every_four_k_branch_asks_for_2160p60() {
         let s = format_selector(Tier::Downscaled4k);
-        assert!(s.contains("height=2160"));
-        assert!(s.contains("fps=60"));
+        for branch in s.split('/') {
+            assert!(branch.contains("height=2160"), "branch without 2160p: {branch}");
+            assert!(branch.contains("fps=60"), "branch without 60fps: {branch}");
+        }
     }
 
     #[test]
@@ -1056,8 +1105,13 @@ Add above the `#[cfg(test)]` block in `src-tauri/src/wr/ytdlp.rs`:
 /// templates. avc1 is merely preferred (cheapest decode); VP9 is fine on a PC.
 pub fn format_selector(tier: Tier) -> &'static str {
     match tier {
+        // There is deliberately NO non-60fps fallback. A branch like `bestvideo[height=1080]`
+        // would match a 1080p30 stream on a video that has no 1080p60 at all, and we would
+        // silently process it badly instead of failing cleanly — "no 1080p60 => fail the job"
+        // is the rule. Without such a branch, yt-dlp reports "Requested format is not
+        // available", which classify_failure maps to WrError::No1080p60. Do not re-add one.
         Tier::Native1080p60 =>
-            "bestvideo[height=1080][fps=60][vcodec^=avc1]/bestvideo[height=1080][fps=60]/bestvideo[height=1080]",
+            "bestvideo[height=1080][fps=60][vcodec^=avc1]/bestvideo[height=1080][fps=60]",
         Tier::Downscaled4k =>
             "bestvideo[height=2160][fps=60]",
     }
@@ -1151,7 +1205,7 @@ git commit -m "feat(wr): self-updating yt-dlp + download with failure classifica
 
 **Interfaces:**
 - Consumes: `EngineDriver`, `Selections`, `Finalized` (Task 2).
-- Produces: `wr::engine::run_video(engine: &EnginePath, video: &Path, sel: Selections, timeout: Duration, cancel: &dyn Fn() -> bool) -> Result<Finalized, WrError>`; `wr::engine::EnginePath` with `EnginePath::resolve() -> EnginePath`.
+- Produces: `wr::engine::run_video(engine: &EnginePath, video: &Path, sel: Selections, timeout: Duration, cancel: &(dyn Fn() -> bool + Sync)) -> Result<Finalized, WrError>`; `wr::engine::EnginePath` with `EnginePath::resolve() -> EnginePath`.
 
 **Engine facts proven by the spike — respect all three:**
 - Processing is **wall-clock bound** (~the video's own duration): the trackers are rate-limited on real time. You cannot speed this up.
@@ -1252,15 +1306,27 @@ impl EnginePath {
 /// AppHandle and yields an async stream, which would drag Tauri into this module and
 /// make it untestable. lib.rs keeps using the plugin for the LIVE engine.
 ///
-/// `cancel` is polled between lines; returning true aborts (a pause, or the idle gate
-/// closing because a race started). Aborting discards — tracking must happen in one
-/// unbroken pass.
+/// `cancel` returning true aborts (a pause, or the idle gate closing because a race
+/// started). Aborting discards — tracking must happen in one unbroken pass.
+///
+/// **The timeout and cancel MUST be enforced by an independent watchdog thread, not by
+/// checks inside the stdout read loop.** `BufReader::read_line` blocks indefinitely on a
+/// pipe with no data and no EOF, so a check placed after it only runs when the engine
+/// happens to speak. That is precisely useless here: the engine's 0.2s heartbeat is
+/// emitted from inside its own synchronous per-frame loop (`main.py:1416`), with no
+/// independent timer thread — so the exact failure a hard timeout exists to catch (the
+/// frame loop wedging on a stuck `cv2.read()`) silences the heartbeat too, and an
+/// in-loop check would block forever without ever firing. Killing the child closes its
+/// stdout, which unblocks the reader with EOF and lets the loop unwind naturally.
+///
+/// Note that the fixture test CANNOT catch a regression here: it keeps the engine talking
+/// constantly, so a blocked-read bug looks healthy. It needs a deliberately silent child.
 pub fn run_video(
     engine: &EnginePath,
     video: &Path,
     sel: Selections,
     timeout: Duration,
-    cancel: &dyn Fn() -> bool,
+    cancel: &(dyn Fn() -> bool + Sync),
 ) -> Result<Finalized, WrError> {
     let (prog, base_args) = engine.command_parts();
     let mut cmd = std::process::Command::new(prog);
@@ -1343,7 +1409,7 @@ git commit -m "feat(wr): engine process shell, proven against the fixture video"
 
 **Interfaces:**
 - Consumes: everything above.
-- Produces: `wr::service::process_one(cfg: &ServiceCfg, cancel: &dyn Fn() -> bool) -> Outcome`; `wr::service::ServiceCfg { server_url, token, data_dir, engine }`; `wr::service::Outcome { Idle, Completed(i64), Failed(i64, WrError), Released(i64), Error(String) }`; the Tauri command `wr_process_one`.
+- Produces: `wr::service::process_one(cfg: &ServiceCfg, cancel: &(dyn Fn() -> bool + Sync)) -> Outcome`; `wr::service::ServiceCfg { server_url, token, data_dir, engine }`; `wr::service::Outcome { Idle, Completed(i64), Failed(i64, WrError), Released(i64), Error(String) }`; the Tauri command `wr_process_one`.
 
 **Scope:** exactly ONE job, then return. No polling loop, no gate, no tray — Plan 3 adds those. Keeping it to one job means the dev command is a clean end-to-end probe.
 
@@ -1470,8 +1536,20 @@ pub fn sweep_orphans(dir: &std::path::Path) {
     }
 }
 
+/// Serializes `process_one` against itself. `sweep_orphans` deletes by glob, so two
+/// overlapping calls would have one delete the other's live video mid-job — and the engine
+/// is wall-clock bound (~100 s per video), so an overlap is a long window, not a
+/// hypothetical. One machine does one job at a time by design (there is nothing to gain from
+/// concurrency when the work is real-time bound), so this states the existing contract rather
+/// than adding a new constraint — and Plan 3's polling loop would otherwise inherit the
+/// assumption invisibly.
+static PROCESS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Claim and fully process one job.
-pub fn process_one(cfg: &ServiceCfg, cancel: &dyn Fn() -> bool) -> Outcome {
+pub fn process_one(cfg: &ServiceCfg, cancel: &(dyn Fn() -> bool + Sync)) -> Outcome {
+    // Held for the whole job. Recover from a poisoned lock rather than propagating a panic:
+    // one job panicking must not permanently disable the service.
+    let _guard = PROCESS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let conn = match state::open(&cfg.data_dir) { Ok(c) => c, Err(e) => return Outcome::Error(e) };
     let worker = state::worker_id(&cfg.data_dir);
     sweep_orphans(&cfg.data_dir);
@@ -1493,7 +1571,7 @@ pub fn process_one(cfg: &ServiceCfg, cancel: &dyn Fn() -> bool) -> Outcome {
 }
 
 fn run_job(cfg: &ServiceCfg, client: &job::Client, j: &job::WrJob,
-           cancel: &dyn Fn() -> bool) -> Outcome {
+           cancel: &(dyn Fn() -> bool + Sync)) -> Outcome {
     let tier = verify::tier_for(j.attempt);
     let dest = video_path(&cfg.data_dir, j.wr_id);
 
