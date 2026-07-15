@@ -13,10 +13,17 @@ const YTDLP_URL: &str = "https://github.com/yt-dlp/yt-dlp/releases/latest/downlo
 /// on one video and would not exist on another). 1080p is non-negotiable — every engine
 /// ROI is a 1080p pixel coord and `_norm()` would rescale anything else and blur the
 /// templates. avc1 is merely preferred (cheapest decode); VP9 is fine on a PC.
+///
+/// EVERY branch must keep `[fps=60]`. There is deliberately NO non-60fps fallback: a
+/// `bestvideo[height=1080]` branch looks like a harmless safety net but is the opposite —
+/// it MATCHES a 1080p30 upload, so the job would silently process a 30fps video instead of
+/// failing. Matching nothing is the INTENDED outcome: yt-dlp then reports "Requested
+/// format is not available", which `classify_failure` turns into `WrError::No1080p60` — a
+/// clean, correct failure. Do not "helpfully" re-add a lower-fps fallback.
 pub fn format_selector(tier: Tier) -> &'static str {
     match tier {
         Tier::Native1080p60 =>
-            "bestvideo[height=1080][fps=60][vcodec^=avc1]/bestvideo[height=1080][fps=60]/bestvideo[height=1080]",
+            "bestvideo[height=1080][fps=60][vcodec^=avc1]/bestvideo[height=1080][fps=60]",
         Tier::Downscaled4k =>
             "bestvideo[height=2160][fps=60]",
     }
@@ -99,10 +106,35 @@ mod tests {
     }
 
     #[test]
+    fn every_native_fallback_branch_still_demands_1080p60() {
+        let s = format_selector(Tier::Native1080p60);
+        // Whole-string `contains` is not enough: a branch that drops [fps=60] would still
+        // pass that, and would silently download a 1080p30 stream instead of failing.
+        for branch in s.split('/') {
+            assert!(branch.contains("height=1080"), "branch without 1080p: {branch}");
+            assert!(branch.contains("fps=60"), "branch without 60fps: {branch}");
+        }
+        assert!(!s.contains("299"), "hardcoded format ids are per-video and must never appear");
+        assert!(s.split('/').next().unwrap().contains("vcodec^=avc1"), "avc1 preferred first");
+    }
+
+    #[test]
     fn four_k_selector_asks_for_2160p60() {
         let s = format_selector(Tier::Downscaled4k);
         assert!(s.contains("height=2160"));
         assert!(s.contains("fps=60"));
+    }
+
+    #[test]
+    fn every_four_k_branch_still_demands_2160p60() {
+        // Same per-branch guard as the native tier. Currently vacuous (one branch), but it
+        // is the check that would catch a future "helpful" non-60fps fallback being added
+        // here — the whole-string assert above would not.
+        let s = format_selector(Tier::Downscaled4k);
+        for branch in s.split('/') {
+            assert!(branch.contains("height=2160"), "branch without 2160p: {branch}");
+            assert!(branch.contains("fps=60"), "branch without 60fps: {branch}");
+        }
     }
 
     #[test]
