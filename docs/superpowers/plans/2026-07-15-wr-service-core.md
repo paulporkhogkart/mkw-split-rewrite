@@ -1031,22 +1031,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn native_selector_demands_1080p60_and_prefers_avc1() {
+    fn every_native_fallback_branch_still_demands_1080p60() {
         let s = format_selector(Tier::Native1080p60);
-        // NEVER a hardcoded format id: ids are per-video and 299 does not exist on every
-        // upload. Must be a selector expression.
+        // Per-BRANCH, not whole-string. `s.contains("fps=60")` passes even if one fallback
+        // drops it — and that branch would silently download a 1080p30 stream instead of
+        // failing the job, which is the one thing this selector exists to prevent.
+        for branch in s.split('/') {
+            assert!(branch.contains("height=1080"), "branch without 1080p: {branch}");
+            assert!(branch.contains("fps=60"), "branch without 60fps: {branch}");
+        }
+        // NEVER a hardcoded format id: ids are per-video and 299 does not exist on every upload.
         assert!(!s.contains("299"), "hardcoded format id would fail unpredictably");
-        assert!(s.contains("height=1080"));
-        assert!(s.contains("fps=60"));
-        assert!(s.contains("vcodec^=avc1"), "avc1 preferred (cheapest decode), not required");
-        assert!(s.contains('/'), "must have fallbacks");
+        assert!(s.split('/').next().unwrap().contains("vcodec^=avc1"),
+                "avc1 preferred first (cheapest decode), not required");
+        assert!(s.contains('/'), "must have a codec fallback");
     }
 
     #[test]
-    fn four_k_selector_asks_for_2160p60() {
+    fn every_four_k_branch_asks_for_2160p60() {
         let s = format_selector(Tier::Downscaled4k);
-        assert!(s.contains("height=2160"));
-        assert!(s.contains("fps=60"));
+        for branch in s.split('/') {
+            assert!(branch.contains("height=2160"), "branch without 2160p: {branch}");
+            assert!(branch.contains("fps=60"), "branch without 60fps: {branch}");
+        }
     }
 
     #[test]
@@ -1098,8 +1105,13 @@ Add above the `#[cfg(test)]` block in `src-tauri/src/wr/ytdlp.rs`:
 /// templates. avc1 is merely preferred (cheapest decode); VP9 is fine on a PC.
 pub fn format_selector(tier: Tier) -> &'static str {
     match tier {
+        // There is deliberately NO non-60fps fallback. A branch like `bestvideo[height=1080]`
+        // would match a 1080p30 stream on a video that has no 1080p60 at all, and we would
+        // silently process it badly instead of failing cleanly — "no 1080p60 => fail the job"
+        // is the rule. Without such a branch, yt-dlp reports "Requested format is not
+        // available", which classify_failure maps to WrError::No1080p60. Do not re-add one.
         Tier::Native1080p60 =>
-            "bestvideo[height=1080][fps=60][vcodec^=avc1]/bestvideo[height=1080][fps=60]/bestvideo[height=1080]",
+            "bestvideo[height=1080][fps=60][vcodec^=avc1]/bestvideo[height=1080][fps=60]",
         Tier::Downscaled4k =>
             "bestvideo[height=2160][fps=60]",
     }
