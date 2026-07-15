@@ -6,7 +6,7 @@ import { resolveCourseId, mkwrsNameToSlug, isGlitchCourseName } from './courses'
 import type { ScrapedWr } from './parse';
 import { resolveLoadout } from './loadout';
 import type { Loadout } from './loadout';
-import { upsertFlag } from './flags';
+import { upsertFlag, markFlagAlerted } from './flags';
 import { enqueueJob } from '../db/wrJobs';
 import { courseLeaderboard } from '../db/reads';
 import { activeSeasonId } from '../db/seasons';
@@ -62,9 +62,12 @@ export function reconcile(db: DatabaseSync, hub: EventHub, scraped: ScrapedWr[],
       // A (glitch) category resolves to null by design and is not a mapping failure.
       if (!isGlitchCourseName(s.courseName)) {
         const slugGuess = mkwrsNameToSlug(s.courseName);
-        const { isNew } = upsertFlag(db, { category: 'course', rawValue: s.courseName, slugGuess });
-        if (isNew) hub.publish({ type: 'wr_name_flag', category: 'course',
-          raw_value: s.courseName, slug_guess: slugGuess, course: null });
+        const { shouldAlert } = upsertFlag(db, { category: 'course', rawValue: s.courseName, slugGuess });
+        if (shouldAlert) {
+          hub.publish({ type: 'wr_name_flag', category: 'course',
+            raw_value: s.courseName, slug_guess: slugGuess, course: null });
+          markFlagAlerted(db, 'course', s.courseName);
+        }
       }
       continue;
     }
@@ -74,17 +77,21 @@ export function reconcile(db: DatabaseSync, hub: EventHub, scraped: ScrapedWr[],
   return report;
 }
 
-/** Record + announce any name in `lo` that failed to resolve. Announce only on first sighting;
- *  an unresolved name blocks WR processing for that record, so it needs a human. */
+/** Record + announce any name in `lo` that failed to resolve. Announces once per broken name
+ *  (tracked via `alerted_at`, not sighting count — see `upsertFlag`'s doc comment); an unresolved
+ *  name blocks WR processing for that record, so it needs a human. */
 function flagUnresolved(db: DatabaseSync, hub: EventHub, lo: Loadout,
                         courseName: string, courseId: number, wrId: number | null): void {
   for (const u of lo.unresolved) {
-    const { isNew } = upsertFlag(db, {
+    const { shouldAlert } = upsertFlag(db, {
       category: u.category, rawValue: u.raw, slugGuess: u.slugGuess,
       exampleCourseId: courseId, exampleWrId: wrId ?? undefined,
     });
-    if (isNew) hub.publish({ type: 'wr_name_flag', category: u.category,
-      raw_value: u.raw, slug_guess: u.slugGuess, course: courseName });
+    if (shouldAlert) {
+      hub.publish({ type: 'wr_name_flag', category: u.category,
+        raw_value: u.raw, slug_guess: u.slugGuess, course: courseName });
+      markFlagAlerted(db, u.category, u.raw);
+    }
   }
 }
 

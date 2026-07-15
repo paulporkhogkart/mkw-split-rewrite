@@ -80,6 +80,9 @@ export function applySchema(db: DatabaseSync): void {
     UNIQUE(category, raw_value)
   )`);
   db.exec(`CREATE TABLE IF NOT EXISTS wr_meta (key TEXT PRIMARY KEY, value TEXT)`);
+  // Additive: explicit "has an alert been sent for this flag" stamp, set only by the caller
+  // that actually publishes the alert (see wr/flags.ts upsertFlag doc comment).
+  try { db.exec('ALTER TABLE wr_name_flags ADD COLUMN alerted_at TEXT'); } catch { /* present */ }
   // Player recolour (existing DBs): Gub teal -> blue. Idempotent (no row matches once recoloured),
   // and gated on the old value so it never fights a future colour change. server/importer.py
   // PLAYER_COLORS carries the same value, so fresh imports seed blue directly.

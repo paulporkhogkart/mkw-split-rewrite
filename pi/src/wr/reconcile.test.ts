@@ -4,6 +4,7 @@ import { EventHub } from '../api/events';
 import type { ServerEvent } from '../db/types';
 import { reconcile } from './reconcile';
 import type { ScrapedWr } from './parse';
+import { upsertFlag } from './flags';
 
 function setup() {
   const db = openDb(':memory:');
@@ -156,6 +157,22 @@ describe('reconcile', () => {
     expect(flags()).toHaveLength(1);
     const row = db.prepare('SELECT occurrences FROM wr_name_flags WHERE raw_value=?').get('Fake Kart') as any;
     expect(row.occurrences).toBe(2);
+  });
+
+  it('still alerts when the history scraper flagged the name first (race regression)', () => {
+    // history_reconcile.ts calls upsertFlag directly with no EventHub, so it can never alert.
+    // If the history scraper wins the race and flags 'Fake Kart' before the current-WR scraper
+    // ever sees it, the current scraper must still alert the first time it gets there.
+    const { db, hub, events } = setup();
+    upsertFlag(db, { category: 'kart', rawValue: 'Fake Kart', slugGuess: 'fake_kart',
+      exampleCourseId: 1 });   // simulates history_reconcile's un-alerting upsertFlag call
+    reconcile(db, hub, [wr({ character: 'Bowser', vehicle: 'Fake Kart' })]);
+    const flags = events.filter((e) => e.type === 'wr_name_flag');
+    expect(flags).toHaveLength(1);
+    expect(flags[0]).toMatchObject({ category: 'kart', raw_value: 'Fake Kart' });
+    // and it still only alerts once on repeat.
+    reconcile(db, hub, [wr({ character: 'Bowser', vehicle: 'Fake Kart' })]);
+    expect(events.filter((e) => e.type === 'wr_name_flag')).toHaveLength(1);
   });
 
   it('does not flag a base costume', () => {

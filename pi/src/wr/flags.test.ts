@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { openDb, applySchema } from '../db/connect';
-import { upsertFlag, resolveFlags, reportFlags } from './flags';
+import { upsertFlag, resolveFlags, reportFlags, markFlagAlerted } from './flags';
 
 function freshDb() { const db = openDb(':memory:'); applySchema(db); return db; }
 
@@ -22,19 +22,30 @@ describe('flags', () => {
     expect(reportFlags(db)).not.toContain('R.O.B. H.O.G.');
   });
 
-  it('reports isNew only on the first sighting', () => {
+  it('reports shouldAlert until markFlagAlerted is called, then stays false across repeats', () => {
     const db = freshDb();
-    expect(upsertFlag(db, { category: 'kart', rawValue: 'Tiny Titan', slugGuess: 'tiny_titan' }).isNew).toBe(true);
-    expect(upsertFlag(db, { category: 'kart', rawValue: 'Tiny Titan', slugGuess: 'tiny_titan' }).isNew).toBe(false);
-    expect(upsertFlag(db, { category: 'kart', rawValue: 'Tiny Titan', slugGuess: 'tiny_titan' }).isNew).toBe(false);
+    expect(upsertFlag(db, { category: 'kart', rawValue: 'Tiny Titan', slugGuess: 'tiny_titan' }).shouldAlert).toBe(true);
+    // Caller hasn't stamped yet (e.g. history reconciler) -> still owed.
+    expect(upsertFlag(db, { category: 'kart', rawValue: 'Tiny Titan', slugGuess: 'tiny_titan' }).shouldAlert).toBe(true);
+    markFlagAlerted(db, 'kart', 'Tiny Titan');
+    expect(upsertFlag(db, { category: 'kart', rawValue: 'Tiny Titan', slugGuess: 'tiny_titan' }).shouldAlert).toBe(false);
     const row = db.prepare('SELECT occurrences FROM wr_name_flags WHERE raw_value=?').get('Tiny Titan') as any;
     expect(row.occurrences).toBe(3);
   });
 
   it('keeps distinct raw values separate', () => {
     const db = freshDb();
-    expect(upsertFlag(db, { category: 'kart', rawValue: 'A', slugGuess: 'a' }).isNew).toBe(true);
-    expect(upsertFlag(db, { category: 'kart', rawValue: 'B', slugGuess: 'b' }).isNew).toBe(true);
+    expect(upsertFlag(db, { category: 'kart', rawValue: 'A', slugGuess: 'a' }).shouldAlert).toBe(true);
+    expect(upsertFlag(db, { category: 'kart', rawValue: 'B', slugGuess: 'b' }).shouldAlert).toBe(true);
+  });
+
+  it('re-alerts after a resolved flag breaks again', () => {
+    const db = freshDb();
+    upsertFlag(db, { category: 'kart', rawValue: 'Mach Rocket', slugGuess: 'mach_rocket' });
+    markFlagAlerted(db, 'kart', 'Mach Rocket');
+    db.exec(`UPDATE wr_name_flags SET resolved_at = datetime('now') WHERE raw_value='Mach Rocket'`);
+    // Broken again: alerted_at should clear along with resolved_at, so it's owed again.
+    expect(upsertFlag(db, { category: 'kart', rawValue: 'Mach Rocket', slugGuess: 'mach_rocket' }).shouldAlert).toBe(true);
   });
 });
 

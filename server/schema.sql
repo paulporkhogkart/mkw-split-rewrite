@@ -138,6 +138,7 @@ CREATE TABLE IF NOT EXISTS wr_name_flags (
     example_wr_id     INTEGER,
     occurrences       INTEGER NOT NULL DEFAULT 1,
     resolved_at       TEXT,
+    alerted_at        TEXT,
     created_at        TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(category, raw_value)
 );
