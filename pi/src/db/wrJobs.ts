@@ -21,3 +21,73 @@ export function seedWrJobs(db: DatabaseSync): number {
   ).run();
   return Number(info.changes);
 }
+
+export type WrJob = {
+  wr_id: number; cc: number; course_slug: string; course_name: string;
+  video_url: string; record_ms: number; lap_splits_ms: number[] | null;
+  character_slug: string; costume_slug: string | null; kart_slug: string | null;
+  attempt: number;             // 1-based; drives the worker's retry tiers (spec §6.4)
+  lease_until: string;
+};
+
+export const DEFAULT_LEASE_SEC = 600;   // 10 min: ~10s download + ~100s processing, wide margin
+
+type ClaimRow = {
+  wr_id: number; cc: number; course_slug: string; course_name: string;
+  video_url: string; record_ms: number; lap_splits_ms: string | null;
+  character_slug: string; costume_slug: string | null; kart_slug: string | null;
+};
+
+/**
+ * Atomically lease the next processable job, or null if there is none.
+ *
+ * Claimable = enqueued, not removed, has a video, HAS A RESOLVED CHARACTER SLUG (an unslugged
+ * WR cannot be turned into a set_selection, so it is unprocessable), has no trail yet, is not
+ * under a live lease, and is under the attempts cap.
+ *
+ * Deliberately NOT filtered on is_current: supersession changes priority, not eligibility — a
+ * WR that fell before we got to it is still valid data for that wr_id.
+ *
+ * attempts increments on CLAIM, not on failure, so a worker that crashes without reporting
+ * still burns an attempt and a poison job cannot retry forever. releaseJob() un-does it for a
+ * voluntary pause.
+ */
+export function claimJob(db: DatabaseSync, owner: string, leaseSec = DEFAULT_LEASE_SEC): WrJob | null {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const row = db.prepare(
+      `SELECT j.wr_id, w.cc, w.video_url, w.record_ms, w.lap_splits_ms,
+              w.character_slug, w.costume_slug, w.kart_slug,
+              c.slug AS course_slug, c.display_name AS course_name
+       FROM wr_jobs j
+       JOIN world_records w ON w.id = j.wr_id
+       JOIN courses c ON c.id = w.course_id
+       WHERE w.removed_at IS NULL
+         AND w.video_url IS NOT NULL
+         AND w.character_slug IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM wr_trails t WHERE t.wr_id = j.wr_id)
+         AND (j.lease_until IS NULL OR j.lease_until < datetime('now'))
+         AND j.attempts < 5
+       ORDER BY w.is_current DESC, w.achieved_at DESC, j.enqueued_at ASC
+       LIMIT 1`
+    ).get() as ClaimRow | undefined;
+
+    if (!row) { db.exec('COMMIT'); return null; }
+
+    const upd = db.prepare(
+      `UPDATE wr_jobs
+       SET lease_owner=?, lease_until=datetime('now', ?), attempts=attempts+1, updated_at=datetime('now')
+       WHERE wr_id=?
+       RETURNING attempts, lease_until`
+    ).get(owner, `+${leaseSec} seconds`, row.wr_id) as { attempts: number; lease_until: string };
+
+    db.exec('COMMIT');
+    return {
+      wr_id: row.wr_id, cc: row.cc, course_slug: row.course_slug, course_name: row.course_name,
+      video_url: row.video_url, record_ms: row.record_ms,
+      lap_splits_ms: row.lap_splits_ms ? (JSON.parse(row.lap_splits_ms) as number[]) : null,
+      character_slug: row.character_slug, costume_slug: row.costume_slug, kart_slug: row.kart_slug,
+      attempt: upd.attempts, lease_until: upd.lease_until,
+    };
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+}
