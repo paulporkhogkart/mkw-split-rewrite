@@ -143,6 +143,31 @@ CREATE TABLE IF NOT EXISTS wr_name_flags (
 );
 CREATE TABLE IF NOT EXISTS wr_meta (key TEXT PRIMARY KEY, value TEXT);
 
+-- A world record's minimap trail. Keyed on world_records.id (NOT runs/players) so a WR set by
+-- a stranger can never leak into leaderboards, turf, activity or the roster. Mirrors run_trails
+-- exactly so db/trailCodec.ts is reused verbatim.
+CREATE TABLE IF NOT EXISTS wr_trails (
+    wr_id    INTEGER PRIMARY KEY REFERENCES world_records(id) ON DELETE CASCADE,
+    codec    INTEGER NOT NULL,
+    n        INTEGER NOT NULL,
+    max_t_ms INTEGER NOT NULL,
+    data     BLOB NOT NULL
+);
+
+-- Lease + failure bookkeeping for WR trail extraction. There is deliberately no status column:
+-- a wr_trails row IS "done". A row is enqueued when a WR becomes current; supersession lowers
+-- its claim priority but never removes it, so history accumulates for free.
+CREATE TABLE IF NOT EXISTS wr_jobs (
+    wr_id       INTEGER PRIMARY KEY REFERENCES world_records(id) ON DELETE CASCADE,
+    lease_owner TEXT,
+    lease_until TEXT,
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    last_error  TEXT,
+    enqueued_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_wr_jobs_claim ON wr_jobs(lease_until);
+
 CREATE TABLE IF NOT EXISTS service_status (
     service    TEXT PRIMARY KEY,
     version    TEXT,
