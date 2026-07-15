@@ -1205,7 +1205,7 @@ git commit -m "feat(wr): self-updating yt-dlp + download with failure classifica
 
 **Interfaces:**
 - Consumes: `EngineDriver`, `Selections`, `Finalized` (Task 2).
-- Produces: `wr::engine::run_video(engine: &EnginePath, video: &Path, sel: Selections, timeout: Duration, cancel: &dyn Fn() -> bool) -> Result<Finalized, WrError>`; `wr::engine::EnginePath` with `EnginePath::resolve() -> EnginePath`.
+- Produces: `wr::engine::run_video(engine: &EnginePath, video: &Path, sel: Selections, timeout: Duration, cancel: &(dyn Fn() -> bool + Sync)) -> Result<Finalized, WrError>`; `wr::engine::EnginePath` with `EnginePath::resolve() -> EnginePath`.
 
 **Engine facts proven by the spike — respect all three:**
 - Processing is **wall-clock bound** (~the video's own duration): the trackers are rate-limited on real time. You cannot speed this up.
@@ -1326,7 +1326,7 @@ pub fn run_video(
     video: &Path,
     sel: Selections,
     timeout: Duration,
-    cancel: &dyn Fn() -> bool,
+    cancel: &(dyn Fn() -> bool + Sync),
 ) -> Result<Finalized, WrError> {
     let (prog, base_args) = engine.command_parts();
     let mut cmd = std::process::Command::new(prog);
@@ -1409,7 +1409,7 @@ git commit -m "feat(wr): engine process shell, proven against the fixture video"
 
 **Interfaces:**
 - Consumes: everything above.
-- Produces: `wr::service::process_one(cfg: &ServiceCfg, cancel: &dyn Fn() -> bool) -> Outcome`; `wr::service::ServiceCfg { server_url, token, data_dir, engine }`; `wr::service::Outcome { Idle, Completed(i64), Failed(i64, WrError), Released(i64), Error(String) }`; the Tauri command `wr_process_one`.
+- Produces: `wr::service::process_one(cfg: &ServiceCfg, cancel: &(dyn Fn() -> bool + Sync)) -> Outcome`; `wr::service::ServiceCfg { server_url, token, data_dir, engine }`; `wr::service::Outcome { Idle, Completed(i64), Failed(i64, WrError), Released(i64), Error(String) }`; the Tauri command `wr_process_one`.
 
 **Scope:** exactly ONE job, then return. No polling loop, no gate, no tray — Plan 3 adds those. Keeping it to one job means the dev command is a clean end-to-end probe.
 
@@ -1536,8 +1536,20 @@ pub fn sweep_orphans(dir: &std::path::Path) {
     }
 }
 
+/// Serializes `process_one` against itself. `sweep_orphans` deletes by glob, so two
+/// overlapping calls would have one delete the other's live video mid-job — and the engine
+/// is wall-clock bound (~100 s per video), so an overlap is a long window, not a
+/// hypothetical. One machine does one job at a time by design (there is nothing to gain from
+/// concurrency when the work is real-time bound), so this states the existing contract rather
+/// than adding a new constraint — and Plan 3's polling loop would otherwise inherit the
+/// assumption invisibly.
+static PROCESS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Claim and fully process one job.
-pub fn process_one(cfg: &ServiceCfg, cancel: &dyn Fn() -> bool) -> Outcome {
+pub fn process_one(cfg: &ServiceCfg, cancel: &(dyn Fn() -> bool + Sync)) -> Outcome {
+    // Held for the whole job. Recover from a poisoned lock rather than propagating a panic:
+    // one job panicking must not permanently disable the service.
+    let _guard = PROCESS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let conn = match state::open(&cfg.data_dir) { Ok(c) => c, Err(e) => return Outcome::Error(e) };
     let worker = state::worker_id(&cfg.data_dir);
     sweep_orphans(&cfg.data_dir);
@@ -1559,7 +1571,7 @@ pub fn process_one(cfg: &ServiceCfg, cancel: &dyn Fn() -> bool) -> Outcome {
 }
 
 fn run_job(cfg: &ServiceCfg, client: &job::Client, j: &job::WrJob,
-           cancel: &dyn Fn() -> bool) -> Outcome {
+           cancel: &(dyn Fn() -> bool + Sync)) -> Outcome {
     let tier = verify::tier_for(j.attempt);
     let dest = video_path(&cfg.data_dir, j.wr_id);
 
