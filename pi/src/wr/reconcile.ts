@@ -7,6 +7,7 @@ import type { ScrapedWr } from './parse';
 import { resolveLoadout } from './loadout';
 import type { Loadout } from './loadout';
 import { upsertFlag } from './flags';
+import { enqueueJob } from '../db/wrJobs';
 import { courseLeaderboard } from '../db/reads';
 import { activeSeasonId } from '../db/seasons';
 import { turfTransitions } from '../turf/transitions';
@@ -134,6 +135,11 @@ function reconcileOne(db: DatabaseSync, hub: EventHub, s: ScrapedWr, courseId: n
 
   flagUnresolved(db, hub, resolveLoadout(s.character, s.vehicle), s.courseName, courseId,
                  insertedWrId ?? reflaggedWrId);
+
+  // Enqueue for trail extraction. A WR that later falls stays queued — supersession lowers its
+  // claim priority but never removes it, so historic trails accumulate without a backfill.
+  const wrId = insertedWrId ?? reflaggedWrId;
+  if (wrId !== null && s.videoUrl) enqueueJob(db, wrId);
 
   // Emit only when a prior current existed (silent first-scrape establishment).
   if (cur) {

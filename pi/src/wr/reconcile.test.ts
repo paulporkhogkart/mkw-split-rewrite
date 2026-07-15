@@ -182,4 +182,17 @@ describe('reconcile', () => {
     expect(events.filter((e) => e.type === 'wr_name_flag')).toHaveLength(0);
     expect(db.prepare('SELECT COUNT(*) n FROM wr_name_flags').get()).toMatchObject({ n: 0 });
   });
+
+  it('enqueues a wr_job for a newly inserted current WR', () => {
+    const { db, hub } = setup();
+    reconcile(db, hub, [wr()]);
+    const id = (db.prepare('SELECT id FROM world_records WHERE is_current=1').get() as any).id;
+    expect(db.prepare('SELECT wr_id FROM wr_jobs').all()).toEqual([{ wr_id: id }]);
+  });
+
+  it('does not enqueue a WR with no video', () => {
+    const { db, hub } = setup();
+    reconcile(db, hub, [wr({ videoUrl: null })]);
+    expect(db.prepare('SELECT COUNT(*) n FROM wr_jobs').get()).toMatchObject({ n: 0 });
+  });
 });
