@@ -4,6 +4,7 @@ import type { ActivityHub } from '../activity/hub';
 import type { ActivityInput } from '../activity/types';
 import { resolveCourseId } from './courses';
 import type { ScrapedWr } from './parse';
+import { resolveLoadout } from './loadout';
 import { courseLeaderboard } from '../db/reads';
 import { activeSeasonId } from '../db/seasons';
 import { turfTransitions } from '../turf/transitions';
@@ -26,14 +27,24 @@ const isoDate = (date: string | null): string =>
   date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? `${date}T00:00:00.000Z` : new Date().toISOString();
 
 /** Update video/character/vehicle (and holder if currently null) on `row` from the
- *  scrape, only where the scraped value is non-empty and differs. Returns true if it wrote. */
+ *  scrape, only where the scraped value is non-empty and differs. A changed raw
+ *  character/vehicle also re-resolves its slugs, so an mkwrs correction propagates.
+ *  Returns true if it wrote. */
 function backfill(db: DatabaseSync, row: Row, s: ScrapedWr): boolean {
   const sets: string[] = [];
   const vals: (string | null)[] = [];
   if (row.holder_name == null && s.holder) { sets.push('holder_name=?'); vals.push(s.holder); }
   if (s.videoUrl && s.videoUrl !== row.video_url) { sets.push('video_url=?'); vals.push(s.videoUrl); }
-  if (s.character && s.character !== row.character) { sets.push('character=?'); vals.push(s.character); }
-  if (s.vehicle && s.vehicle !== row.vehicle) { sets.push('vehicle=?'); vals.push(s.vehicle); }
+  if (s.character && s.character !== row.character) {
+    const lo = resolveLoadout(s.character, null);
+    sets.push('character=?', 'character_slug=?', 'costume_slug=?');
+    vals.push(s.character, lo.characterSlug, lo.costumeSlug);
+  }
+  if (s.vehicle && s.vehicle !== row.vehicle) {
+    const lo = resolveLoadout(null, s.vehicle);
+    sets.push('vehicle=?', 'kart_slug=?');
+    vals.push(s.vehicle, lo.kartSlug);
+  }
   if (sets.length === 0) return false;
   db.prepare(`UPDATE world_records SET ${sets.join(', ')} WHERE id=?`).run(...vals, row.id);
   return true;
@@ -76,12 +87,15 @@ function reconcileOne(db: DatabaseSync, hub: EventHub, s: ScrapedWr, courseId: n
       backfill(db, existing, s);
       report.reflagged++;
     } else {
+      const lo = resolveLoadout(s.character, s.vehicle);
       db.prepare(
         `INSERT INTO world_records(course_id, cc, holder_name, record_ms, record_str,
-           achieved_at, video_url, character, vehicle, provenance, is_current)
-         VALUES (?,?,?,?,?,?,?,?,?, 'scraped', 1)`
+           achieved_at, video_url, character, vehicle,
+           character_slug, costume_slug, kart_slug, provenance, is_current)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'scraped', 1)`
       ).run(courseId, cc, s.holder, s.recordMs, s.recordStr,
-            isoDate(s.date), s.videoUrl, s.character, s.vehicle);
+            isoDate(s.date), s.videoUrl, s.character, s.vehicle,
+            lo.characterSlug, lo.costumeSlug, lo.kartSlug);
       report.inserted++;
     }
     db.exec('COMMIT');

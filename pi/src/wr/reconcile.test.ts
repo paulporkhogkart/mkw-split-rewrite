@@ -107,4 +107,38 @@ describe('reconcile', () => {
     expect(rep.unmapped).toEqual(['Mystery Track']);
     expect(rep.inserted).toBe(0);
   });
+
+  it('writes loadout slugs on a fresh insert', () => {
+    const { db, hub } = setup();
+    reconcile(db, hub, [wr({ character: 'Toadette (Conductor)', vehicle: 'Mach Rocket' })]);
+    const row = db.prepare(
+      'SELECT character, character_slug, costume_slug, kart_slug FROM world_records WHERE is_current=1'
+    ).get() as any;
+    expect(row.character).toBe('Toadette (Conductor)');   // raw is still stored
+    expect(row.character_slug).toBe('toadette');
+    expect(row.costume_slug).toBe('conductor');
+    expect(row.kart_slug).toBe('mach_rocket');
+  });
+
+  it('re-resolves slugs when the raw value changes on the current row', () => {
+    const { db, hub } = setup();
+    reconcile(db, hub, [wr({ character: 'Toadette (Conductor)', vehicle: 'Mach Rocket' })]);
+    // same record + holder -> Case 1 backfill path, with a corrected loadout
+    reconcile(db, hub, [wr({ character: 'Bowser (Biker)', vehicle: 'Reel Racer' })]);
+    const row = db.prepare(
+      'SELECT character, character_slug, costume_slug, kart_slug FROM world_records WHERE is_current=1'
+    ).get() as any;
+    expect(row.character).toBe('Bowser (Biker)');
+    expect(row.character_slug).toBe('bowser');
+    expect(row.costume_slug).toBe('biker');
+    expect(row.kart_slug).toBe('reel_racer');
+  });
+
+  it('clears the costume slug when the raw drops back to a base costume', () => {
+    const { db, hub } = setup();
+    reconcile(db, hub, [wr({ character: 'Toadette (Conductor)' })]);
+    reconcile(db, hub, [wr({ character: 'Toadette' })]);
+    const row = db.prepare('SELECT costume_slug FROM world_records WHERE is_current=1').get() as any;
+    expect(row.costume_slug).toBeNull();
+  });
 });
