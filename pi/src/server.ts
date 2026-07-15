@@ -4,6 +4,7 @@ import { migrateSeason0Recovered } from './db/season0Recovery';
 import { migratePlayerRenames } from './db/playerRenames';
 import { migrateTrails } from './db/trailMigrate';
 import { purgeRemovedPlayers } from './db/purgeRemovedPlayers';
+import { seedWrJobs } from './db/wrJobs';
 import { backfillActivity } from './activity/backfill';
 import { EventHub } from './api/events';
 import { ActivityHub } from './activity/hub';
@@ -28,6 +29,7 @@ migrateSeason0Recovered(db);   // one-time: real Discord-recovered Season 0 prog
 migratePlayerRenames(db);      // idempotent display-name corrections (e.g. Paul -> paul pork)
 migrateTrails(db);             // one-time: run_points rows → run_trails blobs (bit-verified; see docs/replay-format.md)
 purgeRemovedPlayers(db);       // remove ex-participants entirely (after recovery + trail migration, before activity backfill)
+seedWrJobs(db);                // WR trail-extraction queue for the current board (idempotent)
 try { backfillActivity(db); } catch { /* guard: safe to skip if activity_events absent */ }
 // Purge the legacy emit-at-end session events ('attempts'/'screen') from any pre-redesign DB;
 // sessions are presence-driven now and the new model never writes these types (idempotent).

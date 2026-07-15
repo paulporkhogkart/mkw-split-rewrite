@@ -2,7 +2,6 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { backfillWasPb } from './pb';
-import { seedWrJobs } from './wrJobs';
 
 export function openDb(path: string): DatabaseSync {
   const db = new DatabaseSync(path);
@@ -65,10 +64,6 @@ export function applySchema(db: DatabaseSync): void {
     'nation TEXT', 'character_slug TEXT', 'kart_slug TEXT', 'costume_slug TEXT',
     'lap_splits_ms TEXT', 'coins TEXT', 'mushrooms TEXT',
     'date_precision TEXT', 'removed_at TEXT', 'source_raw TEXT',
-    // seedWrJobs (below) reads video_url on every boot, and a throw inside applySchema would
-    // block boot entirely. Every schema.sql in history has this column, so this is defensive
-    // only — it no-ops on every real DB.
-    'video_url TEXT',
   ]) {
     try { db.exec(`ALTER TABLE world_records ADD COLUMN ${col}`); } catch { /* present */ }
   }
@@ -89,6 +84,4 @@ export function applySchema(db: DatabaseSync): void {
   // and gated on the old value so it never fights a future colour change. server/importer.py
   // PLAYER_COLORS carries the same value, so fresh imports seed blue directly.
   db.exec("UPDATE players SET color = '#38bdf8' WHERE display_name = 'Gub' COLLATE NOCASE AND color = '#2dd4bf'");
-  // Seed WR trail-extraction jobs for the current board. Idempotent; safe on every boot.
-  seedWrJobs(db);
 }
