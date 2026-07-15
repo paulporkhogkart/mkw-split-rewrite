@@ -13,6 +13,7 @@ import { versionRoutes } from './version';
 import type { LatestFn } from '../version/latest';
 import { createStatsApp } from './stats';
 import { screenRoutes } from './screen';
+import { wrJobsRoutes } from './wrJobs';
 import { presenceHandlers } from './presence';
 import { playerByToken } from '../db/players';
 import { requireTokenAny } from './auth';
@@ -35,7 +36,7 @@ export function createApp(db: DatabaseSync, hub: EventHub,
   // The public website fetches these reads cross-origin. They serve already-public data (same
   // category as the open /v1/presence stream), so they skip the token gate and get permissive
   // CORS (incl. preflight). Everything else (writes, stats, screen, other reads) stays gated.
-  const PUBLIC_READS = ['/v1/leaderboard', '/v1/world-records', '/v1/roster', '/v1/territory', '/v1/territory/timeline', '/v1/version', '/v1/activity'];
+  const PUBLIC_READS = ['/v1/leaderboard', '/v1/world-records', '/v1/wr-trails', '/v1/roster', '/v1/territory', '/v1/territory/timeline', '/v1/version', '/v1/activity'];
   const readCors = cors({ origin: '*', allowMethods: ['GET'] });
   for (const p of PUBLIC_READS) app.use(p, readCors);
   app.use('/v1/players/:slug', readCors);   // single-segment player summary is public
@@ -57,6 +58,7 @@ export function createApp(db: DatabaseSync, hub: EventHub,
   app.route('/', versionRoutes(db, { latest: opts?.latest }));
   app.route('/', createStatsApp(db, { porkerPath: process.env.STATS_PORKER_DB ?? 'porker.db' }));
   app.route('/', screenRoutes(db));
+  app.route('/', wrJobsRoutes(db));
   app.get('/explorer', (c) => {
     try { return c.html(readFileSync(EXPLORER_HTML, 'utf8')); }
     catch { return c.text('stat-explorer.html not found', 404); }

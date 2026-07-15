@@ -2,8 +2,12 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { EventHub } from '../api/events';
 import type { ActivityHub } from '../activity/hub';
 import type { ActivityInput } from '../activity/types';
-import { resolveCourseId } from './courses';
+import { resolveCourseId, mkwrsNameToSlug, isGlitchCourseName } from './courses';
 import type { ScrapedWr } from './parse';
+import { resolveLoadout } from './loadout';
+import type { Loadout } from './loadout';
+import { upsertFlag, markFlagAlerted } from './flags';
+import { enqueueJob } from '../db/wrJobs';
 import { courseLeaderboard } from '../db/reads';
 import { activeSeasonId } from '../db/seasons';
 import { turfTransitions } from '../turf/transitions';
@@ -26,14 +30,24 @@ const isoDate = (date: string | null): string =>
   date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? `${date}T00:00:00.000Z` : new Date().toISOString();
 
 /** Update video/character/vehicle (and holder if currently null) on `row` from the
- *  scrape, only where the scraped value is non-empty and differs. Returns true if it wrote. */
+ *  scrape, only where the scraped value is non-empty and differs. A changed raw
+ *  character/vehicle also re-resolves its slugs, so an mkwrs correction propagates.
+ *  Returns true if it wrote. */
 function backfill(db: DatabaseSync, row: Row, s: ScrapedWr): boolean {
   const sets: string[] = [];
   const vals: (string | null)[] = [];
   if (row.holder_name == null && s.holder) { sets.push('holder_name=?'); vals.push(s.holder); }
   if (s.videoUrl && s.videoUrl !== row.video_url) { sets.push('video_url=?'); vals.push(s.videoUrl); }
-  if (s.character && s.character !== row.character) { sets.push('character=?'); vals.push(s.character); }
-  if (s.vehicle && s.vehicle !== row.vehicle) { sets.push('vehicle=?'); vals.push(s.vehicle); }
+  if (s.character && s.character !== row.character) {
+    const lo = resolveLoadout(s.character, null);
+    sets.push('character=?', 'character_slug=?', 'costume_slug=?');
+    vals.push(s.character, lo.characterSlug, lo.costumeSlug);
+  }
+  if (s.vehicle && s.vehicle !== row.vehicle) {
+    const lo = resolveLoadout(null, s.vehicle);
+    sets.push('vehicle=?', 'kart_slug=?');
+    vals.push(s.vehicle, lo.kartSlug);
+  }
   if (sets.length === 0) return false;
   db.prepare(`UPDATE world_records SET ${sets.join(', ')} WHERE id=?`).run(...vals, row.id);
   return true;
@@ -43,11 +57,42 @@ export function reconcile(db: DatabaseSync, hub: EventHub, scraped: ScrapedWr[],
   const report: WrReport = { inserted: 0, reflagged: 0, backfilled: 0, unchanged: 0, unmapped: [] };
   for (const s of scraped) {
     const courseId = resolveCourseId(db, s.courseName);
-    if (courseId === null) { report.unmapped.push(s.courseName); continue; }
+    if (courseId === null) {
+      report.unmapped.push(s.courseName);
+      // A (glitch) category resolves to null by design and is not a mapping failure.
+      if (!isGlitchCourseName(s.courseName)) {
+        const slugGuess = mkwrsNameToSlug(s.courseName);
+        const { shouldAlert } = upsertFlag(db, { category: 'course', rawValue: s.courseName, slugGuess });
+        if (shouldAlert) {
+          hub.publish({ type: 'wr_name_flag', category: 'course',
+            raw_value: s.courseName, slug_guess: slugGuess, course: null });
+          markFlagAlerted(db, 'course', s.courseName);
+        }
+      }
+      continue;
+    }
     try { reconcileOne(db, hub, s, courseId, cc, report, activity); }
     catch (e) { console.error(`[wr] reconcile failed for ${s.courseName}:`, e); }
   }
   return report;
+}
+
+/** Record + announce any name in `lo` that failed to resolve. Announces once per broken name
+ *  (tracked via `alerted_at`, not sighting count — see `upsertFlag`'s doc comment); an unresolved
+ *  name blocks WR processing for that record, so it needs a human. */
+function flagUnresolved(db: DatabaseSync, hub: EventHub, lo: Loadout,
+                        courseName: string, courseId: number, wrId: number | null): void {
+  for (const u of lo.unresolved) {
+    const { shouldAlert } = upsertFlag(db, {
+      category: u.category, rawValue: u.raw, slugGuess: u.slugGuess,
+      exampleCourseId: courseId, exampleWrId: wrId ?? undefined,
+    });
+    if (shouldAlert) {
+      hub.publish({ type: 'wr_name_flag', category: u.category,
+        raw_value: u.raw, slug_guess: u.slugGuess, course: courseName });
+      markFlagAlerted(db, u.category, u.raw);
+    }
+  }
 }
 
 function reconcileOne(db: DatabaseSync, hub: EventHub, s: ScrapedWr, courseId: number, cc: number, report: WrReport, activity?: ActivityHub): void {
@@ -59,10 +104,13 @@ function reconcileOne(db: DatabaseSync, hub: EventHub, s: ScrapedWr, courseId: n
   // Case 1: same record as current -> backfill metadata in place, no current move.
   if (cur && cur.record_ms === s.recordMs && cur.holder_name === s.holder) {
     if (backfill(db, cur, s)) report.backfilled++; else report.unchanged++;
+    flagUnresolved(db, hub, resolveLoadout(s.character, s.vehicle), s.courseName, courseId, cur.id);
     return;
   }
 
   // Case 2: the current WR changed -> mirror the page (one transaction).
+  let insertedWrId: number | null = null;
+  let reflaggedWrId: number | null = null;
   db.exec('BEGIN');
   try {
     if (cur) db.prepare('UPDATE world_records SET is_current=0 WHERE id=?').run(cur.id);
@@ -74,18 +122,31 @@ function reconcileOne(db: DatabaseSync, hub: EventHub, s: ScrapedWr, courseId: n
     if (existing) {
       db.prepare('UPDATE world_records SET is_current=1 WHERE id=?').run(existing.id);
       backfill(db, existing, s);
+      reflaggedWrId = existing.id;
       report.reflagged++;
     } else {
-      db.prepare(
+      const lo = resolveLoadout(s.character, s.vehicle);
+      const res = db.prepare(
         `INSERT INTO world_records(course_id, cc, holder_name, record_ms, record_str,
-           achieved_at, video_url, character, vehicle, provenance, is_current)
-         VALUES (?,?,?,?,?,?,?,?,?, 'scraped', 1)`
+           achieved_at, video_url, character, vehicle,
+           character_slug, costume_slug, kart_slug, provenance, is_current)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'scraped', 1)`
       ).run(courseId, cc, s.holder, s.recordMs, s.recordStr,
-            isoDate(s.date), s.videoUrl, s.character, s.vehicle);
+            isoDate(s.date), s.videoUrl, s.character, s.vehicle,
+            lo.characterSlug, lo.costumeSlug, lo.kartSlug);
+      insertedWrId = Number(res.lastInsertRowid);
       report.inserted++;
     }
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }
+
+  flagUnresolved(db, hub, resolveLoadout(s.character, s.vehicle), s.courseName, courseId,
+                 insertedWrId ?? reflaggedWrId);
+
+  // Enqueue for trail extraction. A WR that later falls stays queued — supersession lowers its
+  // claim priority but never removes it, so historic trails accumulate without a backfill.
+  const wrId = insertedWrId ?? reflaggedWrId;
+  if (wrId !== null && s.videoUrl) enqueueJob(db, wrId);
 
   // Emit only when a prior current existed (silent first-scrape establishment).
   if (cur) {

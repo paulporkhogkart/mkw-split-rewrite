@@ -4,6 +4,7 @@ import { EventHub } from '../api/events';
 import type { ServerEvent } from '../db/types';
 import { reconcile } from './reconcile';
 import type { ScrapedWr } from './parse';
+import { upsertFlag } from './flags';
 
 function setup() {
   const db = openDb(':memory:');
@@ -106,5 +107,109 @@ describe('reconcile', () => {
     const rep = reconcile(db, hub, [wr({ courseName: 'Mystery Track' })], 150);
     expect(rep.unmapped).toEqual(['Mystery Track']);
     expect(rep.inserted).toBe(0);
+  });
+
+  it('writes loadout slugs on a fresh insert', () => {
+    const { db, hub } = setup();
+    reconcile(db, hub, [wr({ character: 'Toadette (Conductor)', vehicle: 'Mach Rocket' })]);
+    const row = db.prepare(
+      'SELECT character, character_slug, costume_slug, kart_slug FROM world_records WHERE is_current=1'
+    ).get() as any;
+    expect(row.character).toBe('Toadette (Conductor)');   // raw is still stored
+    expect(row.character_slug).toBe('toadette');
+    expect(row.costume_slug).toBe('conductor');
+    expect(row.kart_slug).toBe('mach_rocket');
+  });
+
+  it('re-resolves slugs when the raw value changes on the current row', () => {
+    const { db, hub } = setup();
+    reconcile(db, hub, [wr({ character: 'Toadette (Conductor)', vehicle: 'Mach Rocket' })]);
+    // same record + holder -> Case 1 backfill path, with a corrected loadout
+    reconcile(db, hub, [wr({ character: 'Bowser (Biker)', vehicle: 'Reel Racer' })]);
+    const row = db.prepare(
+      'SELECT character, character_slug, costume_slug, kart_slug FROM world_records WHERE is_current=1'
+    ).get() as any;
+    expect(row.character).toBe('Bowser (Biker)');
+    expect(row.character_slug).toBe('bowser');
+    expect(row.costume_slug).toBe('biker');
+    expect(row.kart_slug).toBe('reel_racer');
+  });
+
+  it('clears the costume slug when the raw drops back to a base costume', () => {
+    const { db, hub } = setup();
+    reconcile(db, hub, [wr({ character: 'Toadette (Conductor)' })]);
+    reconcile(db, hub, [wr({ character: 'Toadette' })]);
+    const row = db.prepare('SELECT costume_slug FROM world_records WHERE is_current=1').get() as any;
+    expect(row.costume_slug).toBeNull();
+  });
+
+  it('flags + announces an unresolvable kart once, on first sighting only', () => {
+    const { db, hub, events } = setup();
+    reconcile(db, hub, [wr({ character: 'Bowser', vehicle: 'Fake Kart' })]);
+    const flags = () => events.filter((e) => e.type === 'wr_name_flag');
+    expect(flags()).toHaveLength(1);
+    expect(flags()[0]).toMatchObject({
+      type: 'wr_name_flag', category: 'kart', raw_value: 'Fake Kart',
+      slug_guess: 'fake_kart', course: 'Rainbow Road',
+    });
+    // second scrape of the same broken name -> counted, not re-announced
+    reconcile(db, hub, [wr({ character: 'Bowser', vehicle: 'Fake Kart' })]);
+    expect(flags()).toHaveLength(1);
+    const row = db.prepare('SELECT occurrences FROM wr_name_flags WHERE raw_value=?').get('Fake Kart') as any;
+    expect(row.occurrences).toBe(2);
+  });
+
+  it('still alerts when the history scraper flagged the name first (race regression)', () => {
+    // history_reconcile.ts calls upsertFlag directly with no EventHub, so it can never alert.
+    // If the history scraper wins the race and flags 'Fake Kart' before the current-WR scraper
+    // ever sees it, the current scraper must still alert the first time it gets there.
+    const { db, hub, events } = setup();
+    upsertFlag(db, { category: 'kart', rawValue: 'Fake Kart', slugGuess: 'fake_kart',
+      exampleCourseId: 1 });   // simulates history_reconcile's un-alerting upsertFlag call
+    reconcile(db, hub, [wr({ character: 'Bowser', vehicle: 'Fake Kart' })]);
+    const flags = events.filter((e) => e.type === 'wr_name_flag');
+    expect(flags).toHaveLength(1);
+    expect(flags[0]).toMatchObject({ category: 'kart', raw_value: 'Fake Kart' });
+    // and it still only alerts once on repeat.
+    reconcile(db, hub, [wr({ character: 'Bowser', vehicle: 'Fake Kart' })]);
+    expect(events.filter((e) => e.type === 'wr_name_flag')).toHaveLength(1);
+  });
+
+  it('does not flag a base costume', () => {
+    const { db, hub, events } = setup();
+    reconcile(db, hub, [wr({ character: 'Bowser', vehicle: 'Reel Racer' })]);
+    expect(events.filter((e) => e.type === 'wr_name_flag')).toHaveLength(0);
+    expect(db.prepare('SELECT COUNT(*) n FROM wr_name_flags').get()).toMatchObject({ n: 0 });
+  });
+
+  it('flags + announces an unmapped course, once', () => {
+    const { db, hub, events } = setup();
+    reconcile(db, hub, [wr({ courseName: 'Brand New Track' })]);
+    const flags = events.filter((e) => e.type === 'wr_name_flag');
+    expect(flags).toHaveLength(1);
+    expect(flags[0]).toMatchObject({ category: 'course', raw_value: 'Brand New Track',
+                                     slug_guess: 'brand_new_track' });
+    reconcile(db, hub, [wr({ courseName: 'Brand New Track' })]);
+    expect(events.filter((e) => e.type === 'wr_name_flag')).toHaveLength(1);
+  });
+
+  it('does not flag a glitch category (legitimately skipped, not broken)', () => {
+    const { db, hub, events } = setup();
+    reconcile(db, hub, [wr({ courseName: 'Rainbow Road (glitch)' })]);
+    expect(events.filter((e) => e.type === 'wr_name_flag')).toHaveLength(0);
+    expect(db.prepare('SELECT COUNT(*) n FROM wr_name_flags').get()).toMatchObject({ n: 0 });
+  });
+
+  it('enqueues a wr_job for a newly inserted current WR', () => {
+    const { db, hub } = setup();
+    reconcile(db, hub, [wr()]);
+    const id = (db.prepare('SELECT id FROM world_records WHERE is_current=1').get() as any).id;
+    expect(db.prepare('SELECT wr_id FROM wr_jobs').all()).toEqual([{ wr_id: id }]);
+  });
+
+  it('does not enqueue a WR with no video', () => {
+    const { db, hub } = setup();
+    reconcile(db, hub, [wr({ videoUrl: null })]);
+    expect(db.prepare('SELECT COUNT(*) n FROM wr_jobs').get()).toMatchObject({ n: 0 });
   });
 });

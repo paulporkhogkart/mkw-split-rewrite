@@ -9,6 +9,7 @@ import { courseSummary } from '../db/courseSummary';
 import type { TrailMode } from '../db/reads';
 import { requireToken } from './auth';
 import { playerByToken } from '../db/players';
+import { courseWrTrails } from '../db/wrTrails';
 
 const num = (v: string | undefined, d: number) => (v ? Number(v) : d);
 
@@ -52,6 +53,10 @@ export function readsRoutes(db: DatabaseSync): Hono<Env> {
     const m = /^Bearer (.+)$/.exec(c.req.header('authorization') ?? '');
     const me = m ? playerByToken(db, m[1]) : null;
     return c.json(courseTrails(db, season(c), cid, num(c.req.query('cc'), 150), me ? me.id : null));
+  });
+  r.get('/v1/wr-trails', (c) => {
+    const cid = course(c); if (cid === null) return c.json({ error: 'unknown course' }, 400);
+    return c.json(courseWrTrails(db, cid, num(c.req.query('cc'), 150)));
   });
   r.get('/v1/roster', (c) => {
     const m = /^Bearer (.+)$/.exec(c.req.header('authorization') ?? '');

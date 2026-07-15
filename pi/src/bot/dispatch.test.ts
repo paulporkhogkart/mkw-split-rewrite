@@ -32,4 +32,13 @@ describe('dispatch', () => {
     dispatch(db1(), { type: 'run_started', player: 'Paul', course: 'rr', cc: 150 }, (e) => sent.push(e));
     expect(sent).toHaveLength(0);
   });
+
+  it('announces an unmapped mkwrs name', () => {
+    const db = openDb(':memory:'); applySchema(db);
+    const sent: any[] = [];
+    dispatch(db, { type: 'wr_name_flag', category: 'kart', raw_value: 'Tiny Titan',
+                   slug_guess: 'tiny_titan', course: 'Rainbow Road' }, (e) => sent.push(e));
+    expect(sent).toHaveLength(1);
+    expect(sent[0].data.title).toBe('UNMAPPED mkwrs NAME');
+  });
 });

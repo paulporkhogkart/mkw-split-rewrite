@@ -1098,11 +1098,21 @@ describe('seedWrJobs', () => {
     expect(seedWrJobs(db)).toBe(0);            // idempotent
   });
 
-  it('skips WRs with no video, non-current WRs, and already-trailed WRs', () => {
-    const db = setup();
-    addWr(db, 10, { video: null });            // no video
-    addWr(db, 11, { current: 0 });             // not current
-    addWr(db, 12);                             // trailed below
+  // NOTE: each skip case gets its OWN fresh db. `idx_wr_current` (connect.ts:61) is a partial
+  // unique index allowing ONE is_current=1 row per (course_id, cc), so two current WRs cannot
+  // coexist on the same course in one db.
+  it('skips a WR with no video', () => {
+    const db = setup(); addWr(db, 10, { video: null });
+    expect(seedWrJobs(db)).toBe(0);
+  });
+
+  it('skips a non-current WR', () => {
+    const db = setup(); addWr(db, 11, { current: 0 });
+    expect(seedWrJobs(db)).toBe(0);
+  });
+
+  it('skips an already-trailed WR', () => {
+    const db = setup(); addWr(db, 12);
     insertWrTrail(db, 12, [{ t_ms: 1, cx: 1, cy: 1, score: 0.9, lap: 1 }]);
     expect(seedWrJobs(db)).toBe(0);
   });
@@ -1196,18 +1206,31 @@ Expected: PASS.
 
 - [ ] **Step 7: Seed on boot**
 
-In `pi/src/db/connect.ts`, add the import at the top:
+**In `pi/src/server.ts`, NOT in `connect.ts`/`applySchema`.** `applySchema` is called by every test
+file and every ops CLI (`mint-token`, `wr-flags`, `scrape-wr`, …); seeding there would make
+`mint-token` scan `world_records`/`wr_trails` and write `wr_jobs`, which is nothing to do with
+minting a token. `server.ts` already has the boot chain for exactly this kind of data population —
+`migrateSeason0Recovered`, `migratePlayerRenames`, `migrateTrails`, `purgeRemovedPlayers` all sit
+there, after `applySchema`. Follow that precedent.
+
+Add the import beside the other boot-migration imports:
 
 ```ts
-import { seedWrJobs } from './wrJobs';
+import { seedWrJobs } from './db/wrJobs';
 ```
 
-and append inside `applySchema`, as the last statement (after the Gub recolour at :86):
+and add the call to the boot chain, after `purgeRemovedPlayers(db)`:
 
 ```ts
-  // Seed WR trail-extraction jobs for the current board. Idempotent; safe on every boot.
-  seedWrJobs(db);
+seedWrJobs(db);                // WR trail-extraction queue for the current board (idempotent)
 ```
+
+**Do NOT add a `video_url TEXT` entry to `applySchema`'s additive ALTER loop.** It is unnecessary
+once `seedWrJobs` is out of `applySchema`: the only thing that ever needed it was
+`connect.test.ts`'s synthetic `legacyShapeDb()` fixture, which hand-builds a `world_records` shape
+that has never existed in production (all 17 `schema.sql` revisions in history carry `video_url`).
+Keeping `seedWrJobs` out of `applySchema` means that fixture never invokes it, so no ALTER and no
+fixture edit is needed.
 
 - [ ] **Step 8: Verify and commit**
 
