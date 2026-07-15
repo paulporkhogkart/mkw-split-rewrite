@@ -8,6 +8,7 @@ use super::WrError;
 use serde_json::json;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 /// Engine DISPLAY names (not slugs). The caller maps slug -> display before constructing.
@@ -125,6 +126,11 @@ pub enum EnginePath {
     Dev,
     /// Release: the PyInstaller exe bundled beside us.
     Bundled(PathBuf),
+    /// Test-only: an arbitrary program + args. `Bundled` takes no args, so it cannot
+    /// express a deliberately-wedged child (`python -c "time.sleep(60)"`) — and a wedged
+    /// child is the ONLY way to test the watchdog, since the fixture keeps talking.
+    #[cfg(test)]
+    Custom(String, Vec<String>),
 }
 
 impl EnginePath {
@@ -144,6 +150,8 @@ impl EnginePath {
         match self {
             EnginePath::Dev => ("python".into(), vec!["-m".into(), "mkw_tracker".into()]),
             EnginePath::Bundled(p) => (p.to_string_lossy().into_owned(), vec![]),
+            #[cfg(test)]
+            EnginePath::Custom(prog, args) => (prog.clone(), args.clone()),
         }
     }
 }
@@ -154,15 +162,18 @@ impl EnginePath {
 /// AppHandle and yields an async stream, which would drag Tauri into this module and
 /// make it untestable. lib.rs keeps using the plugin for the LIVE engine.
 ///
-/// `cancel` is polled between lines; returning true aborts (a pause, or the idle gate
-/// closing because a race started). Aborting discards — tracking must happen in one
-/// unbroken pass.
+/// `cancel` is polled by the watchdog every 250ms; returning true aborts (a pause, or the
+/// idle gate closing because a race started). Aborting discards — tracking must happen in
+/// one unbroken pass.
+///
+/// `cancel` is `+ Sync` because the watchdog thread polls it: it CANNOT be polled from the
+/// read loop, which is exactly where it would never run. See the watchdog comment below.
 pub fn run_video(
     engine: &EnginePath,
     video: &Path,
     sel: Selections,
     timeout: Duration,
-    cancel: &dyn Fn() -> bool,
+    cancel: &(dyn Fn() -> bool + Sync),
 ) -> Result<Finalized, WrError> {
     let (prog, base_args) = engine.command_parts();
     let mut cmd = std::process::Command::new(prog);
@@ -181,39 +192,79 @@ pub fn run_video(
     let mut stdin = child.stdin.take().expect("piped stdin");
     let stdout = child.stdout.take().expect("piped stdout");
 
-    let mut driver = EngineDriver::new(sel);
     let started = Instant::now();
-    let mut result: Option<Finalized> = None;
+    let child = std::sync::Mutex::new(child);
+    let done = AtomicBool::new(false);
+    let cancelled = AtomicBool::new(false);
+    let timed_out = AtomicBool::new(false);
 
-    for line in BufReader::new(stdout).lines() {
-        // Distinct reasons: a deliberate stop must never be reported as a timeout, or the
-        // Pi's last_error would blame the video for something we chose to do.
-        if cancel() { let _ = child.kill(); let _ = child.wait(); return Err(WrError::Cancelled); }
-        if started.elapsed() > timeout {
-            let _ = child.kill(); let _ = child.wait();
-            return Err(WrError::Timeout);
+    let result = std::thread::scope(|s| {
+        // WATCHDOG. The read loop below blocks inside read_line, which returns only on a
+        // line or on EOF. Checking the timeout there is useless: a wedged engine sends
+        // neither. Its heartbeat is emitted from inside its own synchronous frame loop
+        // (main.py:1416 — sidecar.py's writer thread merely drains a queue that loop
+        // fills), so the very failure this timeout exists to catch — a stuck cv2.read() —
+        // silences the heartbeat too, and read_line would block forever.
+        //
+        // Only an independent thread can enforce it. Killing the child closes its stdout,
+        // which unblocks the reader with EOF and lets the loop unwind normally.
+        s.spawn(|| {
+            while !done.load(Ordering::Relaxed) {
+                if cancel() {
+                    cancelled.store(true, Ordering::Relaxed);
+                    let _ = child.lock().unwrap().kill();
+                    return;
+                }
+                if started.elapsed() > timeout {
+                    timed_out.store(true, Ordering::Relaxed);
+                    let _ = child.lock().unwrap().kill();
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(250));
+            }
+        });
+
+        // The read loop never locks `child`, so it cannot contend with the watchdog.
+        let mut driver = EngineDriver::new(sel);
+        let mut result: Option<Finalized> = None;
+        for line in BufReader::new(stdout).lines() {
+            let line = match line { Ok(l) => l, Err(_) => break };
+
+            // The engine's own diagnostics: these are the canaries for a healthy run.
+            if line.contains("[MinimapTracker]") || line.contains("[ThresholdStore]") {
+                log::info!("[wr engine] {}", line.trim());
+            }
+
+            for cmd in driver.on_line(&line) {
+                if writeln!(stdin, "{cmd}").is_err() { break; }
+                let _ = stdin.flush();
+            }
+
+            if driver.finalized().is_some() {
+                result = driver.finalized().cloned();
+                break;   // --video-once stops PLAYBACK but never exits: we must reap it.
+            }
         }
-        let line = match line { Ok(l) => l, Err(_) => break };
+        // Retires the watchdog on every exit path, so the scope's implicit join at the end
+        // of this closure cannot block for longer than one 250ms poll.
+        done.store(true, Ordering::Relaxed);
+        result
+    });
 
-        // The engine's own diagnostics: these are the canaries for a healthy run.
-        if line.contains("[MinimapTracker]") || line.contains("[ThresholdStore]") {
-            log::info!("[wr engine] {}", line.trim());
-        }
-
-        for cmd in driver.on_line(&line) {
-            if writeln!(stdin, "{cmd}").is_err() { break; }
-            let _ = stdin.flush();
-        }
-
-        if driver.finalized().is_some() {
-            result = driver.finalized().cloned();
-            break;   // --video-once stops PLAYBACK but never exits: we must reap it.
-        }
-    }
-
+    let mut child = child.into_inner().unwrap_or_else(|e| e.into_inner());
     let _ = child.kill();
     let _ = child.wait();
-    result.ok_or(WrError::NoTrail)
+
+    // Distinguish the two: a cancel must NEVER be reported to the server as a failure (the
+    // caller release()s, refunding the attempt); a timeout must. Both are read from flags
+    // the watchdog actually set, not re-derived from elapsed() — a late but legitimate EOF
+    // (an engine crash at 299.9s of a 300s budget) is NoTrail, not a timeout we imposed.
+    match result {
+        Some(f) => Ok(f),
+        None if cancelled.load(Ordering::Relaxed) => Err(WrError::Cancelled),
+        None if timed_out.load(Ordering::Relaxed) => Err(WrError::Timeout),
+        None => Err(WrError::NoTrail),
+    }
 }
 
 #[cfg(test)]
@@ -337,6 +388,61 @@ mod tests {
         let (prog, args) = p.command_parts();
         assert_eq!(prog, "python");
         assert_eq!(&args[..2], &["-m", "mkw_tracker"]);
+    }
+
+    /// A child that produces NO stdout and never exits — the shape of a wedged engine.
+    /// The engine's heartbeat is emitted from inside its synchronous frame loop
+    /// (main.py:1416), so the very failure a hard timeout exists to catch — a stuck
+    /// cv2.read() — silences the heartbeat too. The fixture CANNOT test this: it talks
+    /// every 0.2s, so it exercises the same blocked read and looks like proof.
+    fn wedged_child() -> EnginePath {
+        EnginePath::Custom(
+            "python".into(),
+            vec!["-c".into(), "import time; time.sleep(60)".into()],
+        )
+    }
+
+    #[test]
+    fn timeout_fires_against_a_silent_child_that_never_exits() {
+        let started = std::time::Instant::now();
+        let err = run_video(
+            &wedged_child(),
+            std::path::Path::new("unused.mp4"),
+            sel(),
+            std::time::Duration::from_secs(2),
+            &|| false,
+        )
+        .expect_err("a wedged engine must time out, not hang forever");
+        // Without a watchdog, read_line blocks forever and we never get here at all.
+        assert!(matches!(err, WrError::Timeout), "expected Timeout, got {err:?}");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(15),
+            "the timeout must actually fire; took {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn cancel_fires_against_a_silent_child_and_is_not_reported_as_a_timeout() {
+        let started = std::time::Instant::now();
+        let err = run_video(
+            &wedged_child(),
+            std::path::Path::new("unused.mp4"),
+            sel(),
+            // Long timeout: only a working cancel can end this run, so a Timeout result
+            // here would mean cancel never fired.
+            std::time::Duration::from_secs(600),
+            &|| true,
+        )
+        .expect_err("a cancelled run must abort");
+        // Cancelled vs Timeout must stay distinct: the caller release()s on a cancel
+        // (refunding the attempt) and only fail()s on a timeout.
+        assert!(matches!(err, WrError::Cancelled), "expected Cancelled, got {err:?}");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(15),
+            "cancel must abort promptly; took {:?}",
+            started.elapsed()
+        );
     }
 
     /// The real proof. Ignored by default: it is wall-clock bound (~100s) and needs the
