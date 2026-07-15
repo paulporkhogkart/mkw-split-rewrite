@@ -1,4 +1,5 @@
-//! The free correctness gate (spec §6.6) + the retry escalation tiers (§6.4).
+//! The free correctness gate (spec §6.6) + the retry tier lookup (§6.4) — currently a
+//! single tier; see `Tier`'s doc for why the escalation tier was removed.
 
 use super::engine::{time_to_ms, Finalized};
 use super::WrError;
@@ -32,8 +33,10 @@ pub fn tier_for(_attempt: i64) -> Tier {
 /// mkwrs, so an exact match is strong evidence we processed the right video in full.
 /// Returns the trail on success.
 pub fn verify(f: &Finalized, expected_ms: i64) -> Result<Vec<[f64; 5]>, WrError> {
-    // Order matters: "no trail" is the actionable reason and is retryable at a higher
-    // tier; a bogus time on an empty run would otherwise mask it as a mismatch.
+    // Order matters: with points empty, total_time (if present at all) is not a real
+    // reading of anything — reporting TimeMismatch off it would report a mismatch that was
+    // never actually measured. NoTrail is the honest diagnosis, and the job stays
+    // claimable up to the attempts cap regardless of which of the two this returns.
     if f.points.is_empty() { return Err(WrError::NoTrail); }
     let detected_ms = match f.total_time.as_deref().and_then(time_to_ms) {
         Some(ms) => ms,
@@ -73,8 +76,9 @@ mod tests {
 
     #[test]
     fn rejects_an_empty_trail_as_no_trail_not_a_mismatch() {
-        // The minimap never locked. Distinct from a wrong video: this one is worth retrying
-        // at higher quality (tier 3), a mismatch never is.
+        // The minimap never locked — a run that produced no reading at all, distinct from
+        // a wrong video that produced a confident, wrong reading. Both keep the job
+        // claimable up to the attempts cap; this is about which reason gets reported.
         assert_eq!(verify(&fin(Some("1:02.934"), 0), 62934).unwrap_err(), WrError::NoTrail);
     }
 
@@ -91,8 +95,10 @@ mod tests {
         // first this is NoTrail; with the time check first it would be TimeMismatch.
         // A malformed time would yield NoTrail either way and prove nothing.
         //
-        // The distinction is load-bearing: NoTrail is retryable at a higher quality tier,
-        // TimeMismatch never is (a wrong video is wrong at any bitrate).
+        // The distinction is load-bearing even with a single tier: NoTrail says "this run
+        // produced no real reading" (total_time, if present, isn't a measurement of
+        // anything); TimeMismatch says "we have a reading and it disagrees with mkwrs".
+        // Collapsing them would report a time mismatch off a number that was never real.
         let err = verify(&fin(Some("1:02.934"), 0), 62000).unwrap_err();
         assert_eq!(err, WrError::NoTrail,
                    "an empty trail must report NoTrail even when the time also disagrees");

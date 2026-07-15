@@ -25,9 +25,11 @@ pub enum WrError {
     TimeMismatch { detected_ms: i64, expected_ms: i64 },
     /// The engine (or yt-dlp) could not be spawned, or the engine produced stderr output
     /// and no trail — a crash, not a merely marginal video. OUR fault, not the video's.
-    /// Distinct from `NoTrail` on purpose: `NoTrail` is retryable at a higher tier, so a
-    /// crash misclassified as `NoTrail` would get retried as though the video were just
-    /// hard to track, burning attempts on a bug rather than surfacing it.
+    /// Distinct from `NoTrail` on purpose: it gives the Pi's `last_error` an honest signal
+    /// (this is our bug, not a hard-to-track video) and keeps the crash visible in logs
+    /// instead of it silently folding into the same bucket as a video whose minimap simply
+    /// never locked. The job still stays claimable up to the attempts cap either way — the
+    /// split is about what gets reported, not about escalating to a different tier.
     EngineFailed(String),
     Timeout,
     /// Aborted by a pause or the idle gate closing. NEVER reported to the Pi — the caller

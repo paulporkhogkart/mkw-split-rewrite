@@ -15,11 +15,12 @@ pub struct ServiceCfg {
     pub engine: EnginePath,
 }
 
-// Fields are read via `{:?}` in wr_process_one's dev-only probe result (the dead_code
-// lint deliberately does NOT count Debug-only usage as "read" — see the compiler's own
-// note on this warning) and by tests matching on the variant only. Plan 3's polling loop
-// is expected to start pattern-matching these for real (retry/backoff decisions per
-// outcome kind), at which point this allow can come off.
+// Fields are read via `{:?}` in wr_process_one's probe result (registered — and so
+// webview-invokable — in every build, not just debug; see mod.rs's HONEST GATING NOTE)
+// and by tests matching on the variant only. The dead_code lint deliberately does NOT
+// count Debug-only usage as "read" — see the compiler's own note on this warning. Plan
+// 3's polling loop is expected to start pattern-matching these for real (retry/backoff
+// decisions per outcome kind), at which point this allow can come off.
 #[allow(dead_code)]
 #[derive(Debug)]
 pub enum Outcome {

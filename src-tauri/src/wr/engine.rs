@@ -218,9 +218,14 @@ pub fn run_video(
     let done = AtomicBool::new(false);
     let cancelled = AtomicBool::new(false);
     let timed_out = AtomicBool::new(false);
-    // Bounded ring of the engine's last STDERR_TAIL_LINES stderr lines. Bounded so a
-    // spewing engine cannot grow memory — the drain thread pops the oldest line whenever
-    // it would exceed the cap.
+    // Bounded ring of the engine's last STDERR_TAIL_LINES stderr lines: the drain thread
+    // pops the oldest line whenever it would exceed the cap. This bounds LINE COUNT, not
+    // bytes — `BufReader::lines()` accumulates one newline-free line unboundedly, so a
+    // single giant line with no `\n` would still grow memory (and the log file below)
+    // without limit. Safe here because the only producer is the Python engine, which never
+    // emits stderr without newlines (print()/logging always terminate lines, and Python
+    // tracebacks are always multi-line) — but that is an assumption about the producer, not
+    // a bound the ring enforces on its own.
     const STDERR_TAIL_LINES: usize = 50;
     let stderr_tail: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
 
@@ -313,9 +318,11 @@ pub fn run_video(
         None => {
             // A genuine "no trail" (minimap never locked) is a SILENT clean exit — nothing
             // on stderr. If the engine wrote to stderr AND produced no trail, that is an
-            // engine failure (a crash), not a marginal video: NoTrail is retryable at a
-            // higher tier by verify.rs, so misclassifying a crash as NoTrail would retry it
-            // as though the video were merely hard to track, burning attempts pointlessly.
+            // engine failure (a crash): OUR fault, not the video's. Keeping it a distinct
+            // variant from NoTrail gives the Pi's `last_error` an honest signal (a crash we
+            // should go fix vs a video that's genuinely hard to track) and makes the crash
+            // visible in logs instead of it quietly reading as just another untrackable
+            // video.
             let joined = stderr_tail.join("\n");
             log::error!("[wr engine] {label}: produced no trail; captured stderr tail:\n{}",
                 if joined.is_empty() { "<empty>" } else { &joined });
@@ -591,6 +598,58 @@ mod tests {
             }
             other => panic!("expected EngineFailed, got {other:?}"),
         }
+    }
+
+    /// A child that emits `run_finalized` and then LINGERS instead of exiting — exactly
+    /// what `--video-once` actually does (it stops playback but never exits, and it never
+    /// writes to stderr again either, so the drain thread's `BufReader::lines()` sits
+    /// blocked in `read()` waiting for the pipe to close).
+    ///
+    /// This is the regression guard for moving the child `kill()` INSIDE `thread::scope`
+    /// (see the "Retire the watchdog" comment above): killing the child is what closes its
+    /// stderr pipe and unblocks the drain thread so the scope's implicit join can return. If
+    /// that kill ever moves back to after the scope closure — as it was before this was
+    /// discovered, and as a future refactor could plausibly reintroduce — the drain thread
+    /// stays blocked forever (the child is still alive) and `run_video` hangs on every
+    /// successful run, even though every *other* test here still passes: they all use
+    /// children that exit on their own, so stderr closes regardless of kill ordering. This
+    /// is the only test whose child stays alive past `run_finalized`.
+    fn lingering_child_after_finalized() -> EnginePath {
+        EnginePath::Custom(
+            "python".into(),
+            vec![
+                "-c".into(),
+                "import json, sys, time\n\
+                 print(json.dumps({'type': 'run_finalized', 'status': 'finished', \
+                 'total_time': '1:02.934', 'points': [[14, 1635, 875, 0.79, 1]]}))\n\
+                 sys.stdout.flush()\n\
+                 time.sleep(60)\n"
+                    .into(),
+            ],
+        )
+    }
+
+    #[test]
+    fn run_video_returns_promptly_when_the_child_lingers_after_run_finalized() {
+        let started = std::time::Instant::now();
+        let f = run_video(
+            &lingering_child_after_finalized(),
+            Path::new("unused.mp4"),
+            sel(),
+            Duration::from_secs(120),
+            &|| false,
+        ).expect("a lingering child that already emitted run_finalized must still yield the trail");
+        assert_eq!(f.total_time.as_deref(), Some("1:02.934"));
+        // The proof: without the kill-inside-scope fix, this blocks on the drain thread's
+        // join until the 120s timeout (or the test harness) kills it. With the fix, the
+        // child is killed the moment run_finalized is seen, so this returns in well under
+        // 10s. The reviewer measured 60.02s (kill moved outside scope) vs 0.26s (fixed).
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "must return promptly once run_finalized is seen rather than waiting for the \
+             child to exit (or the timeout) on its own; took {:?}",
+            started.elapsed()
+        );
     }
 
     #[test]
