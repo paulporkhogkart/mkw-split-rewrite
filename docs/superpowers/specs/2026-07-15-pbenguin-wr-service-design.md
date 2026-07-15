@@ -300,30 +300,93 @@ is a query, not an event subscription. The WS is a latency nudge only; polling a
 
 ## 6. The WR service
 
-A **second Tauri binary inside the existing `src-tauri` project**, sharing the bundled engine exe,
-`sync.rs` upload patterns, the icons, and the palette. Requires enabling the `tray-icon` and
-`image-png` features on the `tauri` dep (currently `features = []`, `Cargo.toml:14`), plus
-`tauri-plugin-autostart` and `tauri-plugin-single-instance`.
+**Revised 2026-07-15 (Paul).** Earlier drafts called for a *second Tauri binary* in `src-tauri`.
+**That is dropped.** It described an outcome, not a mechanism: Tauri v2 is one-app-per
+`tauri.conf.json` (one `productName`, one `identifier`, one `windows` array, one bundle), and
+`Cargo.toml` has no `[[bin]]` section — a real second binary needs its own config and a bespoke
+step to get both into one NSIS installer. Off the paved path for no benefit.
 
-### 6.1 Tray UX
+**The WR service lives inside pbenguin as a background capability.** Nothing new is built, signed,
+installed or updated: pbenguin already ships via NSIS, has an updater, bundles the engine exe as a
+resource (`tauri.conf.json:32`), holds the player token, and already has `reqwest`, `rusqlite`, and
+the spawn-a-Python-sidecar-and-read-its-stdout pattern this needs (`lib.rs:48-134`). The only
+additions are the `tray-icon` feature on the `tauri` dep (currently `features = []`,
+`Cargo.toml:14`) and `tauri-plugin-autostart`.
+
+This also dissolves the "don't bloat non-users" problem (§8): it's an opt-in setting, so users who
+never enable it are unaffected — no installer component picker needed.
+
+### 6.1 Settings — three global checkboxes plus one tray checkbox
+
+All default to pbenguin's **current** behaviour, so a user who ignores them notices no change.
+
+```
+Settings > Background
+  [ ] Close to tray instead of quitting        (off — closing quits, as today)
+  [ ] Start pbenguin at login                  (off)
+  [ ] Run the WR service                       (off)
+        Processes WR videos only while tracking is stopped or idle 10 min+.
+  When in tray:
+  [ ] Keep live tracking running               (off — engine stops, camera released)
+```
+
+**Two checkboxes, not a mode enum.** A four-way radio (Nothing / tracking / WR / both) cannot
+express "tracking in tray but no WR service", and costs a concept. Independent checkboxes yield all
+four combinations for free.
+
+The original brief — *"automatically run in the background at startup"* — is simply
+**Start at login + Run the WR service**, with *Keep live tracking* left off.
+
+### 6.2 The idle gate — global, automatic, not configurable per-mode
+
+**The WR service only processes while tracking is stopped, or has been idle ≥ `WR_IDLE_MINUTES`
+(default 10).** This is a *global* rule, not a tray rule: it holds whether the window is open or
+pbenguin is trayed. WR processing is ~100 s of real-time OpenCV and must never compete with live
+race detection, which is the app's primary job.
+
+Because the gate is automatic there is no mode to pick and **no way to misconfigure the service
+into competing with your racing**.
+
+"Tracking wakes up mid-job" needs no new concept — it is exactly the mid-processing pause of §6.4:
+discard the video, `release` the lease, let another machine take it.
+
+*Rejected: throttling the engine's screen polling while idle.* The idle cost is dominated by frame
+capture and the 1080p `_norm()` resize, not detection — phase 1 is a single template match per
+frame and phase 2 only scans on a miss. Skipping detection saves the cheap half while capture keeps
+running, and you cannot skip capture without going blind to a race starting. Risking a late race
+start (the app's whole purpose) to save very little. Measure before revisiting; out of scope.
+
+### 6.3 Tray UX
 
 - **Badge:** pbenguin's icon with the blue re-shaded — **grey when inactive, red when active**.
   Needs a 16×16 asset; `src-tauri/icons/` has no 16×16 today (smallest is `32x32.png`), so either
   add one or downscale at runtime via the existing `image` crate.
 - **Hover tooltip:** current activity — `Downloading Mario Circuit 62%` / `Processing Mario
-  Circuit 41%` / `Idle — 3 queued` / `Paused`.
-- **Left click:** live log feed window (webview; reuses Svelte components + design tokens).
-- **Right click:** Pause / Resume / Exit, context-sensitive per §6.3.
+  Circuit 41%` / `Idle — 3 queued` / `Waiting — tracking active` / `Paused`.
+- **Left click:** restore the pbenguin window (which hosts the log view — no separate window).
+- **Right click:** Pause / Resume / Open pbenguin / Quit, context-sensitive per §6.4.
 
-### 6.2 Work loop
+**Autostart must not open the capture card.** Launching at login shows the tray icon and runs only
+the service loop; the live engine spawns only when the frontend calls `start_tracker`
+(`lib.rs:139`), so a hidden start touches no camera. A WR job spawns its own short-lived engine
+against a video file and reaps it.
+
+### 6.4 Work loop
 
 ```
-claim -> download -> process -> verify -> upload -> cleanup -> repeat
+gate -> claim -> download -> process -> verify -> upload -> cleanup -> repeat
 ```
 
-1. **Claim** `POST /v1/wr-jobs/claim`. 204 → idle, poll with backoff (and/or wake on the
+0. **Gate** (§6.2): if tracking is running and not yet idle for `WR_IDLE_MINUTES`, do not claim.
+1. **Claim** `POST /v1/wr-jobs/claim` with `Authorization: Bearer <player token>` and
+   `X-Worker-Id: <per-install id>`. 204 → idle, poll with backoff (and/or wake on the
    `wr_update` WS event as a latency nudge).
-2. **Download** with yt-dlp:
+2. **Download** with yt-dlp. **Delivery: the service self-updates `yt-dlp.exe`** — on first run,
+   and when a download starts failing, it fetches the official standalone binary from yt-dlp's
+   GitHub releases into its own data dir. YouTube breaks yt-dlp regularly (the spike hit both a
+   403 and an n-challenge failure), and pbenguin releases are manual and infrequent, so a bundled
+   copy would rot between them and this feature would die quietly. Pin to the official repo.
+   Flags:
    `-f "bestvideo[height=1080][fps=60][vcodec^=avc1]/bestvideo[height=1080][fps=60]/bestvideo[height=1080]"`
    — a **format selector, never a hardcoded id**: format ids are per-video and `299` does not
    exist on every upload. Video only; audio is never fetched. 1080p is non-negotiable (all ROIs
@@ -346,7 +409,10 @@ claim -> download -> process -> verify -> upload -> cleanup -> repeat
 5. **Upload** `POST /v1/wr-jobs/:id/result` with the points array.
 6. **Cleanup**: delete the video on *every* terminal outcome.
 
-### 6.3 Pause semantics
+### 6.5 Pause semantics
+
+Applies to an explicit user pause AND to the idle gate closing (tracking waking up mid-job) —
+they are the same path, which is why the gate needs no new concept.
 
 | State when paused | Behaviour |
 |---|---|
@@ -360,7 +426,7 @@ guard drops the paused frames. What actually discards is *invalidation* (`_INVAL
 which is terminal and sticky. Discard-on-pause here is a deliberate choice, not an inherited rule
 — and it's cheap, because "discard" only means re-download (~6 s) and re-run later.
 
-### 6.4 Verification — the free correctness gate
+### 6.6 Verification — the free correctness gate
 
 **The engine reads the time off the video independently of mkwrs.** The spike got `1:02.934`
 against a scraped `1'02"934`. So:
@@ -387,7 +453,7 @@ Escalating to 4K only on a `no_trail` failure means the extra 197 MB and ~58 s t
 only when a marginal video actually needs them. A `time_mismatch` should **not** escalate — a
 wrong video is wrong at any bitrate; it needs a human, not more pixels.
 
-### 6.5 Local state
+### 6.7 Local state
 
 No local queue — **the Pi is the queue**, which is exactly what makes it survive app and system
 restarts. Local SQLite holds only: a stable worker id, the single in-flight job (for crash
@@ -416,15 +482,21 @@ colour is fixed + the same on every client" (`trailSettings.js:5`).
 
 ## 8. Risks and decisions taken
 
-- **Installer component picker deferred.** Tauri v2's NSIS bundler doesn't expose component
-  selection as a config knob; a real components page needs a custom `nsis.template`. **v1 ships the
-  binary with autostart OFF by default, opt-in from the UI** — ~90% of the "don't bloat non-users"
-  goal for ~5% of the effort. Installer work comes later.
+- **~~Installer component picker deferred.~~ MOOT** (revised 2026-07-15). This risk only existed
+  because the service was going to be a second shipped binary. Now that it lives inside pbenguin as
+  an opt-in setting (§6), there is nothing to opt out of installing: leave the checkbox off and
+  nothing runs. No `nsis.template` work, ever.
+- **The service shares a process with the app you race with.** The real cost of folding it in: a
+  bug in the WR loop can destabilise live tracking. Mitigated by the idle gate (§6.2 — WR work
+  never runs while you're racing) and by each job spawning its own short-lived engine rather than
+  touching the live one. Accepted deliberately; the alternative was a second app to build, sign,
+  install and update forever.
 - **The `force_screen` bypass is implicit.** It works and needs no engine change, but it depends on
   the service noticing `UNKNOWN_RACE_ACTIVE` and reacting. A later explicit engine ingest mode
   would be cleaner; not needed for v1.
-- **yt-dlp rots.** YouTube changes break it regularly; it needs a pinned-but-updatable dependency
-  and `video_unavailable` must be a normal, retryable outcome rather than an exception.
+- **yt-dlp rots.** YouTube changes break it regularly — the spike hit a 403 and an n-challenge
+  failure. Hence the self-updating `yt-dlp.exe` in §6.4 rather than a bundled copy;
+  `video_unavailable` must be a normal, retryable outcome rather than an exception.
 - **Downloading YouTube videos** is against YouTube's ToS. Paul's call; noted, not litigated.
 - **`OVER_LIMIT_MS = 11 min`** (`ingest.ts:10`) drops trails on the run path. WR videos are ~2 min,
   so it never bites — but don't blindly copy that guard's *value* if reusing ingest code.
@@ -435,17 +507,25 @@ colour is fixed + the same on every client" (`trailSettings.js:5`).
 
 ## 9. Implementation phasing
 
-This spec spans three loosely-coupled chunks and should become **three plans**, not one. They are
-ordered by dependency, and each is independently verifiable:
+**Four plans** (revised 2026-07-15 — the WR service split in two once it moved inside pbenguin).
+Ordered by dependency; each is independently verifiable.
 
-1. **Pi foundation** — §5 scraper fixes (slugging + flags + alerts), then §3 schema and §4
-   endpoints. Testable on its own via vitest and the ops CLIs, with no client involved.
-2. **The WR service** — §6. Depends on plan 1's `claim` endpoint existing. The download → engine →
-   verify core can be built and proven headless *before* any tray UI, using the §9 fixture.
-3. **Client display** — §7. Depends on plan 1's `/v1/wr-trails` and on plan 2 having produced at
+1. ✅ **Pi foundation** — §5 scraper fixes (slugging + flags + alerts), then §3 schema and §4
+   endpoints. **DONE** — merged to `main` @ `d749002`, 594 tests, verified end-to-end against a
+   live server and a real mkwrs scrape.
+2. **WR service core** — §6.2 gate, §6.4 work loop, §6.6 verification, §6.7 local state. Headless:
+   no tray, no settings UI, driven by a dev-only Tauri command. Depends on plan 1's `claim`
+   endpoint. **Fully provable against `temp/wr_mario_circuit.mp4`** (§10) — a known-good video with
+   a known-exact expected output. This is where all the risk lives.
+3. **Tray + background modes** — §6.1 settings, §6.3 tray UX. Touches pbenguin's window lifecycle
+   (close-to-tray, start-at-login, hidden start), so it is the only plan with a blast radius on the
+   existing app. Wires plan 2's core to the "Run the WR service" checkbox.
+4. **Client display** — §7. Depends on plan 1's `/v1/wr-trails` and on plan 2 having produced at
    least one real trail to look at.
 
-Plan 1 is the only one that touches existing production code paths; plans 2 and 3 are additive.
+Plans 1 and 3 touch existing production code paths; 2 and 4 are additive. Splitting 2 from 3 means
+the download → engine → verify core is proven against the fixture **before** any UI exists to
+confuse a failure — a tray bug and a detection bug should never be diagnosed together.
 
 ## 10. Testing
 
