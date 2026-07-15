@@ -1306,9 +1306,21 @@ impl EnginePath {
 /// AppHandle and yields an async stream, which would drag Tauri into this module and
 /// make it untestable. lib.rs keeps using the plugin for the LIVE engine.
 ///
-/// `cancel` is polled between lines; returning true aborts (a pause, or the idle gate
-/// closing because a race started). Aborting discards — tracking must happen in one
-/// unbroken pass.
+/// `cancel` returning true aborts (a pause, or the idle gate closing because a race
+/// started). Aborting discards — tracking must happen in one unbroken pass.
+///
+/// **The timeout and cancel MUST be enforced by an independent watchdog thread, not by
+/// checks inside the stdout read loop.** `BufReader::read_line` blocks indefinitely on a
+/// pipe with no data and no EOF, so a check placed after it only runs when the engine
+/// happens to speak. That is precisely useless here: the engine's 0.2s heartbeat is
+/// emitted from inside its own synchronous per-frame loop (`main.py:1416`), with no
+/// independent timer thread — so the exact failure a hard timeout exists to catch (the
+/// frame loop wedging on a stuck `cv2.read()`) silences the heartbeat too, and an
+/// in-loop check would block forever without ever firing. Killing the child closes its
+/// stdout, which unblocks the reader with EOF and lets the loop unwind naturally.
+///
+/// Note that the fixture test CANNOT catch a regression here: it keeps the engine talking
+/// constantly, so a blocked-read bug looks healthy. It needs a deliberately silent child.
 pub fn run_video(
     engine: &EnginePath,
     video: &Path,
