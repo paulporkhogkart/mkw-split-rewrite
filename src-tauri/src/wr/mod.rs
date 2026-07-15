@@ -8,6 +8,7 @@ pub mod engine;
 pub mod job;
 pub mod state;
 pub mod verify;
+pub mod ytdlp;
 
 /// Terminal outcomes reported to the Pi as `{"ok":false,"error":...}`. The Pi's
 /// `attempts` counter walks a repeatedly-failing job to its cap and stops it.
