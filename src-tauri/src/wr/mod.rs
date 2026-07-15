@@ -6,6 +6,7 @@
 
 pub mod engine;
 pub mod job;
+pub mod service;
 pub mod state;
 pub mod verify;
 pub mod ytdlp;
@@ -48,4 +49,22 @@ impl WrError {
             WrError::Cancelled => "cancelled".into(),
         }
     }
+}
+
+/// DEV ONLY: claim and process exactly one job, then report. Plan 3 replaces this with
+/// the real loop behind the settings toggle + idle gate.
+///
+/// Takes `server_url`/`token` explicitly rather than reading sync.rs's CONFIG, so a probe
+/// can never accidentally claim from the real Pi.
+#[tauri::command]
+pub async fn wr_process_one(app: tauri::AppHandle, server_url: String, token: String)
+    -> Result<String, String> {
+    use tauri::Manager;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("wr");
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = service::ServiceCfg {
+            server_url, token, data_dir: dir, engine: engine::EnginePath::resolve(),
+        };
+        format!("{:?}", service::process_one(&cfg, &|| false))
+    }).await.map_err(|e| e.to_string())
 }
