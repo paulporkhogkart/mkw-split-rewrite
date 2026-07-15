@@ -65,7 +65,44 @@ on screen_change -> UNKNOWN_RACE_ACTIVE:
 This is **self-correcting**: forcing happens *only* on `UNKNOWN_RACE_ACTIVE`. A video that does
 include a real loading screen starts a valid race by itself and is never forced.
 
-### 1.2 Other engine facts the service must respect
+### 1.2 Source quality: native 1080p vs downscaled 4K (measured, 2026-07-15)
+
+YouTube's 1080p AVC is 4675k while its 2160p60 VP9 is 16855k, so downscaling the 4K stream should
+supersample away compression artifacts and beat the native 1080p encode. It does — and it changes
+nothing. Same fixture, same loadout, DB reset between runs (**note: the tracker DB is WAL-mode —
+resetting it means deleting `-wal`/`-shm` too, or the previous run's calibration is replayed and
+silently confounds the comparison**):
+
+| | native 1080p (fmt 299) | 2160p60 VP9 → lanczos 1080p |
+|---|---|---|
+| Total time | `1:02.934` | `1:02.934` |
+| Trail points | 1749 | 1747 |
+| Minimap updates | 864 | 865 |
+| Score median | 0.7964 | **0.8288** |
+| Score p10 | 0.7324 | **0.7419** |
+| Frames below 0.65 | 0 | 1 |
+| Auto-calibrated to | 0.715 | **0.763** |
+| tracking / ring_only | 850 / 14 | 792 / 73 |
+
+The image really is better (median NCC +0.03). It buys nothing, because the calibration is
+*relative*: `margin = _MM_CALIB_MARGIN_BASE * (1.0 - median)` (`tracker.py:199`), so a higher
+median yields a smaller margin and a **stricter** gate (0.842−0.079 = 0.763 vs 0.810−0.095 =
+0.715). The better image tightens its own threshold proportionally, producing *more* `ring_only`
+frames despite higher absolute scores — and `ring_only` still publishes a position, so the trail
+is identical either way.
+
+**Decision: download native 1080p60.** It costs 55 MB vs 197 MB, needs no transcode (the 4K route
+adds ~58 s per job and a 476 MB intermediate), and it is not the bottleneck — *zero* frames fell
+below the accept gate. The 4K route is retained as a **retry tier** (§6.4), where the quality
+headroom might matter on a marginal case (HDR washout, low-contrast badge, cluttered minimap)
+rather than on this clean one.
+
+**Do not feed 4K to the engine directly.** `_norm()` resizes with `cv2.INTER_LINEAR`
+(`main.py:104`), which samples a 2×2 neighbourhood — for a 2:1 downscale that aliases, and could
+be *worse* than native 1080p despite the higher source bitrate. Any downscale must happen in
+ffmpeg with a proper filter (`scale=1920:1080:flags=lanczos`) so `_norm()` becomes a no-op.
+
+### 1.3 Other engine facts the service must respect
 
 - **Processing is wall-clock bound.** The trackers are rate-limited on real time (10 Hz scans,
   timestamp bursts, EMA), so a WR video takes ~its own duration to process (~100 s). `--video-fps 0`
@@ -266,7 +303,14 @@ claim -> download -> process -> verify -> upload -> cleanup -> repeat
    exist on every upload. Video only; audio is never fetched. 1080p is non-negotiable (all ROIs
    are 1080p pixel coords; `_norm()` would rescale anything else and blur the templates), so no
    1080p60 stream → fail the job with a reason rather than process it badly. avc1 is preferred,
-   not required — that mattered only for a Pi's hardware decoder.
+   not required — that mattered only for a Pi's hardware decoder. Rationale for 1080p over 4K, and
+   the measurements behind it, in §1.2.
+
+   Large downloads throttle: the 197 MB 4K pull 403'd mid-transfer on the default settings and
+   only completed with `--concurrent-fragments 4`. Use `--retries` / `--fragment-retries`, and
+   treat a 403 as retryable rather than terminal. Do **not** set `--extractor-args
+   player_client=web_safari` reaching for a fix — it trips YouTube's n-challenge and needs a JS
+   runtime; the default client works.
 3. **Process**: spawn the engine `--video <path> --video-once --no-display`, then
    - on `ready` → `set_selection` with display names mapped from the job's slugs
    - on `screen_change` → `UNKNOWN_RACE_ACTIVE` → `force_screen RESET` then `force_screen RACING`
@@ -303,6 +347,19 @@ number already in hand. Splits provide a secondary check against `lap_splits_ms`
 
 Additional failure reasons: `no_1080p60`, `download_failed`, `video_unavailable`,
 `no_trail` (0 points — i.e. the minimap never locked), `time_mismatch`, `timeout`.
+
+**Retry tiers.** The `attempts` column drives escalation rather than blind repetition:
+
+| attempt | action |
+|---|---|
+| 1 | native 1080p60 (§6.2) |
+| 2 | re-download — covers throttling, a 403, or a since-fixed mkwrs link |
+| 3 | **2160p60 + ffmpeg lanczos → 1080p**, for the quality headroom (§1.2) |
+| 4–5 | back off; then flag for Paul |
+
+Escalating to 4K only on a `no_trail` failure means the extra 197 MB and ~58 s transcode are paid
+only when a marginal video actually needs them. A `time_mismatch` should **not** escalate — a
+wrong video is wrong at any bitrate; it needs a human, not more pixels.
 
 ### 6.5 Local state
 
