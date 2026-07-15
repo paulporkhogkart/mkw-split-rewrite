@@ -132,16 +132,22 @@ export function releaseJob(db: DatabaseSync, wrId: number, owner: string): boole
   return Number(info.changes) > 0;
 }
 
-/** Store the extracted trail and close the job. The wr_trails row is what marks it done. */
+/** Store the extracted trail and close the job. The wr_trails row is what marks it done.
+ *  Ownership is enforced by the UPDATE's WHERE inside the transaction (same shape as
+ *  heartbeat/release/fail) so the check cannot drift from the mutation. The UPDATE runs BEFORE
+ *  insertWrTrail so a non-owner never gets a trail written; a throw from the insert rolls both
+ *  back. Nothing fallible may follow COMMIT — see claimJob's docstring. */
 export function completeJob(db: DatabaseSync, wrId: number, owner: string, pts: Point[]): boolean {
-  const owns = db.prepare('SELECT 1 FROM wr_jobs WHERE wr_id=? AND lease_owner=?').get(wrId, owner);
-  if (!owns) return false;
   if (pts.length === 0) return false;
   db.exec('BEGIN IMMEDIATE');
   try {
+    const info = db.prepare(
+      `UPDATE wr_jobs SET lease_owner=NULL, lease_until=NULL, last_error=NULL,
+         updated_at=datetime('now')
+       WHERE wr_id=? AND lease_owner=?`
+    ).run(wrId, owner);
+    if (Number(info.changes) === 0) { db.exec('ROLLBACK'); return false; }
     insertWrTrail(db, wrId, toTrailPoints(pts));
-    db.prepare(`UPDATE wr_jobs SET lease_owner=NULL, lease_until=NULL, last_error=NULL,
-                  updated_at=datetime('now') WHERE wr_id=?`).run(wrId);
     db.exec('COMMIT');
     return true;
   } catch (e) { db.exec('ROLLBACK'); throw e; }

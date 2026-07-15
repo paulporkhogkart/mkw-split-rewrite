@@ -194,4 +194,11 @@ describe('lease lifecycle', () => {
     const row = db.prepare('SELECT lease_owner, last_error, attempts FROM wr_jobs WHERE wr_id=10').get() as any;
     expect(row).toMatchObject({ lease_owner: null, last_error: 'time_mismatch', attempts: 1 });
   });
+
+  it('fail by a non-owner is rejected and does not clear the lease', () => {
+    const db = queued(); claimJob(db, 'w1');
+    expect(failJob(db, 10, 'w2', 'time_mismatch')).toBe(false);
+    expect(db.prepare('SELECT lease_owner, last_error FROM wr_jobs WHERE wr_id=10').get())
+      .toMatchObject({ lease_owner: 'w1', last_error: null });   // w1 still holds it
+  });
 });
