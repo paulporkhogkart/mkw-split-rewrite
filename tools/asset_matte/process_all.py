@@ -182,11 +182,13 @@ def main(argv=None):
                 matted[seg] = int(mb.matte_loopframes(
                     fd, segname, mattedir, clip=clip,
                     apply_predark=not (kart and seg == "flourish"), is_kart=kart,
+                    predark_raw_tail=el.char_flourish_raw_tail(kart, seg, counts),
                     direction=mm.segment_direction(kart, seg)))
             if not a.keep_loopframes:
                 shutil.rmtree(seg_base, ignore_errors=True)
             manifest[name] = {"status": "done", "kart": kart,
                               "segments": matted, "idle_resume": idle_resume,
+                              "flourish_fallback": bool(counts.get("flourish_fallback", False)),
                               "secs": round(time.time() - t0, 1)}
             save_manifest(manifest_path, manifest)
             if a.ship_dir:                        # ship BEFORE marking done: bytes on share first

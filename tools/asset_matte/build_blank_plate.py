@@ -27,6 +27,8 @@ import pre_darken as pd
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _REPO = os.path.abspath(os.path.join(_HERE, "..", ".."))
+if _REPO not in sys.path:
+    sys.path.insert(0, _REPO)          # extract_loop imports mkw_tracker.tools.loop_probe
 ASSETS = os.path.join(_HERE, "assets")
 
 # Committed kart plate mask — the region the text/serration/badge live in.
@@ -94,13 +96,142 @@ def build(clips_dir, char, verbose=True):
     return blank.astype(np.float32)
 
 
+# ── char-screen mode: blank_plate_char + clean_bg_char from the standalone captures ────
+import extract_loop as el
+
+CHAR_BODY_DILATE = 31
+BG_WIN = 3          # bg frames per clip: [cut-5, cut-2) — plate gone, scene up, kart-tag not yet in
+
+
+def standalone_names(clips_dir):
+    return sorted(n for n in (os.path.splitext(os.path.basename(p))[0]
+                              for p in glob.glob(os.path.join(clips_dir, "*.mkv")))
+                  if len(n.split("__")) == 2)
+
+
+def nan_body(f32_frame, alpha_png_path, dilate=CHAR_BODY_DILATE):
+    """NaN the character body (matte alpha>10, dilated) in-place; silent no-op if absent."""
+    m = cv2.imread(alpha_png_path, cv2.IMREAD_UNCHANGED)
+    if m is None or m.ndim != 3 or m.shape[2] < 4:
+        return
+    body = cv2.dilate((m[..., 3] > 10).astype(np.uint8),
+                      np.ones((dilate, dilate), np.uint8)).astype(bool)
+    f32_frame[body] = np.nan
+
+
+def char_cut_for(clip, cache):
+    """Hard-cut frame for a standalone char clip, via cache else find_segments (17s decode).
+    None when the flourish fell back (no cut) — the clip is skipped for the bg build."""
+    name = os.path.splitext(os.path.basename(clip))[0]
+    if name in cache:
+        return cache[name]
+    segs, _fps, _kart, fell_back, _res = el.find_segments(clip)
+    cache[name] = None if fell_back else segs["flourish"][1] + el.CHAR_CUT_GUARD
+    return cache[name]
+
+
+def _seq_frames(clip, idxs):
+    """Sequential decode (NO seek — unreliable on these HEVC clips) -> {idx: prod-crop bgr}."""
+    idxs = sorted(set(idxs))
+    cap = cv2.VideoCapture(clip)
+    got, k = {}, 0
+    while idxs and k <= idxs[-1]:
+        ok, fr = cap.read()
+        if not ok:
+            break
+        if k in idxs:
+            got[k] = nc.prod_crop(fr)
+        k += 1
+    cap.release()
+    return got
+
+
+def finish_median(stack, in_plate):
+    if not stack:
+        raise RuntimeError("empty frame stack — no usable clips (check --clips / --matte-dir)")
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        out = np.nanmedian(np.stack(stack), axis=0).astype(np.float32)
+    nanpx = np.isnan(out[..., 0])
+    if nanpx.any():
+        out[nanpx] = np.nanmedian(out[in_plate], axis=0)
+    return out
+
+
+def build_char(a):
+    _, _, _, mask_c = pd.load_template(True)
+    in_plate_c = mask_c > 0.05
+    names = standalone_names(a.clips)
+    if not names:
+        raise RuntimeError(f"no standalone char clips in {a.clips!r}")
+    cuts_path = os.path.join(ASSETS, "char_cuts.json")
+    cache = {}
+    if os.path.exists(cuts_path):
+        cache = json.load(open(cuts_path))
+
+    blank_stack, bg_stack, skipped_bg = [], [], []
+    for i, name in enumerate(names):
+        clip = os.path.join(a.clips, name + ".mkv")
+        fr = idle_frame(clip)
+        if fr is not None:
+            f = fr.astype(np.float32)
+            f[nc.yellow_text_mask(fr) & in_plate_c] = np.nan
+            nan_body(f, os.path.join(a.matte_dir, f"{name}__idle_frames", "000.png"))
+            blank_stack.append(f.astype(np.float16))
+        cut = char_cut_for(clip, cache)
+        if cut is None:
+            skipped_bg.append(name)
+        else:
+            got = _seq_frames(clip, list(range(cut - 5, cut - 2)))
+            fdir = os.path.join(a.matte_dir, f"{name}__flourish_frames")
+            npng = len(glob.glob(os.path.join(fdir, "*.png")))
+            for j, gi in enumerate(sorted(got)):
+                f = got[gi].astype(np.float32)
+                if npng >= BG_WIN:
+                    nan_body(f, os.path.join(fdir, f"{npng - BG_WIN + j:03d}.png"))
+                bg_stack.append(f.astype(np.float16))
+        if (i + 1) % 10 == 0 or i + 1 == len(names):
+            json.dump(cache, open(cuts_path + ".tmp", "w"), indent=0)
+            os.replace(cuts_path + ".tmp", cuts_path)
+            print(f"  {i + 1}/{len(names)} (bg-skipped: {len(skipped_bg)})", flush=True)
+
+    blank = finish_median(blank_stack, in_plate_c)
+    bg = finish_median(bg_stack, in_plate_c)
+    for label, arr in (("blank_plate_char", blank), ("clean_bg_char", bg)):
+        np.save(os.path.join(ASSETS, f"{label}.npy"), arr)
+        cv2.imwrite(os.path.join(ASSETS, f"{label}.png"), np.clip(arr, 0, 255).astype(np.uint8))
+    tmed = float(np.median(nc.solve_tc(blank, bg.astype(np.float64))[0][in_plate_c]))
+    print(f"blank={len(blank_stack)} frames  bg={len(bg_stack)} frames  "
+          f"bg-skipped={skipped_bg}  T_B median={tmed:.3f}", flush=True)
+    if not (0.3 < tmed < 1.0):
+        raise RuntimeError(f"T_B median {tmed:.3f} outside sanity band (0.3, 1.0) — stale/mismatched inputs?")
+    meta_p = os.path.join(ASSETS, "templates_meta.json")
+    meta = json.load(open(meta_p)) if os.path.exists(meta_p) else {}
+    import datetime
+    meta["char_blank"] = {"date": datetime.date.today().isoformat(),
+                          "clips": len(blank_stack), "bg_clips": len(bg_stack) // BG_WIN}
+    with open(meta_p + ".tmp", "w") as f:
+        json.dump(meta, f, indent=2)
+    os.replace(meta_p + ".tmp", meta_p)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Build the text-free blank plate (masked median).")
     ap.add_argument("--clips", default=os.path.join(_REPO, "captures_sdr", "en_uk", "clips"))
     ap.add_argument("--char", default="baby_daisy", help="character that owns one of every kart")
     ap.add_argument("--out", default=os.path.join(ASSETS, "blank_plate_masked.npy"))
     ap.add_argument("--compare", action="store_true", help="diff vs the existing committed artifact")
+    ap.add_argument("--screen", choices=("kart", "char"), default="kart",
+                    help="kart: baby_daisy 40-kart blank (default, unchanged). "
+                         "char: blank_plate_char + clean_bg_char from ALL standalone clips")
+    ap.add_argument("--matte-dir", default=r"D:\kartoff\asset_chips\matte",
+                    help="char mode: current mattes, for body-exclusion alphas")
     a = ap.parse_args()
+
+    if a.screen == "char":
+        build_char(a)
+        return
 
     blank = build(a.clips, a.char)
     os.makedirs(os.path.dirname(a.out), exist_ok=True)

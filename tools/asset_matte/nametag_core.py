@@ -77,3 +77,11 @@ def prod_crop(canvas_4k):
     x1, y1, x2, y2 = PROD_CROP_4K
     sub = canvas_4k[y1:y2, x1:x2]
     return cv2.resize(sub, (OUT_W, OUT_H), interpolation=cv2.INTER_AREA)
+
+
+def yellow_text_mask(bgr_uint8):
+    """Saturated-yellow name-text mask (OpenCV hue 18-42, S>150, V>150) — the same gates
+    build_blank_plate.nan_yellow_text uses; shared so the char text mask matches the blank."""
+    hsv = cv2.cvtColor(bgr_uint8, cv2.COLOR_BGR2HSV)
+    return ((hsv[..., 0] >= 18) & (hsv[..., 0] <= 42)
+            & (hsv[..., 1] > 150) & (hsv[..., 2] > 150))

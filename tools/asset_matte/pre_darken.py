@@ -11,6 +11,30 @@ import nametag_core as nc
 
 ASSETS = os.path.join(os.path.dirname(__file__), "assets")
 T_OPAQUE = 0.20    # transmission below this = opaque plate content (text/badge) -> left as UI
+CHAR_TEXT_DILATE = 7   # covers the AA ring + dark drop shadow around the yellow glyphs
+
+
+def char_text_band(t_template, mask):
+    """Rows the template glyphs occupy (+-8), full footprint x-span, clipped to the footprint.
+    Geometry only — char_P's stale LEVELS are never used (spec: live-derived clean_bg_char)."""
+    in_plate = mask > 0.05
+    glyph = (t_template < T_OPAQUE) & in_plate
+    ys = np.where(glyph.any(1))[0]
+    xs = np.where(in_plate.any(0))[0]
+    band = np.zeros_like(in_plate)
+    band[max(0, ys.min() - 8):ys.max() + 9, xs.min():xs.max() + 1] = True
+    return band & in_plate
+
+
+def char_text_mask(median_bgr, text_band):
+    """Per-clip live-text mask: HSV-yellow on the segment median, in-band, dilated.
+    NOT the kart t<T_OPAQUE gate — that only works against a TINTED reference (kart A
+    anti-correlates with yellow); vs the neutral live char bg it lands on solve_tc's
+    ratio path and misses the text entirely (prototype-verified 2026-07-17)."""
+    med = np.clip(np.asarray(median_bgr), 0, 255).astype(np.uint8)
+    yellow = nc.yellow_text_mask(med) & text_band
+    k = np.ones((CHAR_TEXT_DILATE, CHAR_TEXT_DILATE), np.uint8)
+    return cv2.dilate(yellow.astype(np.uint8), k).astype(bool)
 
 
 def load_template(is_char):
@@ -27,7 +51,8 @@ def load_template(is_char):
 
 
 def pre_darken(raw_bgr, t, C, A, mask, KEY_THR=60, CSUB=0.75, TFLOOR=0.01, YELLOW_S=250, BRIGHT_V=255):
-    """Paint the WHOLE plate footprint to the clean background A, then stamp back only the genuine
+    """LEGACY (tuner/tests only; production chars now use char_predark + live-derived assets).
+    Paint the WHOLE plate footprint to the clean background A, then stamp back only the genuine
     overlapping-subject pixels (recovered from behind the semi-transparent serration). birefnet then
     sees continuous background across the plate (empty serration, yellow text, and bright badge all
     become A) and drops it; only the stamped subject pixels stay connected to the kart/character.
@@ -68,6 +93,56 @@ def process(base, names, is_char):
                 continue
             cv2.imwrite(f"{dst}/{os.path.basename(f)}", pre_darken(raw, t, C, A, mask))
         print(f"{name}: {len(files)} frames pre-darkened ({'char' if is_char else 'kart'}) -> {dst}", flush=True)
+
+
+def predark_frame_count(n_frames, raw_tail):
+    """How many frames from the segment start get predark; the trailing raw_tail pass raw
+    (the departing/absent plate is the matte's job, like the kart flourish)."""
+    return max(0, n_frames - max(0, raw_tail))
+
+
+def char_predark(raw_bgr, text, assets, KEY_THR=120, CSUB=0.5, TFLOOR=0.01, FILL_K=51):
+    """Blank-transform un-darken for the CHAR plate — _kart_predark's exact math (full-S
+    stamp `eac3c82` + interior TELEA), parameterized on the char assets dict so it stays
+    pure/testable under build python. Params are the kart-locked values (spec 2026-07-17)."""
+    T_B, C_B, bg = assets["T_B"], assets["C_B"], assets["bg"]
+    in_plate = assets["in_plate"]
+    O = raw_bgr.astype(np.float64)
+    S = np.clip((O - CSUB * C_B[..., None]) / np.clip(T_B, TFLOOR, 1.6)[..., None], 0, 255)
+    opaque = (assets["badge"] | text) & in_plate
+    subject = in_plate & (np.abs(S - bg).max(2) >= KEY_THR) & ~opaque
+    out = O.copy(); out[in_plate] = S[in_plate]; out[opaque] = bg[opaque]
+    out = np.clip(out, 0, 255).astype(np.uint8)
+    K = int(FILL_K) | 1
+    closed = cv2.morphologyEx(subject.astype(np.uint8) * 255, cv2.MORPH_CLOSE,
+                              cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (K, K))) > 0
+    holes = in_plate & closed & ~subject
+    n, lab, st, _ = cv2.connectedComponentsWithStats(holes.astype(np.uint8), 8)
+    keep = np.zeros_like(holes)
+    for i in range(1, n):
+        if st[i, cv2.CC_STAT_AREA] <= 2000:
+            keep |= (lab == i)
+    return cv2.inpaint(out, keep.astype(np.uint8) * 255, 3, cv2.INPAINT_TELEA)
+
+
+def load_char_assets(assets_dir=ASSETS):
+    """Char blank-plate assets dict for char_predark. Solves (T_B, C_B) from the two
+    committed live-derived artifacts; char_P/char_A contribute GEOMETRY ONLY (footprint
+    mask + text-band rows) — their stale bright-era levels are never used (spec)."""
+    blank_p = os.path.join(assets_dir, "blank_plate_char.npy")
+    bg_p = os.path.join(assets_dir, "clean_bg_char.npy")
+    for p in (blank_p, bg_p):
+        if not os.path.exists(p):
+            raise FileNotFoundError(
+                f"{p} missing — build it with: python tools/asset_matte/build_blank_plate.py --screen char")
+    blank = np.load(blank_p).astype(np.float32)
+    bg = np.load(bg_p).astype(np.float64)
+    t_tmpl, _, _, mask = load_template(True)
+    in_plate = mask > 0.05
+    T_B, C_B = nc.solve_tc(blank, bg)
+    return {"T_B": T_B, "C_B": C_B, "badge": (T_B < T_OPAQUE) & in_plate,
+            "bg": bg, "in_plate": in_plate,
+            "text_band": char_text_band(t_tmpl, mask)}
 
 
 def main():

@@ -346,6 +346,23 @@ CHAR_FLOURISH_LEN = 54
 # captured item). The incoming item's nameplate text blends in ~2f before the subject
 # cut, so the export stops CHAR_CUT_GUARD frames short of it.
 CHAR_CUT_GUARD = 2
+# The char nameplate SLIDES LEFT + FADES OUT starting exactly this many frames before the
+# hard cut (2026-07-17 survey: 11/11 measurable chars; fully gone by ~cut-5). Frames at or
+# after cut-CHAR_PLATE_DEPART must NOT be predarked (static-template predark would paint a
+# phantom plate); the flourish export ends at cut-CHAR_CUT_GUARD, so the raw tail is the
+# last CHAR_PLATE_DEPART-CHAR_CUT_GUARD (=7) exported frames.
+CHAR_PLATE_DEPART = 9
+
+
+def char_flourish_raw_tail(kart, seg, counts):
+    """Trailing raw-frame count for matte_loopframes(predark_raw_tail=...): only a CHAR
+    flourish whose hard cut was actually found (no fallback) has the deterministic
+    departing-plate tail; karts keep predark-off-for-the-whole-flourish instead."""
+    if kart or seg != "flourish" or counts.get("flourish_fallback"):
+        return 0
+    return CHAR_PLATE_DEPART - CHAR_CUT_GUARD
+
+
 # Cut-detector gates — ABSOLUTE, deliberately not idle-relative: relative gates failed on
 # high-motion characters (cataquack idle_med 326 lifted 6x above its real 1939 cut;
 # hammer_bro/king_boo__pro_racer/coin_coffer semi-moving frames at pre4 260-530 squeaked
@@ -482,7 +499,8 @@ def _fresh_dir(d):
 def extract_segments(clip, out_base, name):
     """Write prod-crop PNG sequences for each detected segment to <out_base>/<name>__<seg>/NNN.png.
     Returns {seg: frame_count}; kart combos also carry {"idle_resume": phase} (the post-flourish
-    idle handoff frame) — a reserved non-segment key the seg loops here/downstream never iterate."""
+    idle handoff frame), and every clip carries {"flourish_fallback": bool} — reserved
+    non-segment keys the seg loops here/downstream never iterate."""
     segs, fps, kart, fell_back, idle_resume = find_segments(clip)
     want = {}
     for seg, (s, e) in segs.items():
@@ -509,6 +527,7 @@ def extract_segments(clip, out_base, name):
           " ".join(f"{nm}={e0 - s0}f" for nm, (s0, e0) in segs.items()) +
           (" flourish=FALLBACK" if fell_back else ""), flush=True)
     counts = {seg: (e - s) for seg, (s, e) in segs.items()}
+    counts["flourish_fallback"] = bool(fell_back)      # reserved non-segment key (like idle_resume)
     if kart:
         counts["idle_resume"] = idle_resume
     return counts
