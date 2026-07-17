@@ -137,6 +137,16 @@ pub fn process_one(cfg: &ServiceCfg, cancel: &(dyn Fn() -> bool + Sync)) -> Outc
     outcome
 }
 
+/// Engine budget for one video, from the record itself. The engine is wall-clock bound
+/// (~the video's duration) and a WR upload is ~the race plus a short menu intro and the
+/// finish-still hold, so record + 180s covers every observed upload shape with room for
+/// engine startup. Floor 300s keeps short courses generous; cap 540s stays a full minute
+/// under the Pi's 600s lease — no heartbeat exists, so the lease must outlive the run or
+/// another machine can claim the job while we are still processing it.
+fn engine_timeout_for(record_ms: i64) -> std::time::Duration {
+    std::time::Duration::from_secs(((record_ms / 1000) + 180).clamp(300, 540) as u64)
+}
+
 fn run_job(cfg: &ServiceCfg, client: &job::Client, j: &job::WrJob,
            cancel: &(dyn Fn() -> bool + Sync)) -> Outcome {
     let tier = verify::tier_for(j.attempt);
@@ -161,9 +171,10 @@ fn run_job(cfg: &ServiceCfg, client: &job::Client, j: &job::WrJob,
     }
     if cancel() { let _ = client.release(j.wr_id); return Outcome::Released(j.wr_id); }
 
-    // Wall-clock bound (~the video's own length). 5 min covers every WR with room to spare.
+    // Wall-clock bound (~the video's own length): budget from the record, not a constant
+    // (Rainbow Road is 233s — a fixed 300s left it ~50s of margin, not "room to spare").
     let finalized = match engine::run_video(
-        &cfg.engine, &dest, selections_for(j), std::time::Duration::from_secs(300), cancel) {
+        &cfg.engine, &dest, selections_for(j), engine_timeout_for(j.record_ms), cancel) {
         Ok(f) => f,
         // Match the variant, don't re-poll cancel(): a genuine timeout that happens to
         // land just as the user pauses must still be reported as a timeout.
@@ -411,5 +422,18 @@ mod tests {
         let d = std::env::temp_dir();
         assert_ne!(video_path(&d, 6), video_path(&d, 7));
         assert!(video_path(&d, 6).to_string_lossy().contains("6"));
+    }
+
+    #[test]
+    fn engine_timeout_scales_with_the_record_within_the_lease() {
+        // Mario Circuit (1:02.934): the 300s floor applies.
+        assert_eq!(engine_timeout_for(62_934), Duration::from_secs(300));
+        // Rainbow Road, the slowest board record (3'53"260 = 233s, mkwrs 2026-07-17):
+        // the old fixed 300s left ~50s for intro + finish-still + startup — one
+        // long-intro upload away from burning all 5 attempts on the marquee track.
+        assert_eq!(engine_timeout_for(233_260), Duration::from_secs(413));
+        // Never within 60s of the Pi's 600s lease: there is NO heartbeat, so the lease
+        // must outlive the engine run or another machine can claim mid-processing.
+        assert_eq!(engine_timeout_for(900_000), Duration::from_secs(540));
     }
 }
