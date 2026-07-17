@@ -34,11 +34,14 @@ pub enum Outcome {
     Error(String),
 }
 
-/// The Pi sends slugs; the engine wants DISPLAY names. `course_name` arrives already
-/// display-shaped, so use it verbatim rather than re-deriving from the slug.
+/// The Pi sends slugs; the engine wants ITS OWN display names. For the course that means
+/// the seed-key shape — job::course_display_for_engine, NOT the Pi's course_name (which
+/// misses the seed table on 7 of 30 courses; see that function's doc). Characters, karts
+/// and costumes are slug_to_display: consistent-by-construction with the engine's
+/// filename-derived template keys.
 fn selections_for(j: &job::WrJob) -> Selections {
     Selections {
-        course: j.course_name.clone(),
+        course: job::course_display_for_engine(&j.course_slug),
         character: job::slug_to_display(&j.character_slug),
         costume: j.costume_slug.as_deref().map(job::slug_to_display),
         kart: j.kart_slug.as_deref().map(job::slug_to_display),
@@ -103,14 +106,19 @@ pub fn process_one(cfg: &ServiceCfg, cancel: &(dyn Fn() -> bool + Sync)) -> Outc
     let client = job::Client::new(&cfg.server_url, &cfg.token, &worker);
 
     // Crash recovery: an inflight record left over means we died mid-job last time,
-    // before reaching the set_inflight(None) at the bottom of this function. Release it
-    // so the Pi REFUNDS that attempt rather than just letting the ~600s lease lapse and
-    // burn it silently. Best-effort: if another machine already re-claimed the job (its
-    // lease had already lapsed by the time we got here), the server correctly no-ops/
-    // rejects the release — we only need our OWN bookkeeping cleared either way.
+    // before reaching the set_inflight(None) at the bottom of this function. Clear the
+    // LOCAL record only — deliberately do NOT release() the lease. release() refunds
+    // the attempt (that is its job: a voluntary pause must not count against the cap),
+    // but a crash is exactly what attempts-on-claim exists to count: "a worker that
+    // dies without reporting still burns one and a poison job can't retry forever"
+    // (spec §4). An app restart inside the ~600s lease window would make the release
+    // succeed and refund — under Plan 3's autostart, a job whose video reliably
+    // crashes the app would then claim -> crash -> refund -> claim forever. Letting
+    // the lease lapse burns the attempt; the only cost is that one job waiting out the
+    // rest of its lease (<= ~10 min) before it can be claimed again.
     if let Some(orphan_wr_id) = state::inflight(&conn) {
-        log::warn!("[wr] found crash-orphaned inflight wr_id={orphan_wr_id}, releasing");
-        let _ = client.release(orphan_wr_id);
+        log::warn!("[wr] crash-orphaned inflight wr_id={orphan_wr_id}: clearing the local \
+                    record; its lease will lapse and the attempt stays burned (per spec)");
         state::set_inflight(&conn, None);
     }
 
@@ -127,6 +135,20 @@ pub fn process_one(cfg: &ServiceCfg, cancel: &(dyn Fn() -> bool + Sync)) -> Outc
     cleanup(&cfg.data_dir, j.wr_id);
     state::set_inflight(&conn, None);
     outcome
+}
+
+/// Engine budget for one video, from the record itself. The engine is wall-clock bound
+/// (~the video's duration) and a WR upload is ~the race plus a short menu intro and the
+/// finish-still hold, so record + 180s covers every observed upload shape with room for
+/// engine startup. Floor 300s keeps short courses generous; cap 540s stays a full minute
+/// under the Pi's 600s lease. That margin is ENGINE-only: the same never-heartbeated
+/// lease also covers the download (unbounded today — bounding yt-dlp is deliberately
+/// deferred) and the result upload, so a badly stalled download can still overrun it.
+/// An overrun wastes work but cannot corrupt: complete() is ownership-checked
+/// server-side and 409s once the lease moves. If records ever approach this cap, wire
+/// job::Client::heartbeat into the engine step instead of raising it (Plan 3).
+fn engine_timeout_for(record_ms: i64) -> std::time::Duration {
+    std::time::Duration::from_secs(((record_ms / 1000) + 180).clamp(300, 540) as u64)
 }
 
 fn run_job(cfg: &ServiceCfg, client: &job::Client, j: &job::WrJob,
@@ -153,9 +175,10 @@ fn run_job(cfg: &ServiceCfg, client: &job::Client, j: &job::WrJob,
     }
     if cancel() { let _ = client.release(j.wr_id); return Outcome::Released(j.wr_id); }
 
-    // Wall-clock bound (~the video's own length). 5 min covers every WR with room to spare.
+    // Wall-clock bound (~the video's own length): budget from the record, not a constant
+    // (Rainbow Road is 233s — a fixed 300s left it ~50s of margin, not "room to spare").
     let finalized = match engine::run_video(
-        &cfg.engine, &dest, selections_for(j), std::time::Duration::from_secs(300), cancel) {
+        &cfg.engine, &dest, selections_for(j), engine_timeout_for(j.record_ms), cancel) {
         Ok(f) => f,
         // Match the variant, don't re-poll cancel(): a genuine timeout that happens to
         // land just as the user pauses must still be reported as a timeout.
@@ -234,6 +257,26 @@ mod tests {
         (format!("http://{addr}"), max_out)
     }
 
+    /// Accepts and immediately drops every connection, counting them. Each reqwest call
+    /// = exactly one connection (a fresh connection that dies before any response is
+    /// not retried by reqwest/hyper — retries only apply to reused pool connections).
+    /// This is the only observation point for WHICH calls process_one makes without a
+    /// mock server: 1 connection = claim only; 2 = a release snuck back in before it.
+    fn counting_listener() -> (String, Arc<AtomicUsize>) {
+        let l = TcpListener::bind("127.0.0.1:0").expect("bind probe listener");
+        let addr = l.local_addr().unwrap();
+        let total = Arc::new(AtomicUsize::new(0));
+        let t = total.clone();
+        std::thread::spawn(move || {
+            for stream in l.incoming() {
+                let Ok(stream) = stream else { break };
+                t.fetch_add(1, SeqCst);
+                drop(stream);
+            }
+        });
+        (format!("http://{addr}"), total)
+    }
+
     #[test]
     fn process_one_never_overlaps_itself_because_sweep_orphans_deletes_by_glob() {
         let hold = Duration::from_millis(300);
@@ -274,29 +317,33 @@ mod tests {
     }
 
     #[test]
-    fn process_one_releases_and_clears_a_crash_orphaned_inflight_job_before_claiming() {
-        let dir = tmpdir("orphan_release");
+    fn crash_orphan_is_cleared_locally_without_a_lease_release() {
+        // A crash must BURN its attempt (spec §4: "a worker that dies without reporting
+        // still burns one and a poison job can't retry forever"). release() REFUNDS the
+        // attempt, and an app restart inside the ~600s lease window would make the
+        // refund succeed — under autostart, a job whose video crashes the app would
+        // claim -> crash -> refund -> claim forever. So crash recovery must clear the
+        // LOCAL record only and let the lease lapse.
+        let (url, total) = counting_listener();
+        let dir = tmpdir("orphan_no_release");
         let conn = state::open(&dir).unwrap();
         state::set_inflight(&conn, Some(42));
         drop(conn);
 
-        // No live server needed to prove the LOCAL bookkeeping is cleared: release() is
-        // best-effort and its own result is ignored — connecting to a port nothing listens
-        // on fails immediately (no listener => instant refusal, no timeout to wait out), so
-        // this stays fast without a mock server.
         let cfg = ServiceCfg {
-            server_url: "http://127.0.0.1:1".into(),
+            server_url: url,
             token: "probe".into(),
             data_dir: dir.clone(),
             engine: EnginePath::Dev,
         };
         let _ = process_one(&cfg, &|| false);
 
+        assert_eq!(total.load(SeqCst), 1,
+            "expected exactly ONE request (the claim); a second one means the orphan \
+             was release()d, which refunds the attempt a crash must burn");
         let conn2 = state::open(&dir).unwrap();
         assert_eq!(state::inflight(&conn2), None,
-            "a crash-orphaned inflight record must be cleared even though release() itself \
-             could not reach a server — otherwise the NEXT process_one call would see the \
-             same stale wr_id forever");
+            "the stale local record must still be cleared, or every future call re-sees it");
     }
 
     #[test]
@@ -356,17 +403,22 @@ mod tests {
     }
 
     #[test]
-    fn course_name_is_used_verbatim_not_derived_from_the_slug() {
-        // The canonical display name for "dk_spaceport" is "DK Spaceport"
-        // (server/courses.py CANONICAL_COURSES). Title-casing the slug word-by-word
-        // (job::slug_to_display) would instead produce "Dk Spaceport" -- a genuinely
-        // different string -- so this input actually discriminates "use course_name
-        // verbatim" from "re-derive from the slug", unlike a course whose name happens
-        // to title-case identically either way.
-        let j = job::parse_job(r#"{"wr_id":1,"cc":150,"course_slug":"dk_spaceport",
+    fn course_sent_to_the_engine_is_seed_key_shaped_not_the_pi_display_name() {
+        // The Pi's canonical name is "DK Spaceport" (server/courses.py) but the engine's
+        // seed row is 'Dk Spaceport' (detection-derived). Sending the Pi name verbatim
+        // finds no seed -> guaranteed no_trail — the pre-fix behaviour this test kills.
+        let j = job::parse_job(r#"{"wr_id":1,"course_slug":"dk_spaceport",
             "course_name":"DK Spaceport","video_url":"u","record_ms":1,
             "character_slug":"bowser","costume_slug":null,"kart_slug":null,"attempt":1}"#).unwrap();
-        assert_eq!(selections_for(&j).course, "DK Spaceport");
+        assert_eq!(selections_for(&j).course, "Dk Spaceport");
+    }
+
+    #[test]
+    fn course_mapping_handles_the_sky_high_sundae_exception() {
+        let j = job::parse_job(r#"{"wr_id":1,"course_slug":"sky_high_sundae",
+            "course_name":"Sky-High Sundae","video_url":"u","record_ms":1,
+            "character_slug":"bowser","costume_slug":null,"kart_slug":null,"attempt":1}"#).unwrap();
+        assert_eq!(selections_for(&j).course, "Sky-High Sundae");
     }
 
     #[test]
@@ -374,5 +426,18 @@ mod tests {
         let d = std::env::temp_dir();
         assert_ne!(video_path(&d, 6), video_path(&d, 7));
         assert!(video_path(&d, 6).to_string_lossy().contains("6"));
+    }
+
+    #[test]
+    fn engine_timeout_scales_with_the_record_within_the_lease() {
+        // Mario Circuit (1:02.934): the 300s floor applies.
+        assert_eq!(engine_timeout_for(62_934), Duration::from_secs(300));
+        // Rainbow Road, the slowest board record (3'53"260 = 233s, mkwrs 2026-07-17):
+        // the old fixed 300s left ~50s for intro + finish-still + startup — one
+        // long-intro upload away from burning all 5 attempts on the marquee track.
+        assert_eq!(engine_timeout_for(233_260), Duration::from_secs(413));
+        // The ENGINE budget stays 60s under the Pi's 600s lease (the whole job shares
+        // that one lease — see engine_timeout_for's doc for the download/upload margins).
+        assert_eq!(engine_timeout_for(900_000), Duration::from_secs(540));
     }
 }

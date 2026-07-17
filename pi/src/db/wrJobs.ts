@@ -33,7 +33,10 @@ export type WrJob = {
   lease_until: string;
 };
 
-export const DEFAULT_LEASE_SEC = 600;   // 10 min: ~10s download + ~100s processing, wide margin
+// 10 min. No longer a wide margin: the client's engine budget alone may take up to 540s
+// of it (src-tauri/src/wr/service.rs engine_timeout_for, deliberate 60s tail) and the
+// same never-heartbeated lease also covers download + upload.
+export const DEFAULT_LEASE_SEC = 600;
 export const MAX_ATTEMPTS = 5;          // claims per job before it is abandoned as poison
 
 type ClaimRow = {
@@ -78,6 +81,10 @@ export function claimJob(db: DatabaseSync, owner: string, leaseSec = DEFAULT_LEA
          AND NOT EXISTS (SELECT 1 FROM wr_trails t WHERE t.wr_id = j.wr_id)
          AND (j.lease_until IS NULL OR j.lease_until < datetime('now'))
          AND j.attempts < ?
+         -- time_mismatch is TERMINAL for claiming: the video itself is wrong for this
+         -- record, and re-downloading it cannot change that verdict. It needs a human —
+         -- or a new link: reconcile's backfill() clears it when video_url changes.
+         AND (j.last_error IS NULL OR j.last_error NOT LIKE 'time_mismatch%')
        -- achieved_at DESC: SQLite sorts NULL smallest, so NULL-dated rows sort LAST within their
        -- current/superseded tier here — intended, not a bug (an undated WR has no basis to jump
        -- the queue over a dated one).
@@ -171,4 +178,24 @@ export function failJob(db: DatabaseSync, wrId: number, owner: string, error: st
      WHERE wr_id=? AND lease_owner=?`
   ).run(error.slice(0, 500), wrId, owner);
   return Number(info.changes) > 0;
+}
+
+export type DeadJob = { wr_id: number; course: string; holder_name: string | null;
+  record_str: string; attempts: number; last_error: string | null };
+
+/** Jobs that will never be claimed again without a human: at the attempts cap, or
+ *  terminally time_mismatched — and still trail-less. Spec §6.4's "cap reached; flag for
+ *  Paul": this is what `npm run wr-flags` prints and what the wr_job_dead alert announces. */
+export function deadJobs(db: DatabaseSync): DeadJob[] {
+  return db.prepare(
+    `SELECT j.wr_id, c.display_name AS course, w.holder_name, w.record_str,
+            j.attempts, j.last_error
+     FROM wr_jobs j
+     JOIN world_records w ON w.id = j.wr_id
+     JOIN courses c ON c.id = w.course_id
+     WHERE NOT EXISTS (SELECT 1 FROM wr_trails t WHERE t.wr_id = j.wr_id)
+       AND w.removed_at IS NULL
+       AND (j.attempts >= ? OR j.last_error LIKE 'time_mismatch%')
+     ORDER BY j.updated_at DESC`
+  ).all(MAX_ATTEMPTS) as DeadJob[];
 }

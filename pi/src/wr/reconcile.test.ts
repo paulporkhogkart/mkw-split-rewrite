@@ -5,6 +5,7 @@ import type { ServerEvent } from '../db/types';
 import { reconcile } from './reconcile';
 import type { ScrapedWr } from './parse';
 import { upsertFlag } from './flags';
+import { claimJob, failJob } from '../db/wrJobs';
 
 function setup() {
   const db = openDb(':memory:');
@@ -211,5 +212,35 @@ describe('reconcile', () => {
     const { db, hub } = setup();
     reconcile(db, hub, [wr({ videoUrl: null })]);
     expect(db.prepare('SELECT COUNT(*) n FROM wr_jobs').get()).toMatchObject({ n: 0 });
+  });
+
+  it('a changed video link revives a time_mismatch-dead job with fresh attempts', () => {
+    const { db, hub } = setup();
+    reconcile(db, hub, [wr({ videoUrl: 'https://youtu.be/wrong' })]);
+    const id = (db.prepare('SELECT id FROM world_records WHERE is_current=1').get() as any).id;
+    expect(claimJob(db, 'w1')).toMatchObject({ wr_id: id });
+    failJob(db, id, 'w1', 'time_mismatch detected=1 expected=2');
+    expect(claimJob(db, 'w1')).toBeNull();                       // dead
+    // Same record + holder -> Case 1 backfill; only the link changed.
+    reconcile(db, hub, [wr({ videoUrl: 'https://youtu.be/corrected' })]);
+    expect(db.prepare('SELECT attempts, last_error FROM wr_jobs WHERE wr_id=?').get(id))
+      .toMatchObject({ attempts: 0, last_error: null });
+    expect(claimJob(db, 'w1')).toMatchObject({ wr_id: id,
+      video_url: 'https://youtu.be/corrected', attempt: 1 });    // alive again, fresh
+  });
+
+  it('revival mid-lease also evicts the lease so a stale verdict cannot re-kill the job', () => {
+    const { db, hub } = setup();
+    reconcile(db, hub, [wr({ videoUrl: 'https://youtu.be/wrong' })]);
+    const id = (db.prepare('SELECT id FROM world_records WHERE is_current=1').get() as any).id;
+    expect(claimJob(db, 'w1')).toMatchObject({ wr_id: id });          // w1 is mid-processing…
+    reconcile(db, hub, [wr({ videoUrl: 'https://youtu.be/corrected' })]);  // …when the link is fixed
+    // The stale worker's eventual verdict must be an ownership no-op, not a re-kill —
+    // otherwise the job dies terminal with the corrected link already stored and NOTHING
+    // ever revives it (the link no longer changes on future scrapes).
+    expect(failJob(db, id, 'w1', 'time_mismatch detected=1 expected=2')).toBe(false);
+    // And the corrected link is immediately claimable with a fresh budget:
+    expect(claimJob(db, 'w2')).toMatchObject({
+      wr_id: id, video_url: 'https://youtu.be/corrected', attempt: 1 });
   });
 });

@@ -1,5 +1,14 @@
 # WR Service Core (headless) Implementation Plan
 
+> **ERRATA (2026-07-17) — this plan's code samples predate the final-review fix waves and the
+> fix-wave plan `2026-07-17-wr-fix-wave.md`. The SHIPPED code is the truth, not these samples.**
+> Known-stale in the samples below: the 4K `Downscaled4k` tier (DELETED — spec §6.4); Task 6's
+> `run_video` showing timeout/cancel checks INSIDE the read loop and `stderr(Stdio::null())`
+> (both forbidden by its own prose — shipped code uses a watchdog thread + a drained, bounded
+> stderr pipe); Task 7's `course_name`-verbatim selections (misses the minimap seeds on 7 of 30
+> courses — shipped code maps `course_display_for_engine`). Rebuilding from these samples
+> reintroduces three known-fatal bugs.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make pbenguin able to take one world-record job from the Pi, download its YouTube video, replay it through the detection engine, verify the result against the scraped time, and upload the trail — with no UI at all.

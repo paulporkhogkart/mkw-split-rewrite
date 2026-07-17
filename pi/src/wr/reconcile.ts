@@ -37,7 +37,21 @@ function backfill(db: DatabaseSync, row: Row, s: ScrapedWr): boolean {
   const sets: string[] = [];
   const vals: (string | null)[] = [];
   if (row.holder_name == null && s.holder) { sets.push('holder_name=?'); vals.push(s.holder); }
-  if (s.videoUrl && s.videoUrl !== row.video_url) { sets.push('video_url=?'); vals.push(s.videoUrl); }
+  if (s.videoUrl && s.videoUrl !== row.video_url) {
+    sets.push('video_url=?'); vals.push(s.videoUrl);
+    // A changed link voids any prior processing verdict for this record — above all a
+    // TERMINAL time_mismatch (wrong video linked): that terminality means "needs a human
+    // or a new link", and this IS the new link. Attempts reset too: they were spent on
+    // the old video. The lease is EVICTED as well: a worker mid-flight on the OLD video
+    // must not land its stale verdict after the reset (its owner-guarded fail() would
+    // re-terminalize the job with the new link already stored, and no future scrape
+    // would ever revive it — the link no longer changes). Evicting makes the stale
+    // fail/complete an ownership no-op; its one wasted run is the ordinary lease-loss
+    // cost. No-op when the WR has no job row.
+    db.prepare(`UPDATE wr_jobs SET last_error=NULL, attempts=0,
+                  lease_owner=NULL, lease_until=NULL, updated_at=datetime('now')
+                WHERE wr_id=?`).run(row.id);
+  }
   if (s.character && s.character !== row.character) {
     const lo = resolveLoadout(s.character, null);
     sets.push('character=?', 'character_slug=?', 'costume_slug=?');

@@ -23,4 +23,6 @@ export type ServerEvent =
       improvement_ms: number | null; character: string | null;
       vehicle: string | null; video_url: string | null }
   | { type: 'wr_name_flag'; category: 'character' | 'kart' | 'costume' | 'course';
-      raw_value: string; slug_guess: string | null; course: string | null };
+      raw_value: string; slug_guess: string | null; course: string | null }
+  | { type: 'wr_job_dead'; wr_id: number; course: string; holder: string | null;
+      record_str: string; reason: string; attempts: number };

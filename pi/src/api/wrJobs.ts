@@ -3,8 +3,9 @@ import type { Context } from 'hono';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Env } from './app';
 import type { Point } from '../db/types';
+import type { EventHub } from './events';
 import { requireToken } from './auth';
-import { claimJob, heartbeatJob, releaseJob, completeJob, failJob, DEFAULT_LEASE_SEC } from '../db/wrJobs';
+import { claimJob, heartbeatJob, releaseJob, completeJob, failJob, deadJobs, DEFAULT_LEASE_SEC } from '../db/wrJobs';
 
 type ResultBody = { ok: true; points: Point[] } | { ok: false; error: string };
 
@@ -31,7 +32,7 @@ const isValidPoint = (p: unknown): p is Point =>
 /** WR-service worker API. Auth is the ordinary player token, header-only (a ?token= in a write
  *  URL would leak into logs) — the same double-gate POST /v1/runs uses: the app-level
  *  requireTokenAny runs first, then requireToken here narrows it to header-only. */
-export function wrJobsRoutes(db: DatabaseSync): Hono<Env> {
+export function wrJobsRoutes(db: DatabaseSync, hub: EventHub): Hono<Env> {
   const r = new Hono<Env>();
 
   r.post('/v1/wr-jobs/claim', requireToken(db), (c) => {
@@ -78,7 +79,19 @@ export function wrJobsRoutes(db: DatabaseSync): Hono<Env> {
                     : c.json({ error: 'not the lease owner' }, 409);
     }
     const recorded = failJob(db, wrId, worker, body.error ?? 'unknown');
-    return recorded ? c.json({ ok: true }) : c.json({ error: 'not the lease owner' }, 409);
+    if (recorded) {
+      // Did that failure kill the job (attempts cap, or terminal time_mismatch)? Then a
+      // human is the only thing that can move it — spec §6.4 "cap reached; flag for
+      // Paul". Same predicate `npm run wr-flags` prints, so alert and listing agree.
+      const dead = deadJobs(db).find((d) => d.wr_id === wrId);
+      if (dead) {
+        hub.publish({ type: 'wr_job_dead', wr_id: dead.wr_id, course: dead.course,
+          holder: dead.holder_name, record_str: dead.record_str,
+          reason: dead.last_error ?? 'unknown', attempts: dead.attempts });
+      }
+      return c.json({ ok: true });
+    }
+    return c.json({ error: 'not the lease owner' }, 409);
   });
 
   return r;
