@@ -352,6 +352,17 @@ CHAR_CUT_GUARD = 2
 # phantom plate); the flourish export ends at cut-CHAR_CUT_GUARD, so the raw tail is the
 # last CHAR_PLATE_DEPART-CHAR_CUT_GUARD (=7) exported frames.
 CHAR_PLATE_DEPART = 9
+
+
+def char_flourish_raw_tail(kart, seg, counts):
+    """Trailing raw-frame count for matte_loopframes(predark_raw_tail=...): only a CHAR
+    flourish whose hard cut was actually found (no fallback) has the deterministic
+    departing-plate tail; karts keep predark-off-for-the-whole-flourish instead."""
+    if kart or seg != "flourish" or counts.get("flourish_fallback"):
+        return 0
+    return CHAR_PLATE_DEPART - CHAR_CUT_GUARD
+
+
 # Cut-detector gates — ABSOLUTE, deliberately not idle-relative: relative gates failed on
 # high-motion characters (cataquack idle_med 326 lifted 6x above its real 1939 cut;
 # hammer_bro/king_boo__pro_racer/coin_coffer semi-moving frames at pre4 260-530 squeaked
@@ -515,6 +526,7 @@ def extract_segments(clip, out_base, name):
           " ".join(f"{nm}={e0 - s0}f" for nm, (s0, e0) in segs.items()) +
           (" flourish=FALLBACK" if fell_back else ""), flush=True)
     counts = {seg: (e - s) for seg, (s, e) in segs.items()}
+    counts["flourish_fallback"] = bool(fell_back)      # reserved non-segment key (like idle_resume)
     if kart:
         counts["idle_resume"] = idle_resume
     return counts

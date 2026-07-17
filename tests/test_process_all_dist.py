@@ -18,6 +18,7 @@ def _install_stubs(monkeypatch):
 
     el.extract_segments = extract_segments
     el.is_kart_combo = lambda name: len(name.split("__")) >= 3
+    el.char_flourish_raw_tail = lambda kart, seg, counts: 0
 
     mb = types.ModuleType("matte_blankplate")
 

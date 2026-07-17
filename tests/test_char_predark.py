@@ -128,3 +128,13 @@ def test_load_char_assets_happy_path(tmp_path, monkeypatch):
     assert a["in_plate"][30, 40] and not a["in_plate"][5, 5]
     assert 0.3 < float(np.median(a["T_B"][a["in_plate"]])) < 0.8
     assert a["text_band"][33, 40]
+
+
+def test_char_flourish_raw_tail_rules():
+    # char flourish with a real cut: the derived 7-frame raw tail
+    assert el.char_flourish_raw_tail(False, "flourish", {"flourish_fallback": False}) == 7
+    # fallback flourish (no cut found): keep predark-all, unchanged legacy behaviour
+    assert el.char_flourish_raw_tail(False, "flourish", {"flourish_fallback": True}) == 0
+    # never for karts or non-flourish segments
+    assert el.char_flourish_raw_tail(True, "flourish", {"flourish_fallback": False}) == 0
+    assert el.char_flourish_raw_tail(False, "idle", {}) == 0
