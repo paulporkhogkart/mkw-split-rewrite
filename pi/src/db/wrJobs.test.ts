@@ -209,4 +209,19 @@ describe('lease lifecycle', () => {
     expect(db.prepare('SELECT lease_owner, last_error FROM wr_jobs WHERE wr_id=10').get())
       .toMatchObject({ lease_owner: 'w1', last_error: null });   // w1 still holds it
   });
+
+  it('a time_mismatch failure makes the job unclaimable — terminal, not retryable', () => {
+    // Re-downloading the same wrong/mislinked video cannot change the verdict; without
+    // terminality it burns all 5 attempts (~10 min + ~275MB on Rainbow Road) to reach
+    // the same dead end. Spec §6.4's known gap, closed here.
+    const db = queued(); claimJob(db, 'w1');
+    expect(failJob(db, 10, 'w1', 'time_mismatch detected=62934 expected=62000')).toBe(true);
+    expect(claimJob(db, 'w2')).toBeNull();
+  });
+
+  it('other failures stay retryable up to the attempts cap', () => {
+    const db = queued(); claimJob(db, 'w1');
+    failJob(db, 10, 'w1', 'download_failed: HTTP 403');
+    expect(claimJob(db, 'w2')).not.toBeNull();
+  });
 });

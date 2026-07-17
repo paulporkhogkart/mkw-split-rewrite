@@ -78,6 +78,10 @@ export function claimJob(db: DatabaseSync, owner: string, leaseSec = DEFAULT_LEA
          AND NOT EXISTS (SELECT 1 FROM wr_trails t WHERE t.wr_id = j.wr_id)
          AND (j.lease_until IS NULL OR j.lease_until < datetime('now'))
          AND j.attempts < ?
+         -- time_mismatch is TERMINAL for claiming: the video itself is wrong for this
+         -- record, and re-downloading it cannot change that verdict. It needs a human —
+         -- or a new link: reconcile's backfill() clears it when video_url changes.
+         AND (j.last_error IS NULL OR j.last_error NOT LIKE 'time_mismatch%')
        -- achieved_at DESC: SQLite sorts NULL smallest, so NULL-dated rows sort LAST within their
        -- current/superseded tier here — intended, not a bug (an undated WR has no basis to jump
        -- the queue over a dated one).
