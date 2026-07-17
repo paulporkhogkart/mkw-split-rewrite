@@ -85,3 +85,55 @@ pub async fn wr_process_one(app: tauri::AppHandle, server_url: String, token: St
         format!("{:?}", service::process_one(&cfg, &|| false))
     }).await.map_err(|e| e.to_string())
 }
+
+/// The four background-mode settings, camelCase for the webview (Tauri convention).
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WrSettings {
+    pub close_to_tray: bool,
+    pub start_at_login: bool,
+    pub run_wr_service: bool,
+    pub keep_tracking_in_tray: bool,
+}
+
+/// The WR service's data dir (worker id, scratch DB, yt-dlp, settings) — the same
+/// `app_data_dir()/wr` wr_process_one uses.
+pub fn wr_data_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    use tauri::Manager;
+    Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.join("wr"))
+}
+
+/// Pub: lib.rs's close-to-tray handler and tray.rs read flags through this too.
+pub fn settings_db(app: &tauri::AppHandle) -> Result<rusqlite::Connection, String> {
+    state::open(&wr_data_dir(app)?)
+}
+
+#[tauri::command]
+pub fn wr_get_settings(app: tauri::AppHandle) -> Result<WrSettings, String> {
+    let c = settings_db(&app)?;
+    Ok(WrSettings {
+        close_to_tray: state::get_flag(&c, state::SETTING_CLOSE_TO_TRAY),
+        start_at_login: state::get_flag(&c, state::SETTING_START_AT_LOGIN),
+        run_wr_service: state::get_flag(&c, state::SETTING_RUN_WR_SERVICE),
+        keep_tracking_in_tray: state::get_flag(&c, state::SETTING_KEEP_TRACKING_IN_TRAY),
+    })
+}
+
+/// Persist one setting. `key` is the snake_case store key (state::SETTING_*). Rejecting
+/// unknown keys keeps a frontend typo from silently minting a dead setting.
+/// Later tasks bolt side-effects on here (autostart registration, runner start/stop,
+/// tray existence) — the persist-then-apply order is deliberate so a crash mid-apply
+/// still leaves the stored intent correct for the next boot.
+#[tauri::command]
+pub fn wr_set_setting(app: tauri::AppHandle, key: String, value: bool) -> Result<(), String> {
+    const KNOWN: [&str; 4] = [
+        state::SETTING_CLOSE_TO_TRAY, state::SETTING_START_AT_LOGIN,
+        state::SETTING_RUN_WR_SERVICE, state::SETTING_KEEP_TRACKING_IN_TRAY,
+    ];
+    if !KNOWN.contains(&key.as_str()) {
+        return Err(format!("unknown setting: {key}"));
+    }
+    let c = settings_db(&app)?;
+    state::set_flag(&c, &key, value);
+    Ok(())
+}
