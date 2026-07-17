@@ -11,6 +11,30 @@ import nametag_core as nc
 
 ASSETS = os.path.join(os.path.dirname(__file__), "assets")
 T_OPAQUE = 0.20    # transmission below this = opaque plate content (text/badge) -> left as UI
+CHAR_TEXT_DILATE = 7   # covers the AA ring + dark drop shadow around the yellow glyphs
+
+
+def char_text_band(t_template, mask):
+    """Rows the template glyphs occupy (+-8), full footprint x-span, clipped to the footprint.
+    Geometry only — char_P's stale LEVELS are never used (spec: live-derived clean_bg_char)."""
+    in_plate = mask > 0.05
+    glyph = (t_template < T_OPAQUE) & in_plate
+    ys = np.where(glyph.any(1))[0]
+    xs = np.where(in_plate.any(0))[0]
+    band = np.zeros_like(in_plate)
+    band[max(0, ys.min() - 8):ys.max() + 9, xs.min():xs.max() + 1] = True
+    return band & in_plate
+
+
+def char_text_mask(median_bgr, text_band):
+    """Per-clip live-text mask: HSV-yellow on the segment median, in-band, dilated.
+    NOT the kart t<T_OPAQUE gate — that only works against a TINTED reference (kart A
+    anti-correlates with yellow); vs the neutral live char bg it lands on solve_tc's
+    ratio path and misses the text entirely (prototype-verified 2026-07-17)."""
+    med = np.clip(np.asarray(median_bgr), 0, 255).astype(np.uint8)
+    yellow = nc.yellow_text_mask(med) & text_band
+    k = np.ones((CHAR_TEXT_DILATE, CHAR_TEXT_DILATE), np.uint8)
+    return cv2.dilate(yellow.astype(np.uint8), k).astype(bool)
 
 
 def load_template(is_char):
