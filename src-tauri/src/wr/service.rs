@@ -34,11 +34,14 @@ pub enum Outcome {
     Error(String),
 }
 
-/// The Pi sends slugs; the engine wants DISPLAY names. `course_name` arrives already
-/// display-shaped, so use it verbatim rather than re-deriving from the slug.
+/// The Pi sends slugs; the engine wants ITS OWN display names. For the course that means
+/// the seed-key shape — job::course_display_for_engine, NOT the Pi's course_name (which
+/// misses the seed table on 7 of 30 courses; see that function's doc). Characters, karts
+/// and costumes are slug_to_display: consistent-by-construction with the engine's
+/// filename-derived template keys.
 fn selections_for(j: &job::WrJob) -> Selections {
     Selections {
-        course: j.course_name.clone(),
+        course: job::course_display_for_engine(&j.course_slug),
         character: job::slug_to_display(&j.character_slug),
         costume: j.costume_slug.as_deref().map(job::slug_to_display),
         kart: j.kart_slug.as_deref().map(job::slug_to_display),
@@ -356,17 +359,22 @@ mod tests {
     }
 
     #[test]
-    fn course_name_is_used_verbatim_not_derived_from_the_slug() {
-        // The canonical display name for "dk_spaceport" is "DK Spaceport"
-        // (server/courses.py CANONICAL_COURSES). Title-casing the slug word-by-word
-        // (job::slug_to_display) would instead produce "Dk Spaceport" -- a genuinely
-        // different string -- so this input actually discriminates "use course_name
-        // verbatim" from "re-derive from the slug", unlike a course whose name happens
-        // to title-case identically either way.
-        let j = job::parse_job(r#"{"wr_id":1,"cc":150,"course_slug":"dk_spaceport",
+    fn course_sent_to_the_engine_is_seed_key_shaped_not_the_pi_display_name() {
+        // The Pi's canonical name is "DK Spaceport" (server/courses.py) but the engine's
+        // seed row is 'Dk Spaceport' (detection-derived). Sending the Pi name verbatim
+        // finds no seed -> guaranteed no_trail — the pre-fix behaviour this test kills.
+        let j = job::parse_job(r#"{"wr_id":1,"course_slug":"dk_spaceport",
             "course_name":"DK Spaceport","video_url":"u","record_ms":1,
             "character_slug":"bowser","costume_slug":null,"kart_slug":null,"attempt":1}"#).unwrap();
-        assert_eq!(selections_for(&j).course, "DK Spaceport");
+        assert_eq!(selections_for(&j).course, "Dk Spaceport");
+    }
+
+    #[test]
+    fn course_mapping_handles_the_sky_high_sundae_exception() {
+        let j = job::parse_job(r#"{"wr_id":1,"course_slug":"sky_high_sundae",
+            "course_name":"Sky-High Sundae","video_url":"u","record_ms":1,
+            "character_slug":"bowser","costume_slug":null,"kart_slug":null,"attempt":1}"#).unwrap();
+        assert_eq!(selections_for(&j).course, "Sky-High Sundae");
     }
 
     #[test]

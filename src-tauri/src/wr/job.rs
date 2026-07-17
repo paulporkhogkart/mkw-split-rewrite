@@ -10,7 +10,6 @@ use super::WrError;
 pub struct WrJob {
     pub wr_id: i64,
     pub course_slug: String,
-    pub course_name: String,
     pub video_url: String,
     pub record_ms: i64,
     pub character_slug: String,
@@ -39,7 +38,6 @@ pub fn parse_job(body: &str) -> Option<WrJob> {
     Some(WrJob {
         wr_id: i("wr_id")?,
         course_slug: s("course_slug")?,
-        course_name: s("course_name")?,
         video_url: s("video_url")?,
         record_ms: i("record_ms")?,
         // Required: no character => no set_selection => the minimap cannot seed.
@@ -64,6 +62,30 @@ pub fn slug_to_display(slug: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// slug -> the display name the ENGINE keys its minimap seeds/ROIs/thresholds on.
+///
+/// NOT the Pi's canonical display name. The engine's course names are detection-derived
+/// (template filename stem via `_`->space + title-case, templates.py:93) and courses are
+/// deliberately not canonicalized to their marketing names (selection.py:76) — so the
+/// seed table keys on "Dk Spaceport" / "Mario Bros Circuit" / "Toads Factory", while the
+/// Pi sends "DK Spaceport" / "Mario Bros. Circuit" / "Toad’s Factory" (server/courses.py).
+/// Sending the Pi name verbatim finds no seed on 7 of 30 courses, the tracker never
+/// seeds, and the run is a guaranteed no_trail (verified on the real DB, 2026-07-17).
+///
+/// `slug_to_display` reproduces the engine derivation for 29 of 30 courses. The single
+/// exception is Sky-High Sundae: its seed row was written by the engine's own schema
+/// migration (migrations.py _SEED_V2) with the hyphenated name, which title-casing a
+/// filename can never produce — so it is matched literally, as the row exists on every
+/// install. If the engine ever migrates that row to "Sky High Sundae" (which would also
+/// fix live-detection seeding on that course — the same latent mismatch), DELETE this
+/// exception in the same commit.
+pub fn course_display_for_engine(course_slug: &str) -> String {
+    match course_slug {
+        "sky_high_sundae" => "Sky-High Sundae".into(),
+        s => slug_to_display(s),
+    }
 }
 
 /// The Pi's WR job API.
@@ -230,5 +252,33 @@ mod tests {
         // say what we saw AND what was expected -- "time_mismatch" alone is useless.
         let r = WrError::TimeMismatch { detected_ms: 62934, expected_ms: 62000 }.reason();
         assert!(r.contains("62934") && r.contains("62000"), "unhelpful reason: {r}");
+    }
+
+    #[test]
+    fn course_display_matches_the_engines_seed_keys_not_the_pi_names() {
+        // The engine's minimap seeds key on DETECTION-derived names (filename stem via
+        // `_`->space + title-case; courses are NOT canonicalized — selection.py:76).
+        // The Pi's canonical names differ on 7 of 30 courses; each of these inputs is
+        // one where sending the Pi's course_name verbatim finds NO seed (verified
+        // against the real DB, 2026-07-17) and the run is a guaranteed no_trail.
+        assert_eq!(course_display_for_engine("dk_spaceport"), "Dk Spaceport");
+        assert_eq!(course_display_for_engine("dk_pass"), "Dk Pass");
+        assert_eq!(course_display_for_engine("mario_bros_circuit"), "Mario Bros Circuit");
+        assert_eq!(course_display_for_engine("toads_factory"), "Toads Factory");
+        assert_eq!(course_display_for_engine("bowsers_castle"), "Bowsers Castle");
+        assert_eq!(course_display_for_engine("warios_galleon"), "Warios Galleon");
+        assert_eq!(course_display_for_engine("great_block_ruins"), "Great Block Ruins");
+        // The 23 already-agreeing courses must keep working unchanged.
+        assert_eq!(course_display_for_engine("mario_circuit"), "Mario Circuit");
+        assert_eq!(course_display_for_engine("rainbow_road"), "Rainbow Road");
+    }
+
+    #[test]
+    fn sky_high_sundae_is_the_one_hyphenated_seed_key_exception() {
+        // Its seed row was written by the engine's own migration (migrations.py
+        // _SEED_V2) as 'Sky-High Sundae' — a hyphen title-casing a filename can never
+        // produce, so slug_to_display would miss it. Match the row as it exists on
+        // every install.
+        assert_eq!(course_display_for_engine("sky_high_sundae"), "Sky-High Sundae");
     }
 }
