@@ -103,3 +103,28 @@ def test_char_predark_text_painted_out_and_gone():
     assert not nc.yellow_text_mask(out)[32:36, 30:44].any()    # yellow gone
     # text region ends near bg level (painted to bg, possibly TELEA-smoothed)
     assert abs(float(out[34, 36].mean()) - float(a["bg"][34, 36].mean())) < 25
+
+
+import os
+import pytest
+
+
+def test_load_char_assets_missing_artifacts_raises(tmp_path):
+    with pytest.raises(FileNotFoundError, match="--screen char"):
+        pd.load_char_assets(assets_dir=str(tmp_path))
+
+
+def test_load_char_assets_happy_path(tmp_path, monkeypatch):
+    h, w = 60, 80
+    bg = np.zeros((h, w, 3), np.float32) + np.array([120, 130, 140], np.float32)
+    blank = bg.copy(); blank[20:50, 10:70] *= 0.5
+    np.save(tmp_path / "blank_plate_char.npy", blank)
+    np.save(tmp_path / "clean_bg_char.npy", bg)
+    t = np.ones((h, w)); t[30:36, 30:50] = 0.1
+    mask = np.zeros((h, w)); mask[20:50, 10:70] = 1.0
+    monkeypatch.setattr(pd, "load_template", lambda is_char: (t, np.zeros((h, w)), bg, mask))
+    a = pd.load_char_assets(assets_dir=str(tmp_path))
+    assert set(a) == {"T_B", "C_B", "badge", "bg", "in_plate", "text_band"}
+    assert a["in_plate"][30, 40] and not a["in_plate"][5, 5]
+    assert 0.3 < float(np.median(a["T_B"][a["in_plate"]])) < 0.8
+    assert a["text_band"][33, 40]

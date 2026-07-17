@@ -51,7 +51,8 @@ def load_template(is_char):
 
 
 def pre_darken(raw_bgr, t, C, A, mask, KEY_THR=60, CSUB=0.75, TFLOOR=0.01, YELLOW_S=250, BRIGHT_V=255):
-    """Paint the WHOLE plate footprint to the clean background A, then stamp back only the genuine
+    """LEGACY (tuner/tests only; production chars now use char_predark + live-derived assets).
+    Paint the WHOLE plate footprint to the clean background A, then stamp back only the genuine
     overlapping-subject pixels (recovered from behind the semi-transparent serration). birefnet then
     sees continuous background across the plate (empty serration, yellow text, and bright badge all
     become A) and drops it; only the stamped subject pixels stay connected to the kart/character.
@@ -122,6 +123,26 @@ def char_predark(raw_bgr, text, assets, KEY_THR=120, CSUB=0.5, TFLOOR=0.01, FILL
         if st[i, cv2.CC_STAT_AREA] <= 2000:
             keep |= (lab == i)
     return cv2.inpaint(out, keep.astype(np.uint8) * 255, 3, cv2.INPAINT_TELEA)
+
+
+def load_char_assets(assets_dir=ASSETS):
+    """Char blank-plate assets dict for char_predark. Solves (T_B, C_B) from the two
+    committed live-derived artifacts; char_P/char_A contribute GEOMETRY ONLY (footprint
+    mask + text-band rows) — their stale bright-era levels are never used (spec)."""
+    blank_p = os.path.join(assets_dir, "blank_plate_char.npy")
+    bg_p = os.path.join(assets_dir, "clean_bg_char.npy")
+    for p in (blank_p, bg_p):
+        if not os.path.exists(p):
+            raise FileNotFoundError(
+                f"{p} missing — build it with: python tools/asset_matte/build_blank_plate.py --screen char")
+    blank = np.load(blank_p).astype(np.float32)
+    bg = np.load(bg_p).astype(np.float64)
+    t_tmpl, _, _, mask = load_template(True)
+    in_plate = mask > 0.05
+    T_B, C_B = nc.solve_tc(blank, bg)
+    return {"T_B": T_B, "C_B": C_B, "badge": (T_B < T_OPAQUE) & in_plate,
+            "bg": bg, "in_plate": in_plate,
+            "text_band": char_text_band(t_tmpl, mask)}
 
 
 def main():
