@@ -160,4 +160,22 @@ mod tests {
         }
         assert!(matches!(verify(&f, 62_000).unwrap_err(), WrError::TimeMismatch { .. }));
     }
+
+    #[test]
+    fn a_trail_reaching_exactly_the_floor_boundary_passes() {
+        // Pins the boundary DIRECTION: the floor is `<`, so exactly 0.8x must be
+        // accepted. Nothing else guards an accidental `<=` flip — every other
+        // fragment test sits deep inside the reject region. The last point is
+        // hard-set to the same expression verify() computes, so the comparison is
+        // bit-exact rather than at the mercy of loop arithmetic.
+        let mut f = fin(Some("1:02.934"), 500);
+        let n = f.points.len() as f64;
+        for (i, p) in f.points.iter_mut().enumerate() {
+            p[0] = ((i + 1) as f64) * (0.8 * 62_934.0) / n;
+        }
+        let last = f.points.len() - 1;
+        f.points[last][0] = 0.8 * 62_934.0;
+        assert!(verify(&f, 62_934).is_ok(),
+            "a trail whose last point lands exactly on the 0.8 floor must pass");
+    }
 }
