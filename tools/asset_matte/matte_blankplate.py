@@ -133,6 +133,11 @@ _TEXT_BAND[_ty0:_ty1 + 1, _PX0:_BX0] = True
 _TEXT_BAND &= _IN_PLATE
 
 
+# ── char blank-plate setup (once) — live-derived committed artifacts (spec 2026-07-17;
+# build_blank_plate.py --screen char). char_P/char_A contribute geometry only.
+_CHAR = pd.load_char_assets()
+
+
 def _kart_text_mask(P_clip):
     t, _ = nc.solve_tc(P_clip, _A_kart)
     return cv2.dilate(((t < pd.T_OPAQUE) & _TEXT_BAND).astype(np.uint8),
@@ -270,22 +275,28 @@ def _checker_rgba(w, h, s=22):
     return Image.fromarray(np.where(m[..., None], 205, 150).astype(np.uint8).repeat(3, 2), "RGB").convert("RGBA")
 
 
-def _build_predark_frames(paths, kart, apply_predark):
-    """Predark (or raw, for a plate-dropped flourish) BGR uint8 frame per path. Kart text mask is
-    computed once from the segment median (== the old inline path)."""
+def _build_predark_frames(paths, kart, apply_predark, predark_raw_tail=0):
+    """Predark (or raw) BGR uint8 frame per path. Text mask computed once per segment from
+    the segment median — for chars, from the PREDARK-ELIGIBLE frames only, so the departing-
+    plate tail (last predark_raw_tail frames, passed raw per CHAR_PLATE_DEPART) can't pollute
+    the median. Kart flourish keeps its whole-segment predark-off behaviour (raw_tail unused)."""
+    n_pre = pd.predark_frame_count(len(paths), predark_raw_tail) if apply_predark else 0
     text = None
     if kart and apply_predark:
         sample = [cv2.imread(p).astype(np.float32) for p in paths[::3]]
         text = _kart_text_mask(np.median(np.stack(sample), axis=0))
+    elif apply_predark and n_pre > 0:
+        sample = [cv2.imread(p).astype(np.float32) for p in paths[:n_pre:3]]
+        text = pd.char_text_mask(np.median(np.stack(sample), axis=0), _CHAR["text_band"])
     out = []
-    for p in paths:
+    for i, p in enumerate(paths):
         raw = cv2.imread(p)
-        if not apply_predark:
-            out.append(raw)                                  # flourish: plate dropped -> raw
+        if not apply_predark or (not kart and i >= n_pre):
+            out.append(raw)                              # flourish plate dropped/departing -> raw
         elif kart:
             out.append(_kart_predark(raw, text))
         else:
-            out.append(pd.pre_darken(raw, _t_char, _C_char, _A_char, _MASK_char))
+            out.append(pd.char_predark(raw, text, _CHAR))
     return out
 
 
@@ -321,7 +332,7 @@ def _write_chip(pairs, name, out_base):
 
 
 def matte_loopframes(framedir, name, out_base, clip=None, backdrop=None,
-                     apply_predark=True, is_kart=None, direction=None):
+                     apply_predark=True, is_kart=None, direction=None, predark_raw_tail=0):
     """Matte every NNN.png frame in `framedir` -> transparent RGBA. Returns the frame count.
 
     `apply_predark`: un-darken the nameplate before birefnet (TRUE for spawn/idle, where the plate
@@ -329,12 +340,15 @@ def matte_loopframes(framedir, name, out_base, clip=None, backdrop=None,
     paint a fake plate). `is_kart`: override kart detection (a segment-suffixed name would otherwise
     miscount the `__` separators). `direction`: MatAnyone2 direction ("fwd"/"bwd"/"split"/"bidir")
     — None falls back to the MATTE_BIDIR env default; segment-aware callers pass
-    matte_matanyone.segment_direction(kart, seg)."""
+    matte_matanyone.segment_direction(kart, seg).
+    `predark_raw_tail`: CHAR flourish only — number of trailing frames to pass RAW (the
+    plate departs at cut-CHAR_PLATE_DEPART inside the export; predarking them painted a
+    phantom plate). Callers pass extract_loop.CHAR_PLATE_DEPART - CHAR_CUT_GUARD (= 7)."""
     paths = sorted(glob.glob(os.path.join(framedir, "*.png")))
     if not paths:
         raise RuntimeError(f"no loop frames in {framedir!r}")
     kart = is_kart_combo(name) if is_kart is None else is_kart
-    pres = _build_predark_frames(paths, kart, apply_predark)   # predark input frames (shared)
+    pres = _build_predark_frames(paths, kart, apply_predark, predark_raw_tail)
 
     if MATTE_ENGINE == "matanyone":
         import matte_matanyone as mm                           # lazy: torch only loads on this path
