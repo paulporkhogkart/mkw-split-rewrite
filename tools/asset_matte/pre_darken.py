@@ -100,6 +100,30 @@ def predark_frame_count(n_frames, raw_tail):
     return max(0, n_frames - max(0, raw_tail))
 
 
+def char_predark(raw_bgr, text, assets, KEY_THR=120, CSUB=0.5, TFLOOR=0.01, FILL_K=51):
+    """Blank-transform un-darken for the CHAR plate — _kart_predark's exact math (full-S
+    stamp `eac3c82` + interior TELEA), parameterized on the char assets dict so it stays
+    pure/testable under build python. Params are the kart-locked values (spec 2026-07-17)."""
+    T_B, C_B, bg = assets["T_B"], assets["C_B"], assets["bg"]
+    in_plate = assets["in_plate"]
+    O = raw_bgr.astype(np.float64)
+    S = np.clip((O - CSUB * C_B[..., None]) / np.clip(T_B, TFLOOR, 1.6)[..., None], 0, 255)
+    opaque = (assets["badge"] | text) & in_plate
+    subject = in_plate & (np.abs(S - bg).max(2) >= KEY_THR) & ~opaque
+    out = O.copy(); out[in_plate] = S[in_plate]; out[opaque] = bg[opaque]
+    out = np.clip(out, 0, 255).astype(np.uint8)
+    K = int(FILL_K) | 1
+    closed = cv2.morphologyEx(subject.astype(np.uint8) * 255, cv2.MORPH_CLOSE,
+                              cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (K, K))) > 0
+    holes = in_plate & closed & ~subject
+    n, lab, st, _ = cv2.connectedComponentsWithStats(holes.astype(np.uint8), 8)
+    keep = np.zeros_like(holes)
+    for i in range(1, n):
+        if st[i, cv2.CC_STAT_AREA] <= 2000:
+            keep |= (lab == i)
+    return cv2.inpaint(out, keep.astype(np.uint8) * 255, 3, cv2.INPAINT_TELEA)
+
+
 def main():
     a = sys.argv[1:]
     is_char = "--kart" not in a
