@@ -106,14 +106,19 @@ pub fn process_one(cfg: &ServiceCfg, cancel: &(dyn Fn() -> bool + Sync)) -> Outc
     let client = job::Client::new(&cfg.server_url, &cfg.token, &worker);
 
     // Crash recovery: an inflight record left over means we died mid-job last time,
-    // before reaching the set_inflight(None) at the bottom of this function. Release it
-    // so the Pi REFUNDS that attempt rather than just letting the ~600s lease lapse and
-    // burn it silently. Best-effort: if another machine already re-claimed the job (its
-    // lease had already lapsed by the time we got here), the server correctly no-ops/
-    // rejects the release — we only need our OWN bookkeeping cleared either way.
+    // before reaching the set_inflight(None) at the bottom of this function. Clear the
+    // LOCAL record only — deliberately do NOT release() the lease. release() refunds
+    // the attempt (that is its job: a voluntary pause must not count against the cap),
+    // but a crash is exactly what attempts-on-claim exists to count: "a worker that
+    // dies without reporting still burns one and a poison job can't retry forever"
+    // (spec §4). An app restart inside the ~600s lease window would make the release
+    // succeed and refund — under Plan 3's autostart, a job whose video reliably
+    // crashes the app would then claim -> crash -> refund -> claim forever. Letting
+    // the lease lapse burns the attempt; the only cost is that one job waiting out the
+    // rest of its lease (<= ~10 min) before it can be claimed again.
     if let Some(orphan_wr_id) = state::inflight(&conn) {
-        log::warn!("[wr] found crash-orphaned inflight wr_id={orphan_wr_id}, releasing");
-        let _ = client.release(orphan_wr_id);
+        log::warn!("[wr] crash-orphaned inflight wr_id={orphan_wr_id}: clearing the local \
+                    record; its lease will lapse and the attempt stays burned (per spec)");
         state::set_inflight(&conn, None);
     }
 
@@ -237,6 +242,26 @@ mod tests {
         (format!("http://{addr}"), max_out)
     }
 
+    /// Accepts and immediately drops every connection, counting them. Each reqwest call
+    /// = exactly one connection (a fresh connection that dies before any response is
+    /// not retried by reqwest/hyper — retries only apply to reused pool connections).
+    /// This is the only observation point for WHICH calls process_one makes without a
+    /// mock server: 1 connection = claim only; 2 = a release snuck back in before it.
+    fn counting_listener() -> (String, Arc<AtomicUsize>) {
+        let l = TcpListener::bind("127.0.0.1:0").expect("bind probe listener");
+        let addr = l.local_addr().unwrap();
+        let total = Arc::new(AtomicUsize::new(0));
+        let t = total.clone();
+        std::thread::spawn(move || {
+            for stream in l.incoming() {
+                let Ok(stream) = stream else { break };
+                t.fetch_add(1, SeqCst);
+                drop(stream);
+            }
+        });
+        (format!("http://{addr}"), total)
+    }
+
     #[test]
     fn process_one_never_overlaps_itself_because_sweep_orphans_deletes_by_glob() {
         let hold = Duration::from_millis(300);
@@ -277,29 +302,33 @@ mod tests {
     }
 
     #[test]
-    fn process_one_releases_and_clears_a_crash_orphaned_inflight_job_before_claiming() {
-        let dir = tmpdir("orphan_release");
+    fn crash_orphan_is_cleared_locally_without_a_lease_release() {
+        // A crash must BURN its attempt (spec §4: "a worker that dies without reporting
+        // still burns one and a poison job can't retry forever"). release() REFUNDS the
+        // attempt, and an app restart inside the ~600s lease window would make the
+        // refund succeed — under autostart, a job whose video crashes the app would
+        // claim -> crash -> refund -> claim forever. So crash recovery must clear the
+        // LOCAL record only and let the lease lapse.
+        let (url, total) = counting_listener();
+        let dir = tmpdir("orphan_no_release");
         let conn = state::open(&dir).unwrap();
         state::set_inflight(&conn, Some(42));
         drop(conn);
 
-        // No live server needed to prove the LOCAL bookkeeping is cleared: release() is
-        // best-effort and its own result is ignored — connecting to a port nothing listens
-        // on fails immediately (no listener => instant refusal, no timeout to wait out), so
-        // this stays fast without a mock server.
         let cfg = ServiceCfg {
-            server_url: "http://127.0.0.1:1".into(),
+            server_url: url,
             token: "probe".into(),
             data_dir: dir.clone(),
             engine: EnginePath::Dev,
         };
         let _ = process_one(&cfg, &|| false);
 
+        assert_eq!(total.load(SeqCst), 1,
+            "expected exactly ONE request (the claim); a second one means the orphan \
+             was release()d, which refunds the attempt a crash must burn");
         let conn2 = state::open(&dir).unwrap();
         assert_eq!(state::inflight(&conn2), None,
-            "a crash-orphaned inflight record must be cleared even though release() itself \
-             could not reach a server — otherwise the NEXT process_one call would see the \
-             same stale wr_id forever");
+            "the stale local record must still be cleared, or every future call re-sees it");
     }
 
     #[test]
