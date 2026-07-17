@@ -45,6 +45,16 @@ pub fn verify(f: &Finalized, expected_ms: i64) -> Result<Vec<[f64; 5]>, WrError>
     if detected_ms != expected_ms {
         return Err(WrError::TimeMismatch { detected_ms, expected_ms });
     }
+    // Fragment floor. The timer (HUD digits) and the trail (minimap) come from
+    // independent trackers, so an exact time does NOT prove the trail covers the race —
+    // the badge can be lost mid-race and never re-acquired. A wr_trails row is
+    // permanently "done", so a stub accepted here is a stub forever. Deliberately AFTER
+    // the mismatch check: a fragment of the WRONG video is primarily wrong (terminal on
+    // the Pi), only secondarily short.
+    let last_t = f.points.last().map(|p| p[0]).unwrap_or(0.0);
+    if last_t < 0.8 * expected_ms as f64 {
+        return Err(WrError::NoTrail);
+    }
     Ok(f.points.clone())
 }
 
@@ -52,11 +62,16 @@ pub fn verify(f: &Finalized, expected_ms: i64) -> Result<Vec<[f64; 5]>, WrError>
 mod tests {
     use super::*;
 
+    /// `n` points spread across ~63s of race clock (matching the 1:02.934 the tests
+    /// use). The old fixture packed all points into the first n MILLISECONDS, which a
+    /// duration floor rightly rejects — a real trail spans the race.
     fn fin(total: Option<&str>, n: usize) -> Finalized {
         Finalized {
             total_time: total.map(str::to_string),
             status: Some("finished".into()),
-            points: (0..n).map(|i| [i as f64, 1635.0, 875.0, 0.79, 1.0]).collect(),
+            points: (0..n)
+                .map(|i| [((i + 1) as f64) * 63_000.0 / (n as f64), 1635.0, 875.0, 0.79, 1.0])
+                .collect(),
         }
     }
 
@@ -119,5 +134,30 @@ mod tests {
         let e = verify(&fin(Some("1:02.934"), 0), 62934).unwrap_err();
         assert_ne!(e, WrError::Cancelled);
         assert_eq!(e, WrError::NoTrail);
+    }
+
+    #[test]
+    fn rejects_a_fragment_trail_that_stops_mid_race() {
+        // The HUD timer and the minimap are read by INDEPENDENT trackers, so a run can
+        // read the exact right total while the badge was lost for most of the race
+        // (e.g. HDR washout, permanent LOST after lap 1). 500 points, all inside the
+        // first 40% of the race, exact time match: without a duration floor this
+        // uploads a stub and the wr_trails row permanently marks the job done.
+        let mut f = fin(Some("1:02.934"), 500);
+        for (i, p) in f.points.iter_mut().enumerate() {
+            p[0] = ((i + 1) as f64) * (0.4 * 62_934.0) / 500.0;
+        }
+        assert_eq!(verify(&f, 62_934).unwrap_err(), WrError::NoTrail);
+    }
+
+    #[test]
+    fn a_wrong_video_fragment_still_reports_time_mismatch_first() {
+        // Mismatch is the more actionable diagnosis (wrong/mislinked video) and the Pi
+        // treats it as terminal; the fragment floor must not mask it.
+        let mut f = fin(Some("1:02.934"), 500);
+        for (i, p) in f.points.iter_mut().enumerate() {
+            p[0] = ((i + 1) as f64) * (0.4 * 62_934.0) / 500.0;
+        }
+        assert!(matches!(verify(&f, 62_000).unwrap_err(), WrError::TimeMismatch { .. }));
     }
 }
