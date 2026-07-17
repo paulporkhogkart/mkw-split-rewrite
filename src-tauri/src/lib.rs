@@ -77,6 +77,7 @@ fn do_spawn_sidecar(app: tauri::AppHandle, state: &SidecarState) {
     match spawn_result {
         Ok((mut rx, child)) => {
             *state.0.lock().unwrap() = Some(child);
+            wr::gate::ACTIVITY.set_tracking(true);
             // Notify the frontend immediately so it knows the process launched
             // and is just slow to produce output (e.g. Windows Defender scanning
             // _internal/ DLLs on first run).
@@ -88,6 +89,12 @@ fn do_spawn_sidecar(app: tauri::AppHandle, state: &SidecarState) {
                     match event {
                         CommandEvent::Stdout(line) => {
                             let msg = String::from_utf8_lossy(&line);
+                            // Idle-gate signal: only screen_change resets the WR idle clock
+                            // (cheap substring check — the full JSON parse isn't needed here).
+                            if msg.contains("\"type\":\"screen_change\"")
+                                || msg.contains("\"type\": \"screen_change\"") {
+                                wr::gate::ACTIVITY.note_screen_change();
+                            }
                             let _ = handle.emit("tracker-event", msg.as_ref());
                             if let Some(ev) = sync::on_line(msg.as_ref()) {
                                 let _ = handle.emit("tracker-event", &ev);
@@ -111,6 +118,7 @@ fn do_spawn_sidecar(app: tauri::AppHandle, state: &SidecarState) {
                             let _ = handle.emit("tracker-event", &msg);
                         }
                         CommandEvent::Terminated(status) => {
+                            wr::gate::ACTIVITY.set_tracking(false);
                             log::error!("[tracker] exited with {status:?}");
                             let msg = format!(
                                 "{{\"type\":\"stderr\",\"line\":{}}}",
@@ -151,6 +159,7 @@ fn stop_tracker(state: tauri::State<SidecarState>) {
     if let Ok(mut guard) = state.0.lock() {
         if let Some(child) = guard.take() {
             let _ = child.kill();
+            wr::gate::ACTIVITY.set_tracking(false);
         }
     }
 }
@@ -161,6 +170,7 @@ fn restart_tracker(app: tauri::AppHandle, state: tauri::State<SidecarState>) {
     if let Ok(mut guard) = state.0.lock() {
         if let Some(child) = guard.take() {
             let _ = child.kill();
+            wr::gate::ACTIVITY.set_tracking(false);
         }
     }
     do_spawn_sidecar(app, &state);
