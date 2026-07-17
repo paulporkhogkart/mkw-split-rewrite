@@ -499,7 +499,8 @@ def _fresh_dir(d):
 def extract_segments(clip, out_base, name):
     """Write prod-crop PNG sequences for each detected segment to <out_base>/<name>__<seg>/NNN.png.
     Returns {seg: frame_count}; kart combos also carry {"idle_resume": phase} (the post-flourish
-    idle handoff frame) — a reserved non-segment key the seg loops here/downstream never iterate."""
+    idle handoff frame), and every clip carries {"flourish_fallback": bool} — reserved
+    non-segment keys the seg loops here/downstream never iterate."""
     segs, fps, kart, fell_back, idle_resume = find_segments(clip)
     want = {}
     for seg, (s, e) in segs.items():

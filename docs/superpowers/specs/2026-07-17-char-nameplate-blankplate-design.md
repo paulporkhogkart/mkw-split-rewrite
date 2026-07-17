@@ -57,7 +57,7 @@ Plumbing is segment-local so no absolute frame numbers cross module boundaries: 
 
 ## What does not change
 
-The kart path (blank, text mask, predark, flourish predark-off) is byte-identical. `extract_loop` segmentation is untouched (`fe = cut − 2` already encodes the cut). The matte engine, viewer, manifest schema, and ship flow are untouched.
+The kart path (blank, text mask, predark, flourish predark-off) is byte-identical. `extract_loop` segmentation is untouched (`fe = cut − 2` already encodes the cut). The matte engine, viewer, and ship flow are untouched; the manifest schema gains one ADDITIVE key (`flourish_fallback`, plumbed by Task 10 of the plan — existing consumers read via `.get()`, so this is backward-compatible).
 
 ## Validation
 
