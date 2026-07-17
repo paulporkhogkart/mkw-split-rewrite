@@ -42,3 +42,10 @@ def test_finish_median_ignores_nan_and_fills_all_nan(tmp_path):
 def test_char_cut_for_uses_cache_without_decoding():
     cache = {"mario__base": 681}
     assert bbp.char_cut_for("D:/nowhere/mario__base.mkv", cache) == 681
+
+
+def test_finish_median_empty_stack_raises_loudly():
+    import pytest
+    in_plate = np.zeros((4, 4), bool)
+    with pytest.raises(RuntimeError, match="check --clips"):
+        bbp.finish_median([], in_plate)

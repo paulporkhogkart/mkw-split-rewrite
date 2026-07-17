@@ -145,6 +145,8 @@ def _seq_frames(clip, idxs):
 
 
 def finish_median(stack, in_plate):
+    if not stack:
+        raise RuntimeError("empty frame stack — no usable clips (check --clips / --matte-dir)")
     import warnings
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
@@ -207,7 +209,9 @@ def build_char(a):
     import datetime
     meta["char_blank"] = {"date": datetime.date.today().isoformat(),
                           "clips": len(blank_stack), "bg_clips": len(bg_stack) // BG_WIN}
-    json.dump(meta, open(meta_p, "w"), indent=2)
+    with open(meta_p + ".tmp", "w") as f:
+        json.dump(meta, f, indent=2)
+    os.replace(meta_p + ".tmp", meta_p)
 
 
 def main():
