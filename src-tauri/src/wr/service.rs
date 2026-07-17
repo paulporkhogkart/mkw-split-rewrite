@@ -141,8 +141,12 @@ pub fn process_one(cfg: &ServiceCfg, cancel: &(dyn Fn() -> bool + Sync)) -> Outc
 /// (~the video's duration) and a WR upload is ~the race plus a short menu intro and the
 /// finish-still hold, so record + 180s covers every observed upload shape with room for
 /// engine startup. Floor 300s keeps short courses generous; cap 540s stays a full minute
-/// under the Pi's 600s lease — no heartbeat exists, so the lease must outlive the run or
-/// another machine can claim the job while we are still processing it.
+/// under the Pi's 600s lease. That margin is ENGINE-only: the same never-heartbeated
+/// lease also covers the download (unbounded today — bounding yt-dlp is deliberately
+/// deferred) and the result upload, so a badly stalled download can still overrun it.
+/// An overrun wastes work but cannot corrupt: complete() is ownership-checked
+/// server-side and 409s once the lease moves. If records ever approach this cap, wire
+/// job::Client::heartbeat into the engine step instead of raising it (Plan 3).
 fn engine_timeout_for(record_ms: i64) -> std::time::Duration {
     std::time::Duration::from_secs(((record_ms / 1000) + 180).clamp(300, 540) as u64)
 }
@@ -432,8 +436,8 @@ mod tests {
         // the old fixed 300s left ~50s for intro + finish-still + startup — one
         // long-intro upload away from burning all 5 attempts on the marquee track.
         assert_eq!(engine_timeout_for(233_260), Duration::from_secs(413));
-        // Never within 60s of the Pi's 600s lease: there is NO heartbeat, so the lease
-        // must outlive the engine run or another machine can claim mid-processing.
+        // The ENGINE budget stays 60s under the Pi's 600s lease (the whole job shares
+        // that one lease — see engine_timeout_for's doc for the download/upload margins).
         assert_eq!(engine_timeout_for(900_000), Duration::from_secs(540));
     }
 }
