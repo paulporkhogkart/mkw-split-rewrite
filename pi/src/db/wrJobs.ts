@@ -176,3 +176,23 @@ export function failJob(db: DatabaseSync, wrId: number, owner: string, error: st
   ).run(error.slice(0, 500), wrId, owner);
   return Number(info.changes) > 0;
 }
+
+export type DeadJob = { wr_id: number; course: string; holder_name: string | null;
+  record_str: string; attempts: number; last_error: string | null };
+
+/** Jobs that will never be claimed again without a human: at the attempts cap, or
+ *  terminally time_mismatched — and still trail-less. Spec §6.4's "cap reached; flag for
+ *  Paul": this is what `npm run wr-flags` prints and what the wr_job_dead alert announces. */
+export function deadJobs(db: DatabaseSync): DeadJob[] {
+  return db.prepare(
+    `SELECT j.wr_id, c.display_name AS course, w.holder_name, w.record_str,
+            j.attempts, j.last_error
+     FROM wr_jobs j
+     JOIN world_records w ON w.id = j.wr_id
+     JOIN courses c ON c.id = w.course_id
+     WHERE NOT EXISTS (SELECT 1 FROM wr_trails t WHERE t.wr_id = j.wr_id)
+       AND w.removed_at IS NULL
+       AND (j.attempts >= ? OR j.last_error LIKE 'time_mismatch%')
+     ORDER BY j.updated_at DESC`
+  ).all(MAX_ATTEMPTS) as DeadJob[];
+}

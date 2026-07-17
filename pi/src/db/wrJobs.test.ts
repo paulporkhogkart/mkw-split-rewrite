@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { openDb, applySchema } from './connect';
 import { enqueueJob, seedWrJobs, claimJob, MAX_ATTEMPTS,
-  heartbeatJob, releaseJob, completeJob, failJob } from './wrJobs';
+  heartbeatJob, releaseJob, completeJob, failJob, deadJobs } from './wrJobs';
 import { insertWrTrail, getWrTrail } from './wrTrails';
 
 function setup() {
@@ -223,5 +223,29 @@ describe('lease lifecycle', () => {
     const db = queued(); claimJob(db, 'w1');
     failJob(db, 10, 'w1', 'download_failed: HTTP 403');
     expect(claimJob(db, 'w2')).not.toBeNull();
+  });
+});
+
+describe('deadJobs', () => {
+  const dead = () => { const db = setup(); addWr(db, 10); seedWrJobs(db); return db; };
+
+  it('lists a job at the attempts cap', () => {
+    const db = dead();
+    db.prepare('UPDATE wr_jobs SET attempts=5 WHERE wr_id=10').run();
+    expect(deadJobs(db)).toMatchObject([{ wr_id: 10, course: 'Mario Circuit', attempts: 5 }]);
+  });
+
+  it('lists a terminal time_mismatch even below the cap', () => {
+    const db = dead(); claimJob(db, 'w1');
+    failJob(db, 10, 'w1', 'time_mismatch detected=1 expected=2');
+    expect(deadJobs(db)).toMatchObject([{ wr_id: 10, attempts: 1 }]);
+  });
+
+  it('does not list healthy or already-trailed jobs', () => {
+    const db = dead();
+    expect(deadJobs(db)).toEqual([]);                            // healthy
+    db.prepare('UPDATE wr_jobs SET attempts=5 WHERE wr_id=10').run();
+    insertWrTrail(db, 10, [{ t_ms: 1, cx: 1, cy: 1, score: 0.9, lap: 1 }]);
+    expect(deadJobs(db)).toEqual([]);                            // done is not dead
   });
 });

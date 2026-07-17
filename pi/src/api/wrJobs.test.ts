@@ -4,6 +4,7 @@ import { EventHub } from './events';
 import { createApp } from './app';
 import { mintToken } from '../db/players';
 import { seedWrJobs } from '../db/wrJobs';
+import type { ServerEvent } from '../db/types';
 
 function setup() {
   const db = openDb(':memory:');
@@ -16,11 +17,14 @@ function setup() {
                       'https://youtu.be/x','toadette','explorer','baby_blooper',1)`).run();
   seedWrJobs(db);
   const token = mintToken(db, 'Paul');
-  const app = createApp(db, new EventHub());
+  const hub = new EventHub();
+  const events: ServerEvent[] = [];
+  hub.subscribe((e) => events.push(e));
+  const app = createApp(db, hub);
   // Same player token on both machines — the X-Worker-Id is what separates the leases.
   const w1 = { Authorization: `Bearer ${token}`, 'X-Worker-Id': 'machine-a' };
   const w2 = { Authorization: `Bearer ${token}`, 'X-Worker-Id': 'machine-b' };
-  return { db, app, token, w1, w2 };
+  return { db, app, token, w1, w2, events };
 }
 
 describe('/v1/wr-jobs', () => {
@@ -146,5 +150,38 @@ describe('/v1/wr-jobs', () => {
     // Shape-valid (equal t_ms is not a shape error) but rejected deeper by packTrail — this
     // documents that the cheap shape guard does not catch it; it still must not be a raw 500.
     expect(res.status).toBe(500);
+  });
+
+  it('announces wr_job_dead when a failure kills the job (cap reached)', async () => {
+    const { db, app, w1, events } = setup();
+    db.prepare('UPDATE wr_jobs SET attempts=4 WHERE wr_id=10').run();
+    await app.request('/v1/wr-jobs/claim', { method: 'POST', headers: w1 });   // attempts -> 5
+    await app.request('/v1/wr-jobs/10/result', {
+      method: 'POST', headers: { ...w1, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ok: false, error: 'timeout' }),
+    });
+    expect(events.filter((e) => e.type === 'wr_job_dead')).toMatchObject([
+      { wr_id: 10, course: 'Mario Circuit', holder: 'JaK', reason: 'timeout', attempts: 5 },
+    ]);
+  });
+
+  it('announces wr_job_dead immediately on a terminal time_mismatch', async () => {
+    const { app, w1, events } = setup();
+    await app.request('/v1/wr-jobs/claim', { method: 'POST', headers: w1 });
+    await app.request('/v1/wr-jobs/10/result', {
+      method: 'POST', headers: { ...w1, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ok: false, error: 'time_mismatch detected=1 expected=2' }),
+    });
+    expect(events.filter((e) => e.type === 'wr_job_dead')).toHaveLength(1);
+  });
+
+  it('does not announce for a survivable failure', async () => {
+    const { app, w1, events } = setup();
+    await app.request('/v1/wr-jobs/claim', { method: 'POST', headers: w1 });
+    await app.request('/v1/wr-jobs/10/result', {
+      method: 'POST', headers: { ...w1, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ok: false, error: 'download_failed: 403' }),
+    });
+    expect(events.filter((e) => e.type === 'wr_job_dead')).toEqual([]);
   });
 });
