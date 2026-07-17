@@ -116,6 +116,12 @@ class ConsoleApp:
         # the Tk thread so a large (or over-SMB) glob never freezes the UI.
         self.btn_viewer = ttk.Button(bar2, text="Build viewer", command=self._click_build_viewer)
         self.btn_viewer.pack(side="left", padx=(12, 2))
+        # Always-clickable: audit the share bookkeeping (frames vs manifest union vs idle_resume)
+        # and absorb foreign manifest.<machine>.json entries into THE one primary manifest.
+        # Audit-only while processing runs (process_all rewrites the manifest after every clip,
+        # so a mid-run merge would be clobbered). Report lines land in the process pane.
+        self.btn_verify = ttk.Button(bar2, text="Verify manifest", command=self._click_verify_manifest)
+        self.btn_verify.pack(side="left", padx=2)
         self.pstatus = ttk.Label(bar2, text="● idle"); self.pstatus.pack(side="right")
 
         body = ttk.Frame(self.root); body.pack(fill="both", expand=True)
@@ -333,6 +339,31 @@ class ConsoleApp:
         def done():
             self._building_viewer = False
             self._on_line("process", f"[console] {msg or 'viewer build produced no output'}")
+        self.q.put(done)
+
+    def _click_verify_manifest(self):
+        """Audit share bookkeeping + absorb foreign manifests into the primary, off the Tk
+        thread (Build-viewer pattern). The merge only runs while processing is IDLE — captured
+        HERE on the Tk thread so the decision and the click are consistent."""
+        if getattr(self, "_verifying", False):
+            self._on_line("process", "[console] manifest verify already running")
+            return
+        self._verifying = True
+        active = self.pstate.state != ps.IDLE
+        self._on_line("process", f"[console] verifying manifest ({PROCESS_MANIFEST}) ...")
+        threading.Thread(target=self._verify_manifest_worker, args=(active,), daemon=True).start()
+
+    def _verify_manifest_worker(self, processing_active):
+        try:
+            import manifest_verify as mv                 # asset_matte is on sys.path (header)
+            lines = mv.run_for_console(CLIPS_DIR, PROCESS_OUT, PROCESS_MANIFEST, processing_active)
+        except Exception as exc:                         # report, never crash the console
+            lines = [f"manifest verify FAILED: {exc}"]
+
+        def done():
+            self._verifying = False
+            for ln in lines:
+                self._append("process", f"[console] {ln}")
         self.q.put(done)
 
     def _manual(self, key):
