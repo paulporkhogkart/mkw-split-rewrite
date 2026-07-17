@@ -31,5 +31,10 @@
     "CSUB": 0.69,
     "TFLOOR": 0.05,
     "T_OPAQUE": 0.2
+  },
+  "char_blank": {
+    "date": "2026-07-17",
+    "clips": 153,
+    "bg_clips": 153
   }
 }
