@@ -228,4 +228,19 @@ describe('reconcile', () => {
     expect(claimJob(db, 'w1')).toMatchObject({ wr_id: id,
       video_url: 'https://youtu.be/corrected', attempt: 1 });    // alive again, fresh
   });
+
+  it('revival mid-lease also evicts the lease so a stale verdict cannot re-kill the job', () => {
+    const { db, hub } = setup();
+    reconcile(db, hub, [wr({ videoUrl: 'https://youtu.be/wrong' })]);
+    const id = (db.prepare('SELECT id FROM world_records WHERE is_current=1').get() as any).id;
+    expect(claimJob(db, 'w1')).toMatchObject({ wr_id: id });          // w1 is mid-processing…
+    reconcile(db, hub, [wr({ videoUrl: 'https://youtu.be/corrected' })]);  // …when the link is fixed
+    // The stale worker's eventual verdict must be an ownership no-op, not a re-kill —
+    // otherwise the job dies terminal with the corrected link already stored and NOTHING
+    // ever revives it (the link no longer changes on future scrapes).
+    expect(failJob(db, id, 'w1', 'time_mismatch detected=1 expected=2')).toBe(false);
+    // And the corrected link is immediately claimable with a fresh budget:
+    expect(claimJob(db, 'w2')).toMatchObject({
+      wr_id: id, video_url: 'https://youtu.be/corrected', attempt: 1 });
+  });
 });

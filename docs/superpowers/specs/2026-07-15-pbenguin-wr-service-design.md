@@ -490,7 +490,10 @@ reset) when the scraper sees the video link change (`reconcile.ts backfill()`), 
 failure — cap reached or terminal mismatch — fires a `wr_job_dead` Discord alert plus a
 `npm run wr-flags` listing. `tier_for` remains blind to WHY a prior attempt failed (the claim
 payload still carries no `last_error`); with a single tier that is moot, and any future
-escalation tier must revisit it.
+escalation tier must revisit it. One death class stays alert-less by design for now: a job
+whose final attempts burn silently via crash + lease lapse never posts a /result, so it
+appears in `npm run wr-flags` but fires no `wr_job_dead` alert — a sweep-based alert is a
+named Plan 3 item.
 
 ### 6.7 Local state
 

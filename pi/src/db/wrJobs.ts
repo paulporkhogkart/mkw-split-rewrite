@@ -33,7 +33,10 @@ export type WrJob = {
   lease_until: string;
 };
 
-export const DEFAULT_LEASE_SEC = 600;   // 10 min: ~10s download + ~100s processing, wide margin
+// 10 min. No longer a wide margin: the client's engine budget alone may take up to 540s
+// of it (src-tauri/src/wr/service.rs engine_timeout_for, deliberate 60s tail) and the
+// same never-heartbeated lease also covers download + upload.
+export const DEFAULT_LEASE_SEC = 600;
 export const MAX_ATTEMPTS = 5;          // claims per job before it is abandoned as poison
 
 type ClaimRow = {
