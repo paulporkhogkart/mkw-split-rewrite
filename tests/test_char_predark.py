@@ -3,6 +3,7 @@ import numpy as np
 import cv2
 import nametag_core as nc          # FLAT imports — conftest adds tools/asset_matte to sys.path
 import pre_darken as pd
+import extract_loop as el
 
 
 def test_yellow_text_mask_catches_text_not_plate():
@@ -44,3 +45,17 @@ def test_char_text_mask_is_yellow_in_band_dilated():
     assert m[32, 47]                            # dilation (7//2=3 px) covers the AA ring
     assert not m[10, 40]
     assert pd.CHAR_TEXT_DILATE == 7
+
+
+def test_char_plate_depart_is_recorder_anchored():
+    # 11/11 measurable chars on the 2026-07-17 survey: slide onset exactly cut-9.
+    assert el.CHAR_PLATE_DEPART == 9
+    # raw tail must stay derivable and positive: export ends at cut - CHAR_CUT_GUARD
+    assert el.CHAR_PLATE_DEPART - el.CHAR_CUT_GUARD == 7
+
+
+def test_predark_frame_count_partition():
+    assert pd.predark_frame_count(78, 7) == 71
+    assert pd.predark_frame_count(78, 0) == 78
+    assert pd.predark_frame_count(5, 7) == 0     # tiny segment: all raw
+    assert pd.predark_frame_count(78, -3) == 78  # negative clamps to no tail

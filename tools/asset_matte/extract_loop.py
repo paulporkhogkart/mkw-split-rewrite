@@ -346,6 +346,12 @@ CHAR_FLOURISH_LEN = 54
 # captured item). The incoming item's nameplate text blends in ~2f before the subject
 # cut, so the export stops CHAR_CUT_GUARD frames short of it.
 CHAR_CUT_GUARD = 2
+# The char nameplate SLIDES LEFT + FADES OUT starting exactly this many frames before the
+# hard cut (2026-07-17 survey: 11/11 measurable chars; fully gone by ~cut-5). Frames at or
+# after cut-CHAR_PLATE_DEPART must NOT be predarked (static-template predark would paint a
+# phantom plate); the flourish export ends at cut-CHAR_CUT_GUARD, so the raw tail is the
+# last CHAR_PLATE_DEPART-CHAR_CUT_GUARD (=7) exported frames.
+CHAR_PLATE_DEPART = 9
 # Cut-detector gates — ABSOLUTE, deliberately not idle-relative: relative gates failed on
 # high-motion characters (cataquack idle_med 326 lifted 6x above its real 1939 cut;
 # hammer_bro/king_boo__pro_racer/coin_coffer semi-moving frames at pre4 260-530 squeaked

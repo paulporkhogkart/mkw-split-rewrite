@@ -94,6 +94,12 @@ def process(base, names, is_char):
         print(f"{name}: {len(files)} frames pre-darkened ({'char' if is_char else 'kart'}) -> {dst}", flush=True)
 
 
+def predark_frame_count(n_frames, raw_tail):
+    """How many frames from the segment start get predark; the trailing raw_tail pass raw
+    (the departing/absent plate is the matte's job, like the kart flourish)."""
+    return max(0, n_frames - max(0, raw_tail))
+
+
 def main():
     a = sys.argv[1:]
     is_char = "--kart" not in a
