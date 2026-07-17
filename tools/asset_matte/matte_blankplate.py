@@ -172,10 +172,6 @@ def _kart_predark(raw, text):
     return cv2.inpaint(out, keep.astype(np.uint8) * 255, 3, cv2.INPAINT_TELEA)
 
 
-# ── char setup (committed CHAR template) ───────────────────────────────────────
-_t_char, _C_char, _A_char, _MASK_char = pd.load_template(True)
-
-
 # ── birefnet + decontam, hybrid hole-repair (char) ─────────────────────────────
 def _birefnet(bgr):
     rgb = cv2.cvtColor(bgr.astype(np.uint8), cv2.COLOR_BGR2RGB)
