@@ -117,6 +117,15 @@ ffmpeg with a proper filter (`scale=1920:1080:flags=lanczos`) so `_norm()` becom
   `_`→space + `.title()` — e.g. slug `baby_blooper` → `"Baby Blooper"`.
 - **Course names are EU/UK.** `minimap_seeds` keys on `Warios Galleon`, not mkwrs's US
   `Wario Shipyard`. Slug resolution is what bridges this (`MKWRS_ALIASES`, `courses.ts:5`).
+- **set_selection course names must be the ENGINE's detection-derived names, not the Pi's
+  canonical display names.** Seeds/ROIs key on filename-derived names (`_`→space + `.title()`;
+  courses are deliberately not canonicalized — `selection.py:76`): `Dk Spaceport`,
+  `Mario Bros Circuit`, `Toads Factory`… The one exception is `Sky-High Sundae`, whose seed row
+  was migration-written with the hyphen. `job.rs::course_display_for_engine` owns this mapping;
+  sending the Pi's `course_name` verbatim finds no seed on 7 of 30 courses (found 2026-07-17).
+  Related latent ENGINE issue (not fixed here): live detection says "Sky High Sundae", so that
+  course's seed row is unreachable in live tracking too; if the engine ever migrates the row,
+  delete the client-side exception in the same commit.
 
 ---
 
@@ -369,7 +378,11 @@ start (the app's whole purpose) to save very little. Measure before revisiting; 
 **Autostart must not open the capture card.** Launching at login shows the tray icon and runs only
 the service loop; the live engine spawns only when the frontend calls `start_tracker`
 (`lib.rs:139`), so a hidden start touches no camera. A WR job spawns its own short-lived engine
-against a video file and reaps it.
+against a video file and reaps it. **Caveat found 2026-07-17: `App.svelte`'s `onMount`
+unconditionally invokes `start_tracker` (src/App.svelte:1436), so ANY window creation — hidden
+included — currently spawns the live engine and opens the camera. Plan 3 must gate that call;
+"a hidden start touches no camera" is a requirement on Plan 3, not a property the app already
+has.**
 
 ### 6.4 Work loop
 
@@ -404,7 +417,10 @@ gate -> claim -> download -> process -> verify -> upload -> cleanup -> repeat
    - on `ready` → `set_selection` with display names mapped from the job's slugs
    - on `screen_change` → `UNKNOWN_RACE_ACTIVE` → `force_screen RESET` then `force_screen RACING`
    - collect `run_finalized`, then **kill the engine** (it will not exit on its own)
-   - hard timeout at ~3× video duration
+   - hard timeout derived from the record: clamp(record + 180s, 300s, 540s). That budget is
+     ENGINE-only — the same never-heartbeated 600s lease also covers the download (unbounded
+     today) and the upload; an overrun is safe (complete() is ownership-checked and 409s) but
+     wasted. Wiring the dormant heartbeat + bounding yt-dlp are named Plan 3 items.
 4. **Verify** (§6.4).
 5. **Upload** `POST /v1/wr-jobs/:id/result` with the points array.
 6. **Cleanup**: delete the video on *every* terminal outcome.
@@ -416,7 +432,7 @@ they are the same path, which is why the gate needs no new concept.
 
 | State when paused | Behaviour |
 |---|---|
-| Mid-download | Suspend the download; keep the lease alive by heartbeat; resume continues it |
+| Mid-download | The in-flight yt-dlp run completes (~10s), then the lease is release()d before processing starts — a pause is honoured at the next boundary, not by suspending the transfer |
 | Mid-processing | **Discard** — kill the engine, bin the partial, `release` the lease so another machine can take it. Tracking must happen in one unbroken pass |
 | Idle | Stay idle; simply stop claiming |
 
@@ -436,9 +452,13 @@ against a scraped `1'02"934`. So:
 
 This catches mkwrs typos, wrong links, re-uploads of the wrong run, and truncated videos — using a
 number already in hand. Splits provide a secondary check against `lap_splits_ms` where present.
+*(v1 verifies the exact total only; `lap_splits_ms` arrives in the claim payload but is not yet
+checked.)*
 
 Additional failure reasons: `no_1080p60`, `download_failed`, `video_unavailable`,
-`no_trail` (0 points — i.e. the minimap never locked), `time_mismatch`, `timeout`.
+`no_trail` (0 points — i.e. the minimap never locked — **or a fragment trail whose last point
+falls before 80% of the record's total time**; an exact total with a mid-race badge loss must not
+store a stub forever), `time_mismatch`, `timeout`.
 
 **Retry tiers — REVISED 2026-07-15 (Paul): the 4K tier is DELETED; there is only native 1080p60.**
 
@@ -461,15 +481,16 @@ at the same time, or you will have built a 197 MB escalation that fires on wrong
 |---|---|
 | 1 | native 1080p60 |
 | 2–4 | re-download — covers throttling, a 403, or a since-fixed mkwrs link |
-| 5 | cap reached; flag for Paul |
+| 5 | cap reached; job is dead — announced via the wr_job_dead Discord alert and listed by npm run wr-flags |
 
-**KNOWN GAP (server-side, unfixed):** `tier_for` only sees the attempt *number*, never *why* the
-last attempt failed — the claim payload carries no `last_error`. So "a `time_mismatch` must never
-escalate" is unenforceable in the client. With the 4K tier gone the blast radius is currently
-**zero** (there is nothing to escalate *to*), but a `time_mismatch` still burns all 5 attempts
-re-downloading a video that is simply the wrong video and needs a human. The real fix is on the
-Pi: make `time_mismatch` terminal so the job is not re-offered. Plan 1 is already merged, so this
-is a follow-up.
+**CLOSED 2026-07-17:** `time_mismatch` is now TERMINAL on the Pi — the claim predicate skips any
+job whose `last_error` starts with `time_mismatch` (`db/wrJobs.ts`), so a wrong/mislinked video
+no longer burns its remaining attempts re-downloading. The job revives automatically (attempts
+reset) when the scraper sees the video link change (`reconcile.ts backfill()`), and a killing
+failure — cap reached or terminal mismatch — fires a `wr_job_dead` Discord alert plus a
+`npm run wr-flags` listing. `tier_for` remains blind to WHY a prior attempt failed (the claim
+payload still carries no `last_error`); with a single tier that is moot, and any future
+escalation tier must revisit it.
 
 ### 6.7 Local state
 
