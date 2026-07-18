@@ -105,7 +105,51 @@ function addCell(root, variant, combo, cssH) {{
   lbl.textContent = `${{variant}} · idle ${{idleKB}}KB`;
   wrap.append(lbl); root.append(wrap);
 }}
+// ---- frame-time profiler (HUD top-right; "copy stats" -> paste back for diagnosis) ----
+const prof = {{ raf: [], cost: [], holds30: [], holds60: [], lastT: 0, h30: 0, h60: 0 }};
+function pushCap(arr, v, cap) {{ arr.push(v); if (arr.length > cap) arr.shift(); }}
+function pct(arr, p) {{
+  if (!arr.length) return 0;
+  const s = [...arr].sort((a, b) => a - b);
+  return s[Math.min(s.length - 1, Math.floor(p * s.length))];
+}}
+function hist(arr) {{
+  const b = {{}};
+  for (const v of arr) {{ const k = Math.round(v / 8.333) * 8.3; b[k] = (b[k] || 0) + 1; }}
+  return Object.keys(b).sort((a, b) => a - b).map((k) => `${{Number(k).toFixed(1)}}ms×${{b[k]}}`).join(" ");
+}}
+function statsText() {{
+  const med = pct(prof.raf, 0.5);
+  const long = prof.raf.filter((v) => v > med * 1.5).length;
+  return [
+    `display: median rAF ${{med.toFixed(2)}}ms (~${{(1000 / med).toFixed(0)}}Hz), ` +
+    `p95 ${{pct(prof.raf, 0.95).toFixed(2)}}ms, max ${{Math.max(0, ...prof.raf).toFixed(1)}}ms, ` +
+    `long-frames ${{long}}/${{prof.raf.length}}`,
+    `tick cost: p50 ${{pct(prof.cost, 0.5).toFixed(2)}}ms, p95 ${{pct(prof.cost, 0.95).toFixed(2)}}ms, ` +
+    `max ${{Math.max(0, ...prof.cost).toFixed(2)}}ms`,
+    `candidate 30fps frame holds (want ~33.3): ${{hist(prof.holds30)}}`,
+    `fps60 frame holds (want ~16.7): ${{hist(prof.holds60)}}`,
+  ].join("\\n");
+}}
+const hud = document.createElement("pre");
+hud.style.cssText = "position:fixed;top:6px;right:8px;z-index:9;background:#191a1dee;" +
+  "color:#9a9ca1;font-size:10px;padding:6px 8px;margin:0;max-width:520px;white-space:pre-wrap";
+const copyBtn = document.createElement("button");
+copyBtn.textContent = "copy stats";
+copyBtn.onclick = () => {{
+  const t = statsText();
+  console.log(t);
+  navigator.clipboard ? navigator.clipboard.writeText(t) : window.prompt("copy:", t);
+}};
+document.body.append(hud, copyBtn);
+copyBtn.style.cssText = "position:fixed;top:6px;right:8px;z-index:10;font-size:10px";
+hud.style.paddingTop = "24px";
+setInterval(() => {{ hud.textContent = statsText(); }}, 500);
+
 function tickAll(t) {{
+  if (prof.lastT) pushCap(prof.raf, t - prof.lastT, 600);
+  prof.lastT = t;
+  const t0 = performance.now();
   for (const c of cells) {{
     const st = c.player.tick(t);
     const key = st.anim + ":" + st.frame;
@@ -117,7 +161,11 @@ function tickAll(t) {{
     c.ctx.clearRect(0, 0, c.man.fw, c.man.fh);
     c.ctx.drawImage(bmp, r.sx, r.sy, c.man.fw, c.man.fh, 0, 0, c.man.fw, c.man.fh);
     c.last = key;
+    // probe: displayed-frame hold durations for the first candidate and fps60 cells
+    if (c === probe30) {{ if (prof.h30) pushCap(prof.holds30, t - prof.h30, 240); prof.h30 = t; }}
+    if (c === probe60) {{ if (prof.h60) pushCap(prof.holds60, t - prof.h60, 240); prof.h60 = t; }}
   }}
+  pushCap(prof.cost, performance.now() - t0, 600);
   requestAnimationFrame(tickAll);
 }}
 const root = document.getElementById("root");
@@ -132,6 +180,8 @@ for (const combo of DATA.combos) {{
   const g2 = document.createElement("div"); g2.className = "grid"; root.append(g2);
   addCell(g2, "candidate", combo, 92); addCell(g2, "candidate", combo, 76);
 }}
+const probe30 = cells.find((c) => c.variant === "candidate");
+const probe60 = cells.find((c) => c.variant === "fps60");
 requestAnimationFrame(tickAll);
 </script></body></html>"""
 
