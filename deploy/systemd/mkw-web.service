@@ -8,6 +8,7 @@ Type=simple
 User=pi
 WorkingDirectory=/home/pi/mkw/web
 Environment=PORT=8788
+Environment=MKW_CHIPS_DIR=/home/pi/mkw-data/chips
 ExecStart=/usr/bin/node serve.mjs
 Restart=always
 RestartSec=3

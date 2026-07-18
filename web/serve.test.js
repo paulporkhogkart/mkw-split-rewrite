@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { join } from "node:path";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolveFile, contentType, createStaticServer } from "./serve.mjs";
 
@@ -82,5 +83,63 @@ describe("createStaticServer (http)", () => {
     const r = await fetch(`${base}/`);
     expect(r.status).toBe(200);
     expect(r.headers.get("content-type")).toBe("text/html; charset=utf-8");
+  });
+});
+
+async function withServer(distDir, chipsDir, fn) {
+  const srv = createStaticServer(distDir, { chipsDir });
+  await new Promise((r) => srv.listen(0, r));
+  const base = `http://127.0.0.1:${srv.address().port}`;
+  try { return await fn(base); } finally { srv.close(); }
+}
+
+function chipsFixture() {
+  const root = mkdtempSync(join(tmpdir(), "chips-"));
+  mkdirSync(join(root, "chips-v1", "chips"), { recursive: true });
+  writeFileSync(join(root, "chips-v1", "chips", "manifest.json"),
+    JSON.stringify({ version: 1, combos: {} }));
+  writeFileSync(join(root, "chips-v1", "chips", "a__idle.webp"), "RIFFfake");
+  writeFileSync(join(root, "current"), "chips-v1");  // text-file form of `current`
+  return root;
+}
+
+describe("/chips/anim/", () => {
+  const dist = mkdtempSync(join(tmpdir(), "dist-"));
+  writeFileSync(join(dist, "index.html"), "<html>spa</html>");
+
+  it("serves the current manifest with short cache and injected base", async () => {
+    await withServer(dist, chipsFixture(), async (base) => {
+      const r = await fetch(`${base}/chips/anim/manifest.json`);
+      expect(r.status).toBe(200);
+      expect(r.headers.get("cache-control")).toContain("max-age=300");
+      expect(r.headers.get("x-chips-tag")).toBe("chips-v1");
+      const j = await r.json();
+      expect(j.base).toBe("/chips/anim/chips-v1/");
+    });
+  });
+
+  it("serves tagged assets immutable", async () => {
+    await withServer(dist, chipsFixture(), async (base) => {
+      const r = await fetch(`${base}/chips/anim/chips-v1/a__idle.webp`);
+      expect(r.status).toBe(200);
+      expect(r.headers.get("content-type")).toBe("image/webp");
+      expect(r.headers.get("cache-control")).toContain("immutable");
+    });
+  });
+
+  it("404s missing chip files without SPA fallback", async () => {
+    await withServer(dist, chipsFixture(), async (base) => {
+      const r = await fetch(`${base}/chips/anim/chips-v1/nope.webp`);
+      expect(r.status).toBe(404);
+      const r2 = await fetch(`${base}/chips/anim/manifest.json`, { method: "GET" });
+      expect(r2.status).toBe(200);
+    });
+  });
+
+  it("without chipsDir the prefix 404s (extension) as before", async () => {
+    await withServer(dist, undefined, async (base) => {
+      const r = await fetch(`${base}/chips/anim/chips-v1/a__idle.webp`);
+      expect(r.status).toBe(404);
+    });
   });
 });

@@ -9,7 +9,7 @@ replace animated WebP after Paul asked for the comparison and measurement favour
 
 ## Goal
 
-Turn ~1.3M pristine 1024×1080 RGBA PNG frames (~900GB; 6,273 char×costume×kart combos with
+Turn ~1.3M pristine 1024×1080 RGBA PNG frames (~1.1TB measured; 6,273 char×costume×kart combos with
 spawn/idle/flourish + 153 standalone char×costume combos with idle/flourish) into a small,
 fast-loading, versioned asset pack: WebP sprite sheet per animation + tearout sil masks + a site
 manifest — hosted as GitHub Release assets, auto-deployed to the Pi, lazy-loaded by the site,
@@ -95,7 +95,8 @@ Built to `D:\kartoff\asset_chips\site_pack\` (outside the repo):
    after a kart flourish), `kart` flag. Derived from the
    master manifest; the site and pbenguin read only this.
 4. **Shards:** `chips-<char>.tar` per character (~50 shards, ~50MB each; well under the 2GB
-   per-asset limit) + `sha256sums.txt`.
+   per-asset limit); `pack_shards.py` writes their sha256s inline into `chips.lock` (no
+   separate checksums file).
 
 ## Delivery: GitHub Release assets + committed lock
 
@@ -109,10 +110,14 @@ Built to `D:\kartoff\asset_chips\site_pack\` (outside the repo):
   `$DATA/chips/.version`, curl shards from the release into `$DATA/chips/`, verify sha256,
   unpack, write `.version`. Outbound-only, idempotent, fail-safe like the rest of the script
   (chips failure must not block the code deploy — served stale until next tick succeeds).
-- **Pi serves** `$DATA/chips/` at `/chips/` (static route in the pi server). Site lazy-loads
-  per combo on selection (~340KB for all three anims), browser-cached (immutable — content
-  changes only with `chips-vN` bump, so long `max-age` + version in path or lock-driven cache
-  bust).
+- **Pi serves** the pack at **`/chips/anim/`** (`web/serve.mjs`, `MKW_CHIPS_DIR`): the bare
+  `/chips/` namespace was already taken by the activity-feed chips (`web/src/lib/chips.js`).
+  `GET /chips/anim/manifest.json` (max-age=300) returns the current pack's manifest with an
+  injected `"base": "/chips/anim/<tag>/"`; all sheet/sil URLs live under that tagged base and
+  are served `immutable` (tag dir per `chips-vN` ⇒ cache-safe across re-encodes). The Pi keeps
+  the current + one previous tag under `$DATA/chips/`. The fetcher writes `$DATA/chips/current`
+  as a plain text file containing the current tag; the server's `currentChipsTag` accepts either
+  a symlink or a text file there, so this needs no special Pi/Windows-dev handling.
 
 ## pbenguin
 

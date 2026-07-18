@@ -112,3 +112,54 @@ Latest sample outputs: `temp/asset_proof/` (`*_checker.webp` to view; `*_full_*`
   to the right end kart but corrupts the middle, so an end-only check is insufficient).
 - **Flourishes** (A-press selection animation) — in scope, spec deferred.
 - **Write the capture spec**, then do the full-roster run.
+
+---
+
+## Site pack pipeline
+
+Encode matte'd chip animations into WebP sprite-sheet grids + sil masks, packaged as GitHub Release
+assets and deployed to the Pi. See `docs/superpowers/specs/2026-07-18-chip-site-pack-design.md`.
+
+**1. A/B eye test**
+
+```
+python tools/asset_matte/build_ab_lab.py --src D:\kartoff\asset_chips --out D:\kartoff\asset_chips\ab_lab
+```
+- Encodes a handful of representative combos (big char, small char, busy kart, standalone char;
+  override with `--combos NAME...`) across scale/fps/quality/alpha-bit variations. Outputs a lab
+  HTML page rendering real card-size chips against card-dark background, ink-ring CSS applied,
+  for visual comparison. Paul's eye test locks the recipe (scale/fps/quality/alpha-bit knobs);
+  nothing batch-encodes until sign-off.
+
+**2. Batch encode**
+
+```
+python tools/asset_matte/build_site_pack.py --src D:\kartoff\asset_chips --out D:\kartoff\asset_chips\site_pack --scale <scale> --fps <fps> --quality <q> --alpha-bits <bits> --workers 12
+```
+- `--scale`/`--fps`/`--quality`/`--alpha-bits` are required and come from whatever the A/B eye
+  test locks — no default recipe is baked into the tool. `--workers` defaults to CPU count − 2.
+  `--only NAME...` limits the run to specific combos (sampling); `--force` ignores the resume
+  book-keeping and re-encodes everything.
+- Multiprocessing over all 6,273 char×costume×kart combos (+ 153 standalone). Per combo: decode
+  pristine 1024×1080 PNG frames from `D:\kartoff\asset_chips\matte\`, downscale + premultiply-safe
+  alpha quantize, tile frames into a WebP sprite-sheet grid (near-square, max side ≤4096px),
+  generate sil masks (12-point radial jagged tearout, 4 sampled frames). Estimated wall-clock ~1.5–2h
+  on the 9800X3D (decode+resize dominates). Resume via `<out>/book.json`; skip-if-done.
+- Output: `D:\kartoff\asset_chips\site_pack/` with `chips/` sheets/masks + `manifest.json`.
+
+**3. Pack shards**
+
+```
+python tools/asset_matte/pack_shards.py --pack D:\kartoff\asset_chips\site_pack --tag chips-v1
+```
+- Splits the pack into per-character shards (~50 shards, ~50MB each; under the 2GB GitHub asset
+  limit). Optional `--base-url` overrides the default GitHub Releases download URL. Writes
+  `<pack>/release/chips-<char>.tar` per character plus `chips-manifest.json`, and folds every
+  shard's sha256 inline into `<pack>/release/chips.lock` (no separate checksums file) — that
+  lock is what gets committed to `web/chips.lock`.
+
+**4. Release & deploy** — see the Task 11 release runbook
+- Upload shards + manifest to a dedicated GitHub Release (tag `chips-vN`, NOT a deploy tag). Commit
+  `web/chips.lock` to git. `deploy/update.sh` pulls shards on the Pi, verifies sha256, unpacks into
+  `$DATA/chips/`. `web/serve.mjs` serves the pack at `/chips/anim/` with manifest injection +
+  immutable cache headers.

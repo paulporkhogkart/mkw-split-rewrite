@@ -42,6 +42,13 @@ git checkout -q --force "tags/$latest"
 npm --prefix "$REPO/pi" install --no-audit --no-fund
 npm --prefix "$REPO/web" install --no-audit --no-fund
 npm --prefix "$REPO/web" run build
+
+# Chip pack (non-fatal: site serves the previous pack until a fetch succeeds)
+if [ -f "$REPO/web/chips.lock" ]; then
+  bash "$REPO/deploy/fetch_chips.sh" "$REPO/web/chips.lock" "$DATA/chips" \
+    || echo "warn: chips fetch failed; keeping current pack"
+fi
+
 sudo systemctl restart mkw-server mkw-bot mkw-web
 echo "$latest" > "$MARKER"
 echo "deployed $latest"
