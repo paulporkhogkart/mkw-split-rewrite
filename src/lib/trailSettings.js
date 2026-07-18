@@ -8,9 +8,14 @@ export const TRAIL_PRESETS = ["#3d7cc2", "#d98a3e", "#5aa86a", "#cf5b4e", "#9b6b
 export const TRAIL_MODES = ["none", "pbs", "best", "last", "last_pb", "all"];
 const FADE_FLOOR = 0.2;
 
+// The world record renders as one more (grey) player: its "PB" is the current WR, its
+// ghosts are the historic ones. Colour locked like the player palette above.
+export const WR_COLOR = "#a7adb5";
+export const WR_MODES = ["off", "current", "all"];
+
 const SKEY = "mkw.trailSettings";
 const RKEY = "mkw.roster";
-const DEFAULTS = { fadeByRank: false, players: {} };   // players: { [playerId]: {mode, n} }
+const DEFAULTS = { fadeByRank: false, players: {}, wr: { mode: "current" } };   // players: { [playerId]: {mode, n} }
 
 function loadSettings() {
   try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(SKEY) || "{}") }; }
@@ -60,6 +65,13 @@ export function playerCfg(settings, rosterPlayer) {
   };
 }
 
+/** The WR pseudo-player's effective config. Default: the current WR only, on
+ *  (spec 2026-07-18). Unknown stored values fall back to the default. */
+export function wrCfg(settings) {
+  const m = settings?.wr?.mode;
+  return { mode: WR_MODES.includes(m) ? m : "current" };
+}
+
 /** The trail config to send to sync_course_reads: players with mode != none. */
 export function activeConfig(settings, rosterList) {
   return (rosterList ?? [])
@@ -74,13 +86,25 @@ export function rankOpacity(i, count, fade) {
   return +(1 - (i / (count - 1)) * (1 - FADE_FLOOR)).toFixed(3);
 }
 
-/** Group the combined course-reads `trails` (each tagged player_id, rank-ordered within a
- *  player) into render-ready runs with the player's locked colour + per-run opacity. PB runs
- *  stay full opacity (and carry is_pb so the overlay can pulse them); reset runs carry abandoned.
- *  Output is in global paint order (z-order, last = on top), intermingled across players by
- *  importance: every PB sits above every non-PB dot, fainter (more faded) runs sit lower, and
- *  faster runs sit higher - so the fastest PB tops the whole stack and no colour forms a layer.
- *  Returns [{points, color, opacity, abandoned, is_pb, total_ms}]. */
+/** Paint band (ascending = bottom to top). Two tiers - every alive run outranks every
+ *  abandoned (X-ending) one - and within a tier the WR yields to players of its rank:
+ *  historic WR < player past run < current WR < player PB (decided 2026-07-18). A
+ *  run's tier is its static abandoned flag, so the paint order never reshuffles
+ *  mid-race when a dot visually becomes its X. */
+export function bandOf(run) {
+  const rank = run.wr === "historic" ? 0 : run.wr === "current" ? 2 : run.is_pb ? 3 : 1;
+  return (run.abandoned ? 0 : 4) + rank;
+}
+
+/** Group course-reads `trails` (per player from `courseReads.trails`) and WR trails
+ *  (mapped through `settings.wr` from `courseReads.wr_trails`; the WR is one more grey player)
+ *  into render-ready runs with locked colours and per-run opacity. The two-tier band hierarchy:
+ *  alive runs above abandoned (X-ending); within a tier: historic WR < player past run < current
+ *  WR < player PB (spec 2026-07-18). Within a band, fainter runs lower / faster runs higher. PB
+ *  runs stay full opacity (and carry is_pb so the overlay can pulse them); reset runs carry
+ *  abandoned. No colour forms a layer.
+ *  Returns [{points, color, opacity, abandoned, is_pb, total_ms, wr}] where wr is
+ *  null | "current" | "historic". */
 export function buildTrailRuns(courseReads, settings, rosterList) {
   const byId = new Map((rosterList ?? []).map((p) => [p.player_id, p]));
   const byPlayer = new Map();
@@ -99,15 +123,32 @@ export function buildTrailRuns(courseReads, settings, rosterList) {
         abandoned: run.status !== "finished",   // reset/dnf runs draw an X at their end
         is_pb: !!run.is_pb,                      // PB run: pulsing accent + top of the z-stack
         total_ms: run.total_ms ?? null,          // for the importance sort below
+        wr: null,                                // player runs are not WR
       });
     });
   }
-  // Global paint order = z-order (last = on top), intermingled across players by importance:
-  //   1. every PB sits above every non-PB dot (no faded ghost ever covers a PB);
-  //   2. within a band, fainter runs sit lower (the fade level is the priority);
-  //   3. faster runs sit higher - so the fastest PB tops the whole stack.
+  // The WR is one more (grey) player. Same opacity rules as everyone (rankOpacity over
+  // the fastest-first rows; the fade toggle applies); a stored WR trail is by
+  // construction a verified finished run, so abandoned is always false.
+  const wrMode = wrCfg(settings).mode;
+  if (wrMode !== "off") {
+    const rows = (courseReads?.wr_trails ?? []).filter((w) => wrMode === "all" || w.is_current);
+    rows.forEach((w, i) => {
+      out.push({
+        points: w.points ?? [],
+        color: WR_COLOR,
+        opacity: w.is_current ? 1 : rankOpacity(i, rows.length, settings.fadeByRank),
+        abandoned: false,
+        is_pb: !!w.is_current,                    // the current WR breathes like a PB
+        total_ms: w.record_ms ?? null,
+        wr: w.is_current ? "current" : "historic",
+      });
+    });
+  }
+  // Global paint order = z-order (last = on top): the two-tier band hierarchy (bandOf),
+  // then the existing tiebreaks - fainter runs lower, faster runs higher.
   out.sort((a, b) => {
-    if (a.is_pb !== b.is_pb) return a.is_pb ? 1 : -1;
+    if (bandOf(a) !== bandOf(b)) return bandOf(a) - bandOf(b);
     if (a.opacity !== b.opacity) return a.opacity - b.opacity;
     const at = a.total_ms ?? Infinity, bt = b.total_ms ?? Infinity;
     return at === bt ? 0 : bt - at;
@@ -115,9 +156,13 @@ export function buildTrailRuns(courseReads, settings, rosterList) {
   return out;
 }
 
-/** Legend rows (active players) for the overlay: {name, color, mode, n}. */
+/** Legend rows (active players) for the overlay: {name, color, mode, n}. When WR mode is not off,
+ *  appends a grey "WR" row. */
 export function trailLegendRows(settings, rosterList) {
-  return (rosterList ?? [])
+  const rows = (rosterList ?? [])
     .map((p) => ({ name: p.display_name, color: playerColor(p), ...playerCfg(settings, p) }))
     .filter((r) => r.mode !== "none");
+  const wr = wrCfg(settings);
+  if (wr.mode !== "off") rows.push({ name: "WR", color: WR_COLOR, mode: wr.mode, n: 1 });
+  return rows;
 }

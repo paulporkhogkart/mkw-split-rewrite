@@ -528,6 +528,11 @@ config-only and becomes useful as superseded trails accumulate (§3.1).
 Colours stay locked and non-user-configurable, consistent with the existing rule that "a player's
 colour is fixed + the same on every client" (`trailSettings.js:5`).
 
+Implemented by Plan 4 (2026-07-18-wr-client-dots-design.md): wr_trails ride the
+sync_course_reads payload behind a wrMode gate; the WR renders as one more grey player
+(current = its pulsing PB under the player-PB band, historic = its ghosts under player
+past runs; two-tier alive/abandoned hierarchy).
+
 ---
 
 ## 8. Risks and decisions taken
@@ -571,7 +576,7 @@ Ordered by dependency; each is independently verifiable.
    (close-to-tray, start-at-login, hidden start), so it is the only plan with a blast radius on the
    existing app. Wires plan 2's core to the "Run the WR service" checkbox.
 4. **Client display** — §7. Depends on plan 1's `/v1/wr-trails` and on plan 2 having produced at
-   least one real trail to look at.
+   least one real trail to look at. **DONE** — see 2026-07-18-wr-client-dots-design.md.
 
 Plans 1 and 3 touch existing production code paths; 2 and 4 are additive. Splitting 2 from 3 means
 the download → engine → verify core is proven against the fixture **before** any UI exists to

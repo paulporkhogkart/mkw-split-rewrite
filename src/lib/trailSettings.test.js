@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { playerColor, playerCfg, activeConfig, rankOpacity, buildTrailRuns, trailLegendRows, TRAIL_PRESETS } from "./trailSettings.js";
+import { playerColor, playerCfg, activeConfig, rankOpacity, buildTrailRuns, trailLegendRows, TRAIL_PRESETS, wrCfg, bandOf, WR_COLOR } from "./trailSettings.js";
 
 const roster = [
   { player_id: 1, display_name: "Paul", is_me: true },
@@ -70,11 +70,112 @@ describe("trailSettings helpers", () => {
     expect(out.map((r) => r.points[0][1])).toEqual([3, 5, 2, 4, 1]);
   });
 
-  it("trailLegendRows lists active players with colour + mode", () => {
+  it("trailLegendRows lists active players with colour + mode, plus the default-on WR row", () => {
     const s = { players: { 2: { mode: "none" } } };
     expect(trailLegendRows(s, roster).map((r) => [r.name, r.mode, r.color])).toEqual([
       ["Paul", "last_pb", playerColor(roster[0])],
       ["Alex", "last_pb", playerColor(roster[2])],
+      ["WR", "current", WR_COLOR],
     ]);
+  });
+});
+
+describe("WR trails (the WR is one more grey player; spec 2026-07-18)", () => {
+  // Wire rows as the Pi serves them: fastest-first, is_current 0/1 integers.
+  const wrRows = [
+    { wr_id: 9, holder_name: "JaK", record_ms: 62934, is_current: 1, points: [[0, 90, 0, 1]] },
+    { wr_id: 7, holder_name: "Old", record_ms: 64000, is_current: 0, points: [[0, 91, 0, 1]] },
+  ];
+
+  it("wrCfg defaults to current; unknown stored values fall back to current", () => {
+    expect(wrCfg({})).toEqual({ mode: "current" });
+    expect(wrCfg(undefined)).toEqual({ mode: "current" });
+    expect(wrCfg({ wr: { mode: "off" } })).toEqual({ mode: "off" });
+    expect(wrCfg({ wr: { mode: "all" } })).toEqual({ mode: "all" });
+    expect(wrCfg({ wr: { mode: "garbage" } })).toEqual({ mode: "current" });
+  });
+
+  it("mode current shows only the current WR; all shows history too; off shows none", () => {
+    const reads = { trails: [], wr_trails: wrRows };
+    expect(buildTrailRuns(reads, { players: {}, wr: { mode: "current" } }, roster)
+      .map((r) => r.points[0][1])).toEqual([90]);
+    // all: historic band sits below the current WR's band.
+    expect(buildTrailRuns(reads, { players: {}, wr: { mode: "all" } }, roster)
+      .map((r) => r.points[0][1])).toEqual([91, 90]);
+    expect(buildTrailRuns(reads, { players: {}, wr: { mode: "off" } }, roster)).toEqual([]);
+  });
+
+  it("the current WR is grey, pulses like a PB, and paints directly UNDER player PBs", () => {
+    const reads = {
+      trails: [
+        { player_id: 2, status: "finished", is_pb: true,  total_ms: 100000, points: [[0, 1, 0, 1]] },
+        { player_id: 2, status: "finished", is_pb: false, total_ms: 110000, points: [[0, 2, 0, 1]] },
+      ],
+      wr_trails: [wrRows[0]],
+    };
+    const out = buildTrailRuns(reads, { players: {}, wr: { mode: "current" } }, roster);
+    // Bottom -> top: player ghost, current WR, player PB. The WR yields to players
+    // within its rank (decided 2026-07-18, supersedes the earlier above-PBs call).
+    expect(out.map((r) => r.points[0][1])).toEqual([2, 90, 1]);
+    expect(out[1]).toMatchObject({ color: WR_COLOR, is_pb: true, abandoned: false, wr: "current" });
+  });
+
+  it("historic WRs sort under all alive player past runs and obey the fade toggle", () => {
+    const reads = {
+      trails: [{ player_id: 2, status: "finished", is_pb: false, total_ms: 110000, points: [[0, 2, 0, 1]] }],
+      wr_trails: wrRows,
+    };
+    const out = buildTrailRuns(reads, { fadeByRank: true, players: {}, wr: { mode: "all" } }, roster);
+    // historic WR < alive player past run < current WR
+    expect(out.map((r) => r.points[0][1])).toEqual([91, 2, 90]);
+    // Fade parity: the historic row is index 1 of the fastest-first WR set, exactly
+    // like a player's non-PB run at rank 1 of 2 (no special dimming anywhere).
+    expect(out[0].opacity).toBe(rankOpacity(1, 2, true));
+    expect(out[0]).toMatchObject({ is_pb: false, wr: "historic", color: WR_COLOR });
+  });
+
+  it("two-tier band formula: every alive run outranks every abandoned one", () => {
+    // Paul's canonical impossible case: a dead current WR sits under an alive player past run.
+    expect(bandOf({ wr: "current", is_pb: true, abandoned: true }))
+      .toBeLessThan(bandOf({ wr: null, is_pb: false, abandoned: false }));
+    expect(bandOf({ wr: null, is_pb: false, abandoned: true }))
+      .toBeLessThan(bandOf({ wr: "historic", is_pb: false, abandoned: false }));
+    // Within a tier: historic WR < player past run < current WR < player PB.
+    expect([
+      bandOf({ wr: "historic", is_pb: false, abandoned: false }),
+      bandOf({ wr: null, is_pb: false, abandoned: false }),
+      bandOf({ wr: "current", is_pb: true, abandoned: false }),
+      bandOf({ wr: null, is_pb: true, abandoned: false }),
+    ]).toEqual([4, 5, 6, 7]);
+    // The abandoned tier mirrors it 4 lower.
+    expect(bandOf({ wr: null, is_pb: false, abandoned: true })).toBe(1);
+    expect(bandOf({ wr: null, is_pb: true, abandoned: true })).toBe(3);
+  });
+
+  it("a stale cached payload without wr_trails yields no WR runs and no crash", () => {
+    const reads = { trails: [{ player_id: 2, status: "finished", is_pb: false, points: [[0, 2, 0, 1]] }] };
+    const out = buildTrailRuns(reads, { players: {}, wr: { mode: "current" } }, roster);
+    expect(out).toHaveLength(1);
+    expect(out[0].wr).toBe(null);
+  });
+
+  it("legend gains a grey WR row iff mode != off", () => {
+    const rows = trailLegendRows({ players: {}, wr: { mode: "all" } }, roster);
+    expect(rows[rows.length - 1]).toMatchObject({ name: "WR", color: WR_COLOR, mode: "all" });
+    expect(trailLegendRows({ players: {}, wr: { mode: "off" } }, roster)
+      .map((r) => r.name)).not.toContain("WR");
+  });
+
+  it("an abandoned run sorts below an alive ghost even when less faded (tier beats opacity)", () => {
+    const reads = { trails: [
+      { player_id: 2, status: "reset",    is_pb: false, total_ms: null,   points: [[0, 7, 0, 1]] },  // rank 0 -> opacity 1, abandoned
+      { player_id: 2, status: "finished", is_pb: false, total_ms: 110000, points: [[0, 8, 0, 1]] },  // rank 1 -> opacity 0.2, alive
+    ] };
+    const out = buildTrailRuns(reads, { fadeByRank: true, players: {}, wr: { mode: "off" } }, roster);
+    // The old opacity-first sort painted [8, 7]; the two-tier hierarchy puts the
+    // abandoned run under the alive one regardless of fade (spec 2026-07-18).
+    expect(out.map((r) => r.points[0][1])).toEqual([7, 8]);
+    expect(out[0]).toMatchObject({ abandoned: true, opacity: 1 });
+    expect(out[1]).toMatchObject({ abandoned: false, opacity: 0.2 });
   });
 });

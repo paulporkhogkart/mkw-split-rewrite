@@ -4,7 +4,7 @@
   // Colours are locked + auto-assigned per player (same on every client), shown read-only.
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
-  import { trailSettings, roster, cacheRoster, playerCfg, playerColor, resetTrailSettings } from "../lib/trailSettings.js";
+  import { trailSettings, roster, cacheRoster, playerCfg, playerColor, resetTrailSettings, wrCfg, WR_COLOR } from "../lib/trailSettings.js";
 
   let confirmReset = false;
 
@@ -13,6 +13,9 @@
     ["last", "Last N"], ["last_pb", "PB + Last N"], ["all", "All"],
   ];
   const usesN = (m) => m === "best" || m === "last" || m === "last_pb";
+  const WR_MODE_OPTS = [["off", "Off"], ["current", "Current WR"], ["all", "All WRs"]];
+  const setWrMode = (m) => trailSettings.update((s) => ({ ...s, wr: { mode: m } }));
+  $: wrmode = wrCfg($trailSettings).mode;
 
   onMount(async () => {
     try {
@@ -38,6 +41,20 @@
     <input type="checkbox" checked={$trailSettings.fadeByRank} on:change={(e) => setFade(e.target.checked)} />
     <span class="fade-tx"><b>Fade older runs by rank</b><i>Off by default. When on, Best / Last sets dim weaker runs - Last: newest brightest; Best: fastest brightest. The PB always stays bright.</i></span>
   </label>
+
+  <div class="grid">
+    <div class="row head"><span>World record</span><span>Show</span><span class="ralign"></span><span class="calign">Colour</span></div>
+    <div class="row" class:off={wrmode === "off"}>
+      <span class="pn">WR</span>
+      <select value={wrmode} on:change={(e) => setWrMode(e.target.value)}>
+        {#each WR_MODE_OPTS as [v, l]}<option value={v}>{l}</option>{/each}
+      </select>
+      <span></span>
+      <span class="chip" class:off={wrmode === "off"}
+        style={wrmode === "off" ? "" : `background:${WR_COLOR}`} title="Locked colour"></span>
+    </div>
+  </div>
+  <p class="note">The current world record replays as a grey dot. It pulses so you can tell it apart from player ghosts. All WRs adds the older records this track has had.</p>
 
   {#if $roster.length === 0}
     <p class="empty">No roster loaded. Set your server URL + token in the Sync tab, then reopen this tab.</p>

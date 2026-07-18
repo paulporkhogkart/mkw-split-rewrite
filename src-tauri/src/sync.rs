@@ -585,11 +585,22 @@ pub fn sync_list_pending() -> String {
     "[]".into()
 }
 
-const EMPTY_COURSE_READS: &str = r#"{"pb_splits":{"total_ms":null,"splits":{}},"trails":[],"friends_pbs":[]}"#;
+const EMPTY_COURSE_READS: &str = r#"{"pb_splits":{"total_ms":null,"splits":{}},"trails":[],"friends_pbs":[],"wr_trails":[]}"#;
 
 /// Per-player trail selection passed from the frontend's Trails settings.
 #[derive(serde::Deserialize)]
 pub struct PlayerTrailCfg { pub player_id: i64, pub mode: String, pub n: i64 }
+
+/// The WR display mode from the frontend's Trails settings. Missing or unrecognized
+/// values mean "current" (the product default; spec 2026-07-18 §1) - one validation
+/// point, so a typo can never silently disable the fetch OR invent a mode.
+fn resolve_wr_mode(raw: Option<&str>) -> &'static str {
+    match raw {
+        Some("off") => "off",
+        Some("all") => "all",
+        _ => "current",
+    }
+}
 
 /// Tag each run in a /v1/players/:id/trails response with its player_id for the combined payload.
 fn tag_runs_with_player(player_id: i64, runs: &serde_json::Value) -> Vec<serde_json::Value> {
@@ -600,10 +611,11 @@ fn tag_runs_with_player(player_id: i64, runs: &serde_json::Value) -> Vec<serde_j
     }).collect()).unwrap_or_default()
 }
 
-/// Fetch the caller's PB splits + each configured player's trails + friends-PBs and combine
-/// into one payload. Err on any non-2xx / network error. Parses via text()+serde_json so no
-/// reqwest "json" feature is required.
-async fn fetch_course_reads(cfg: &Config, course: &str, players: &[PlayerTrailCfg]) -> Result<String, String> {
+/// Fetch three token-authenticated reads (caller's PB splits, each configured player's trails,
+/// friends-PBs) and one public read (WR trails) into one payload. The three token reads Err on
+/// any non-2xx / network error (all-or-cache); the wr-trails read (public, gated by wr_mode)
+/// degrades to [] on any error so older Pis or transient failures never take the other three down.
+async fn fetch_course_reads(cfg: &Config, course: &str, players: &[PlayerTrailCfg], wr_mode: &str) -> Result<String, String> {
     let base = cfg.server_url.trim_end_matches('/');
     let client = reqwest::Client::new();
     let q = [("course", course), ("cc", "150")];
@@ -627,14 +639,25 @@ async fn fetch_course_reads(cfg: &Config, course: &str, players: &[PlayerTrailCf
         ).await?;
         trails.extend(tag_runs_with_player(p.player_id, &runs));
     }
-    Ok(serde_json::json!({ "pb_splits": pb, "trails": trails, "friends_pbs": fp }).to_string())
+    // WR trails: public read, no token needed. Degrade, never fail - a Pi that
+    // predates the endpoint (or a transient error) must not take PB splits and
+    // player trails down with it; the dots just sit out this fetch.
+    let wr = if wr_mode == "off" {
+        serde_json::json!([])
+    } else {
+        get_json(client.get(format!("{base}/v1/wr-trails")).query(&q), "wr-trails")
+            .await
+            .unwrap_or_else(|e| { log::debug!("[sync] wr-trails: {e}"); serde_json::json!([]) })
+    };
+    Ok(serde_json::json!({ "pb_splits": pb, "trails": trails, "friends_pbs": fp, "wr_trails": wr }).to_string())
 }
 
-/// Frontend reads for a course (PB splits + per-player trails + friends PBs), via the server
-/// with the token, cached per course. `config` is the per-player trail selection (players with
-/// mode != none). Returns the last cache when offline / unconfigured. JSON string.
+/// Frontend reads for a course (PB splits + per-player trails + friends PBs + WR trails),
+/// via the server with the token, cached per course. `config` is the per-player trail selection
+/// (players with mode != none). `wr_mode` gates the WR read (missing/unrecognized defaults to
+/// "current"; "off" skips it). Returns the last cache when offline / unconfigured. JSON string.
 #[tauri::command]
-pub async fn sync_course_reads(course: String, config: Option<Vec<PlayerTrailCfg>>) -> String {
+pub async fn sync_course_reads(course: String, config: Option<Vec<PlayerTrailCfg>>, wr_mode: Option<String>) -> String {
     let slug = slugify(&course);
     let players = config.unwrap_or_default();
     let cfg = { CONFIG.lock().unwrap().clone() };
@@ -646,7 +669,7 @@ pub async fn sync_course_reads(course: String, config: Option<Vec<PlayerTrailCfg
     if cfg.server_url.trim().is_empty() || cfg.token.trim().is_empty() {
         return cached();
     }
-    match fetch_course_reads(&cfg, &course, &players).await {
+    match fetch_course_reads(&cfg, &course, &players, resolve_wr_mode(wr_mode.as_deref())).await {
         Ok(payload) => {
             if let Ok(g) = OUTBOX.lock() {
                 if let Some(c) = g.as_ref() { course_cache_put(c, &slug, &payload); }
@@ -1097,6 +1120,29 @@ mod tests {
         assert_eq!(out[0]["run_id"], 10);
         assert_eq!(out[1]["player_id"], 7);
         assert!(tag_runs_with_player(7, &serde_json::json!("not an array")).is_empty());
+    }
+
+    #[test]
+    fn empty_course_reads_carries_every_payload_key() {
+        // The offline/unconfigured fallback must have the same shape as a live payload,
+        // or the frontend's key reads differ between online and offline.
+        let v: serde_json::Value = serde_json::from_str(EMPTY_COURSE_READS).unwrap();
+        for key in ["pb_splits", "trails", "friends_pbs", "wr_trails"] {
+            assert!(v.get(key).is_some(), "EMPTY_COURSE_READS missing {key}");
+        }
+        assert!(v["wr_trails"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn wr_mode_resolution_defaults_unknowns_to_current() {
+        // Missing or unrecognized means the product default, one validation point
+        // (spec 2026-07-18 §1). "off" is what gates the GET entirely.
+        assert_eq!(resolve_wr_mode(None), "current");
+        assert_eq!(resolve_wr_mode(Some("current")), "current");
+        assert_eq!(resolve_wr_mode(Some("off")), "off");
+        assert_eq!(resolve_wr_mode(Some("all")), "all");
+        assert_eq!(resolve_wr_mode(Some("garbage")), "current");
+        assert_eq!(resolve_wr_mode(Some("")), "current");
     }
 
     #[test]

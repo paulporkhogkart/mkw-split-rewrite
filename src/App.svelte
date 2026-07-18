@@ -35,7 +35,7 @@
            trailRuns as trailRunsStore, trailLegend as trailLegendStore, serverConnection } from "./lib/stores.js";
   import { get } from "svelte/store";
   import { trailSettings, roster as rosterStore, cacheRoster,
-           activeConfig, buildTrailRuns, trailLegendRows } from "./lib/trailSettings.js";
+           activeConfig, buildTrailRuns, trailLegendRows, wrCfg } from "./lib/trailSettings.js";
   import { initDiscordPresence } from "./lib/discord.js";
   import { initPresence } from "./lib/presence.js";
   import { initSync } from "./lib/sync.js";
@@ -727,7 +727,7 @@
     try {
       const settings = get(trailSettings);
       const rosterList = get(rosterStore);
-      const r = JSON.parse(await invoke("sync_course_reads", { course, config: activeConfig(settings, rosterList) }));
+      const r = JSON.parse(await invoke("sync_course_reads", { course, config: activeConfig(settings, rosterList), wrMode: wrCfg(settings).mode }));
       pbSplitsStore.set(r.pb_splits?.splits ?? null);
       pbTotalStore.set(r.pb_splits?.total_ms ?? null);
       trailRunsStore.set(buildTrailRuns(r, settings, rosterList));
