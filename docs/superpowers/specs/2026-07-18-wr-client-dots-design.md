@@ -11,10 +11,12 @@ Decisions locked (Paul, 2026-07-18):
 | Decision | Choice |
 |---|---|
 | Mental model | **The WR is just another player**, drawn grey. Its "PB" is the current WR; historic WRs are its ordinary ghost runs |
-| Z-order | Current WR paints **just above player PBs** (top of the stack); historic WRs are ordinary ghost-band members |
+| Z-order (revised 2026-07-18, supersedes the earlier "above player PBs" call) | **WR always yields to players within its rank**: the current WR paints directly UNDER the player-PB band; historic WRs paint UNDER all player past runs. Full hierarchy in §3 |
+| Abandoned tier (added 2026-07-18) | The whole hierarchy is **duplicated into two tiers**: alive runs (dots) above, abandoned runs (the ones that end as an X) below — every alive run outranks every abandoned one, so even a hypothetical dead current WR sits under an alive player past run. Tier comes from the run's `abandoned` flag (static), not from the frame it visually becomes an X |
 | Opacity | **No special dimming.** Full opacity like every player run; historic WRs obey the existing global "Fade older runs by rank" toggle exactly as a player's non-PB runs do |
 | Default | **Current WR only, on** (`mode: "current"`); "all history" and "off" are options |
 | Colour | Locked grey `#a7adb5`, a constant beside `TRAIL_PRESETS` — never user-configurable (the `trailSettings.js:5` rule) |
+| Storage | Already satisfied by Plan 1, pinned here per Paul: `wr_trails` stores trails **identically to `run_trails`** — same `codec`/`n`/`max_t_ms`/`data` columns, same `trailCodec.ts` brotli-v1 blobs (parent §3; `pi/src/db/wrTrails.ts` insertWrTrail). Points are decoded only on the wire, exactly like run trails. Plan 4 adds no storage |
 | Copy | No em dashes in any user-facing string (standing rule, 2026-07-18) |
 
 ---
@@ -76,17 +78,30 @@ mirrors `playerCfg`. `resetTrailSettings` resets it with everything else. No cou
   the player runs use, over the WR rows in their fastest-first order (fade toggle off →
   1.0 like everyone else; on → fastest brightest, same as a player's Best-mode fade).
 
-The paint-order sort gains an explicit band index so the existing behavior is unchanged
-and the two WR placements are exact:
+The paint-order sort gains an explicit band index (computed in the builder; `is_pb`
+stays purely the pulse flag, `abandoned` stays purely the X flag) implementing Paul's
+two-tier hierarchy — WR yields to players within its rank, and every alive run outranks
+every abandoned run:
 
 ```
-band 0: non-PB runs (player ghosts AND historic WRs, intermingled by the existing
-        opacity-then-speed tiebreaks)
-band 1: player PBs
-band 2: the current WR          (Paul: "just above player PBs")
+rank within a tier:  0 historic WR   1 player past run   2 current WR   3 player PB
+band = (abandoned ? 0 : 4) + rank        // paint order = ascending band
+
+bottom  band 0: abandoned historic WRs      (definitionally empty: WR trails are verified finished)
+        band 1: abandoned player past runs  (the runs that end as an X)
+        band 2: abandoned current WR        (definitionally empty, hierarchy defined anyway)
+        band 3: abandoned player PBs        (definitionally empty: a PB is a finished run)
+        band 4: alive historic WRs
+        band 5: alive player past runs
+        band 6: alive current WR
+top     band 7: alive player PBs            (fastest on top, as today)
 ```
 
-Within a band, the existing tiebreaks stay: fainter lower, faster higher.
+A run's tier is its `abandoned` flag — a static property — so the paint order never
+reshuffles mid-race when an abandoned dot visually turns into its X. Within a band, the
+existing tiebreaks stay: fainter lower, faster higher. The empty-by-construction bands
+cost nothing (the band is a formula, not a data structure) and keep the pure function
+total for any input.
 
 **Legend:** `trailLegendRows` gains one grey `"WR"` row while `wr.mode != "off"` (no
 holder name in v1; the legend is settings-derived and has no server data in scope).
@@ -111,9 +126,12 @@ settings change applies at the next race, exactly like the player-trail settings
 ## 6. Testing
 
 - **JS unit (`trailSettings.test.js`):** mode selection off/current/all; current WR gets
-  `is_pb` + grey + tops the stack above a player PB; historic WRs land in the ghost band
-  and obey `rankOpacity` parity with player runs; missing `wr_trails` key (stale cache)
-  yields no WR runs and no crash; legend row appears iff mode != off; `wrCfg` defaults.
+  `is_pb` + grey and sorts directly UNDER every player PB; historic WRs sort UNDER every
+  alive player past run and obey `rankOpacity` parity with player runs; the two-tier split
+  is table-tested on the band formula, including Paul's canonical case (an abandoned
+  current WR sorts below an alive player past run) and an abandoned player ghost below an
+  alive historic WR; missing `wr_trails` key (stale cache) yields no WR runs and no crash;
+  legend row appears iff mode != off; `wrCfg` defaults.
 - **Rust:** `EMPTY_COURSE_READS` contains the `wr_trails` key (shape-pinning test beside
   the existing const); mode resolution helper (`"off"`/`"current"`/`"all"`/garbage/None)
   is a pure function with a table test.
