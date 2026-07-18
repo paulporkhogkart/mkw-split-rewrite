@@ -3,7 +3,7 @@
 // just runs `node serve.mjs`. PORT defaults to 8788. Helpers are exported for tests;
 // the server only listens when this file is run directly.
 import { createServer } from "node:http";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, stat, readlink } from "node:fs/promises";
 import { join, normalize, extname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -28,10 +28,58 @@ export function resolveFile(urlPath, distDir) {
   return join(distDir, rel);
 }
 
-export function createStaticServer(distDir) {
+const CHIPS_PREFIX = "/chips/anim/";
+
+/** Resolve the current chips tag: `current` may be a symlink to the tag dir or a
+ *  text file containing the tag name (Windows dev uses the text-file form). Returns
+ *  null when unset/invalid. */
+export async function currentChipsTag(chipsDir) {
+  const p = join(chipsDir, "current");
+  try { return (await readlink(p)).replace(/[/\\]+$/, "").split(/[/\\]/).pop(); }
+  catch { /* not a symlink */ }
+  try { return (await readFile(p, "utf8")).trim() || null; }
+  catch { return null; }
+}
+
+export function createStaticServer(distDir, opts = {}) {
+  const chipsDir = opts.chipsDir ?? process.env.MKW_CHIPS_DIR;
   const indexHtml = join(distDir, "index.html");
   return createServer(async (req, res) => {
     try {
+      const rawPath = decodeURIComponent((req.url || "/").split("?")[0]);
+      if (rawPath.startsWith(CHIPS_PREFIX)) {
+        if (!chipsDir) { res.writeHead(404); res.end("not found"); return; }
+        const rest = rawPath.slice(CHIPS_PREFIX.length);
+        if (rest === "manifest.json") {
+          const tag = await currentChipsTag(chipsDir);
+          const file = tag && resolveFile(`/${tag}/chips/manifest.json`, chipsDir);
+          const body = file && await readFile(file).catch(() => null);
+          if (!body) { res.writeHead(404); res.end("not found"); return; }
+          const j = JSON.parse(body);
+          j.base = `${CHIPS_PREFIX}${tag}/`;
+          res.writeHead(200, {
+            "content-type": TYPES[".json"],
+            "cache-control": "public, max-age=300",
+            "x-chips-tag": tag,
+          });
+          res.end(JSON.stringify(j));
+          return;
+        }
+        // <tag>/<file...> — tag is user-supplied (it's in the URL), so guard it against
+        // traversal the same way resolveFile guards everything else; reject before it
+        // ever reaches `join(chipsDir, tag, "chips")`.
+        const [tag, ...restParts] = rest.split("/");
+        if (!tag || tag.includes("..") || tag.includes("\\")) { res.writeHead(404); res.end("not found"); return; }
+        const file = resolveFile(`/${restParts.join("/")}`, join(chipsDir, tag, "chips"));
+        const ok = await stat(file).then((s) => s.isFile()).catch(() => false);
+        if (!ok) { res.writeHead(404); res.end("not found"); return; }
+        res.writeHead(200, {
+          "content-type": contentType(file),
+          "cache-control": "public, max-age=31536000, immutable",
+        });
+        res.end(await readFile(file));
+        return;
+      }
       let file = resolveFile(req.url, distDir);
       const exists = await stat(file).then((s) => s.isFile()).catch(() => false);
       if (!exists) {
