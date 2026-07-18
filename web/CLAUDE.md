@@ -52,3 +52,7 @@ one thing / never regress). **Verify map/canvas visuals in a REAL browser (headl
 never OpenCV** — OpenCV premultiplies differently and lies about compositing. Pi-served media
 (`web/public/**`, e.g. player GIFs) must be **ordinary git binaries, never Git LFS** (the Pi build
 has no `git lfs pull`, so LFS files ship as pointer stubs).
+
+**Chip sprite-sheet pack:** built by `tools/asset_matte/build_site_pack.py`, delivered as GitHub
+Release assets pinned by `web/chips.lock`, served at `/chips/anim/` — see
+`docs/superpowers/specs/2026-07-18-chip-site-pack-design.md`.

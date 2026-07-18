@@ -137,6 +137,10 @@ A bottom `StatusBar` shows connection dot, live screen name + confidence score, 
 | `images/mushrooms/1mush.png`–`3mush.png` | Mushroom count templates |
 | `images/heads/<player>.png` | Head images for replay bubbles (BGRA) |
 
+**Chip sprite-sheet pack:** built by `tools/asset_matte/build_site_pack.py`, delivered as GitHub
+Release assets pinned by `web/chips.lock`, served at `/chips/anim/` — see
+`docs/superpowers/specs/2026-07-18-chip-site-pack-design.md`.
+
 ## Important Constants
 
 All ROI coordinates are **full 1080p pixels**. `DISPLAY_SCALE = 720/1080` applied for 720p label drawing. Minimap tuning knobs prefixed `_MM_`. All constants are also in the `config` table and listed in `docs/config-reference.md`.

@@ -112,3 +112,35 @@ Latest sample outputs: `temp/asset_proof/` (`*_checker.webp` to view; `*_full_*`
   to the right end kart but corrupts the middle, so an end-only check is insufficient).
 - **Flourishes** (A-press selection animation) — in scope, spec deferred.
 - **Write the capture spec**, then do the full-roster run.
+
+---
+
+## Site pack pipeline
+
+Encode matte'd chip animations into WebP sprite-sheet grids + sil masks, packaged as GitHub Release
+assets and deployed to the Pi. See `docs/superpowers/specs/2026-07-18-chip-site-pack-design.md`.
+
+**1. A/B eye test** — `build_ab_lab.py <out_dir>`
+- Encodes a handful of representative combos (big char, small char, busy kart, standalone char)
+  across scale/fps/quality/alpha-bit variations. Outputs a lab HTML page rendering real card-size chips
+  against card-dark background, ink-ring CSS applied, for visual comparison. Paul's eye test locks the
+  recipe; nothing batch-encodes until sign-off.
+
+**2. Batch encode** — `build_site_pack.py <master_manifest.json> <pack_dir>`
+- Multiprocessing over all 6,273 char×costume×kart combos (+ 153 standalone). Per combo: decode
+  pristine 1024×1080 PNG frames from `D:\kartoff\asset_chips\matte\`, downscale + premultiply-safe
+  alpha quantize to 5 bits, tile frames into WebP sprite-sheet grid (near-square, max side ≤4096px),
+  generate sil masks (12-point radial jagged tearout, 4 sampled frames). Estimated wall-clock ~1.5–2h
+  on the 9800X3D (decode+resize dominates). Resume via local book-keeping; skip-if-done.
+- Output: `D:\kartoff\asset_chips\site_pack/` with `chips/` sheets/masks + `manifest.json`.
+
+**3. Pack shards** — `pack_shards.py <pack_dir> <out_lock_file>`
+- Splits the ~2.1GB pack into ~50 shards (~50MB each, per character; under the 2GB GitHub asset
+  limit). Writes shard `.tar` files + `sha256sums.txt`. Generates `<out_lock_file>` (release tag +
+  shard manifest + checksums) for commit to `web/chips.lock`.
+
+**4. Release & deploy** — see the Task 11 release runbook
+- Upload shards + manifest to a dedicated GitHub Release (tag `chips-vN`, NOT a deploy tag). Commit
+  `web/chips.lock` to git. `deploy/update.sh` pulls shards on the Pi, verifies sha256, unpacks into
+  `$DATA/chips/`. `web/serve.mjs` serves the pack at `/chips/anim/` with manifest injection +
+  immutable cache headers.
