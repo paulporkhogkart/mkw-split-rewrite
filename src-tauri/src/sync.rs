@@ -611,9 +611,10 @@ fn tag_runs_with_player(player_id: i64, runs: &serde_json::Value) -> Vec<serde_j
     }).collect()).unwrap_or_default()
 }
 
-/// Fetch the caller's PB splits + each configured player's trails + friends-PBs and combine
-/// into one payload. Err on any non-2xx / network error. Parses via text()+serde_json so no
-/// reqwest "json" feature is required.
+/// Fetch three token-authenticated reads (caller's PB splits, each configured player's trails,
+/// friends-PBs) and one public read (WR trails) into one payload. The three token reads Err on
+/// any non-2xx / network error (all-or-cache); the wr-trails read (public, gated by wr_mode)
+/// degrades to [] on any error so older Pis or transient failures never take the other three down.
 async fn fetch_course_reads(cfg: &Config, course: &str, players: &[PlayerTrailCfg], wr_mode: &str) -> Result<String, String> {
     let base = cfg.server_url.trim_end_matches('/');
     let client = reqwest::Client::new();
@@ -651,9 +652,10 @@ async fn fetch_course_reads(cfg: &Config, course: &str, players: &[PlayerTrailCf
     Ok(serde_json::json!({ "pb_splits": pb, "trails": trails, "friends_pbs": fp, "wr_trails": wr }).to_string())
 }
 
-/// Frontend reads for a course (PB splits + per-player trails + friends PBs), via the server
-/// with the token, cached per course. `config` is the per-player trail selection (players with
-/// mode != none). Returns the last cache when offline / unconfigured. JSON string.
+/// Frontend reads for a course (PB splits + per-player trails + friends PBs + WR trails),
+/// via the server with the token, cached per course. `config` is the per-player trail selection
+/// (players with mode != none). `wr_mode` gates the WR read (missing/unrecognized defaults to
+/// "current"; "off" skips it). Returns the last cache when offline / unconfigured. JSON string.
 #[tauri::command]
 pub async fn sync_course_reads(course: String, config: Option<Vec<PlayerTrailCfg>>, wr_mode: Option<String>) -> String {
     let slug = slugify(&course);

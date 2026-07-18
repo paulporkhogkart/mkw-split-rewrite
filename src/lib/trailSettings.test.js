@@ -165,4 +165,17 @@ describe("WR trails (the WR is one more grey player; spec 2026-07-18)", () => {
     expect(trailLegendRows({ players: {}, wr: { mode: "off" } }, roster)
       .map((r) => r.name)).not.toContain("WR");
   });
+
+  it("an abandoned run sorts below an alive ghost even when less faded (tier beats opacity)", () => {
+    const reads = { trails: [
+      { player_id: 2, status: "reset",    is_pb: false, total_ms: null,   points: [[0, 7, 0, 1]] },  // rank 0 -> opacity 1, abandoned
+      { player_id: 2, status: "finished", is_pb: false, total_ms: 110000, points: [[0, 8, 0, 1]] },  // rank 1 -> opacity 0.2, alive
+    ] };
+    const out = buildTrailRuns(reads, { fadeByRank: true, players: {}, wr: { mode: "off" } }, roster);
+    // The old opacity-first sort painted [8, 7]; the two-tier hierarchy puts the
+    // abandoned run under the alive one regardless of fade (spec 2026-07-18).
+    expect(out.map((r) => r.points[0][1])).toEqual([7, 8]);
+    expect(out[0]).toMatchObject({ abandoned: true, opacity: 1 });
+    expect(out[1]).toMatchObject({ abandoned: false, opacity: 0.2 });
+  });
 });

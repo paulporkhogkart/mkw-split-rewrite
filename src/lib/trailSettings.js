@@ -96,13 +96,15 @@ export function bandOf(run) {
   return (run.abandoned ? 0 : 4) + rank;
 }
 
-/** Group the combined course-reads `trails` (each tagged player_id, rank-ordered within a
- *  player) into render-ready runs with the player's locked colour + per-run opacity. PB runs
- *  stay full opacity (and carry is_pb so the overlay can pulse them); reset runs carry abandoned.
- *  Output is in global paint order (z-order, last = on top), intermingled across players by
- *  importance: every PB sits above every non-PB dot, fainter (more faded) runs sit lower, and
- *  faster runs sit higher - so the fastest PB tops the whole stack and no colour forms a layer.
- *  Returns [{points, color, opacity, abandoned, is_pb, total_ms}]. */
+/** Group course-reads `trails` (per player from `courseReads.trails`) and WR trails
+ *  (mapped through `settings.wr` from `courseReads.wr_trails`; the WR is one more grey player)
+ *  into render-ready runs with locked colours and per-run opacity. The two-tier band hierarchy:
+ *  alive runs above abandoned (X-ending); within a tier: historic WR < player past run < current
+ *  WR < player PB (spec 2026-07-18). Within a band, fainter runs lower / faster runs higher. PB
+ *  runs stay full opacity (and carry is_pb so the overlay can pulse them); reset runs carry
+ *  abandoned. No colour forms a layer.
+ *  Returns [{points, color, opacity, abandoned, is_pb, total_ms, wr}] where wr is
+ *  null | "current" | "historic". */
 export function buildTrailRuns(courseReads, settings, rosterList) {
   const byId = new Map((rosterList ?? []).map((p) => [p.player_id, p]));
   const byPlayer = new Map();
@@ -154,7 +156,8 @@ export function buildTrailRuns(courseReads, settings, rosterList) {
   return out;
 }
 
-/** Legend rows (active players) for the overlay: {name, color, mode, n}. */
+/** Legend rows (active players) for the overlay: {name, color, mode, n}. When WR mode is not off,
+ *  appends a grey "WR" row. */
 export function trailLegendRows(settings, rosterList) {
   const rows = (rosterList ?? [])
     .map((p) => ({ name: p.display_name, color: playerColor(p), ...playerCfg(settings, p) }))

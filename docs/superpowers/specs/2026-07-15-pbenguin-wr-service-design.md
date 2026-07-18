@@ -528,7 +528,10 @@ config-only and becomes useful as superseded trails accumulate (§3.1).
 Colours stay locked and non-user-configurable, consistent with the existing rule that "a player's
 colour is fixed + the same on every client" (`trailSettings.js:5`).
 
-Implemented by Plan 4 (2026-07-18-wr-client-dots-design.md): wr_trails ride the sync_course_reads payload behind a wrMode gate; the WR renders as one more grey player (current = its pulsing PB under the player-PB band, historic = its ghosts under player past runs; two-tier alive/abandoned hierarchy).
+Implemented by Plan 4 (2026-07-18-wr-client-dots-design.md): wr_trails ride the
+sync_course_reads payload behind a wrMode gate; the WR renders as one more grey player
+(current = its pulsing PB under the player-PB band, historic = its ghosts under player
+past runs; two-tier alive/abandoned hierarchy).
 
 ---
 

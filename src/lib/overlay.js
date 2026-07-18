@@ -233,8 +233,8 @@ export function drawOverlay(ctx, opts) {
   // retried/reset run (abandoned: no finish) becomes an X at its final point once its
   // recorded clock runs out, marking where that attempt ended.
   //
-  // `trails` arrives in global paint order (buildTrailRuns): intermingled across players by
-  // importance - every PB above every non-PB, fainter ghosts lower, the fastest PB on top.
+  // `trails` arrives pre-sorted by buildTrailRuns' two-tier band hierarchy (alive above
+  // abandoned; historic WR < player past run < current WR < player PB), fainter lower / faster higher within a band.
   if (trails && trails.length > 0 && raceElapsedMs != null) {
     const dotR = Math.max(3, 5 * scale);
     for (const trail of trails) {
