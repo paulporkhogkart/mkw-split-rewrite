@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
+import type { EventHub } from '../api/events';
 import type { Point } from './types';
 import { insertWrTrail } from './wrTrails';
 import type { TrailPoint } from './trailCodec';
@@ -196,6 +197,36 @@ export function deadJobs(db: DatabaseSync): DeadJob[] {
      WHERE NOT EXISTS (SELECT 1 FROM wr_trails t WHERE t.wr_id = j.wr_id)
        AND w.removed_at IS NULL
        AND (j.attempts >= ? OR j.last_error LIKE 'time_mismatch%')
+       -- A live lease means the final attempt is still being worked: not dead YET.
+       -- Without this, the auto-firing sweep false-alerts mid-attempt and the /result
+       -- route re-announces the same death seconds later (double wr_job_dead).
+       AND (j.lease_until IS NULL OR j.lease_until < datetime('now'))
      ORDER BY j.updated_at DESC`
   ).all(MAX_ATTEMPTS) as DeadJob[];
+}
+
+/** Stamp a dead job as announced, whichever path announced it (the /result route or the
+ *  sweep). Revival (reconcile backfill on a link change) clears it, so a revived-then-
+ *  re-dead job legitimately re-alerts. */
+export function markJobAlerted(db: DatabaseSync, wrId: number): void {
+  db.prepare(`UPDATE wr_jobs SET alerted_at=datetime('now') WHERE wr_id=?`).run(wrId);
+}
+
+/** Announce dead jobs nobody has alerted yet. Catches the death class the /result route
+ *  can't see: a job whose final attempts burned via crash + lease lapse never posts a
+ *  result (spec §6.4's silent-crash note). Runs on the scraper tick; same deadJobs()
+ *  predicate as the route and wr-flags, so all three can never disagree. */
+export function sweepDeadJobAlerts(db: DatabaseSync, hub: EventHub): number {
+  let n = 0;
+  for (const d of deadJobs(db)) {
+    const row = db.prepare('SELECT alerted_at FROM wr_jobs WHERE wr_id=?').get(d.wr_id) as
+      { alerted_at: string | null } | undefined;
+    if (!row || row.alerted_at !== null) continue;
+    hub.publish({ type: 'wr_job_dead', wr_id: d.wr_id, course: d.course,
+      holder: d.holder_name, record_str: d.record_str,
+      reason: d.last_error ?? 'attempts exhausted (no result ever posted)', attempts: d.attempts });
+    markJobAlerted(db, d.wr_id);
+    n++;
+  }
+  return n;
 }

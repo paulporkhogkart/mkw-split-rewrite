@@ -15,13 +15,6 @@ pub struct ServiceCfg {
     pub engine: EnginePath,
 }
 
-// Fields are read via `{:?}` in wr_process_one's probe result (registered — and so
-// webview-invokable — in every build, not just debug; see mod.rs's HONEST GATING NOTE)
-// and by tests matching on the variant only. The dead_code lint deliberately does NOT
-// count Debug-only usage as "read" — see the compiler's own note on this warning. Plan
-// 3's polling loop is expected to start pattern-matching these for real (retry/backoff
-// decisions per outcome kind), at which point this allow can come off.
-#[allow(dead_code)]
 #[derive(Debug)]
 pub enum Outcome {
     /// Nothing claimable (204).
@@ -131,6 +124,7 @@ pub fn process_one(cfg: &ServiceCfg, cancel: &(dyn Fn() -> bool + Sync)) -> Outc
     log::info!("[wr] claimed wr_id={} {} attempt={}", j.wr_id, j.course_slug, j.attempt);
 
     let outcome = run_job(cfg, &client, &j, cancel);
+    super::phase::set(None);
 
     cleanup(&cfg.data_dir, j.wr_id);
     state::set_inflight(&conn, None);
@@ -151,20 +145,44 @@ fn engine_timeout_for(record_ms: i64) -> std::time::Duration {
     std::time::Duration::from_secs(((record_ms / 1000) + 180).clamp(300, 540) as u64)
 }
 
+/// Only a CONFIRMED ownership loss (server said false) stops in-flight work; a network
+/// error keeps going — the lease is probably still ours and the next beat re-checks.
+fn should_stop_after_heartbeat(res: &Result<bool, String>) -> bool {
+    matches!(res, Ok(false))
+}
+
+/// Beat every 120s: the lease is 600s, so even one lost beat leaves wide margin, and
+/// the cadence is cheap enough to never matter.
+const HEARTBEAT_EVERY: std::time::Duration = std::time::Duration::from_secs(120);
+
 fn run_job(cfg: &ServiceCfg, client: &job::Client, j: &job::WrJob,
            cancel: &(dyn Fn() -> bool + Sync)) -> Outcome {
     let tier = verify::tier_for(j.attempt);
     let dest = video_path(&cfg.data_dir, j.wr_id);
 
     let exe = match ytdlp::ensure(&cfg.data_dir) { Ok(p) => p, Err(e) => return Outcome::Error(e) };
-    if let Err(e) = ytdlp::download(&exe, &j.video_url, tier, &dest) {
+    super::phase::set(Some(super::phase::Phase {
+        kind: super::phase::PhaseKind::Downloading, course_slug: j.course_slug.clone() }));
+    if let Err(e) = ytdlp::download(&exe, &j.video_url, tier, &dest, cancel) {
+        // A cancel mid-download is a deliberate stop: release (refund), never fail.
+        if matches!(e, WrError::Cancelled) {
+            let _ = client.release(j.wr_id);
+            return Outcome::Released(j.wr_id);
+        }
         if is_staleness_explicable(&e) {
             // See is_staleness_explicable's doc for why only THIS class of error retries.
             log::warn!("[wr] download failed ({}), refreshing yt-dlp and retrying once", e.reason());
             let retry = ytdlp::fetch(&cfg.data_dir)
                 .map_err(WrError::DownloadFailed)
-                .and_then(|exe2| ytdlp::download(&exe2, &j.video_url, tier, &dest));
+                .and_then(|exe2| ytdlp::download(&exe2, &j.video_url, tier, &dest, cancel));
             if let Err(e2) = retry {
+                // Mirror the first leg: a cancel during the RETRY is the same deliberate
+                // stop — release (refund), never fail (which would burn the attempt and
+                // record a nonsense "cancelled" as last_error).
+                if matches!(e2, WrError::Cancelled) {
+                    let _ = client.release(j.wr_id);
+                    return Outcome::Released(j.wr_id);
+                }
                 let _ = client.fail(j.wr_id, &e2);
                 return Outcome::Failed(j.wr_id, e2);
             }
@@ -175,14 +193,56 @@ fn run_job(cfg: &ServiceCfg, client: &job::Client, j: &job::WrJob,
     }
     if cancel() { let _ = client.release(j.wr_id); return Outcome::Released(j.wr_id); }
 
+    super::phase::set(Some(super::phase::Phase {
+        kind: super::phase::PhaseKind::Processing, course_slug: j.course_slug.clone() }));
     // Wall-clock bound (~the video's own length): budget from the record, not a constant
     // (Rainbow Road is 233s — a fixed 300s left it ~50s of margin, not "room to spare").
-    let finalized = match engine::run_video(
-        &cfg.engine, &dest, selections_for(j), engine_timeout_for(j.record_ms), cancel) {
+    //
+    // HEARTBEAT (spec 2026-07-17 §5.1): while the engine runs, a scoped thread extends
+    // the lease every 120s. This decouples the engine budget from the 600s lease for
+    // good, and a CONFIRMED ownership loss (heartbeat -> Ok(false): someone else claimed
+    // after an overrun) cancels the run — no point finishing a job we can no longer
+    // report. The composed closure means the engine watchdog polls lease_lost every
+    // 250ms like everything else.
+    let lease_lost = std::sync::atomic::AtomicBool::new(false);
+    let cancel_or_lost = || cancel() || lease_lost.load(std::sync::atomic::Ordering::Relaxed);
+    // Declared here, NOT inside the scope closure below: a scoped thread is joined only
+    // when std::thread::scope itself returns, which is after the closure body finishes —
+    // so a flag the spawned thread borrows must outlive the closure, not just live inside
+    // it (the same reason `lease_lost` above is already out here).
+    let done = std::sync::atomic::AtomicBool::new(false);
+    let run_result = std::thread::scope(|s| {
+        let done_ref = &done;
+        let lost_ref = &lease_lost;
+        s.spawn(move || {
+            let mut since_beat = std::time::Duration::ZERO;
+            while !done_ref.load(std::sync::atomic::Ordering::Relaxed) {
+                if cancel_or_lost() { return; }
+                std::thread::sleep(std::time::Duration::from_millis(250));
+                since_beat += std::time::Duration::from_millis(250);
+                if since_beat >= HEARTBEAT_EVERY {
+                    since_beat = std::time::Duration::ZERO;
+                    let res = client.heartbeat(j.wr_id);
+                    if should_stop_after_heartbeat(&res) {
+                        log::warn!("[wr] wr_id={} lease no longer ours; cancelling run", j.wr_id);
+                        lost_ref.store(true, std::sync::atomic::Ordering::Relaxed);
+                        return;
+                    }
+                }
+            }
+        });
+        let r = engine::run_video(
+            &cfg.engine, &dest, selections_for(j), engine_timeout_for(j.record_ms),
+            &cancel_or_lost);
+        done.store(true, std::sync::atomic::Ordering::Relaxed);
+        r
+    });
+    let finalized = match run_result {
         Ok(f) => f,
         // Match the variant, don't re-poll cancel(): a genuine timeout that happens to
         // land just as the user pauses must still be reported as a timeout.
         // release() refunds the attempt; fail() deliberately does not.
+        // (A lease-lost cancel lands here too: release() then 409s harmlessly — fine.)
         Err(WrError::Cancelled) => { let _ = client.release(j.wr_id); return Outcome::Released(j.wr_id); }
         Err(e) => { let _ = client.fail(j.wr_id, &e); return Outcome::Failed(j.wr_id, e); }
     };
@@ -439,5 +499,15 @@ mod tests {
         // The ENGINE budget stays 60s under the Pi's 600s lease (the whole job shares
         // that one lease — see engine_timeout_for's doc for the download/upload margins).
         assert_eq!(engine_timeout_for(900_000), Duration::from_secs(540));
+    }
+
+    #[test]
+    fn heartbeat_verdicts_only_a_confirmed_loss_stops_work() {
+        // Ok(false) = the server CONFIRMED we no longer own the lease: stop, the job is
+        // someone else's now. An Err is a network blip — the lease is probably still
+        // ours, and stopping on flaky wifi would abandon healthy jobs.
+        assert!(should_stop_after_heartbeat(&Ok(false)));
+        assert!(!should_stop_after_heartbeat(&Ok(true)));
+        assert!(!should_stop_after_heartbeat(&Err("timeout".into())));
     }
 }

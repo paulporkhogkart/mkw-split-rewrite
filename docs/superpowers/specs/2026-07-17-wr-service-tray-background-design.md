@@ -38,10 +38,16 @@ programmatically:
   `sync::on_line` in Rust; the engine's events simply have no listener while trayed), so
   nothing is lost but the on-screen log history, which restarts empty on restore. With the
   checkbox off, close quits, as today.
+- **Staying resident (found in review 2026-07-18):** destroying the last window fires
+  `RunEvent::ExitRequested`, which unprevented exits the app — so close-to-tray requires a
+  guarded `api.prevent_exit()`. The guard distinguishes cases with no extra state:
+  last-window-destroy carries `code: None`, a deliberate `app.exit(n)` carries `Some(n)`.
+  Prevent only on `None` AND close-to-tray enabled.
 - **Quit** (tray menu, or close with the checkbox off): the existing `RunEvent::Exit` sidecar
-  teardown runs unchanged. If a WR job is in flight: set the loop's cancel flag, join the loop
-  thread briefly (≤2 s) so it can `release()` the lease; past that, exit anyway — the lease
-  lapse covers an unreleased job (attempt burned, per crash semantics).
+  teardown runs unchanged (tray Quit = `app.exit(0)` → `Some(0)` → never prevented). If a WR
+  job is in flight: set the loop's cancel flag, join the loop thread (typically <1 s; worst
+  case ~30 s if a lease release/heartbeat is mid-flight against an unreachable Pi — the 30 s
+  reqwest timeout bounds it) so it can `release()` the lease before the process exits.
 
 **Single instance is now load-bearing, not cosmetic.** With autostart on, a manual launch
 would start a SECOND process: two live engines contending for the camera, and two WR workers

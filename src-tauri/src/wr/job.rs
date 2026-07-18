@@ -132,11 +132,8 @@ impl Client {
     /// lease), but a transient 5xx would read identically: treat false as "stop working,
     /// we cannot confirm we still hold this job" rather than specifically "409".
     ///
-    /// Unused for now (`#[allow(dead_code)]` below) — today's whole-job worst case
-    /// (~30s download + <=540s engine budget + 30s upload) still fits the ~600s lease,
-    /// narrowly; see service::engine_timeout_for's doc. Plan 3's loop should call this
-    /// defensively around the engine step.
-    #[allow(dead_code)]
+    /// Called every 120s by run_job's heartbeat thread while the engine runs (Plan 3),
+    /// so the lease outlives any legal run regardless of the download's duration.
     pub fn heartbeat(&self, wr_id: i64) -> Result<bool, String> {
         Ok(self.post(&format!("/v1/wr-jobs/{wr_id}/heartbeat"), None)?.status().is_success())
     }

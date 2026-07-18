@@ -5,7 +5,7 @@ import type { Env } from './app';
 import type { Point } from '../db/types';
 import type { EventHub } from './events';
 import { requireToken } from './auth';
-import { claimJob, heartbeatJob, releaseJob, completeJob, failJob, deadJobs, DEFAULT_LEASE_SEC } from '../db/wrJobs';
+import { claimJob, heartbeatJob, releaseJob, completeJob, failJob, deadJobs, markJobAlerted, DEFAULT_LEASE_SEC } from '../db/wrJobs';
 
 type ResultBody = { ok: true; points: Point[] } | { ok: false; error: string };
 
@@ -88,6 +88,7 @@ export function wrJobsRoutes(db: DatabaseSync, hub: EventHub): Hono<Env> {
         hub.publish({ type: 'wr_job_dead', wr_id: dead.wr_id, course: dead.course,
           holder: dead.holder_name, record_str: dead.record_str,
           reason: dead.last_error ?? 'unknown', attempts: dead.attempts });
+        markJobAlerted(db, dead.wr_id);
       }
       return c.json({ ok: true });
     }

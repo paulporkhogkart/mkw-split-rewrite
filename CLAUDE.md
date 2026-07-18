@@ -13,7 +13,7 @@ engine); the others have their own `CLAUDE.md` where noted.
 
 | Surface | Path | What it is |
 |---------|------|-----------|
-| **Desktop app "pbenguin"** | `mkw_tracker/` (Python engine) + `src/`, `src-tauri/` (Tauri v2 + Svelte shell) | The capture/detection client. **Pure detector**: the engine emits `run_finalized` over stdio; Rust does all networking. Product name is `pbenguin` (`src-tauri/tauri.conf.json`); the npm package id is still `mkw-tracker`. |
+| **Desktop app "pbenguin"** | `mkw_tracker/` (Python engine) + `src/`, `src-tauri/` (Tauri v2 + Svelte shell) | The capture/detection client. **Pure detector**: the engine emits `run_finalized` over stdio; Rust does all networking. Product name is `pbenguin` (`src-tauri/tauri.conf.json`); the npm package id is still `mkw-tracker`. Opt-in background WR service (tray-only autostart, settings > Background) replays mkwrs WR videos through a throwaway engine and uploads trails — see docs/superpowers/specs/2026-07-17-wr-service-tray-background-design.md. |
 | **Pi server** | `pi/` (Node/TS, Hono + `node:sqlite`, run via `tsx`) — see `pi/CLAUDE.md` | **Canonical source of truth**, runs on a Raspberry Pi. Hosts the token-gated API, Discord bot, WR scraper, stats/`/explorer`, presence/activity. |
 | **Website thekartoff.com** | `web/` (Vite + Svelte SPA) — see `web/CLAUDE.md` | Public site, **served by the Pi**. Live cards, Turf (territory) map, activity feed. Imports shared components from the desktop `src/`. |
 | **Schema + importer** | `server/` (Python) | Owns the canonical DB DDL `server/schema.sql` (which the Pi loads at boot) and the legacy-data importer (`python -m server.importer`). NOT an HTTP server. |

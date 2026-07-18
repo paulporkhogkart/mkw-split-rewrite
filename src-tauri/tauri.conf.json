@@ -43,19 +43,7 @@
     }
   },
   "app": {
-    "windows": [
-      {
-        "label": "main",
-        "title": "pbenguin",
-        "width": 1200,
-        "height": 760,
-        "center": true,
-        "resizable": true,
-        "minWidth": 600,
-        "minHeight": 440,
-        "decorations": false
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
     }

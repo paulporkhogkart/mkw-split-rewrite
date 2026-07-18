@@ -48,4 +48,17 @@ describe('startWrScraper', () => {
     expect(scrape).not.toHaveBeenCalled();
     stop();
   });
+
+  it('runs the dead-job sweep after each scrape tick', async () => {
+    const calls: string[] = [];
+    const stop = startWrScraper({} as any, {} as any, {
+      minIntervalSec: 0, maxIntervalSec: 1,
+      scrape: async () => { calls.push('scrape'); return emptyReport; },
+      sweep: () => { calls.push('sweep'); return 0; },
+      random: () => 0,
+    });
+    await vi.waitFor(() => expect(calls).toContain('sweep'));
+    expect(calls.indexOf('sweep')).toBeGreaterThan(calls.indexOf('scrape'));
+    stop();
+  });
 });

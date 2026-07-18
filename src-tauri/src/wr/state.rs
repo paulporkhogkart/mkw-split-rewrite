@@ -43,6 +43,36 @@ pub fn set_inflight(conn: &Connection, wr_id: Option<i64>) {
     put(conn, "inflight_wr_id", wr_id.map(|v| v.to_string()).as_deref());
 }
 
+/// Background-mode settings (spec 2026-07-17 §3). Exact key strings — the frontend sends
+/// these verbatim through wr_set_setting.
+pub const SETTING_CLOSE_TO_TRAY: &str = "close_to_tray";
+pub const SETTING_START_AT_LOGIN: &str = "start_at_login";
+pub const SETTING_RUN_WR_SERVICE: &str = "run_wr_service";
+pub const SETTING_KEEP_TRACKING_IN_TRAY: &str = "keep_tracking_in_tray";
+
+/// Read a boolean setting; unset = false (every setting defaults to today's behaviour).
+pub fn get_flag(conn: &Connection, key: &str) -> bool {
+    get(conn, key).as_deref() == Some("1")
+}
+
+pub fn set_flag(conn: &Connection, key: &str, value: bool) {
+    put(conn, key, Some(if value { "1" } else { "0" }));
+}
+
+/// Sync credentials, persisted so a --tray-start boot (no webview, which is what feeds
+/// sync's in-RAM CONFIG) can still run the WR service. Same exposure as the webview's
+/// localStorage copy: plaintext in the same user profile.
+pub const SETTING_SYNC_SERVER_URL: &str = "sync_server_url";
+pub const SETTING_SYNC_TOKEN: &str = "sync_token";
+
+pub fn get_str(conn: &Connection, key: &str) -> Option<String> {
+    get(conn, key)
+}
+
+pub fn set_str(conn: &Connection, key: &str, value: &str) {
+    put(conn, key, Some(value));
+}
+
 /// Stable per-install lease identity. Generated once into `worker-id` beside the DB and
 /// reused forever; a plain file (not the DB) so a scratch-DB reset can't silently change
 /// our identity and orphan a live lease.
@@ -215,5 +245,46 @@ mod tests {
         { let c = open(&d).unwrap(); set_inflight(&c, Some(7)); }
         let c2 = open(&d).unwrap();
         assert_eq!(inflight(&c2), Some(7), "a crash must leave the orphan discoverable");
+    }
+
+    #[test]
+    fn flags_default_false_and_roundtrip() {
+        let d = tmpdir("flags");
+        let c = open(&d).unwrap();
+        assert!(!get_flag(&c, SETTING_CLOSE_TO_TRAY), "unset flag must read false");
+        set_flag(&c, SETTING_CLOSE_TO_TRAY, true);
+        assert!(get_flag(&c, SETTING_CLOSE_TO_TRAY));
+        set_flag(&c, SETTING_CLOSE_TO_TRAY, false);
+        assert!(!get_flag(&c, SETTING_CLOSE_TO_TRAY));
+    }
+
+    #[test]
+    fn flags_are_independent_keys() {
+        let d = tmpdir("flags_indep");
+        let c = open(&d).unwrap();
+        set_flag(&c, SETTING_RUN_WR_SERVICE, true);
+        assert!(get_flag(&c, SETTING_RUN_WR_SERVICE));
+        assert!(!get_flag(&c, SETTING_KEEP_TRACKING_IN_TRAY),
+            "setting one flag must not bleed into another");
+    }
+
+    #[test]
+    fn flags_survive_reopen() {
+        let d = tmpdir("flags_reopen");
+        { let c = open(&d).unwrap(); set_flag(&c, SETTING_START_AT_LOGIN, true); }
+        let c2 = open(&d).unwrap();
+        assert!(get_flag(&c2, SETTING_START_AT_LOGIN), "settings must persist across restarts");
+    }
+
+    #[test]
+    fn str_settings_roundtrip_and_survive_reopen() {
+        let d = tmpdir("str_settings");
+        { let c = open(&d).unwrap();
+          set_str(&c, SETTING_SYNC_SERVER_URL, "https://pi.example");
+          set_str(&c, SETTING_SYNC_TOKEN, "tok123"); }
+        let c2 = open(&d).unwrap();
+        assert_eq!(get_str(&c2, SETTING_SYNC_SERVER_URL).as_deref(), Some("https://pi.example"));
+        assert_eq!(get_str(&c2, SETTING_SYNC_TOKEN).as_deref(), Some("tok123"));
+        assert_eq!(get_str(&c2, "never_set"), None);
     }
 }

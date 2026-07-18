@@ -1,5 +1,6 @@
 mod discord;
 mod sync;
+mod tray;
 mod wr;
 
 use std::sync::Mutex;
@@ -45,6 +46,9 @@ fn grant_media_permissions(window: &tauri::WebviewWindow) {
 /// Holds the Python sidecar child process once started. None until start_tracker is called.
 struct SidecarState(Mutex<Option<tauri_plugin_shell::process::CommandChild>>);
 
+/// The WR service loop, when the run_wr_service setting is on. None otherwise.
+pub struct RunnerState(pub Mutex<Option<wr::runner::Runner>>);
+
 /// Spawn (or re-spawn) the tracker sidecar and wire up its stdout listener.
 fn do_spawn_sidecar(app: tauri::AppHandle, state: &SidecarState) {
     let shell = app.shell();
@@ -77,6 +81,7 @@ fn do_spawn_sidecar(app: tauri::AppHandle, state: &SidecarState) {
     match spawn_result {
         Ok((mut rx, child)) => {
             *state.0.lock().unwrap() = Some(child);
+            wr::gate::ACTIVITY.set_tracking(true);
             // Notify the frontend immediately so it knows the process launched
             // and is just slow to produce output (e.g. Windows Defender scanning
             // _internal/ DLLs on first run).
@@ -88,6 +93,12 @@ fn do_spawn_sidecar(app: tauri::AppHandle, state: &SidecarState) {
                     match event {
                         CommandEvent::Stdout(line) => {
                             let msg = String::from_utf8_lossy(&line);
+                            // Idle-gate signal: only screen_change resets the WR idle clock
+                            // (cheap substring check — the full JSON parse isn't needed here).
+                            if msg.contains("\"type\":\"screen_change\"")
+                                || msg.contains("\"type\": \"screen_change\"") {
+                                wr::gate::ACTIVITY.note_screen_change();
+                            }
                             let _ = handle.emit("tracker-event", msg.as_ref());
                             if let Some(ev) = sync::on_line(msg.as_ref()) {
                                 let _ = handle.emit("tracker-event", &ev);
@@ -111,6 +122,7 @@ fn do_spawn_sidecar(app: tauri::AppHandle, state: &SidecarState) {
                             let _ = handle.emit("tracker-event", &msg);
                         }
                         CommandEvent::Terminated(status) => {
+                            wr::gate::ACTIVITY.set_tracking(false);
                             log::error!("[tracker] exited with {status:?}");
                             let msg = format!(
                                 "{{\"type\":\"stderr\",\"line\":{}}}",
@@ -148,21 +160,13 @@ fn start_tracker(app: tauri::AppHandle, state: tauri::State<SidecarState>) {
 /// Kill the running tracker without restarting it (e.g. before applying an update).
 #[tauri::command]
 fn stop_tracker(state: tauri::State<SidecarState>) {
-    if let Ok(mut guard) = state.0.lock() {
-        if let Some(child) = guard.take() {
-            let _ = child.kill();
-        }
-    }
+    kill_sidecar(&state);
 }
 
 /// Kill the running tracker and immediately restart it (e.g. after a device change).
 #[tauri::command]
 fn restart_tracker(app: tauri::AppHandle, state: tauri::State<SidecarState>) {
-    if let Ok(mut guard) = state.0.lock() {
-        if let Some(child) = guard.take() {
-            let _ = child.kill();
-        }
-    }
+    kill_sidecar(&state);
     do_spawn_sidecar(app, &state);
 }
 
@@ -242,8 +246,62 @@ fn open_screenshot_dir(app: tauri::AppHandle, dir: Option<String>) -> Result<(),
         .map_err(|e| e.to_string())
 }
 
+/// True when this process was started by the login autostart entry. A --tray-start
+/// launch creates NO window and NO webview (spec 2026-07-17 §1): the camera cannot be
+/// touched by a hidden start because App.svelte's onMount->start_tracker only ever runs
+/// inside a window the user asked for.
+fn is_tray_start() -> bool {
+    std::env::args().any(|a| a == "--tray-start")
+}
+
+/// Create the main window (the exact shape tauri.conf.json used to declare) or focus it
+/// if it already exists. Every fresh creation re-runs the frontend's onMount, so live
+/// tracking starts on restore just as it does on a normal launch.
+pub fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+        return;
+    }
+    match tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
+        .title("pbenguin")
+        .inner_size(1200.0, 760.0)
+        .min_inner_size(600.0, 440.0)
+        .center()
+        .resizable(true)
+        .decorations(false)
+        .build()
+    {
+        Ok(_w) => {
+            #[cfg(target_os = "windows")]
+            if let Some(w) = app.get_webview_window("main") {
+                grant_media_permissions(&w);
+            }
+        }
+        Err(e) => log::error!("create main window: {e}"),
+    }
+}
+
+/// Kill the live engine sidecar if running. Shared by stop/restart commands, app exit,
+/// and close-to-tray with keep_tracking_in_tray off (camera released).
+fn kill_sidecar(state: &SidecarState) {
+    if let Ok(mut guard) = state.0.lock() {
+        if let Some(child) = guard.take() {
+            let _ = child.kill();
+            wr::gate::ACTIVITY.set_tracking(false);
+        }
+    }
+}
+
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            // A second manual launch while trayed: surface the existing instance.
+            // Load-bearing, not cosmetic — two processes would share one worker-id and
+            // sweep_orphans would glob-delete each other's live download (spec §1).
+            show_main_window(app);
+        }))
         .plugin(
             tauri_plugin_log::Builder::new()
                 .target(tauri_plugin_log::Target::new(
@@ -256,26 +314,109 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![start_tracker, stop_tracker, restart_tracker, send_to_tracker, open_url, save_screenshot, copy_screenshot_to_clipboard, open_screenshot_dir, discord::discord_set_presence, discord::discord_clear_presence, sync::sync_set_config, sync::sync_test_connection, sync::sync_resolve_pending, sync::sync_discard_pending, sync::sync_list_pending, sync::sync_course_reads, sync::sync_roster, sync::sync_pb_best, wr::wr_process_one])
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--tray-start"]),
+        ))
+        .invoke_handler(tauri::generate_handler![start_tracker, stop_tracker, restart_tracker, send_to_tracker, open_url, save_screenshot, copy_screenshot_to_clipboard, open_screenshot_dir, discord::discord_set_presence, discord::discord_clear_presence, sync::sync_set_config, sync::sync_test_connection, sync::sync_resolve_pending, sync::sync_discard_pending, sync::sync_list_pending, sync::sync_course_reads, sync::sync_roster, sync::sync_pb_best, wr::wr_process_one, wr::wr_get_settings, wr::wr_set_setting])
         .setup(|app| {
             app.manage(SidecarState(Mutex::new(None)));
-            #[cfg(target_os = "windows")]
-            grant_media_permissions(&app.get_webview_window("main").expect("main window"));
+            app.manage(RunnerState(Mutex::new(None)));
+            if let Ok(c) = wr::settings_db(app.handle()) {
+                if wr::state::get_flag(&c, wr::state::SETTING_RUN_WR_SERVICE) {
+                    let runner = wr::runner::Runner::start(app.handle().clone());
+                    *app.state::<RunnerState>().0.lock().unwrap() = Some(runner);
+                }
+            }
+            tray::sync_tray(app.handle());
+            if let Some(rs) = app.try_state::<RunnerState>() {
+                if let Ok(guard) = rs.0.lock() {
+                    if let Some(r) = guard.as_ref() {
+                        let h = app.handle().clone();
+                        r.set_refresh_hook(Box::new(move || {
+                            // Post-and-forget: tray setters BLOCK until the main thread
+                            // services them (run_item_main_thread!), and Runner::stop()
+                            // joins this thread FROM the main thread — a direct call here
+                            // deadlocks every quit. A queued task at exit simply never
+                            // runs, which is harmless.
+                            let h2 = h.clone();
+                            let _ = h.run_on_main_thread(move || crate::tray::refresh_tray_status(&h2));
+                        }));
+                    }
+                }
+            }
+            {
+                let h = app.handle().clone();
+                wr::phase::set_notifier(Box::new(move || {
+                    let h2 = h.clone();
+                    let _ = h.run_on_main_thread(move || tray::refresh_tray_status(&h2));
+                }));
+            }
+            if !is_tray_start() {
+                show_main_window(app.handle());
+            }
             sync::init(app.handle().clone());
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            // This logic is for the main window only — never a future secondary window.
+            if window.label() != "main" { return; }
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let app = window.app_handle();
+                let Ok(c) = wr::settings_db(app) else { return };
+                if !wr::state::get_flag(&c, wr::state::SETTING_CLOSE_TO_TRAY) {
+                    return; // default: closing quits, exactly as today
+                }
+                api.prevent_close();
+                if !wr::state::get_flag(&c, wr::state::SETTING_KEEP_TRACKING_IN_TRAY) {
+                    // The camera light goes OFF on tray-enter unless the user opted to
+                    // keep tracking (spec §3).
+                    if let Some(state) = app.try_state::<SidecarState>() {
+                        kill_sidecar(&state);
+                    }
+                }
+                // Destroy (not hide): the webview is a pure viewer — run uploads flow
+                // through sync::on_line in Rust — and a fresh onMount on restore is the
+                // same path as a normal launch. destroy() bypasses CloseRequested, so
+                // no loop.
+                let _ = window.destroy();
+            }
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
-            if let tauri::RunEvent::Exit = event {
-                if let Some(state) = app_handle.try_state::<SidecarState>() {
-                    if let Ok(mut guard) = state.0.lock() {
-                        if let Some(child) = guard.take() {
-                            let _ = child.kill();
+            match event {
+                // Last-window-destroyed arrives with code: None; a deliberate app.exit(n)
+                // (tray Quit) carries Some(n). Stay resident only for the former, and only
+                // when close-to-tray is on — i.e. exactly when our close handler just
+                // destroyed the window expecting the process to live on in the tray.
+                // Everything else (normal quit with the flag off, tray Quit, OS session
+                // end) falls through to a real exit.
+                tauri::RunEvent::ExitRequested { code, api, .. } => {
+                    if code.is_none() {
+                        if let Ok(c) = wr::settings_db(app_handle) {
+                            if wr::state::get_flag(&c, wr::state::SETTING_CLOSE_TO_TRAY) {
+                                api.prevent_exit();
+                            }
                         }
                     }
                 }
-                discord::shutdown();
+                tauri::RunEvent::Exit => {
+                    if let Some(rs) = app_handle.try_state::<RunnerState>() {
+                        // Guard dropped before stop(): see wr_set_setting's same pattern.
+                        let taken = rs.0.lock().unwrap_or_else(|e| e.into_inner()).take();
+                        if let Some(runner) = taken { runner.stop(); }
+                    }
+                    if let Some(state) = app_handle.try_state::<SidecarState>() {
+                        if let Ok(mut guard) = state.0.lock() {
+                            if let Some(child) = guard.take() {
+                                let _ = child.kill();
+                            }
+                        }
+                    }
+                    discord::shutdown();
+                }
+                _ => {}
             }
         });
 }
