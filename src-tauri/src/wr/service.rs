@@ -193,10 +193,10 @@ fn run_job(cfg: &ServiceCfg, client: &job::Client, j: &job::WrJob,
     }
     if cancel() { let _ = client.release(j.wr_id); return Outcome::Released(j.wr_id); }
 
-    // Wall-clock bound (~the video's own length): budget from the record, not a constant
-    // (Rainbow Road is 233s — a fixed 300s left it ~50s of margin, not "room to spare").
     super::phase::set(Some(super::phase::Phase {
         kind: super::phase::PhaseKind::Processing, course_slug: j.course_slug.clone() }));
+    // Wall-clock bound (~the video's own length): budget from the record, not a constant
+    // (Rainbow Road is 233s — a fixed 300s left it ~50s of margin, not "room to spare").
     //
     // HEARTBEAT (spec 2026-07-17 §5.1): while the engine runs, a scoped thread extends
     // the lease every 120s. This decouples the engine budget from the 600s lease for
@@ -217,6 +217,7 @@ fn run_job(cfg: &ServiceCfg, client: &job::Client, j: &job::WrJob,
         s.spawn(move || {
             let mut since_beat = std::time::Duration::ZERO;
             while !done_ref.load(std::sync::atomic::Ordering::Relaxed) {
+                if cancel_or_lost() { return; }
                 std::thread::sleep(std::time::Duration::from_millis(250));
                 since_beat += std::time::Duration::from_millis(250);
                 if since_beat >= HEARTBEAT_EVERY {

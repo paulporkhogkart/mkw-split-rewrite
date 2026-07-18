@@ -149,7 +149,12 @@ pub fn wr_set_setting(app: tauri::AppHandle, key: String, value: bool) -> Result
                 (true, false) => {
                     let r = runner::Runner::start(app.clone());
                     let h = app.clone();
-                    r.set_refresh_hook(Box::new(move || crate::tray::refresh_tray_status(&h)));
+                    r.set_refresh_hook(Box::new(move || {
+                        // Post-and-forget — see lib.rs's hook install for why a direct call
+                        // deadlocks every quit.
+                        let h2 = h.clone();
+                        let _ = h.run_on_main_thread(move || crate::tray::refresh_tray_status(&h2));
+                    }));
                     *guard = Some(r);
                     None
                 }
@@ -164,6 +169,9 @@ pub fn wr_set_setting(app: tauri::AppHandle, key: String, value: bool) -> Result
         let mgr = app.autolaunch();
         let res = if value { mgr.enable() } else { mgr.disable() };
         if let Err(e) = res {
+            // Revert the flag: persist-then-apply must not leave the checkbox claiming a
+            // Run key that doesn't exist.
+            state::set_flag(&c, &key, !value);
             return Err(format!("autostart registration failed: {e}"));
         }
     }

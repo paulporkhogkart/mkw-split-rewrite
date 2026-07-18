@@ -450,9 +450,15 @@ pub fn on_line(line: &str) -> Option<String> {
 }
 
 #[tauri::command]
-pub fn sync_set_config(server_url: String, token: String) {
+pub fn sync_set_config(app: tauri::AppHandle, server_url: String, token: String) {
     if let Ok(mut c) = CONFIG.lock() {
-        *c = Config { server_url, token };
+        *c = Config { server_url: server_url.clone(), token: token.clone() };
+    }
+    // Persist for --tray-start boots: the webview (which feeds this command) doesn't run
+    // there, so the RAM CONFIG would stay empty forever without this.
+    if let Ok(conn) = crate::wr::settings_db(&app) {
+        crate::wr::state::set_str(&conn, crate::wr::state::SETTING_SYNC_SERVER_URL, &server_url);
+        crate::wr::state::set_str(&conn, crate::wr::state::SETTING_SYNC_TOKEN, &token);
     }
 }
 
@@ -672,6 +678,20 @@ pub async fn sync_roster() -> String {
 /// Open the outbox DB in the app data dir, then spawn the drain loop.
 pub fn init(app: tauri::AppHandle) {
     use tauri::Manager;
+
+    // Seed CONFIG from the persisted copy (wr_local) so a --tray-start boot can claim
+    // before any webview ever runs. The webview's sync_set_config remains the writer of
+    // record and overwrites this on the next window open.
+    if let Ok(conn) = crate::wr::settings_db(&app) {
+        let url = crate::wr::state::get_str(&conn, crate::wr::state::SETTING_SYNC_SERVER_URL).unwrap_or_default();
+        let tok = crate::wr::state::get_str(&conn, crate::wr::state::SETTING_SYNC_TOKEN).unwrap_or_default();
+        if !url.trim().is_empty() && !tok.trim().is_empty() {
+            if let Ok(mut c) = CONFIG.lock() {
+                if c.server_url.trim().is_empty() { *c = Config { server_url: url, token: tok }; }
+            }
+        }
+    }
+
     let dir = match app.path().app_data_dir() {
         Ok(d) => d,
         Err(e) => { log::error!("[sync] no app_data_dir: {e}"); return; }

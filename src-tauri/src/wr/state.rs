@@ -59,6 +59,20 @@ pub fn set_flag(conn: &Connection, key: &str, value: bool) {
     put(conn, key, Some(if value { "1" } else { "0" }));
 }
 
+/// Sync credentials, persisted so a --tray-start boot (no webview, which is what feeds
+/// sync's in-RAM CONFIG) can still run the WR service. Same exposure as the webview's
+/// localStorage copy: plaintext in the same user profile.
+pub const SETTING_SYNC_SERVER_URL: &str = "sync_server_url";
+pub const SETTING_SYNC_TOKEN: &str = "sync_token";
+
+pub fn get_str(conn: &Connection, key: &str) -> Option<String> {
+    get(conn, key)
+}
+
+pub fn set_str(conn: &Connection, key: &str, value: &str) {
+    put(conn, key, Some(value));
+}
+
 /// Stable per-install lease identity. Generated once into `worker-id` beside the DB and
 /// reused forever; a plain file (not the DB) so a scratch-DB reset can't silently change
 /// our identity and orphan a live lease.
@@ -260,5 +274,17 @@ mod tests {
         { let c = open(&d).unwrap(); set_flag(&c, SETTING_START_AT_LOGIN, true); }
         let c2 = open(&d).unwrap();
         assert!(get_flag(&c2, SETTING_START_AT_LOGIN), "settings must persist across restarts");
+    }
+
+    #[test]
+    fn str_settings_roundtrip_and_survive_reopen() {
+        let d = tmpdir("str_settings");
+        { let c = open(&d).unwrap();
+          set_str(&c, SETTING_SYNC_SERVER_URL, "https://pi.example");
+          set_str(&c, SETTING_SYNC_TOKEN, "tok123"); }
+        let c2 = open(&d).unwrap();
+        assert_eq!(get_str(&c2, SETTING_SYNC_SERVER_URL).as_deref(), Some("https://pi.example"));
+        assert_eq!(get_str(&c2, SETTING_SYNC_TOKEN).as_deref(), Some("tok123"));
+        assert_eq!(get_str(&c2, "never_set"), None);
     }
 }

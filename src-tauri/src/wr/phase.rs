@@ -17,9 +17,17 @@ pub struct Phase {
 }
 
 static PHASE: Mutex<Option<Phase>> = Mutex::new(None);
+static NOTIFY: Mutex<Option<Box<dyn Fn() + Send>>> = Mutex::new(None);
+
+/// Installed once at setup: fires after every phase change so the tray retints/retips
+/// mid-job (the runner's loop-boundary pings can't see inside run_job).
+pub fn set_notifier(f: Box<dyn Fn() + Send>) {
+    *NOTIFY.lock().unwrap_or_else(|e| e.into_inner()) = Some(f);
+}
 
 pub fn set(p: Option<Phase>) {
     *PHASE.lock().unwrap_or_else(|e| e.into_inner()) = p;
+    if let Some(f) = NOTIFY.lock().unwrap_or_else(|e| e.into_inner()).as_ref() { f(); }
 }
 
 /// No non-test caller until Task 7's tray reads the tooltip phase.

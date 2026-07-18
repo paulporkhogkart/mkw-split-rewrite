@@ -333,9 +333,24 @@ pub fn run() {
                 if let Ok(guard) = rs.0.lock() {
                     if let Some(r) = guard.as_ref() {
                         let h = app.handle().clone();
-                        r.set_refresh_hook(Box::new(move || tray::refresh_tray_status(&h)));
+                        r.set_refresh_hook(Box::new(move || {
+                            // Post-and-forget: tray setters BLOCK until the main thread
+                            // services them (run_item_main_thread!), and Runner::stop()
+                            // joins this thread FROM the main thread — a direct call here
+                            // deadlocks every quit. A queued task at exit simply never
+                            // runs, which is harmless.
+                            let h2 = h.clone();
+                            let _ = h.run_on_main_thread(move || crate::tray::refresh_tray_status(&h2));
+                        }));
                     }
                 }
+            }
+            {
+                let h = app.handle().clone();
+                wr::phase::set_notifier(Box::new(move || {
+                    let h2 = h.clone();
+                    let _ = h.run_on_main_thread(move || tray::refresh_tray_status(&h2));
+                }));
             }
             if !is_tray_start() {
                 show_main_window(app.handle());

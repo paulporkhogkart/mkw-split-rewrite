@@ -110,6 +110,7 @@ fn run_loop(
         }
         let (server_url, token) = crate::sync::config_snapshot();
         if server_url.trim().is_empty() || token.trim().is_empty() {
+            ping_refresh(&refresh);
             interruptible_sleep(Duration::from_secs(60), &shutdown);
             continue;
         }
