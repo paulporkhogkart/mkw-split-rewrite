@@ -145,6 +145,16 @@ fn engine_timeout_for(record_ms: i64) -> std::time::Duration {
     std::time::Duration::from_secs(((record_ms / 1000) + 180).clamp(300, 540) as u64)
 }
 
+/// Only a CONFIRMED ownership loss (server said false) stops in-flight work; a network
+/// error keeps going — the lease is probably still ours and the next beat re-checks.
+fn should_stop_after_heartbeat(res: &Result<bool, String>) -> bool {
+    matches!(res, Ok(false))
+}
+
+/// Beat every 120s: the lease is 600s, so even one lost beat leaves wide margin, and
+/// the cadence is cheap enough to never matter.
+const HEARTBEAT_EVERY: std::time::Duration = std::time::Duration::from_secs(120);
+
 fn run_job(cfg: &ServiceCfg, client: &job::Client, j: &job::WrJob,
            cancel: &(dyn Fn() -> bool + Sync)) -> Outcome {
     let tier = verify::tier_for(j.attempt);
@@ -175,12 +185,51 @@ fn run_job(cfg: &ServiceCfg, client: &job::Client, j: &job::WrJob,
     // (Rainbow Road is 233s — a fixed 300s left it ~50s of margin, not "room to spare").
     super::phase::set(Some(super::phase::Phase {
         kind: super::phase::PhaseKind::Processing, course_slug: j.course_slug.clone() }));
-    let finalized = match engine::run_video(
-        &cfg.engine, &dest, selections_for(j), engine_timeout_for(j.record_ms), cancel) {
+    //
+    // HEARTBEAT (spec 2026-07-17 §5.1): while the engine runs, a scoped thread extends
+    // the lease every 120s. This decouples the engine budget from the 600s lease for
+    // good, and a CONFIRMED ownership loss (heartbeat -> Ok(false): someone else claimed
+    // after an overrun) cancels the run — no point finishing a job we can no longer
+    // report. The composed closure means the engine watchdog polls lease_lost every
+    // 250ms like everything else.
+    let lease_lost = std::sync::atomic::AtomicBool::new(false);
+    let cancel_or_lost = || cancel() || lease_lost.load(std::sync::atomic::Ordering::Relaxed);
+    // Declared here, NOT inside the scope closure below: a scoped thread is joined only
+    // when std::thread::scope itself returns, which is after the closure body finishes —
+    // so a flag the spawned thread borrows must outlive the closure, not just live inside
+    // it (the same reason `lease_lost` above is already out here).
+    let done = std::sync::atomic::AtomicBool::new(false);
+    let run_result = std::thread::scope(|s| {
+        let done_ref = &done;
+        let lost_ref = &lease_lost;
+        s.spawn(move || {
+            let mut since_beat = std::time::Duration::ZERO;
+            while !done_ref.load(std::sync::atomic::Ordering::Relaxed) {
+                std::thread::sleep(std::time::Duration::from_millis(250));
+                since_beat += std::time::Duration::from_millis(250);
+                if since_beat >= HEARTBEAT_EVERY {
+                    since_beat = std::time::Duration::ZERO;
+                    let res = client.heartbeat(j.wr_id);
+                    if should_stop_after_heartbeat(&res) {
+                        log::warn!("[wr] wr_id={} lease no longer ours; cancelling run", j.wr_id);
+                        lost_ref.store(true, std::sync::atomic::Ordering::Relaxed);
+                        return;
+                    }
+                }
+            }
+        });
+        let r = engine::run_video(
+            &cfg.engine, &dest, selections_for(j), engine_timeout_for(j.record_ms),
+            &cancel_or_lost);
+        done.store(true, std::sync::atomic::Ordering::Relaxed);
+        r
+    });
+    let finalized = match run_result {
         Ok(f) => f,
         // Match the variant, don't re-poll cancel(): a genuine timeout that happens to
         // land just as the user pauses must still be reported as a timeout.
         // release() refunds the attempt; fail() deliberately does not.
+        // (A lease-lost cancel lands here too: release() then 409s harmlessly — fine.)
         Err(WrError::Cancelled) => { let _ = client.release(j.wr_id); return Outcome::Released(j.wr_id); }
         Err(e) => { let _ = client.fail(j.wr_id, &e); return Outcome::Failed(j.wr_id, e); }
     };
@@ -437,5 +486,15 @@ mod tests {
         // The ENGINE budget stays 60s under the Pi's 600s lease (the whole job shares
         // that one lease — see engine_timeout_for's doc for the download/upload margins).
         assert_eq!(engine_timeout_for(900_000), Duration::from_secs(540));
+    }
+
+    #[test]
+    fn heartbeat_verdicts_only_a_confirmed_loss_stops_work() {
+        // Ok(false) = the server CONFIRMED we no longer own the lease: stop, the job is
+        // someone else's now. An Err is a network blip — the lease is probably still
+        // ours, and stopping on flaky wifi would abandon healthy jobs.
+        assert!(should_stop_after_heartbeat(&Ok(false)));
+        assert!(!should_stop_after_heartbeat(&Ok(true)));
+        assert!(!should_stop_after_heartbeat(&Err("timeout".into())));
     }
 }
