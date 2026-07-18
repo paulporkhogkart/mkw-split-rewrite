@@ -176,6 +176,13 @@ fn run_job(cfg: &ServiceCfg, client: &job::Client, j: &job::WrJob,
                 .map_err(WrError::DownloadFailed)
                 .and_then(|exe2| ytdlp::download(&exe2, &j.video_url, tier, &dest, cancel));
             if let Err(e2) = retry {
+                // Mirror the first leg: a cancel during the RETRY is the same deliberate
+                // stop — release (refund), never fail (which would burn the attempt and
+                // record a nonsense "cancelled" as last_error).
+                if matches!(e2, WrError::Cancelled) {
+                    let _ = client.release(j.wr_id);
+                    return Outcome::Released(j.wr_id);
+                }
                 let _ = client.fail(j.wr_id, &e2);
                 return Outcome::Failed(j.wr_id, e2);
             }

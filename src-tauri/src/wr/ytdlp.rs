@@ -227,7 +227,7 @@ mod tests {
     #[test]
     fn a_spawn_failure_is_engine_failed_not_download_failed() {
         // A real spawn failure, not a simulated one: point at an exe that cannot exist so
-        // Command::output() itself errors, exercising the actual code path rather than
+        // Command::spawn() inside run_download itself errors, exercising the actual code path rather than
         // asserting on classify_failure() (which spawn failures never reach).
         let missing = Path::new("this-path-definitely-does-not-exist-wr-test.exe");
         let dest = std::env::temp_dir().join("wr_ytdlp_spawn_test_unused.mp4");
