@@ -339,6 +339,10 @@ Settings > Background
   [ ] Keep live tracking running               (off — engine stops, camera released)
 ```
 
+Implemented by Plan 3 (2026-07-17-wr-service-tray-background-design.md): keys in
+wr_service.db's wr_local, a Background section in SettingsModal, tray exists only while at
+least one checkbox is on.
+
 **Two checkboxes, not a mode enum.** A four-way radio (Nothing / tracking / WR / both) cannot
 express "tracking in tray but no WR service", and costs a concept. Independent checkboxes yield all
 four combinations for free.
@@ -380,9 +384,12 @@ the service loop; the live engine spawns only when the frontend calls `start_tra
 (`lib.rs:139`), so a hidden start touches no camera. A WR job spawns its own short-lived engine
 against a video file and reaps it. **Caveat found 2026-07-17: `App.svelte`'s `onMount`
 unconditionally invokes `start_tracker` (src/App.svelte:1436), so ANY window creation — hidden
-included — currently spawns the live engine and opens the camera. Plan 3 must gate that call;
-"a hidden start touches no camera" is a requirement on Plan 3, not a property the app already
-has.**
+included — currently spawns the live engine and opens the camera. RESOLVED by Plan 3's tray-only
+architecture (2026-07-17-wr-service-tray-background-design.md §1): a --tray-start launch creates
+no window and no webview at all, so onMount never runs; the call needs no gating. The residency
+itself needs a guarded prevent_exit — last-window-destroy arrives with code None, a deliberate
+app.exit(n) with Some(n); prevent only on None + close-to-tray on (found in review, lib.rs run
+callback).**
 
 ### 6.4 Work loop
 
@@ -420,7 +427,8 @@ gate -> claim -> download -> process -> verify -> upload -> cleanup -> repeat
    - hard timeout derived from the record: clamp(record + 180s, 300s, 540s). That budget is
      ENGINE-only — the same never-heartbeated 600s lease also covers the download (unbounded
      today) and the upload; an overrun is safe (complete() is ownership-checked and 409s) but
-     wasted. Wiring the dormant heartbeat + bounding yt-dlp are named Plan 3 items.
+     wasted. Plan 3 wired both: a 120s heartbeat thread runs while the engine does (service.rs),
+     and yt-dlp is bounded at 240s and cancel-aware (ytdlp.rs run_download).
 4. **Verify** (§6.4).
 5. **Upload** `POST /v1/wr-jobs/:id/result` with the points array.
 6. **Cleanup**: delete the video on *every* terminal outcome.
@@ -490,10 +498,9 @@ reset) when the scraper sees the video link change (`reconcile.ts backfill()`), 
 failure — cap reached or terminal mismatch — fires a `wr_job_dead` Discord alert plus a
 `npm run wr-flags` listing. `tier_for` remains blind to WHY a prior attempt failed (the claim
 payload still carries no `last_error`); with a single tier that is moot, and any future
-escalation tier must revisit it. One death class stays alert-less by design for now: a job
-whose final attempts burn silently via crash + lease lapse never posts a /result, so it
-appears in `npm run wr-flags` but fires no `wr_job_dead` alert — a sweep-based alert is a
-named Plan 3 item.
+escalation tier must revisit it. Silent-crash deaths (attempts burned via crash + lease lapse,
+no /result ever posted) are announced too: the scraper tick sweeps deadJobs() for unalerted
+rows (wr_jobs.alerted_at dedups; revival clears it).
 
 ### 6.7 Local state
 
