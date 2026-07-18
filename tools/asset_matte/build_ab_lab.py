@@ -57,7 +57,12 @@ def render_html(combos, variants, manifests, sizes, stepper_js) -> str:
  h2{{font-size:13px;margin:26px 0 8px;color:#9a9ca1}}
  .grid{{display:flex;gap:14px;flex-wrap:wrap}}
  .cell{{text-align:center}}
- .chip{{background-repeat:no-repeat;{INK_RING};margin:0 auto}}
+ /* Chips paint at NATIVE sheet pixels (integral background-position/size) inside a
+    transform:scale() box — fractional CSS background math rounds per-property per-frame
+    and visibly jitters as columns cycle. The ink ring sits on the scaled box so the
+    1px ring stays 1px on screen, like the real card. */
+ .chipbox{{position:relative;overflow:hidden;{INK_RING};margin:0 auto}}
+ .chip{{background-repeat:no-repeat;position:absolute;left:0;top:0;transform-origin:0 0}}
  .lbl{{color:#6b6d73;font-size:10px;margin-top:4px}}
  button{{font-size:10px;margin:2px}}
  .silwrap{{position:relative;width:120px;height:126px;background:#191a1d}}
@@ -73,13 +78,27 @@ function addCell(root, variant, combo, cssH) {{
   const man = DATA.manifests[variant]; if (!man || !man.combos[combo]) return;
   const entry = man.combos[combo];
   const wrap = document.createElement("div"); wrap.className = "cell";
-  const el = document.createElement("div"); el.className = "chip";
   const s = cssH / man.fh;
-  el.style.width = man.fw * s + "px"; el.style.height = man.fh * s + "px";
+  // Scaled outer box (carries the ink ring) around a native-resolution chip div.
+  const box = document.createElement("div"); box.className = "chipbox";
+  box.style.width = man.fw * s + "px"; box.style.height = man.fh * s + "px";
+  const el = document.createElement("div"); el.className = "chip";
+  el.style.width = man.fw + "px"; el.style.height = man.fh + "px";
+  el.style.transform = `scale(${{s}})`;
+  // ALL sheets layered once at init — per-tick we only move background-position,
+  // so an anim switch never swaps a URL (URL swaps decode async -> blank flash).
+  const layers = Object.keys(entry.anims);
+  el.style.backgroundImage = layers.map((n) =>
+    `url(packs/${{variant}}/chips/${{combo}}__${{n}}.webp)`).join(",");
+  el.style.backgroundSize = layers.map((n) => {{
+    const a = entry.anims[n];
+    return `${{a.cols * man.fw}}px ${{a.rows * man.fh}}px`;
+  }}).join(",");
+  box.append(el);
   const player = createChipPlayer({{entry, fps: man.fps, fw: man.fw, fh: man.fh}});
-  cells.push({{el, player, man, entry, s, variant, combo}});
+  cells.push({{el, player, man, entry, layers, variant, combo}});
   const kb = (n, f) => {{ const b = document.createElement("button"); b.textContent = n; b.onclick = f; return b; }};
-  wrap.append(el, kb("SELECT", () => player.select()), kb("CONFIRM", () => player.confirm()));
+  wrap.append(box, kb("SELECT", () => player.select()), kb("CONFIRM", () => player.confirm()));
   const idleKB = (DATA.sizes[[variant, combo, "idle"].join("|")] / 1024) | 0;
   const lbl = document.createElement("div"); lbl.className = "lbl";
   lbl.textContent = `${{variant}} · idle ${{idleKB}}KB`;
@@ -88,11 +107,9 @@ function addCell(root, variant, combo, cssH) {{
 function tickAll(t) {{
   for (const c of cells) {{
     const st = c.player.tick(t);
-    const a = c.entry.anims[st.anim];
-    c.el.style.backgroundImage = `url(packs/${{c.variant}}/chips/${{c.combo}}__${{st.anim}}.webp)`;
-    c.el.style.backgroundSize = `${{a.cols * c.man.fw * c.s}}px ${{a.rows * c.man.fh * c.s}}px`;
-    const [x, y] = st.bg.split(" ");
-    c.el.style.backgroundPosition = `${{parseFloat(x) * c.s}}px ${{parseFloat(y) * c.s}}px`;
+    // Active layer shows its frame (native integral px); inactive layers park offscreen.
+    c.el.style.backgroundPosition = c.layers.map((n) =>
+      n === st.anim ? st.bg : "-99999px -99999px").join(",");
   }}
   requestAnimationFrame(tickAll);
 }}

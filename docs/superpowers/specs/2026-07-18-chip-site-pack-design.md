@@ -77,6 +77,15 @@ the lossless alpha plane is 38% of bytes at 8-bit; 5-bit cuts total ~31%, dimini
   `idle_resume`** directly — random access replaces the encode-side idle-tail hack an animated
   format would have needed. Chars keep the designed hard cut (enter idle at 0).
 - End-of-animation is the stepper reaching the last frame — no duration/timer guesswork.
+- **Rendering rules (learned on the A/B lab, binding for the card integration):** paint the
+  chip at NATIVE sheet pixels (integral `background-position`/`background-size`) and scale the
+  element with a single `transform: scale()` — scaling the background math itself produces
+  fractional px that browsers round per-property per-frame, a visible horizontal jitter as
+  columns cycle. And layer ALL of a combo's sheets on the element once at mount (comma-list
+  `background-image`), moving only the active layer's position per tick, parking inactive
+  layers offscreen — swapping the `background-image`/`src` URL on an anim switch decodes
+  async and flashes blank for 1–2 frames (this equally afflicts the `<img>`-swap approach an
+  animated format would need).
 
 ## Outputs (one pack dir, all data in one place)
 
