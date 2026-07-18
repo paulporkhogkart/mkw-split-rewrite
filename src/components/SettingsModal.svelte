@@ -38,6 +38,25 @@
     invoke("open_screenshot_dir", { dir: $screenshotDir || null }).catch(() => {});
   }
 
+  // ── Background modes (spec 2026-07-17 §3) ────────────────────────────────────
+  // camelCase mirror of the Rust store; keys sent back are the snake_case store keys.
+  let bg = { closeToTray: false, startAtLogin: false, runWrService: false, keepTrackingInTray: false };
+  const BG_KEYS = {
+    closeToTray: "close_to_tray",
+    startAtLogin: "start_at_login",
+    runWrService: "run_wr_service",
+    keepTrackingInTray: "keep_tracking_in_tray",
+  };
+  async function loadBg() {
+    try { bg = await invoke("wr_get_settings"); } catch { /* pre-first-run: defaults stand */ }
+  }
+  async function setBg(field, value) {
+    bg = { ...bg, [field]: value };                    // optimistic; store is the truth on reopen
+    try { await invoke("wr_set_setting", { key: BG_KEYS[field], value }); }
+    catch (e) { console.error("wr_set_setting failed", e); loadBg(); }
+  }
+  loadBg();
+
   // ── Modal open/close ──────────────────────────────────────────────────────────
   export let wizardOpen    = false;
   export let setupComplete = false;
@@ -117,6 +136,34 @@
               {onSwitch2LanguageChange}
               idPrefix="wiz"
             />
+
+            <!-- Background modes: all default off = today's behaviour exactly. -->
+            <div class="bg-section">
+              <h3>Background</h3>
+              <label class="bg-row">
+                <input type="checkbox" checked={bg.closeToTray}
+                       on:change={(e) => setBg("closeToTray", e.currentTarget.checked)} />
+                Close to tray instead of quitting
+              </label>
+              <label class="bg-row">
+                <input type="checkbox" checked={bg.startAtLogin}
+                       on:change={(e) => setBg("startAtLogin", e.currentTarget.checked)} />
+                Start pbenguin at login
+              </label>
+              <label class="bg-row">
+                <input type="checkbox" checked={bg.runWrService}
+                       on:change={(e) => setBg("runWrService", e.currentTarget.checked)} />
+                Run the WR service
+              </label>
+              <div class="bg-hint">Processes WR videos only while tracking is stopped or idle 10 min+.</div>
+              <div class="bg-subhead">When in tray:</div>
+              <label class="bg-row bg-indent">
+                <input type="checkbox" checked={bg.keepTrackingInTray}
+                       on:change={(e) => setBg("keepTrackingInTray", e.currentTarget.checked)} />
+                Keep live tracking running
+              </label>
+            </div>
+
             <button class="btn-primary btn-lg" on:click={() => onGoStep("camera")}>Continue</button>
           </div>
 
@@ -471,4 +518,12 @@
   .dm input[type="radio"] { margin-top: .15rem; }
   .dm b { font-size: .72rem; color: var(--tx); font-weight: 600; display: block; }
   .dm i { font-size: .66rem; color: var(--tx-dim); font-style: normal; line-height: 1.5; display: block; }
+
+  /* Background modes (language step, returning-user settings) */
+  .bg-section { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--bd); }
+  .bg-section h3 { margin: 0 0 8px; font-size: .8rem; color: var(--tx); }
+  .bg-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; cursor: pointer; font-size: .72rem; color: var(--tx); }
+  .bg-hint { font-size: .7rem; color: var(--tx-dim); margin: 0 0 6px 24px; line-height: 1.55; }
+  .bg-subhead { font-size: .7rem; color: var(--tx-dim); margin-top: 6px; }
+  .bg-indent { margin-left: 16px; }
 </style>
