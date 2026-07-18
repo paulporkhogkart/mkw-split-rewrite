@@ -28,29 +28,43 @@ on). Foreign per-machine manifests are publications to be absorbed, not co-equal
   - `missing_idle_resume` — KART entries (≥3 name parts) union-status done without the key
   - `status_not_done` — recorded anywhere with status ≠ done
   - `pending` — clips the PRIMARY manifest does not mark done (what Process would run)
-- `merge_foreign(out_dir, primary_path) -> (added: int, backup_path: str | None)` — additive-only:
-  every status-done entry present in a foreign manifest and absent from the primary is copied in;
-  the primary always wins on conflicts; nothing is ever removed. Timestamped backup of the primary
-  is written first; the write is atomic (`.tmp` + `os.replace`). Returns `(0, None)` when there is
-  nothing to merge (no backup written).
+- `merge_foreign(out_dir, primary_path) -> (added: int, backup_path: str | None, stale_skipped: list)`
+  — additive-only: every status-done entry present in a foreign manifest and absent from the
+  primary is copied in **only when its core frames exist on the share** — a foreign "done" whose
+  frames are gone is STALE (e.g. the primary was deliberately cleared to force a re-matte) and
+  absorbing it would make `process_all` skip the clip (the resurrect hazard, review wave
+  2026-07-18). The primary always wins on conflicts; nothing is ever removed; both audit and
+  merge select from the SAME union (primary wins; among foreign files a done entry wins over a
+  non-done one) so the report can never disagree with the merge. Timestamped `shutil.copy2`
+  backup first (skipped when the primary doesn't exist yet — a fresh box is a normal state);
+  atomic `.tmp` + `os.replace` write. `(0, None, stale)` when nothing was mergeable.
 - `format_report(audit_result) -> list[str]` — stable human lines shared by console + CLI, ending
   with `pending for next Process run: N (S standalones + K karts)`.
-- `run_for_console(clips_dir, out_dir, primary_path, processing_active) -> list[str]` — orchestrator:
-  audit → report; if `foreign_only` is non-empty: merge when `processing_active` is False (then
-  re-audit so the report reflects the merged state), else emit a warning that the merge was
-  skipped (`process_all` holds the manifest in memory and rewrites the whole file after every
-  clip — a mid-run merge would be clobbered by its next save).
-- CLI `main()` — `--clips/--out/--manifest` (defaults mirror `process_all`), `--no-merge` for
-  audit-only; prints the same report lines. For headless / cron use.
+- `run_for_console(clips_dir, out_dir, primary_path, processing_active, claims_dir=None)` —
+  orchestrator: audit → report; if `foreign_only` is non-empty: merge when not processing, else
+  warn (`process_all` holds the manifest in memory and rewrites the whole file after every clip —
+  a mid-run merge would be clobbered by its next save). `processing_active` may be a bool or a
+  ZERO-ARG CALLABLE evaluated right before the write (the audit scan can be SMB-slow; a
+  click-time snapshot goes stale — review wave 2026-07-18). Handles the `(0, None, stale)` merge
+  result and reports stale-skipped names.
+- `audit(..., claims_dir=None)` — when given (multi-machine sweeps), `pending` subtracts claimed
+  clips via `claims.pending_names`, matching `process_all`'s real pending set exactly.
+- CLI `main()` — `--clips/--out/--manifest/--claims-dir`; **audit-only by default**, `--merge` to
+  opt in (a headless run cannot see whether `process_all` is mid-run on this box).
 
 ### Console button (`tools/sweep_console/app.py`)
 
 "Verify manifest" beside "Build viewer", same pattern: always-clickable, `_verifying` re-entry
-guard, worker thread (never the Tk thread), each report line appended to the `process` log pane
-via `_on_line` (already thread-safe). `processing_active = self.pstate.state != ps.IDLE`
-(conservative: PAUSED also blocks the merge — resume relaunches `process_all`, which reloads the
-manifest and then picks the merged entries up anyway). `asset_matte` is already on `app.py`'s
-`sys.path`. One button serves both machines: paths come from `procconfig` per machine.
+guard, worker thread (never the Tk thread), report lines into the `process` log pane. Audits
+against `SHIP_DIR or PROCESS_OUT` (Build-viewer precedent — on the ship-and-delete box the
+frames and foreign manifests live on the share, review wave 2026-07-18) with the box-local
+`PROCESS_MANIFEST` as primary and `CLAIMS_DIR` for pending accuracy. Two guards close the
+click-Process-mid-verify clobber: the Process button is LOCKED while verifying
+(`_refresh_buttons` honors `_verifying`), and `processing_active` is passed as a live
+`lambda: self.pstate.state != ps.IDLE` evaluated at merge time (PAUSED also blocks — resume
+relaunches `process_all`, which reloads the manifest and picks merged entries up anyway).
+`asset_matte` is already on `app.py`'s `sys.path`. One button serves both machines: paths come
+from `procconfig` per machine.
 
 ### Explicitly report-only
 
