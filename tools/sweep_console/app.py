@@ -116,6 +116,12 @@ class ConsoleApp:
         # the Tk thread so a large (or over-SMB) glob never freezes the UI.
         self.btn_viewer = ttk.Button(bar2, text="Build viewer", command=self._click_build_viewer)
         self.btn_viewer.pack(side="left", padx=(12, 2))
+        # Always-clickable: audit the share bookkeeping (frames vs manifest union vs idle_resume)
+        # and absorb foreign manifest.<machine>.json entries into THE one primary manifest.
+        # Audit-only while processing runs (process_all rewrites the manifest after every clip,
+        # so a mid-run merge would be clobbered). Report lines land in the process pane.
+        self.btn_verify = ttk.Button(bar2, text="Verify manifest", command=self._click_verify_manifest)
+        self.btn_verify.pack(side="left", padx=2)
         self.pstatus = ttk.Label(bar2, text="● idle"); self.pstatus.pack(side="right")
 
         body = ttk.Frame(self.root); body.pack(fill="both", expand=True)
@@ -335,6 +341,39 @@ class ConsoleApp:
             self._on_line("process", f"[console] {msg or 'viewer build produced no output'}")
         self.q.put(done)
 
+    def _click_verify_manifest(self):
+        """Audit share bookkeeping + absorb foreign manifests into the primary, off the Tk
+        thread (Build-viewer pattern). Two guards close the click-Process-mid-verify clobber:
+        the Process button is LOCKED while verifying (_refresh_buttons), and the merge re-reads
+        pstate via a live callable right before writing (the audit scan can be SMB-slow, so a
+        click-time snapshot could go stale)."""
+        if getattr(self, "_verifying", False):
+            self._on_line("process", "[console] manifest verify already running")
+            return
+        self._verifying = True
+        self._refresh_buttons()                          # lock Process for the duration
+        out_dir = SHIP_DIR or PROCESS_OUT                # frames + foreign manifests live on the
+        self._on_line("process",                         # share on the ship-and-delete box
+                      f"[console] verifying manifest ({PROCESS_MANIFEST}) against {out_dir} ...")
+        threading.Thread(target=self._verify_manifest_worker, args=(out_dir,), daemon=True).start()
+
+    def _verify_manifest_worker(self, out_dir):
+        try:
+            import manifest_verify as mv                 # asset_matte is on sys.path (header)
+            lines = mv.run_for_console(
+                CLIPS_DIR, out_dir, PROCESS_MANIFEST,
+                processing_active=lambda: self.pstate.state != ps.IDLE,   # evaluated at merge time
+                claims_dir=CLAIMS_DIR)
+        except Exception as exc:                         # report, never crash the console
+            lines = [f"manifest verify FAILED: {exc}"]
+
+        def done():
+            self._verifying = False
+            for ln in lines:
+                self._append("process", f"[console] {ln}")
+            self._refresh_buttons()                      # unlock Process
+        self.q.put(done)
+
     def _manual(self, key):
         if self.manual and self.state.state in (cs.RIG_WARM, cs.PAUSED):
             self.manual.press(key)
@@ -354,7 +393,10 @@ class ConsoleApp:
                 except tk.TclError: pass
         self.status.configure(text=f"● {s.lower().replace('_', ' ')}")
         pp = self.pstate.state
-        self.pbtn["pstart"].configure(state=("normal" if pp == ps.IDLE else "disabled"))
+        # Process locked while a manifest verify is in flight: its merge must not race a fresh
+        # process_all load->per-clip-rewrite cycle (see _click_verify_manifest).
+        pstart_ok = pp == ps.IDLE and not getattr(self, "_verifying", False)
+        self.pbtn["pstart"].configure(state=("normal" if pstart_ok else "disabled"))
         self.pbtn["ppause"].configure(
             text=("Resume" if pp == ps.PAUSED else "Pause"),
             state=("normal" if pp in (ps.RUNNING, ps.PAUSED) else "disabled"))
