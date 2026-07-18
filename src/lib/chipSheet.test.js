@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { bgPos, sheetCss, createChipPlayer } from "./chipSheet.js";
+import { bgPos, frameRect, sheetCss, createChipPlayer } from "./chipSheet.js";
 
 const ENTRY = {
   kart: true, idle_resume: 51,
@@ -17,6 +17,14 @@ const player = (entry = ENTRY) => {
   const p = createChipPlayer({ entry, fps: FPS, fw: 205, fh: 216, now: () => t });
   return { p, at: (ms) => { t = ms; return p.tick(t); } };
 };
+
+describe("frameRect", () => {
+  it("maps frame index to row-major source rects", () => {
+    expect(frameRect(0, 8, 205, 216)).toEqual({ sx: 0, sy: 0 });
+    expect(frameRect(3, 8, 205, 216)).toEqual({ sx: 615, sy: 0 });
+    expect(frameRect(8, 8, 205, 216)).toEqual({ sx: 0, sy: 216 });
+  });
+});
 
 describe("bgPos / sheetCss", () => {
   it("maps frame index to row-major grid offsets", () => {

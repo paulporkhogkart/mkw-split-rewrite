@@ -9,6 +9,14 @@ export function bgPos(index, cols, fw, fh) {
   return `${c === 0 ? "0px" : `-${c * fw}px`} ${r === 0 ? "0px" : `-${r * fh}px`}`;
 }
 
+// Source rect of a frame in its sheet, for canvas drawImage rendering. Canvas is the
+// jitter-free way to show a frame: a moving background-position gets pixel-snapped
+// per paint under scaling (visible horizontal shake as columns cycle), while
+// drawImage keeps a constant destination rect — nothing to re-snap.
+export function frameRect(index, cols, fw, fh) {
+  return { sx: (index % cols) * fw, sy: Math.floor(index / cols) * fh };
+}
+
 export function sheetCss(entry, anim, fw, fh) {
   const a = entry.anims[anim];
   return {
