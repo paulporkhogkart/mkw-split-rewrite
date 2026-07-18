@@ -40,23 +40,44 @@ pub fn classify_failure(stderr: &str) -> WrError {
 
 /// Path to a usable yt-dlp.exe, fetching it if absent. Callers should also re-`fetch`
 /// when downloads start failing — a stale yt-dlp is the likeliest way this feature dies.
-pub fn ensure(dir: &Path) -> Result<PathBuf, String> {
+pub fn ensure(dir: &Path, cancel: &(dyn Fn() -> bool + Sync)) -> Result<PathBuf, String> {
     let exe = dir.join("yt-dlp.exe");
     if exe.is_file() { return Ok(exe); }
-    fetch(dir)
+    fetch(dir, cancel)
 }
 
-/// (Re)download the official standalone yt-dlp.exe.
-pub fn fetch(dir: &Path) -> Result<PathBuf, String> {
+/// (Re)download the official standalone yt-dlp.exe. Cancel-aware: Runner::stop() joins
+/// the thread this runs on, so a quit/pause/toggle-off mid-refresh must interrupt the
+/// transfer rather than sit out up to the full 180s window (review 2026-07-18 — the
+/// download step was made cancel-aware in Task 5, but this fetch was missed).
+pub fn fetch(dir: &Path, cancel: &(dyn Fn() -> bool + Sync)) -> Result<PathBuf, String> {
+    fetch_from(YTDLP_URL, dir, cancel)
+}
+
+/// The URL-injectable body of `fetch`, so tests can observe cancel behaviour against a
+/// local dripping server instead of the network.
+fn fetch_from(url: &str, dir: &Path, cancel: &(dyn Fn() -> bool + Sync)) -> Result<PathBuf, String> {
+    use std::io::Read;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let exe = dir.join("yt-dlp.exe");
     let tmp = dir.join("yt-dlp.exe.part");
-    let bytes = reqwest::blocking::Client::new()
-        .get(YTDLP_URL)
+    let mut resp = reqwest::blocking::Client::new()
+        .get(url)
         .timeout(std::time::Duration::from_secs(180))
         .send().map_err(|e| format!("fetch yt-dlp: {e}"))?
-        .error_for_status().map_err(|e| format!("fetch yt-dlp: {e}"))?
-        .bytes().map_err(|e| format!("fetch yt-dlp: {e}"))?;
+        .error_for_status().map_err(|e| format!("fetch yt-dlp: {e}"))?;
+    // Chunked read with a cancel check per chunk. The 180s request timeout stays the
+    // outer bound for a stalled socket; cancel latency on a live transfer is one chunk.
+    let mut bytes: Vec<u8> = Vec::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        if cancel() { return Err("yt-dlp fetch cancelled".into()); }
+        match resp.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => bytes.extend_from_slice(&buf[..n]),
+            Err(e) => return Err(format!("fetch yt-dlp: {e}")),
+        }
+    }
     std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
     // Rename last: a half-written exe must never be mistaken for a usable one.
     std::fs::rename(&tmp, &exe).map_err(|e| e.to_string())?;
@@ -264,6 +285,68 @@ mod tests {
         assert!(matches!(err, WrError::Cancelled),
             "cancel must stay distinct from failure (release vs fail), got {err:?}");
         assert!(started.elapsed() < Duration::from_secs(15));
+    }
+
+    /// A local HTTP server that drips `chunks` KB-sized body chunks, one per `chunk_ms`.
+    /// The shape of a slow yt-dlp.exe transfer from GitHub — the only way to observe
+    /// whether fetch honours cancel mid-body without touching the network.
+    fn dripping_http_server(chunks: usize, chunk_ms: u64) -> String {
+        use std::io::{Read as _, Write as _};
+        let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind drip server");
+        let addr = l.local_addr().unwrap();
+        std::thread::spawn(move || {
+            if let Ok((mut s, _)) = l.accept() {
+                let mut req = [0u8; 2048];
+                let _ = s.read(&mut req);
+                let body_len = chunks * 1024;
+                let _ = write!(
+                    s, "HTTP/1.1 200 OK\r\nContent-Length: {body_len}\r\nConnection: close\r\n\r\n");
+                for _ in 0..chunks {
+                    if s.write_all(&[0u8; 1024]).is_err() { return; }
+                    let _ = s.flush();
+                    std::thread::sleep(Duration::from_millis(chunk_ms));
+                }
+            }
+        });
+        format!("http://{addr}/yt-dlp.exe")
+    }
+
+    #[test]
+    fn a_cancelled_fetch_aborts_promptly_instead_of_sitting_out_the_transfer() {
+        // Runner::stop() joins the runner thread; a fetch that ignores cancel makes a
+        // quit or toggle-off sit out up to the full 180s transfer (found in the
+        // 2026-07-18 review: the spec's "~30s worst case" was 6x understated whenever
+        // a yt-dlp refresh was in flight).
+        let url = dripping_http_server(40, 250); // ~10s if allowed to finish
+        let dir = tmpdir("fetch_cancel");
+        let started = std::time::Instant::now();
+        let err = fetch_from(&url, &dir, &|| true).expect_err("a cancelled fetch must abort");
+        assert!(err.contains("cancel"), "the error must say it was a cancel, got: {err}");
+        assert!(started.elapsed() < Duration::from_secs(3),
+            "cancel must interrupt the body read, not wait out the drip; took {:?}",
+            started.elapsed());
+        assert!(!dir.join("yt-dlp.exe").exists(),
+            "a cancelled fetch must not leave a usable-looking exe behind");
+    }
+
+    #[test]
+    fn an_uncancelled_fetch_completes_and_installs_the_exe_atomically() {
+        // The happy path through the same chunked reader: bytes land, .part is renamed,
+        // and the finished exe is exactly the served body.
+        let url = dripping_http_server(3, 1);
+        let dir = tmpdir("fetch_ok");
+        let exe = fetch_from(&url, &dir, &|| false).expect("fetch must succeed");
+        assert_eq!(exe, dir.join("yt-dlp.exe"));
+        let got = std::fs::read(&exe).unwrap();
+        assert_eq!(got.len(), 3 * 1024, "must have read the whole Content-Length body");
+        assert!(!dir.join("yt-dlp.exe.part").exists(), "the temp file must be renamed away");
+    }
+
+    fn tmpdir(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("wr_ytdlp_test_{tag}"));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
     }
 
     #[test]

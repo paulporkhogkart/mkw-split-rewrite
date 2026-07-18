@@ -68,8 +68,10 @@ impl Runner {
     pub fn is_paused(&self) -> bool { self.paused.load(Ordering::Relaxed) }
 
     /// Orderly shutdown: flags the loop (whose cancel closure aborts any in-flight job,
-    /// releasing the lease) and joins. The engine watchdog polls at 250ms and the
-    /// download watchdog likewise, so the join resolves within a few seconds worst-case.
+    /// releasing the lease) and joins. The engine, download and fetch steps all poll
+    /// cancel within ~250ms/one chunk, so the join normally resolves in ~1s; the honest
+    /// worst case is ~30s — one in-flight HTTP call (lease release/heartbeat/claim)
+    /// against an unreachable Pi, bounded by job.rs's 30s request timeout.
     pub fn stop(mut self) {
         self.shutdown.store(true, Ordering::Relaxed);
         if let Some(h) = self.handle.take() { let _ = h.join(); }

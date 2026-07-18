@@ -248,6 +248,36 @@ mod tests {
     }
 
     #[test]
+    fn a_read_waits_out_a_concurrent_writers_lock_instead_of_degrading_to_false() {
+        // wr_service.db is hit from three threads (runner: inflight writes; main: tray
+        // refresh + CloseRequested/ExitRequested flag reads; commands: setting writes).
+        // If a read landing on another connection's commit window got SQLITE_BUSY,
+        // get_flag would swallow it to FALSE and close-to-tray would silently quit
+        // instead of traying. What prevents that is rusqlite's DEFAULT 5s busy
+        // handler (rusqlite 0.32.1 inner_connection.rs:119 — sqlite3_busy_timeout
+        // 5000 on every open), which open() relies on WITHOUT setting anything.
+        // This test pins that reliance: if a rusqlite upgrade ever drops or shrinks
+        // the default, the lifecycle paths above start misreading under contention
+        // and this is the only thing that will say so (review 2026-07-18).
+        let d = tmpdir("busy_wait");
+        let c1 = open(&d).unwrap();
+        set_flag(&c1, SETTING_CLOSE_TO_TRAY, true);
+        let c2 = open(&d).unwrap();
+        c1.execute_batch("BEGIN EXCLUSIVE").unwrap();
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            c1.execute_batch("COMMIT").unwrap();
+        });
+        let started = std::time::Instant::now();
+        assert!(get_flag(&c2, SETTING_CLOSE_TO_TRAY),
+            "a stored '1' must never read as false just because a writer was mid-commit");
+        assert!(started.elapsed() >= std::time::Duration::from_millis(150),
+            "the truthful read implies the reader actually waited for the writer, \
+             not that the lock was already free (took {:?})", started.elapsed());
+        writer.join().unwrap();
+    }
+
+    #[test]
     fn flags_default_false_and_roundtrip() {
         let d = tmpdir("flags");
         let c = open(&d).unwrap();

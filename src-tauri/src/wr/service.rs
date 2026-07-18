@@ -160,7 +160,16 @@ fn run_job(cfg: &ServiceCfg, client: &job::Client, j: &job::WrJob,
     let tier = verify::tier_for(j.attempt);
     let dest = video_path(&cfg.data_dir, j.wr_id);
 
-    let exe = match ytdlp::ensure(&cfg.data_dir) { Ok(p) => p, Err(e) => return Outcome::Error(e) };
+    let exe = match ytdlp::ensure(&cfg.data_dir, cancel) {
+        Ok(p) => p,
+        Err(e) => {
+            // A cancel mid-fetch is the same deliberate stop as everywhere else:
+            // hand the claim back (refund) instead of letting the lease lapse and
+            // silently burn the attempt on a pause.
+            if cancel() { let _ = client.release(j.wr_id); return Outcome::Released(j.wr_id); }
+            return Outcome::Error(e);
+        }
+    };
     super::phase::set(Some(super::phase::Phase {
         kind: super::phase::PhaseKind::Downloading, course_slug: j.course_slug.clone() }));
     if let Err(e) = ytdlp::download(&exe, &j.video_url, tier, &dest, cancel) {
@@ -172,8 +181,12 @@ fn run_job(cfg: &ServiceCfg, client: &job::Client, j: &job::WrJob,
         if is_staleness_explicable(&e) {
             // See is_staleness_explicable's doc for why only THIS class of error retries.
             log::warn!("[wr] download failed ({}), refreshing yt-dlp and retrying once", e.reason());
-            let retry = ytdlp::fetch(&cfg.data_dir)
-                .map_err(WrError::DownloadFailed)
+            let retry = ytdlp::fetch(&cfg.data_dir, cancel)
+                // A cancel surfacing through the fetch must become Cancelled, not
+                // DownloadFailed — the arm below releases on Cancelled, and a fail()
+                // here would burn the attempt with a nonsense last_error (the same
+                // contract the retry-download leg had to learn in f3fb8fa).
+                .map_err(|e| if cancel() { WrError::Cancelled } else { WrError::DownloadFailed(e) })
                 .and_then(|exe2| ytdlp::download(&exe2, &j.video_url, tier, &dest, cancel));
             if let Err(e2) = retry {
                 // Mirror the first leg: a cancel during the RETRY is the same deliberate

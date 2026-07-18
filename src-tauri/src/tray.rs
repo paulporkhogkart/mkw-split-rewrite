@@ -147,6 +147,12 @@ mod tests {
         // Priority: off > paused > working > waiting > idle.
         assert_eq!(tooltip(false, false, true, None), "WR service off");
         assert_eq!(tooltip(true, true, true, None), "Paused");
+        // Paused must OUTRANK an in-flight phase: after Pause is clicked the phase
+        // lingers until the cancel lands (≥250ms, up to a slow release round-trip),
+        // and advertising "Downloading…" in that window would say the pause didn't
+        // take. Found unpinned by mutation in the 2026-07-18 review — the priority
+        // flip passed this test as it stood.
+        assert_eq!(tooltip(true, true, true, Some(&ph(PhaseKind::Downloading))), "Paused");
         assert_eq!(tooltip(true, false, true, Some(&ph(PhaseKind::Downloading))),
                    "Downloading dk_spaceport…");
         assert_eq!(tooltip(true, false, true, Some(&ph(PhaseKind::Processing))),
