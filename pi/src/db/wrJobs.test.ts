@@ -272,4 +272,19 @@ describe('deadJobs', () => {
     const hub = new EventHub();
     expect(sweepDeadJobAlerts(db, hub)).toBe(0);
   });
+
+  it('a live final-attempt lease is in flight, not dead — no premature or double alert', () => {
+    const db = dead();
+    db.prepare('UPDATE wr_jobs SET attempts=4 WHERE wr_id=10').run();
+    claimJob(db, 'w1');                                     // attempts -> 5, lease LIVE
+    expect(deadJobs(db)).toEqual([]);                       // being worked ≠ dead
+    const hub = new EventHub();
+    const events: ServerEvent[] = [];
+    hub.subscribe((e) => events.push(e));
+    expect(sweepDeadJobAlerts(db, hub)).toBe(0);            // sweep silent mid-attempt
+    failJob(db, 10, 'w1', 'download_failed: 500');          // the real death (lease cleared)
+    expect(sweepDeadJobAlerts(db, hub)).toBe(1);            // now dead -> exactly one alert
+    expect(sweepDeadJobAlerts(db, hub)).toBe(0);
+    expect(events.filter((e) => e.type === 'wr_job_dead')).toHaveLength(1);
+  });
 });

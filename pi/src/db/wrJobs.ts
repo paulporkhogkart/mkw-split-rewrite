@@ -197,6 +197,10 @@ export function deadJobs(db: DatabaseSync): DeadJob[] {
      WHERE NOT EXISTS (SELECT 1 FROM wr_trails t WHERE t.wr_id = j.wr_id)
        AND w.removed_at IS NULL
        AND (j.attempts >= ? OR j.last_error LIKE 'time_mismatch%')
+       -- A live lease means the final attempt is still being worked: not dead YET.
+       -- Without this, the auto-firing sweep false-alerts mid-attempt and the /result
+       -- route re-announces the same death seconds later (double wr_job_dead).
+       AND (j.lease_until IS NULL OR j.lease_until < datetime('now'))
      ORDER BY j.updated_at DESC`
   ).all(MAX_ATTEMPTS) as DeadJob[];
 }
