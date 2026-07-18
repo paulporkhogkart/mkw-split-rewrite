@@ -163,13 +163,18 @@ fn run_job(cfg: &ServiceCfg, client: &job::Client, j: &job::WrJob,
     let exe = match ytdlp::ensure(&cfg.data_dir) { Ok(p) => p, Err(e) => return Outcome::Error(e) };
     super::phase::set(Some(super::phase::Phase {
         kind: super::phase::PhaseKind::Downloading, course_slug: j.course_slug.clone() }));
-    if let Err(e) = ytdlp::download(&exe, &j.video_url, tier, &dest) {
+    if let Err(e) = ytdlp::download(&exe, &j.video_url, tier, &dest, cancel) {
+        // A cancel mid-download is a deliberate stop: release (refund), never fail.
+        if matches!(e, WrError::Cancelled) {
+            let _ = client.release(j.wr_id);
+            return Outcome::Released(j.wr_id);
+        }
         if is_staleness_explicable(&e) {
             // See is_staleness_explicable's doc for why only THIS class of error retries.
             log::warn!("[wr] download failed ({}), refreshing yt-dlp and retrying once", e.reason());
             let retry = ytdlp::fetch(&cfg.data_dir)
                 .map_err(WrError::DownloadFailed)
-                .and_then(|exe2| ytdlp::download(&exe2, &j.video_url, tier, &dest));
+                .and_then(|exe2| ytdlp::download(&exe2, &j.video_url, tier, &dest, cancel));
             if let Err(e2) = retry {
                 let _ = client.fail(j.wr_id, &e2);
                 return Outcome::Failed(j.wr_id, e2);

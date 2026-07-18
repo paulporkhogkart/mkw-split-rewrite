@@ -64,35 +64,111 @@ pub fn fetch(dir: &Path) -> Result<PathBuf, String> {
     Ok(exe)
 }
 
-/// Download `url` to `dest`. Video only — audio is never fetched.
-pub fn download(exe: &Path, url: &str, tier: Tier, dest: &Path) -> Result<(), WrError> {
-    let out = std::process::Command::new(exe)
-        .args([
-            "-f", format_selector(tier),
-            "-o", &dest.to_string_lossy(),
-            "--no-playlist",
-            // Observed live: the 197MB pull 403'd on defaults and only completed with
-            // concurrent fragments. Do NOT reach for --extractor-args
-            // player_client=web_safari as a "fix" — it trips YouTube's n-challenge and
-            // needs a JS runtime. The default client works.
-            "--concurrent-fragments", "4",
-            "--retries", "10",
-            "--fragment-retries", "10",
-            "--no-progress",
-            url,
-        ])
-        .output()
-        // A spawn failure (missing/corrupt exe, no permission to exec) is OUR fault, not
-        // the video's — DownloadFailed would misleadingly blame the video in the Pi's
-        // last_error, and it's not something a plain retry of the same exe can fix.
+/// Hard cap on one yt-dlp run (spec 2026-07-17 §5.2). The biggest current video
+/// (Rainbow Road, ~135MB) downloads in well under a minute on any sane connection;
+/// 240s is generous headroom, and past it a retry beats waiting.
+pub const DOWNLOAD_CAP: std::time::Duration = std::time::Duration::from_secs(240);
+
+/// Run a downloader process with a watchdog: cancel-aware, bounded by `cap`. Returns
+/// (exit_success, stderr_text). Mirrors engine.rs's run_video shell: a watchdog thread
+/// polls cancel/elapsed every 250ms and kills the child (closing its pipes, which
+/// unblocks the drain); .output()-style blocking had neither bound nor cancel, which
+/// stalled the whole runner on a hung transfer (fix-wave review F6).
+fn run_download(
+    mut cmd: std::process::Command,
+    cap: std::time::Duration,
+    cancel: &(dyn Fn() -> bool + Sync),
+) -> Result<(bool, String), WrError> {
+    use std::io::Read;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Mutex;
+
+    let mut child = cmd
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
         .map_err(|e| WrError::EngineFailed(format!("spawn yt-dlp: {e}")))?;
-    if out.status.success() && dest.is_file() { return Ok(()); }
-    Err(classify_failure(&String::from_utf8_lossy(&out.stderr)))
+    let stderr = child.stderr.take().expect("piped stderr");
+
+    let started = std::time::Instant::now();
+    let child = Mutex::new(child);
+    let done = AtomicBool::new(false);
+    let cancelled = AtomicBool::new(false);
+    let timed_out = AtomicBool::new(false);
+
+    let stderr_text = std::thread::scope(|s| {
+        s.spawn(|| {
+            while !done.load(Ordering::Relaxed) {
+                if cancel() {
+                    cancelled.store(true, Ordering::Relaxed);
+                    let _ = child.lock().unwrap().kill();
+                    return;
+                }
+                if started.elapsed() > cap {
+                    timed_out.store(true, Ordering::Relaxed);
+                    let _ = child.lock().unwrap().kill();
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+        });
+        // Drain stderr to EOF (yt-dlp's stderr is small; no ring needed). Blocks until
+        // the child exits or is killed — either closes the pipe.
+        let mut buf = String::new();
+        let mut rdr = stderr;
+        let _ = rdr.read_to_string(&mut buf);
+        done.store(true, Ordering::Relaxed);
+        buf
+    });
+
+    let mut child = child.into_inner().unwrap_or_else(|e| e.into_inner());
+    let status = child.wait().map_err(|e| WrError::EngineFailed(format!("wait yt-dlp: {e}")))?;
+
+    if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err(WrError::Cancelled);
+    }
+    if timed_out.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err(WrError::DownloadFailed(format!(
+            "download exceeded the {}s cap and was killed", cap.as_secs())));
+    }
+    Ok((status.success(), stderr_text))
+}
+
+/// Download `url` to `dest`. Video only — audio is never fetched. Bounded and
+/// cancel-aware via run_download.
+pub fn download(
+    exe: &Path,
+    url: &str,
+    tier: Tier,
+    dest: &Path,
+    cancel: &(dyn Fn() -> bool + Sync),
+) -> Result<(), WrError> {
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args([
+        "-f", format_selector(tier),
+        "-o", &dest.to_string_lossy(),
+        "--no-playlist",
+        // Observed live: the 197MB pull 403'd on defaults and only completed with
+        // concurrent fragments. Do NOT reach for --extractor-args
+        // player_client=web_safari as a "fix" — it trips YouTube's n-challenge and
+        // needs a JS runtime. The default client works.
+        "--concurrent-fragments", "4",
+        "--retries", "10",
+        "--fragment-retries", "10",
+        "--no-progress",
+        url,
+    ]);
+    let (success, stderr) = run_download(cmd, DOWNLOAD_CAP, cancel)?;
+    if success && dest.is_file() { return Ok(()); }
+    Err(classify_failure(&stderr))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
+    use std::time::Duration;
 
     #[test]
     fn native_selector_demands_1080p60_and_prefers_avc1() {
@@ -155,9 +231,47 @@ mod tests {
         // asserting on classify_failure() (which spawn failures never reach).
         let missing = Path::new("this-path-definitely-does-not-exist-wr-test.exe");
         let dest = std::env::temp_dir().join("wr_ytdlp_spawn_test_unused.mp4");
-        let err = download(missing, "https://example.invalid/video", Tier::Native1080p60, &dest)
+        let err = download(missing, "https://example.invalid/video", Tier::Native1080p60, &dest,
+                           &|| false)
             .expect_err("a nonexistent exe must fail to spawn");
         assert!(matches!(err, WrError::EngineFailed(_)),
             "a spawn failure is OUR fault, not the video's — expected EngineFailed, got {err:?}");
+    }
+
+    /// A stand-in downloader that never finishes — the shape of a stalled transfer.
+    fn wedged_cmd() -> Command {
+        let mut c = Command::new("python");
+        c.args(["-c", "import time; time.sleep(60)"]);
+        c
+    }
+
+    #[test]
+    fn a_wedged_download_is_killed_at_the_cap_not_waited_out() {
+        let started = std::time::Instant::now();
+        let err = run_download(wedged_cmd(), Duration::from_secs(2), &|| false)
+            .expect_err("a stalled download must be killed, not waited out");
+        assert!(matches!(err, WrError::DownloadFailed(_)),
+            "a timeout is retryable DownloadFailed, got {err:?}");
+        assert!(started.elapsed() < Duration::from_secs(15),
+            "the cap must actually fire; took {:?}", started.elapsed());
+    }
+
+    #[test]
+    fn cancel_aborts_a_download_promptly_and_is_not_a_failure() {
+        let started = std::time::Instant::now();
+        let err = run_download(wedged_cmd(), Duration::from_secs(600), &|| true)
+            .expect_err("a cancelled download must abort");
+        assert!(matches!(err, WrError::Cancelled),
+            "cancel must stay distinct from failure (release vs fail), got {err:?}");
+        assert!(started.elapsed() < Duration::from_secs(15));
+    }
+
+    #[test]
+    fn a_finished_download_reports_status_and_stderr() {
+        let mut ok = Command::new("python");
+        ok.args(["-c", "import sys; sys.stderr.write('some warning\\n')"]);
+        let (success, stderr) = run_download(ok, Duration::from_secs(10), &|| false).unwrap();
+        assert!(success);
+        assert!(stderr.contains("some warning"), "stderr must be captured for classify_failure");
     }
 }
