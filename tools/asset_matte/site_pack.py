@@ -54,16 +54,22 @@ def quant_alpha(im: Image.Image, bits: int) -> Image.Image:
 
 
 def grid_for(n_frames: int, fw: int, fh: int, max_side: int = MAX_SHEET_SIDE) -> tuple[int, int]:
-    """Near-square row-major grid, both sides <= max_side."""
-    cols = max(1, math.ceil(math.sqrt(n_frames)))
-    while cols > 1 and cols * fw > max_side:
-        cols -= 1
-    if cols * fw > max_side:
-        raise ValueError(f"frame width {fw} exceeds max sheet side {max_side}")
-    rows = math.ceil(n_frames / cols)
-    if rows * fh > max_side:
+    """Near-square row-major grid, both sides <= max_side. Prefers the fittable
+    column count nearest ceil(sqrt(n)); raises ValueError when nothing fits."""
+    target = max(1, math.ceil(math.sqrt(n_frames)))
+    best = None
+    for cols in range(1, n_frames + 1):
+        if cols * fw > max_side:
+            break
+        rows = math.ceil(n_frames / cols)
+        if rows * fh > max_side:
+            continue
+        score = (abs(cols - target), cols)
+        if best is None or score < best[0]:
+            best = (score, cols, rows)
+    if best is None:
         raise ValueError(f"{n_frames}f of {fw}x{fh} cannot fit a {max_side}px sheet")
-    return cols, rows
+    return best[1], best[2]
 
 
 def build_sheet(frames: list[Image.Image], fw: int, fh: int) -> Image.Image:

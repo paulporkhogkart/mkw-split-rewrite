@@ -59,6 +59,10 @@ class TestSheet:
         with pytest.raises(ValueError):
             sp.grid_for(4000, 500, 500, max_side=4096)
 
+    def test_grid_finds_wide_packing_for_tall_frames(self):
+        cols, rows = sp.grid_for(100, 10, 1000, max_side=4096)
+        assert cols * 10 <= 4096 and rows * 1000 <= 4096 and cols * rows >= 100
+
     def test_build_sheet_places_frames_row_major(self):
         frames = [_rgba(10, 12, (i * 20, 0, 0, 255)) for i in range(5)]
         sheet = sp.build_sheet(frames, 10, 12)
