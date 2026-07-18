@@ -22,6 +22,12 @@ def test_keyframe_indices_spread():
     assert sm.keyframe_indices(4) == [0, 1, 2, 3]
 
 
+def test_keyframe_indices_always_four_even_for_tiny_anims(tmp_path):
+    assert sm.keyframe_indices(2) == [0, 0, 1, 1]
+    paths = sm.write_sil_masks([_blob(), _blob(cx=52)], "t__base", "spawn", str(tmp_path))
+    assert len(paths) == 4  # sil_k0..k3 all written
+
+
 def test_mask_same_size_and_covers_silhouette():
     f = _blob()
     m = np.asarray(sm.sil_mask(f, "combo__idle"))

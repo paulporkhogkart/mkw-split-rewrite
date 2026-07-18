@@ -15,7 +15,7 @@ from PIL import Image, ImageDraw
 
 
 def keyframe_indices(n_frames: int) -> list[int]:
-    return sorted(set(round(i * (n_frames - 1) / 3) for i in range(4)))
+    return [round(i * (n_frames - 1) / 3) for i in range(4)]
 
 
 def _jags(seed_key: str, points: int, margin_range: tuple[int, int]):
@@ -46,7 +46,7 @@ def sil_mask(frame: Image.Image, seed_key: str, margin_range=(18, 34),
         theta = -math.pi + (j + 0.5) * sector + jitters[j]
         # silhouette extent in this sector (max radius of any silhouette pixel)
         lo, hi = -math.pi + j * sector, -math.pi + (j + 1) * sector
-        in_sector = (ang >= lo) & (ang < hi)
+        in_sector = (ang >= lo) & ((ang < hi) if j < points - 1 else (ang <= hi))
         r = dist[in_sector].max() if in_sector.any() else dist.max() * 0.4
         r += margins[j] * scale
         verts.append((cx + r * math.cos(theta), cy + r * math.sin(theta)))
