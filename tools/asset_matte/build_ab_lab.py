@@ -83,16 +83,21 @@ function addCell(root, variant, combo, cssH) {{
   const el = document.createElement("canvas"); el.className = "chip";
   el.width = man.fw; el.height = man.fh;
   el.style.width = man.fw * s + "px"; el.style.height = man.fh * s + "px";
-  // All sheets decoded up-front as Image objects; a draw simply skips (keeping the
-  // previous frame on the canvas) until its sheet is ready -> no blank flash ever.
-  const imgs = {{}};
+  // Sheets pinned as ImageBitmaps: a bare Image's decoded pixels live in Chrome's
+  // evictable decode cache, and with ~100 large sheets on this page drawImage kept
+  // triggering synchronous re-decodes (global jank). createImageBitmap decodes ONCE
+  // into a GPU-backed bitmap; draws are pure texture copies. Until a bitmap is
+  // ready a draw skips, holding the previous canvas frame -> still no blank flash.
+  const bmps = {{}};
   for (const n of Object.keys(entry.anims)) {{
     const im = new Image();
     im.src = `packs/${{variant}}/chips/${{combo}}__${{n}}.webp`;
-    imgs[n] = im;
+    im.decode().then(() => createImageBitmap(im))
+      .then((b) => {{ bmps[n] = b; }})
+      .catch(() => console.warn("sheet decode failed", im.src));
   }}
   const player = createChipPlayer({{entry, fps: man.fps, fw: man.fw, fh: man.fh}});
-  cells.push({{el, ctx: el.getContext("2d"), imgs, player, man, entry, last: "", variant, combo}});
+  cells.push({{el, ctx: el.getContext("2d"), bmps, player, man, entry, last: "", variant, combo}});
   const kb = (n, f) => {{ const b = document.createElement("button"); b.textContent = n; b.onclick = f; return b; }};
   wrap.append(el, kb("SELECT", () => player.select()), kb("CONFIRM", () => player.confirm()));
   const idleKB = (DATA.sizes[[variant, combo, "idle"].join("|")] / 1024) | 0;
@@ -105,12 +110,12 @@ function tickAll(t) {{
     const st = c.player.tick(t);
     const key = st.anim + ":" + st.frame;
     if (key === c.last) continue;                       // same frame, skip redraw
-    const img = c.imgs[st.anim];
-    if (!img.complete || !img.naturalWidth) continue;   // not decoded yet: hold last frame
+    const bmp = c.bmps[st.anim];
+    if (!bmp) continue;                                 // bitmap not ready: hold last frame
     const a = c.entry.anims[st.anim];
     const r = frameRect(st.frame, a.cols, c.man.fw, c.man.fh);
     c.ctx.clearRect(0, 0, c.man.fw, c.man.fh);
-    c.ctx.drawImage(img, r.sx, r.sy, c.man.fw, c.man.fh, 0, 0, c.man.fw, c.man.fh);
+    c.ctx.drawImage(bmp, r.sx, r.sy, c.man.fw, c.man.fh, 0, 0, c.man.fw, c.man.fh);
     c.last = key;
   }}
   requestAnimationFrame(tickAll);

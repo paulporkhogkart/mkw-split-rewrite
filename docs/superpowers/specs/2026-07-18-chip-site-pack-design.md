@@ -86,10 +86,15 @@ the lossless alpha plane is 38% of bytes at 8-bit; 5-bit cuts total ~31%, dimini
   debugging: the sheet pixels themselves are shift-free (decoded-tile dx spread 0.03px vs
   ground truth, statistically identical to animated webp) — the jitter is purely paint-time
   snapping, which canvas avoids because the destination rect never moves (the `<img>` path).
-  Decode all of a combo's sheets up-front (`Image` objects); if a sheet isn't decoded at
-  switch time, skip the draw and hold the previous canvas frame — never blank. (URL/src
-  swapping flashes 1–2 blank frames on async decode; an animated-webp `<img>`-swap approach
-  would hit the same flash.)
+  Decode all of a combo's sheets up-front into **`ImageBitmap`s** (`img.decode()` →
+  `createImageBitmap`) — a bare `Image`'s decoded pixels sit in the browser's evictable
+  decode cache, so `drawImage` from many/large sheets triggers synchronous re-decodes
+  (measured on the lab: global judder even at 60fps); an ImageBitmap decodes once into a
+  pinned GPU-backed bitmap and draws are texture copies. If a bitmap isn't ready at switch
+  time, skip the draw and hold the previous canvas frame — never blank. (URL/src swapping
+  flashes 1–2 blank frames on async decode; an animated-webp `<img>`-swap approach would hit
+  the same flash. Per-combo bitmap memory is trivial for the card — ~33MB decoded; the lab
+  pins ~100 sheets ≈ 1GB, fine for a desktop eye-test page.)
 
 ## Outputs (one pack dir, all data in one place)
 
