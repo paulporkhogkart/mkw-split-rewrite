@@ -7,7 +7,7 @@ from tools.asset_matte import build_ab_lab as ab
 def test_variants_change_one_thing():
     v = {x["id"]: x for x in ab.VARIANTS}
     cand = v["candidate"]
-    assert cand == {"id": "candidate", "scale": 0.2, "fps": 30, "quality": 60, "alpha_bits": 5}
+    assert cand == {"id": "candidate", "scale": 0.2, "fps": 60, "quality": 60, "alpha_bits": 5}
     for vid, x in v.items():
         if vid == "candidate":
             continue

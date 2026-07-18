@@ -17,14 +17,16 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from tools.asset_matte import build_site_pack as bsp              # noqa: E402
 from tools.asset_matte import site_pack as sp                     # noqa: E402
 
+# Pivoted to a 60fps candidate 2026-07-19 (Paul locked fps=60 on round 1; fps30
+# kept as the rejected-reference cell). Change-one-thing around the candidate.
 VARIANTS = [
-    {"id": "candidate", "scale": 0.2, "fps": 30, "quality": 60, "alpha_bits": 5},
-    {"id": "fps60",     "scale": 0.2, "fps": 60, "quality": 60, "alpha_bits": 5},
-    {"id": "q75",       "scale": 0.2, "fps": 30, "quality": 75, "alpha_bits": 5},
-    {"id": "q50",       "scale": 0.2, "fps": 30, "quality": 50, "alpha_bits": 5},
-    {"id": "alpha8",    "scale": 0.2, "fps": 30, "quality": 60, "alpha_bits": 8},
-    {"id": "alpha4",    "scale": 0.2, "fps": 30, "quality": 60, "alpha_bits": 4},
-    {"id": "scale015",  "scale": 0.15, "fps": 30, "quality": 60, "alpha_bits": 5},
+    {"id": "candidate", "scale": 0.2, "fps": 60, "quality": 60, "alpha_bits": 5},
+    {"id": "fps30",     "scale": 0.2, "fps": 30, "quality": 60, "alpha_bits": 5},
+    {"id": "q75",       "scale": 0.2, "fps": 60, "quality": 75, "alpha_bits": 5},
+    {"id": "q50",       "scale": 0.2, "fps": 60, "quality": 50, "alpha_bits": 5},
+    {"id": "alpha8",    "scale": 0.2, "fps": 60, "quality": 60, "alpha_bits": 8},
+    {"id": "alpha4",    "scale": 0.2, "fps": 60, "quality": 60, "alpha_bits": 4},
+    {"id": "scale015",  "scale": 0.15, "fps": 60, "quality": 60, "alpha_bits": 5},
 ]
 DEFAULT_COMBOS = ["baby_daisy__base__b_dasher", "bowser__base__bowser_bruiser",
                   "mario__base", "king_boo__base"]
