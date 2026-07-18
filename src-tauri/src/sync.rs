@@ -498,7 +498,7 @@ pub async fn sync_test_connection() -> Result<String, String> {
     match client.get(format!("{base}/health"))
         .timeout(std::time::Duration::from_secs(8)).send().await
     {
-        Err(e) => return Err(format!("Couldn't reach {base} — {e}")),
+        Err(e) => return Err(format!("Couldn't reach {base}: {e}")),
         Ok(r) if !r.status().is_success() =>
             return Err(format!("{base}/health returned HTTP {}.", r.status().as_u16())),
         Ok(_) => {}
@@ -512,7 +512,7 @@ pub async fn sync_test_connection() -> Result<String, String> {
         .timeout(std::time::Duration::from_secs(8))
         .send().await
     {
-        Err(e) => Err(format!("Server reachable, but the runs endpoint errored — {e}")),
+        Err(e) => Err(format!("Server reachable, but the runs endpoint errored: {e}")),
         Ok(r) => match r.status().as_u16() {
             400 => Ok(format!("Connected to {base}. Server is up and your token is valid.")),
             401 => Err("Reached the server, but it rejected your token (401). Check the token.".into()),

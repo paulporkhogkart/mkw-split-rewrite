@@ -56,7 +56,7 @@
 
   <!-- On-fire target -->
   <div class="fireline">
-    {#if lit}🔥 This track is on fire — {s.leaderboard[0].display_name} leads by enough to burn.
+    {#if lit}🔥 This track is on fire. {s.leaderboard[0].display_name} leads by enough to burn.
     {:else if fire.ms != null}🔥 Run <b>{fmtTime(fire.ms)}</b> or faster to seize #1 and light this track.
     {:else if fire.reason === "wr-tight"}The leader is too close to the WR to be out-lit.
     {:else}Needs a WR and a second time before a track can catch fire.{/if}

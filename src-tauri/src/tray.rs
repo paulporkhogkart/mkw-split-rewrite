@@ -17,7 +17,7 @@ pub fn tooltip(run_wr_service: bool, paused: bool, gate_open: bool, phase: Optio
             wr::phase::PhaseKind::Processing => format!("Processing {}…", p.course_slug),
         };
     }
-    if !gate_open { return "Waiting — tracking active".into(); }
+    if !gate_open { return "Waiting (tracking active)".into(); }
     "Idle".into()
 }
 
@@ -157,7 +157,7 @@ mod tests {
                    "Downloading dk_spaceport…");
         assert_eq!(tooltip(true, false, true, Some(&ph(PhaseKind::Processing))),
                    "Processing dk_spaceport…");
-        assert_eq!(tooltip(true, false, false, None), "Waiting — tracking active");
+        assert_eq!(tooltip(true, false, false, None), "Waiting (tracking active)");
         assert_eq!(tooltip(true, false, true, None), "Idle");
     }
 

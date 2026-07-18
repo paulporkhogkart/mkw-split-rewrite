@@ -71,7 +71,7 @@
 </script>
 
 <header class="top" style="--brand-accent:{brandColor}">
-  <a class="brand" href="/" aria-label="THE KART-OFF — home" on:click={navigate}
+  <a class="brand" href="/" aria-label="THE KART-OFF home" on:click={navigate}
      on:mouseenter={() => (brandHot = true)} on:mouseleave={() => (brandHot = false)}>
     <WordmarkFire color={brandColor} active={brandHot} />
     <span class="wmwrap"><Wordmark size="22px" player={brandPlayer} fire={brandHot} /></span>

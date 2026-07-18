@@ -17,6 +17,6 @@ export function buildJobDeadEmbed(d: JobDeadData): EmbedBuilder {
       { name: 'Attempts', value: String(d.attempts), inline: true },
     )
     .setFooter({ text: d.reason.startsWith('time_mismatch')
-      ? 'Likely a wrong/mislinked video — revives automatically if mkwrs corrects the link. npm run wr-flags lists it.'
+      ? 'Likely a wrong/mislinked video; revives automatically if mkwrs corrects the link. npm run wr-flags lists it.'
       : 'npm run wr-flags lists dead jobs.' });
 }
