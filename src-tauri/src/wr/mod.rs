@@ -146,7 +146,13 @@ pub fn wr_set_setting(app: tauri::AppHandle, key: String, value: bool) -> Result
         let taken = {
             let mut guard = rs.0.lock().unwrap_or_else(|e| e.into_inner());
             match (value, guard.is_some()) {
-                (true, false) => { *guard = Some(runner::Runner::start(app.clone())); None }
+                (true, false) => {
+                    let r = runner::Runner::start(app.clone());
+                    let h = app.clone();
+                    r.set_refresh_hook(Box::new(move || crate::tray::refresh_tray_status(&h)));
+                    *guard = Some(r);
+                    None
+                }
                 (false, true) => guard.take(),
                 _ => None,
             }
@@ -161,5 +167,6 @@ pub fn wr_set_setting(app: tauri::AppHandle, key: String, value: bool) -> Result
             return Err(format!("autostart registration failed: {e}"));
         }
     }
+    crate::tray::sync_tray(&app);
     Ok(())
 }

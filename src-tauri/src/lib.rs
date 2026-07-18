@@ -1,5 +1,6 @@
 mod discord;
 mod sync;
+mod tray;
 mod wr;
 
 use std::sync::Mutex;
@@ -325,6 +326,15 @@ pub fn run() {
                 if wr::state::get_flag(&c, wr::state::SETTING_RUN_WR_SERVICE) {
                     let runner = wr::runner::Runner::start(app.handle().clone());
                     *app.state::<RunnerState>().0.lock().unwrap() = Some(runner);
+                }
+            }
+            tray::sync_tray(app.handle());
+            if let Some(rs) = app.try_state::<RunnerState>() {
+                if let Ok(guard) = rs.0.lock() {
+                    if let Some(r) = guard.as_ref() {
+                        let h = app.handle().clone();
+                        r.set_refresh_hook(Box::new(move || tray::refresh_tray_status(&h)));
+                    }
                 }
             }
             if !is_tray_start() {
