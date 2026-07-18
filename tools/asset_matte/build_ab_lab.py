@@ -62,7 +62,12 @@ def render_html(combos, variants, manifests, sizes, stepper_js) -> str:
     moving background-position gets pixel-snapped per paint and jitters horizontally
     as columns cycle — measured: the sheet PIXELS are shift-free (dx spread 0.03px,
     same as animated webp), the shake was pure paint snapping. */
- .chip{{{INK_RING};margin:0 auto;display:block}}
+ /* Ring is applied per ring-mode from JS (baked = stamped inside the canvas draw;
+    css = the card's drop-shadow filter chain; off = none). CSS drop-shadows on
+    canvases that invalidate every frame force ~per-cell filter re-raster each
+    frame — the suspected cause of the page compositing at ~22Hz. */
+ .chip{{margin:0 auto;display:block}}
+ .chip.cssring,img.cssring{{{INK_RING}}}
  .lbl{{color:#6b6d73;font-size:10px;margin-top:4px}}
  button{{font-size:10px;margin:2px}}
  .silwrap{{position:relative;width:120px;height:126px;background:#191a1d}}
@@ -79,10 +84,16 @@ function addCell(root, variant, combo, cssH) {{
   const entry = man.combos[combo];
   const wrap = document.createElement("div"); wrap.className = "cell";
   const s = cssH / man.fh;
-  // Native-resolution canvas, CSS-downscaled as one texture (the <img> path).
+  // Canvas backing at DEVICE pixels of the display size: drawImage does one
+  // high-quality resample per frame and a baked ring stamps at true device px
+  // (matches what the card integration will do).
+  const dpr = window.devicePixelRatio || 1;
   const el = document.createElement("canvas"); el.className = "chip";
-  el.width = man.fw; el.height = man.fh;
+  el.width = Math.round(man.fw * s * dpr); el.height = Math.round(man.fh * s * dpr);
   el.style.width = man.fw * s + "px"; el.style.height = man.fh * s + "px";
+  // offscreen scratch for the baked ring (silhouette union, tinted)
+  const oc = document.createElement("canvas");
+  oc.width = el.width; oc.height = el.height;
   // Sheets pinned as ImageBitmaps: a bare Image's decoded pixels live in Chrome's
   // evictable decode cache, and with ~100 large sheets on this page drawImage kept
   // triggering synchronous re-decodes (global jank). createImageBitmap decodes ONCE
@@ -97,7 +108,8 @@ function addCell(root, variant, combo, cssH) {{
       .catch(() => console.warn("sheet decode failed", im.src));
   }}
   const player = createChipPlayer({{entry, fps: man.fps, fw: man.fw, fh: man.fh}});
-  cells.push({{el, ctx: el.getContext("2d"), bmps, player, man, entry, last: "", variant, combo}});
+  cells.push({{el, ctx: el.getContext("2d"), oc, octx: oc.getContext("2d"),
+              bmps, player, man, entry, last: "", variant, combo}});
   const kb = (n, f) => {{ const b = document.createElement("button"); b.textContent = n; b.onclick = f; return b; }};
   wrap.append(el, kb("SELECT", () => player.select()), kb("CONFIRM", () => player.confirm()));
   const idleKB = (DATA.sizes[[variant, combo, "idle"].join("|")] / 1024) | 0;
@@ -144,22 +156,55 @@ copyBtn.onclick = () => {{
 document.body.append(hud, copyBtn);
 copyBtn.style.cssText = "position:fixed;top:6px;right:8px;z-index:10;font-size:10px";
 hud.style.paddingTop = "24px";
+for (const [i, m] of ["baked", "css", "off"].entries()) {{
+  const b = document.createElement("button"); b.className = "ringbtn";
+  b.textContent = "ring: " + m; b.onclick = () => setRing(m);
+  b.style.cssText = `position:fixed;top:6px;right:${{90 + i * 78}}px;z-index:10;font-size:10px`;
+  document.body.append(b);
+}}
 setInterval(() => {{ hud.textContent = statsText(); }}, 500);
 
+// ring modes: baked (stamped in-canvas, the production candidate) | css (card's
+// filter chain, suspected 22Hz culprit) | off (control). Switching bumps ringGen
+// so every cell force-redraws.
+let ringMode = "baked", ringGen = 0;
+function setRing(mode) {{
+  ringMode = mode; ringGen++;
+  for (const c of cells) c.el.classList.toggle("cssring", mode === "css");
+  document.querySelectorAll("img.animref").forEach((im) =>
+    im.classList.toggle("cssring", mode === "css"));
+  document.querySelectorAll(".ringbtn").forEach((b) =>
+    b.style.fontWeight = b.textContent.endsWith(mode) ? "bold" : "normal");
+}}
+const RING_OFFS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+function draw(c, bmp, r) {{
+  const W = c.el.width, H = c.el.height;
+  c.ctx.clearRect(0, 0, W, H);
+  if (ringMode === "baked") {{
+    const o = c.octx, d = Math.max(1, Math.round(window.devicePixelRatio || 1));
+    o.globalCompositeOperation = "source-over";
+    o.clearRect(0, 0, W, H);
+    for (const [dx, dy] of RING_OFFS)
+      o.drawImage(bmp, r.sx, r.sy, c.man.fw, c.man.fh, dx * d, dy * d, W, H);
+    o.globalCompositeOperation = "source-in";
+    o.fillStyle = "#101114";
+    o.fillRect(0, 0, W, H);
+    c.ctx.drawImage(c.oc, 0, 0);
+  }}
+  c.ctx.drawImage(bmp, r.sx, r.sy, c.man.fw, c.man.fh, 0, 0, W, H);
+}}
 function tickAll(t) {{
   if (prof.lastT) pushCap(prof.raf, t - prof.lastT, 600);
   prof.lastT = t;
   const t0 = performance.now();
   for (const c of cells) {{
     const st = c.player.tick(t);
-    const key = st.anim + ":" + st.frame;
+    const key = st.anim + ":" + st.frame + ":" + ringGen;
     if (key === c.last) continue;                       // same frame, skip redraw
     const bmp = c.bmps[st.anim];
     if (!bmp) continue;                                 // bitmap not ready: hold last frame
     const a = c.entry.anims[st.anim];
-    const r = frameRect(st.frame, a.cols, c.man.fw, c.man.fh);
-    c.ctx.clearRect(0, 0, c.man.fw, c.man.fh);
-    c.ctx.drawImage(bmp, r.sx, r.sy, c.man.fw, c.man.fh, 0, 0, c.man.fw, c.man.fh);
+    draw(c, bmp, frameRect(st.frame, a.cols, c.man.fw, c.man.fh));
     c.last = key;
     // probe: displayed-frame hold durations for the first candidate and fps60 cells
     if (c === probe30) {{ if (prof.h30) pushCap(prof.holds30, t - prof.h30, 240); prof.h30 = t; }}
@@ -174,7 +219,7 @@ for (const combo of DATA.combos) {{
   const g = document.createElement("div"); g.className = "grid"; root.append(g);
   for (const v of DATA.variants) addCell(g, v, combo, 112);
   const ref = document.createElement("div"); ref.className = "cell";
-  ref.innerHTML = `<img style="height:112px;{INK_RING}" src="animref/${{combo}}__idle.webp"><div class="lbl">animref (animated webp)</div>`;
+  ref.innerHTML = `<img class="animref" style="height:112px" src="animref/${{combo}}__idle.webp"><div class="lbl">animref (animated webp)</div>`;
   g.append(ref);
   const h2 = document.createElement("h2"); h2.textContent = combo + " · candidate at card sizes"; root.append(h2);
   const g2 = document.createElement("div"); g2.className = "grid"; root.append(g2);
@@ -182,6 +227,7 @@ for (const combo of DATA.combos) {{
 }}
 const probe30 = cells.find((c) => c.variant === "candidate");
 const probe60 = cells.find((c) => c.variant === "fps60");
+setRing("baked");
 requestAnimationFrame(tickAll);
 </script></body></html>"""
 
