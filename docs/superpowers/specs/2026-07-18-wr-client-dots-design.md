@@ -40,6 +40,10 @@ feed `interpolateXY` unchanged (it reads elements 0..2 and ignores the rest).
 - `sync_course_reads` gains a `wr_mode: Option<String>` parameter (JS sends `wrMode` —
   Tauri v2 camelCase mapping, same as `serverUrl`). Missing or unrecognized values are
   treated as `"current"` (the product default), one validation point.
+- **The wr-trails read degrades, never fails**: on any error it contributes `[]` instead
+  of failing the whole payload — a Pi that predates the endpoint (or a transient error)
+  must not take PB splits and player trails down with it. The other three reads keep
+  their existing all-or-cached semantics.
 - When the resolved mode is `"off"`, the GET is skipped and `wr_trails` is `[]` — a user
   who never enables WRs costs the Pi nothing.
 - `EMPTY_COURSE_READS` gains `"wr_trails":[]`. A stale cached payload from before this
