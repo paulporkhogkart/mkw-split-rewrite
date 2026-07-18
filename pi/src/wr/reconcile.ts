@@ -49,7 +49,7 @@ function backfill(db: DatabaseSync, row: Row, s: ScrapedWr): boolean {
     // fail/complete an ownership no-op; its one wasted run is the ordinary lease-loss
     // cost. No-op when the WR has no job row.
     db.prepare(`UPDATE wr_jobs SET last_error=NULL, attempts=0,
-                  lease_owner=NULL, lease_until=NULL, updated_at=datetime('now')
+                  lease_owner=NULL, lease_until=NULL, alerted_at=NULL, updated_at=datetime('now')
                 WHERE wr_id=?`).run(row.id);
   }
   if (s.character && s.character !== row.character) {

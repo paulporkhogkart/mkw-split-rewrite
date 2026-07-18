@@ -83,6 +83,9 @@ export function applySchema(db: DatabaseSync): void {
   // Additive: explicit "has an alert been sent for this flag" stamp, set only by the caller
   // that actually publishes the alert (see wr/flags.ts upsertFlag doc comment).
   try { db.exec('ALTER TABLE wr_name_flags ADD COLUMN alerted_at TEXT'); } catch { /* present */ }
+  // Additive: same dedup stamp for wr_jobs — set by whichever path announces a dead job first
+  // (the /result route or the sweep), cleared by reconcile's backfill() on revival.
+  try { db.exec('ALTER TABLE wr_jobs ADD COLUMN alerted_at TEXT'); } catch { /* present */ }
   // Player recolour (existing DBs): Gub teal -> blue. Idempotent (no row matches once recoloured),
   // and gated on the old value so it never fights a future colour change. server/importer.py
   // PLAYER_COLORS carries the same value, so fresh imports seed blue directly.

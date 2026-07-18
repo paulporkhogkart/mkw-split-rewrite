@@ -184,4 +184,15 @@ describe('/v1/wr-jobs', () => {
     });
     expect(events.filter((e) => e.type === 'wr_job_dead')).toEqual([]);
   });
+
+  it('a route-announced death is stamped so the sweep will not re-announce it', async () => {
+    const { db, app, w1 } = setup();
+    await app.request('/v1/wr-jobs/claim', { method: 'POST', headers: w1 });
+    await app.request('/v1/wr-jobs/10/result', {
+      method: 'POST', headers: { ...w1, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ok: false, error: 'time_mismatch detected=1 expected=2' }),
+    });
+    expect(db.prepare('SELECT alerted_at FROM wr_jobs WHERE wr_id=10').get())
+      .not.toMatchObject({ alerted_at: null });
+  });
 });

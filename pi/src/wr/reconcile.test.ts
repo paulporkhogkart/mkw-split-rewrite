@@ -220,6 +220,7 @@ describe('reconcile', () => {
     const id = (db.prepare('SELECT id FROM world_records WHERE is_current=1').get() as any).id;
     expect(claimJob(db, 'w1')).toMatchObject({ wr_id: id });
     failJob(db, id, 'w1', 'time_mismatch detected=1 expected=2');
+    db.prepare("UPDATE wr_jobs SET alerted_at=datetime('now') WHERE wr_id=?").run(id);
     expect(claimJob(db, 'w1')).toBeNull();                       // dead
     // Same record + holder -> Case 1 backfill; only the link changed.
     reconcile(db, hub, [wr({ videoUrl: 'https://youtu.be/corrected' })]);
@@ -227,6 +228,8 @@ describe('reconcile', () => {
       .toMatchObject({ attempts: 0, last_error: null });
     expect(claimJob(db, 'w1')).toMatchObject({ wr_id: id,
       video_url: 'https://youtu.be/corrected', attempt: 1 });    // alive again, fresh
+    expect(db.prepare('SELECT alerted_at FROM wr_jobs WHERE wr_id=?').get(id))
+      .toMatchObject({ alerted_at: null });             // revival re-arms alerting
   });
 
   it('revival mid-lease also evicts the lease so a stale verdict cannot re-kill the job', () => {

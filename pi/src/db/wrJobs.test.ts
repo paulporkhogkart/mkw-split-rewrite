@@ -1,8 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { openDb, applySchema } from './connect';
 import { enqueueJob, seedWrJobs, claimJob, MAX_ATTEMPTS,
-  heartbeatJob, releaseJob, completeJob, failJob, deadJobs } from './wrJobs';
+  heartbeatJob, releaseJob, completeJob, failJob, deadJobs,
+  sweepDeadJobAlerts, markJobAlerted } from './wrJobs';
 import { insertWrTrail, getWrTrail } from './wrTrails';
+import { EventHub } from '../api/events';
+import type { ServerEvent } from './types';
 
 function setup() {
   const db = openDb(':memory:');
@@ -247,5 +250,26 @@ describe('deadJobs', () => {
     db.prepare('UPDATE wr_jobs SET attempts=5 WHERE wr_id=10').run();
     insertWrTrail(db, 10, [{ t_ms: 1, cx: 1, cy: 1, score: 0.9, lap: 1 }]);
     expect(deadJobs(db)).toEqual([]);                            // done is not dead
+  });
+
+  it('sweepDeadJobAlerts announces each dead job exactly once', () => {
+    const db = dead();
+    db.prepare('UPDATE wr_jobs SET attempts=5 WHERE wr_id=10').run();
+    const hub = new EventHub();
+    const events: ServerEvent[] = [];
+    hub.subscribe((e) => events.push(e));
+    expect(sweepDeadJobAlerts(db, hub)).toBe(1);       // silent death found -> alert
+    expect(sweepDeadJobAlerts(db, hub)).toBe(0);       // second sweep: already alerted
+    expect(events.filter((e) => e.type === 'wr_job_dead')).toMatchObject([
+      { wr_id: 10, course: 'Mario Circuit', attempts: 5 },
+    ]);
+  });
+
+  it('markJobAlerted keeps the route-alerted job out of the sweep', () => {
+    const db = dead(); claimJob(db, 'w1');
+    failJob(db, 10, 'w1', 'time_mismatch detected=1 expected=2');
+    markJobAlerted(db, 10);                            // the /result route alerted already
+    const hub = new EventHub();
+    expect(sweepDeadJobAlerts(db, hub)).toBe(0);
   });
 });
