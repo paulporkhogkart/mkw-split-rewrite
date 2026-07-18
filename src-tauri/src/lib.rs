@@ -45,6 +45,9 @@ fn grant_media_permissions(window: &tauri::WebviewWindow) {
 /// Holds the Python sidecar child process once started. None until start_tracker is called.
 struct SidecarState(Mutex<Option<tauri_plugin_shell::process::CommandChild>>);
 
+/// The WR service loop, when the run_wr_service setting is on. None otherwise.
+pub struct RunnerState(pub Mutex<Option<wr::runner::Runner>>);
+
 /// Spawn (or re-spawn) the tracker sidecar and wire up its stdout listener.
 fn do_spawn_sidecar(app: tauri::AppHandle, state: &SidecarState) {
     let shell = app.shell();
@@ -269,6 +272,13 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![start_tracker, stop_tracker, restart_tracker, send_to_tracker, open_url, save_screenshot, copy_screenshot_to_clipboard, open_screenshot_dir, discord::discord_set_presence, discord::discord_clear_presence, sync::sync_set_config, sync::sync_test_connection, sync::sync_resolve_pending, sync::sync_discard_pending, sync::sync_list_pending, sync::sync_course_reads, sync::sync_roster, sync::sync_pb_best, wr::wr_process_one, wr::wr_get_settings, wr::wr_set_setting])
         .setup(|app| {
             app.manage(SidecarState(Mutex::new(None)));
+            app.manage(RunnerState(Mutex::new(None)));
+            if let Ok(c) = wr::settings_db(app.handle()) {
+                if wr::state::get_flag(&c, wr::state::SETTING_RUN_WR_SERVICE) {
+                    let runner = wr::runner::Runner::start(app.handle().clone());
+                    *app.state::<RunnerState>().0.lock().unwrap() = Some(runner);
+                }
+            }
             #[cfg(target_os = "windows")]
             grant_media_permissions(&app.get_webview_window("main").expect("main window"));
             sync::init(app.handle().clone());
@@ -278,6 +288,9 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app_handle, event| {
             if let tauri::RunEvent::Exit = event {
+                if let Some(rs) = app_handle.try_state::<RunnerState>() {
+                    if let Some(runner) = rs.0.lock().unwrap().take() { runner.stop(); }
+                }
                 if let Some(state) = app_handle.try_state::<SidecarState>() {
                     if let Ok(mut guard) = state.0.lock() {
                         if let Some(child) = guard.take() {

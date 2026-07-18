@@ -2,13 +2,10 @@
 //! stopped, or has shown no screen_change for WR_IDLE_MS. The SAME predicate, negated,
 //! is the in-flight job's cancel: any screen change closes the gate AND cancels.
 
+// SeqCst throughout: the runner thread reads these; two Relaxed stores could formally let it see tracking=true with a stale activity timestamp. Frequency makes the cost irrelevant.
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
 /// 10 minutes (spec §6.2 WR_IDLE_MINUTES).
-///
-/// Read by `gate_open` below, which has no non-test caller until Task 3's runner lands
-/// (see that function's `#[allow(dead_code)]` note).
-#[allow(dead_code)]
 pub const WR_IDLE_MS: i64 = 10 * 60 * 1000;
 
 /// Live-tracker activity signals, maintained by lib.rs's engine-stdout forwarder and the
@@ -28,22 +25,18 @@ impl TrackerActivity {
     /// 2026-07-17: navigating menus counts as activity; the engine's 0.2s heartbeats
     /// and other chatter do not).
     pub fn note_screen_change(&self) {
-        self.last_change_ms.store(now_epoch_ms(), Ordering::Relaxed);
+        self.last_change_ms.store(now_epoch_ms(), Ordering::SeqCst);
     }
 
     /// Turning tracking ON also counts as activity, so the gate shuts the moment the
     /// live engine starts rather than 10 minutes later.
     pub fn set_tracking(&self, on: bool) {
         if on { self.note_screen_change(); }
-        self.tracking.store(on, Ordering::Relaxed);
+        self.tracking.store(on, Ordering::SeqCst);
     }
 
-    // Both read only by `gate_open` (see its `#[allow(dead_code)]` note) and by tests
-    // until Task 3's runner lands.
-    #[allow(dead_code)]
-    pub fn tracking_running(&self) -> bool { self.tracking.load(Ordering::Relaxed) }
-    #[allow(dead_code)]
-    pub fn last_change_epoch_ms(&self) -> i64 { self.last_change_ms.load(Ordering::Relaxed) }
+    pub fn tracking_running(&self) -> bool { self.tracking.load(Ordering::SeqCst) }
+    pub fn last_change_epoch_ms(&self) -> i64 { self.last_change_ms.load(Ordering::SeqCst) }
 }
 
 /// Process-wide instance. A static (not app-managed state) because the wr runner thread
@@ -59,11 +52,6 @@ pub fn now_epoch_ms() -> i64 {
 
 /// The gate predicate (pure — the runner and the cancel closure share it).
 /// Open = tracking stopped, or no screen change for WR_IDLE_MS.
-///
-/// Unused outside tests until Task 3's runner lands and calls
-/// `gate_open(ACTIVITY.tracking_running(), ACTIVITY.last_change_epoch_ms(), now_epoch_ms())`
-/// (mod.rs's Interfaces note) — this task only wires the activity signals, not the caller.
-#[allow(dead_code)]
 pub fn gate_open(tracking_running: bool, last_change_epoch_ms: i64, now_epoch_ms: i64) -> bool {
     !tracking_running || (now_epoch_ms - last_change_epoch_ms) >= WR_IDLE_MS
 }

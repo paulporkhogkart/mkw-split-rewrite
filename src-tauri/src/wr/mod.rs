@@ -7,6 +7,8 @@
 pub mod engine;
 pub mod gate;
 pub mod job;
+pub mod phase;
+pub mod runner;
 pub mod service;
 pub mod state;
 pub mod verify;
@@ -77,8 +79,7 @@ impl WrError {
 #[tauri::command]
 pub async fn wr_process_one(app: tauri::AppHandle, server_url: String, token: String)
     -> Result<String, String> {
-    use tauri::Manager;
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("wr");
+    let dir = wr_data_dir(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = service::ServiceCfg {
             server_url, token, data_dir: dir, engine: engine::EnginePath::resolve(),
@@ -136,5 +137,15 @@ pub fn wr_set_setting(app: tauri::AppHandle, key: String, value: bool) -> Result
     }
     let c = settings_db(&app)?;
     state::set_flag(&c, &key, value);
+    if key == state::SETTING_RUN_WR_SERVICE {
+        use tauri::Manager;
+        let rs = app.state::<crate::RunnerState>();
+        let mut guard = rs.0.lock().unwrap_or_else(|e| e.into_inner());
+        match (value, guard.is_some()) {
+            (true, false) => *guard = Some(runner::Runner::start(app.clone())),
+            (false, true) => { if let Some(r) = guard.take() { r.stop(); } }
+            _ => {}
+        }
+    }
     Ok(())
 }

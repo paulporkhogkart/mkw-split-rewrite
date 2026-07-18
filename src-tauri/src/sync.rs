@@ -456,6 +456,13 @@ pub fn sync_set_config(server_url: String, token: String) {
     }
 }
 
+/// Snapshot of (server_url, token) for the WR runner. Same CONFIG the uploader uses —
+/// the WR service deliberately has no second credential store (spec §4).
+pub fn config_snapshot() -> (String, String) {
+    let c = CONFIG.lock().unwrap();
+    (c.server_url.clone(), c.token.clone())
+}
+
 /// Probe the configured server and report a human-readable result.
 ///
 /// Reads the SAME `CONFIG` the uploader's drain loop uses, so it also reveals

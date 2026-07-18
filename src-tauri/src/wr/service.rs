@@ -15,13 +15,6 @@ pub struct ServiceCfg {
     pub engine: EnginePath,
 }
 
-// Fields are read via `{:?}` in wr_process_one's probe result (registered — and so
-// webview-invokable — in every build, not just debug; see mod.rs's HONEST GATING NOTE)
-// and by tests matching on the variant only. The dead_code lint deliberately does NOT
-// count Debug-only usage as "read" — see the compiler's own note on this warning. Plan
-// 3's polling loop is expected to start pattern-matching these for real (retry/backoff
-// decisions per outcome kind), at which point this allow can come off.
-#[allow(dead_code)]
 #[derive(Debug)]
 pub enum Outcome {
     /// Nothing claimable (204).
@@ -131,6 +124,7 @@ pub fn process_one(cfg: &ServiceCfg, cancel: &(dyn Fn() -> bool + Sync)) -> Outc
     log::info!("[wr] claimed wr_id={} {} attempt={}", j.wr_id, j.course_slug, j.attempt);
 
     let outcome = run_job(cfg, &client, &j, cancel);
+    super::phase::set(None);
 
     cleanup(&cfg.data_dir, j.wr_id);
     state::set_inflight(&conn, None);
@@ -157,6 +151,8 @@ fn run_job(cfg: &ServiceCfg, client: &job::Client, j: &job::WrJob,
     let dest = video_path(&cfg.data_dir, j.wr_id);
 
     let exe = match ytdlp::ensure(&cfg.data_dir) { Ok(p) => p, Err(e) => return Outcome::Error(e) };
+    super::phase::set(Some(super::phase::Phase {
+        kind: super::phase::PhaseKind::Downloading, course_slug: j.course_slug.clone() }));
     if let Err(e) = ytdlp::download(&exe, &j.video_url, tier, &dest) {
         if is_staleness_explicable(&e) {
             // See is_staleness_explicable's doc for why only THIS class of error retries.
@@ -177,6 +173,8 @@ fn run_job(cfg: &ServiceCfg, client: &job::Client, j: &job::WrJob,
 
     // Wall-clock bound (~the video's own length): budget from the record, not a constant
     // (Rainbow Road is 233s — a fixed 300s left it ~50s of margin, not "room to spare").
+    super::phase::set(Some(super::phase::Phase {
+        kind: super::phase::PhaseKind::Processing, course_slug: j.course_slug.clone() }));
     let finalized = match engine::run_video(
         &cfg.engine, &dest, selections_for(j), engine_timeout_for(j.record_ms), cancel) {
         Ok(f) => f,
