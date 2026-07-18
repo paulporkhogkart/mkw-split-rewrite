@@ -7,6 +7,7 @@ locks their production values, nothing is hardcoded.
 from __future__ import annotations
 
 import math
+import os
 
 import numpy as np
 from PIL import Image
@@ -50,3 +51,41 @@ def quant_alpha(im: Image.Image, bits: int) -> Image.Image:
     q[al > 249] = 255
     a[..., 3] = q.astype(np.uint8)
     return Image.fromarray(a, "RGBA")
+
+
+def grid_for(n_frames: int, fw: int, fh: int, max_side: int = MAX_SHEET_SIDE) -> tuple[int, int]:
+    """Near-square row-major grid, both sides <= max_side."""
+    cols = max(1, math.ceil(math.sqrt(n_frames)))
+    while cols > 1 and cols * fw > max_side:
+        cols -= 1
+    if cols * fw > max_side:
+        raise ValueError(f"frame width {fw} exceeds max sheet side {max_side}")
+    rows = math.ceil(n_frames / cols)
+    if rows * fh > max_side:
+        raise ValueError(f"{n_frames}f of {fw}x{fh} cannot fit a {max_side}px sheet")
+    return cols, rows
+
+
+def build_sheet(frames: list[Image.Image], fw: int, fh: int) -> Image.Image:
+    cols, rows = grid_for(len(frames), fw, fh)
+    sheet = Image.new("RGBA", (cols * fw, rows * fh), (0, 0, 0, 0))
+    for i, f in enumerate(frames):
+        sheet.paste(f, ((i % cols) * fw, (i // cols) * fh))
+    return sheet
+
+
+def encode_anim(frames: list[Image.Image], out_path: str, quality: int) -> int:
+    """Sheet the frames and write a static lossy WebP. Returns bytes written."""
+    fw, fh = frames[0].size
+    build_sheet(frames, fw, fh).save(out_path, format="WEBP", quality=quality, method=4)
+    return os.path.getsize(out_path)
+
+
+def manifest_anim_entry(n_frames: int, fw: int, fh: int) -> dict:
+    cols, rows = grid_for(n_frames, fw, fh)
+    return {"frames": n_frames, "cols": cols, "rows": rows}
+
+
+def encode_idle_resume(master_idx: int, step: int, n_encoded: int) -> int:
+    """Map a 60fps master idle index onto the subsampled sheet (kept frames are 0, step, 2*step...)."""
+    return min(max(master_idx // step, 0), n_encoded - 1)
