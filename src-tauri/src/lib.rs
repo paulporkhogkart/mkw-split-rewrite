@@ -334,6 +334,8 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            // This logic is for the main window only — never a future secondary window.
+            if window.label() != "main" { return; }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let app = window.app_handle();
                 let Ok(c) = wr::settings_db(app) else { return };
@@ -358,20 +360,38 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
-            if let tauri::RunEvent::Exit = event {
-                if let Some(rs) = app_handle.try_state::<RunnerState>() {
-                    // Guard dropped before stop(): see wr_set_setting's same pattern.
-                    let taken = rs.0.lock().unwrap_or_else(|e| e.into_inner()).take();
-                    if let Some(runner) = taken { runner.stop(); }
-                }
-                if let Some(state) = app_handle.try_state::<SidecarState>() {
-                    if let Ok(mut guard) = state.0.lock() {
-                        if let Some(child) = guard.take() {
-                            let _ = child.kill();
+            match event {
+                // Last-window-destroyed arrives with code: None; a deliberate app.exit(n)
+                // (tray Quit) carries Some(n). Stay resident only for the former, and only
+                // when close-to-tray is on — i.e. exactly when our close handler just
+                // destroyed the window expecting the process to live on in the tray.
+                // Everything else (normal quit with the flag off, tray Quit, OS session
+                // end) falls through to a real exit.
+                tauri::RunEvent::ExitRequested { code, api, .. } => {
+                    if code.is_none() {
+                        if let Ok(c) = wr::settings_db(app_handle) {
+                            if wr::state::get_flag(&c, wr::state::SETTING_CLOSE_TO_TRAY) {
+                                api.prevent_exit();
+                            }
                         }
                     }
                 }
-                discord::shutdown();
+                tauri::RunEvent::Exit => {
+                    if let Some(rs) = app_handle.try_state::<RunnerState>() {
+                        // Guard dropped before stop(): see wr_set_setting's same pattern.
+                        let taken = rs.0.lock().unwrap_or_else(|e| e.into_inner()).take();
+                        if let Some(runner) = taken { runner.stop(); }
+                    }
+                    if let Some(state) = app_handle.try_state::<SidecarState>() {
+                        if let Ok(mut guard) = state.0.lock() {
+                            if let Some(child) = guard.take() {
+                                let _ = child.kill();
+                            }
+                        }
+                    }
+                    discord::shutdown();
+                }
+                _ => {}
             }
         });
 }
