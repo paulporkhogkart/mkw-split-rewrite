@@ -153,5 +153,13 @@ pub fn wr_set_setting(app: tauri::AppHandle, key: String, value: bool) -> Result
         };
         if let Some(r) = taken { r.stop(); }
     }
+    if key == state::SETTING_START_AT_LOGIN {
+        use tauri_plugin_autostart::ManagerExt;
+        let mgr = app.autolaunch();
+        let res = if value { mgr.enable() } else { mgr.disable() };
+        if let Err(e) = res {
+            return Err(format!("autostart registration failed: {e}"));
+        }
+    }
     Ok(())
 }
