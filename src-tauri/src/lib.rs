@@ -289,7 +289,9 @@ pub fn run() {
         .run(|app_handle, event| {
             if let tauri::RunEvent::Exit = event {
                 if let Some(rs) = app_handle.try_state::<RunnerState>() {
-                    if let Some(runner) = rs.0.lock().unwrap().take() { runner.stop(); }
+                    // Guard dropped before stop(): see wr_set_setting's same pattern.
+                    let taken = rs.0.lock().unwrap_or_else(|e| e.into_inner()).take();
+                    if let Some(runner) = taken { runner.stop(); }
                 }
                 if let Some(state) = app_handle.try_state::<SidecarState>() {
                     if let Ok(mut guard) = state.0.lock() {

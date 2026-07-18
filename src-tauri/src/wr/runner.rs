@@ -3,11 +3,11 @@
 //! house pattern (sync.rs does the same); no tokio.
 
 use super::service::{self, Outcome, ServiceCfg};
+use super::gate;
 // `WrError` is unused outside `#[cfg(test)]` — imported solely so the test module's
-// `use super::*` can name it (its Outcome::Failed case). A plain `cargo build` (no
-// test cfg) would otherwise flag it; `cargo test` does use it, via that glob.
-#[allow(unused_imports)]
-use super::{gate, WrError};
+// `use super::*` can name it (its Outcome::Failed case).
+#[cfg(test)]
+use super::WrError;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -142,6 +142,7 @@ fn run_loop(
         })) {
             Ok(o) => o,
             Err(_) => {
+                super::phase::set(None); // a panicked job must not leave a stale tooltip phase
                 log::error!("[wr] process_one panicked; backing off 5 min");
                 ping_refresh(&refresh);
                 interruptible_sleep(Duration::from_secs(300), &shutdown);

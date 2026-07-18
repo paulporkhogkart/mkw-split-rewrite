@@ -140,12 +140,18 @@ pub fn wr_set_setting(app: tauri::AppHandle, key: String, value: bool) -> Result
     if key == state::SETTING_RUN_WR_SERVICE {
         use tauri::Manager;
         let rs = app.state::<crate::RunnerState>();
-        let mut guard = rs.0.lock().unwrap_or_else(|e| e.into_inner());
-        match (value, guard.is_some()) {
-            (true, false) => *guard = Some(runner::Runner::start(app.clone())),
-            (false, true) => { if let Some(r) = guard.take() { r.stop(); } }
-            _ => {}
-        }
+        // Take under the lock, stop OUTSIDE it: stop() joins the runner thread, whose
+        // terminal refresh hook (Task 7's tray) locks RunnerState — joining under the
+        // guard would self-deadlock the toggle-off path.
+        let taken = {
+            let mut guard = rs.0.lock().unwrap_or_else(|e| e.into_inner());
+            match (value, guard.is_some()) {
+                (true, false) => { *guard = Some(runner::Runner::start(app.clone())); None }
+                (false, true) => guard.take(),
+                _ => None,
+            }
+        };
+        if let Some(r) = taken { r.stop(); }
     }
     Ok(())
 }
