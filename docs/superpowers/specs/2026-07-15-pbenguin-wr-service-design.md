@@ -341,7 +341,8 @@ Settings > Background
 
 Implemented by Plan 3 (2026-07-17-wr-service-tray-background-design.md): keys in
 wr_service.db's wr_local, a Background section in SettingsModal, tray exists only while at
-least one checkbox is on.
+least one of the three GLOBAL checkboxes is on (Keep-live-tracking alone creates no tray —
+it only means anything once you're in the tray).
 
 **Two checkboxes, not a mode enum.** A four-way radio (Nothing / tracking / WR / both) cannot
 express "tracking in tray but no WR service", and costs a concept. Independent checkboxes yield all
