@@ -197,7 +197,10 @@ Sequence when `bridge_migrate()` runs:
    (b) runs the old install's `uninstall.exe /S` and waits,
    (c) polls up to ~30s (60×500ms) for the install directory to vanish (the silent uninstaller
        re-spawns from temp, so its own wait returns early),
-   (d) runs `Setup.exe --silent`, which installs and launches the new copy.
+   (d) runs `Setup.exe --silent` (installs only — silent Setup never starts the app;
+       proven live in the rc.4 rehearsal),
+   (e) launches the freshly-installed stub (`%LocalAppData%\pbenguin\pbenguin.exe`) as
+       its final act, so the user sees the app come back on its own.
    Order is load-bearing — NSIS and Velopack both use `%LocalAppData%\pbenguin`, so the old
    tree must be gone before Setup writes there. The old process has already exited, so the
    uninstaller never fights a live exe. A silent uninstall never shows the delete-app-data

@@ -49,20 +49,33 @@ fn nsis_install_dir() -> Option<PathBuf> {
 
 /// The PowerShell the detached helper runs. Order is load-bearing (see module
 /// doc comment): wait for our exit → uninstall the old NSIS tree → poll for the
-/// install dir to actually vanish → run Setup into the now-empty dir.
-fn helper_command(pid: u32, setup: &Path, uninstaller: &Path, install_dir: &Path) -> String {
+/// install dir to actually vanish → run Setup into the now-empty dir → launch
+/// the installed stub. The explicit launch is required: `Setup.exe --silent`
+/// installs and STOPS — it never starts the app (observed live in the rc.4
+/// bridge rehearsal, 2026-07-20: migration completed perfectly but the user was
+/// left staring at nothing).
+fn helper_command(
+    pid: u32,
+    setup: &Path,
+    uninstaller: &Path,
+    install_dir: &Path,
+    new_stub: &Path,
+) -> String {
     // Escape single quotes in paths for PowerShell single-quoted strings by doubling them.
     let setup_escaped = setup.display().to_string().replace('\'', "''");
     let uninst_escaped = uninstaller.display().to_string().replace('\'', "''");
     let installdir_escaped = install_dir.display().to_string().replace('\'', "''");
+    let stub_escaped = new_stub.display().to_string().replace('\'', "''");
     format!(
         "Wait-Process -Id {pid} -ErrorAction SilentlyContinue; \
          Start-Process -Wait -FilePath '{uninst}' -ArgumentList '/S'; \
          for ($i=0; $i -lt 60 -and (Test-Path -LiteralPath '{installdir}'); $i++) {{ Start-Sleep -Milliseconds 500 }}; \
-         Start-Process -Wait -FilePath '{setup}' -ArgumentList '--silent'",
+         Start-Process -Wait -FilePath '{setup}' -ArgumentList '--silent'; \
+         Start-Process -FilePath '{stub}'",
         uninst = uninst_escaped,
         installdir = installdir_escaped,
         setup = setup_escaped,
+        stub = stub_escaped,
     )
 }
 
@@ -120,11 +133,16 @@ pub async fn bridge_migrate(app: tauri::AppHandle) -> Result<(), String> {
     .await
     .map_err(|e| e.to_string())??;
 
+    // Where Velopack's Setup will put the launch stub: %LocalAppData%\{packId}\{mainExe}.
+    // The NSIS install occupies the SAME directory (see module doc), so install_dir
+    // already IS that path — the stub name is the only thing that differs post-migration.
+    let new_stub = install_dir.join("pbenguin.exe");
     let cmd = helper_command(
         std::process::id(),
         &setup_path,
         &install_dir.join("uninstall.exe"),
         &install_dir,
+        &new_stub,
     );
     let mut helper = std::process::Command::new("powershell");
     helper.args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &cmd]);
@@ -184,12 +202,13 @@ mod tests {
             std::path::Path::new("C:\\Users\\o'brien\\AppData\\Local\\Temp\\pbenguin-win-Setup.exe"),
             std::path::Path::new("C:\\Users\\o'brien\\AppData\\Local\\pbenguin\\uninstall.exe"),
             std::path::Path::new("C:\\Users\\o'brien\\AppData\\Local\\pbenguin"),
+            std::path::Path::new("C:\\Users\\o'brien\\AppData\\Local\\pbenguin\\pbenguin.exe"),
         );
         assert!(cmd.contains("o''brien"), "embedded ' must be doubled for PowerShell");
         // Every occurrence of the name must be the doubled form — no raw un-escaped
-        // apostrophe may survive in any of the three interpolated paths.
+        // apostrophe may survive in any of the four interpolated paths.
         assert_eq!(cmd.matches("o'brien").count(), 0);
-        assert!(cmd.matches("o''brien").count() >= 3, "setup, uninstaller, AND installdir must all be escaped");
+        assert!(cmd.matches("o''brien").count() >= 4, "setup, uninstaller, installdir, AND stub must all be escaped");
     }
 
     #[test]
@@ -203,6 +222,7 @@ mod tests {
             std::path::Path::new("C:\\tmp\\pbenguin-win-Setup.exe"),
             std::path::Path::new("C:\\Users\\paul\\AppData\\Local\\pbenguin\\uninstall.exe"),
             std::path::Path::new("C:\\Users\\paul\\AppData\\Local\\pbenguin"),
+            std::path::Path::new("C:\\Users\\paul\\AppData\\Local\\pbenguin\\pbenguin.exe"),
         );
         assert!(cmd.contains("Wait-Process -Id 1234"));
         assert!(cmd.contains("uninstall.exe' -ArgumentList '/S'"));
@@ -213,9 +233,15 @@ mod tests {
         let uninst_pos = cmd.find("uninstall.exe").unwrap();
         let poll_pos = cmd.find("Test-Path").unwrap();
         let setup_pos = cmd.find("Setup.exe").unwrap();
+        // Setup --silent installs and STOPS (rc.4 rehearsal): the helper's final act
+        // must be launching the freshly-installed stub, after Setup completes.
+        let launch_pos = cmd.rfind("Start-Process -FilePath").unwrap();
 
         assert!(wait_pos < uninst_pos, "helper must wait for our exit before uninstalling");
         assert!(uninst_pos < poll_pos, "uninstall must run before the poll loop");
         assert!(poll_pos < setup_pos, "poll loop must sit between uninstall and setup");
+        assert!(setup_pos < launch_pos, "stub launch must be the final step, after Setup");
+        assert!(cmd[launch_pos..].contains("pbenguin.exe'"), "final launch must target the installed stub");
+        assert!(!cmd[launch_pos..].contains("-Wait"), "stub launch must not block the helper's exit");
     }
 }

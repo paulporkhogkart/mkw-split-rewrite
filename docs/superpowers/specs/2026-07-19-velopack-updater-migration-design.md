@@ -113,7 +113,8 @@ NSIS default) — the SAME directory Velopack targets, not Program Files; they m
   to exit, then runs the NSIS uninstaller silently (`uninstall.exe /S` — silent mode
   never deletes app data; the delete-app-data hook requires the interactive checkbox),
   then polls until the (shared) install directory is actually gone, then runs
-  `Setup.exe --silent` (installs per-user to `%LocalAppData%`, launches the new copy)
+  `Setup.exe --silent` (installs per-user to `%LocalAppData%`; silent Setup does NOT
+  start the app, so the helper then launches the installed stub itself)
   → exits. Uninstall runs **before** Setup because both land in the same directory —
   Setup must never write into a tree the old install still occupies.
 - **Straggler safety net:** every future release re-uploads a pinned static
