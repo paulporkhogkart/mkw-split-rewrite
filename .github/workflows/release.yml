@@ -286,10 +286,17 @@ jobs:
           cp -r src-tauri/sidecar/_internal pack/bin/_internal
 
       - name: Install vpk CLI
-        run: dotnet tool install -g vpk
+        # Pinned to the version the 2026-07-19 local rehearsal validated (Setup naming,
+        # delta behavior). `dotnet tool install -g` writes the tools dir into the
+        # PERSISTENT user PATH, which later steps in the same job never see — GITHUB_PATH
+        # is how a step extends PATH for the rest of the job (first rc.1 run proved it).
+        run: |
+          dotnet tool install -g vpk --version 1.2.0
+          echo "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
       - name: Verify vpk CLI is on PATH
-        run: vpk --version
+        # `vpk -h` exits 0; `vpk --version` is not a valid invocation (exits 1).
+        run: vpk -h
 
       - name: Download previous release (delta baseline)
         # First Velopack release has no baseline — that's fine, vpk just skips deltas.
