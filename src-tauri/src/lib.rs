@@ -368,6 +368,10 @@ pub fn run() {
                         .status(status)
                         .header("content-type", ct)
                         .header("cache-control", cache)
+                        // The webview origin (localhost:1420 dev / tauri.localhost prod) is
+                        // cross-origin to chips.localhost: without this, fetch() is
+                        // CORS-blocked and createImageBitmap rejects on tainted images.
+                        .header("access-control-allow-origin", "*")
                         .body(body)
                         .unwrap(),
                 );

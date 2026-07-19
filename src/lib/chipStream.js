@@ -29,6 +29,10 @@ export const silUrl = (m, combo, anim, k) => `${m.base}${combo}__${anim}__sil_k$
 /** Default loader: fetch-decode a sheet into a pinned ImageBitmap. DOM-only, untested. */
 export async function defaultBitmapLoader(url) {
   const img = new Image();
+  // chips.localhost is cross-origin to the webview; without CORS opt-in the decoded
+  // image is tainted and createImageBitmap rejects. The chips protocol serves
+  // access-control-allow-origin: *. (On the site the pack is same-origin; harmless.)
+  img.crossOrigin = "anonymous";
   img.src = url;
   await img.decode();
   return await createImageBitmap(img);
