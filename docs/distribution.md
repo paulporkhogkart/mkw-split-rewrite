@@ -434,10 +434,21 @@ Executed scripted (Claude session, Paul's machine), verified by filesystem/proce
 - **Gotcha found (see warning box in Step 3):** exes rebuilt with plain
   `cargo build --release` embed the dev URL → updated app boots to a WebView2 error
   page with no engine and no further update checks. Rehearsal-only hazard; CI immune.
+- **Strip visuals:** confirmed by Paul on a live 2.99.1→2.99.2 update (progress bar +
+  ready state look right).
+- **Tray-resident second-instance race (observed, accepted — no guard):** with a
+  close-to-tray-resident instance holding a downloaded-but-unapplied update, a second
+  launch auto-applies: Update.exe kills the resident instance (and anything else under
+  the install root, so no orphaned engine), applies, and launches a fresh updated app.
+  User-visible outcome is "app opened, updated". Cost: the resident instance dies hard
+  (no graceful teardown) — a mid-flight WR job takes the crash path the Pi lease sweep
+  already recovers. Accepted 2026-07-19.
+- **Gotcha (cosmetic):** launching the Velopack stub from Git-Bash/MSYS fails inside the
+  stub (`Update.exe: os error 50`) before app code runs. Shortcut/Explorer/PowerShell
+  launches are unaffected; no action taken.
 - **Not covered locally:** real-network resume semantics (FileSource completes too
-  fast to distinguish resume-vs-restart), update-strip visuals, tray-resident
-  second-instance observation, autostart Run-key path (shares the real install's
-  settings DB — left manual), bridge rehearsal, CI run.
+  fast to distinguish resume-vs-restart), autostart Run-key path (shares the real
+  install's settings DB — left manual), bridge rehearsal, CI run.
 
 ### Step 6: Record results
 
