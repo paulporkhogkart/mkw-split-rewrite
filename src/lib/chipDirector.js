@@ -9,9 +9,11 @@ export function directorStep(prev, next) {
   if (!combo) return { combo: null, action: null };
   const prevCombo = prev ? comboKey(prev) : null;
   const changed = combo !== prevCombo;
-  if (changed && SELECT_SCREENS.has(next.screen)) return { combo, action: "select" };
+  // Kart lock-in flourish: swap-and-advance in one transition still means locked in
+  // (mockup: "locked in → FLOURISH"). Must beat the select-spawn rule.
   if (prev && prev.screen === "KART_SELECT" && next.screen !== "KART_SELECT" && next.kart)
     return { combo, action: "confirm" };
+  if (changed && SELECT_SCREENS.has(next.screen)) return { combo, action: "select" };
   if (next.final_time && !(prev && prev.final_time)) return { combo, action: "confirm" };
   if (changed) return { combo, action: "idle" };
   return { combo, action: null };

@@ -27,4 +27,8 @@ describe("directorStep", () => {
   it("no character -> chip hidden", () => {
     expect(directorStep(e(), e({ character: null })).combo).toBeNull();
   });
+  it("simultaneous kart swap + leaving kart select -> flourish wins over spawn", () => {
+    const r = directorStep(e({ screen: "KART_SELECT" }), e({ screen: "COURSE_SELECT", kart: "B Dasher" }));
+    expect(r).toEqual({ combo: "mario__base__b_dasher", action: "confirm" });
+  });
 });
