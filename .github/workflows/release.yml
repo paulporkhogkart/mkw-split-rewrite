@@ -2,19 +2,33 @@
 #
 # Three jobs:
 #   build-python  → PyInstaller portable bundle (unchanged from pre-Tauri)
-#   build-tauri   → Copies sidecar, runs tauri build, signs NSIS installer,
-#                   writes the real latest.json
-#   publish       → Creates GitHub Release with all artifacts
+#   build-tauri   → Copies sidecar, runs a no-bundle tauri build, assembles the
+#                   Velopack pack dir, and packs it with `vpk` (full+delta
+#                   .nupkg, releases.win.json, Setup.exe). For the one-time
+#                   v3.0.0 bridge tag ONLY, it additionally builds + signs the
+#                   legacy NSIS installer and writes the old-style latest.json,
+#                   so pre-Velopack clients (Tauri updater) can update into the
+#                   bridge release; every later tag skips that pair entirely.
+#   publish       → Creates GitHub Release with the Velopack assets (+ NSIS/
+#                   latest.json when present, i.e. only on the bridge tag).
 #
 # Required GitHub Secrets:
 #   TAURI_SIGNING_PRIVATE_KEY         private key (from: npm run tauri signer generate)
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD password chosen during key generation
+#                                     (both only used by the bridge-only NSIS step)
 #
 # One-time local setup:
 #   npm install
 #   npm run tauri signer generate -- -w ~/.tauri/mkw-tracker.key
 #   # Copy the printed public key into src-tauri/tauri.conf.json → plugins.updater.pubkey
 #   # Add private key + password to GitHub Secrets
+#
+# Velopack (vpk) notes:
+#   - packId is "pbenguin"; vpk emits the Setup exe as "pbenguin-win-Setup.exe",
+#     which matches the URL the Rust updater downloads — no rename needed.
+#   - Delta baseline comes from `vpk download github` against this same repo;
+#     the first-ever Velopack release has nothing to download against, so that
+#     step is `continue-on-error: true` and vpk just falls back to a full pack.
 
 name: Release
 
@@ -178,7 +192,7 @@ jobs:
           path: ${{ steps.names.outputs.zip }}
           retention-days: 1
 
-  # ── 2. Build Tauri NSIS installer ────────────────────────────────────────────
+  # ── 2. Build Tauri app + Velopack pack (+ bridge-only NSIS on v3.0.0) ────────
   build-tauri:
     name: Build Tauri installer (Windows x64)
     runs-on: windows-latest
@@ -241,17 +255,55 @@ jobs:
         # reconciles the lock against package.json and installs, which is fine for a build.
         run: npm install --no-audit --no-fund
 
-      - name: Build Tauri NSIS installer
+      - name: Build Tauri app (no bundle)
+        run: npm run tauri build -- --no-bundle
+
+      - name: Assemble Velopack pack directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -lh src-tauri/target/release/*.exe
+          mkdir -p pack/bin
+          # tauri CLI names the binary after productName; fall back to the cargo name.
+          cp src-tauri/target/release/pbenguin.exe pack/pbenguin.exe 2>/dev/null \
+            || cp src-tauri/target/release/mkw-tracker.exe pack/pbenguin.exe
+          cp src-tauri/sidecar/mkw-tracker-engine.exe pack/bin/mkw-tracker-engine.exe
+          cp -r src-tauri/sidecar/_internal pack/bin/_internal
+
+      - name: Install vpk CLI
+        run: dotnet tool install -g vpk
+
+      - name: Download previous release (delta baseline)
+        # First Velopack release has no baseline — that's fine, vpk just skips deltas.
+        continue-on-error: true
+        run: vpk download github --repoUrl https://github.com/${{ github.repository }} -o velopack_releases
+
+      - name: Velopack pack
+        run: >-
+          vpk pack -u pbenguin -v ${{ needs.build-python.outputs.version }}
+          -p pack -e pbenguin.exe
+          -i src-tauri/icons/icon.ico --packTitle pbenguin
+          -o velopack_releases
+
+      - name: List Velopack output (debug)
+        shell: bash
+        run: ls -lh velopack_releases/
+
+      # ── Bridge-only (v3.0.0): last NSIS artifacts so old clients update into the bridge ──
+      - name: Build NSIS installer (bridge release only)
+        if: startsWith(github.ref_name, 'v3.0.0')
         run: npm run tauri build -- --bundles nsis
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: List NSIS bundle output (debug)
+        if: startsWith(github.ref_name, 'v3.0.0')
         shell: bash
         run: ls src-tauri/target/release/bundle/nsis/
 
-      - name: Generate update manifest (latest.json)
+      - name: Generate update manifest (bridge release only)
+        if: startsWith(github.ref_name, 'v3.0.0')
         shell: bash
         run: |
           python - <<'EOF'
@@ -298,6 +350,7 @@ jobs:
           TAG: ${{ github.ref_name }}
 
       - name: Upload NSIS installer artifact
+        if: startsWith(github.ref_name, 'v3.0.0')
         uses: actions/upload-artifact@v7
         with:
           name: tauri-installer
@@ -307,10 +360,18 @@ jobs:
           retention-days: 1
 
       - name: Upload update manifest artifact
+        if: startsWith(github.ref_name, 'v3.0.0')
         uses: actions/upload-artifact@v7
         with:
           name: update-manifest
           path: latest.json
+          retention-days: 1
+
+      - name: Upload Velopack artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: velopack-release
+          path: velopack_releases/
           retention-days: 1
 
   # ── 3. Publish GitHub Release ─────────────────────────────────────────────────
@@ -327,11 +388,33 @@ jobs:
 
       - uses: actions/download-artifact@v8
         with:
+          name: velopack-release
+          path: velopack_releases
+
+      - uses: actions/download-artifact@v8
+        if: startsWith(github.ref_name, 'v3.0.0')
+        with:
           name: tauri-installer
 
       - uses: actions/download-artifact@v8
+        if: startsWith(github.ref_name, 'v3.0.0')
         with:
           name: update-manifest
+
+      # After v3.0.0 ships, its latest.json gets committed as .github/bridge-latest.json
+      # (post-bridge checklist). Re-publishing it on every later release keeps
+      # releases/latest/download/latest.json resolving for straggler NSIS installs,
+      # which then funnel through the bridge.
+      - uses: actions/checkout@v6
+        with:
+          path: repo
+      - name: Pin bridge latest.json for stragglers
+        if: ${{ !startsWith(github.ref_name, 'v3.0.0') }}
+        shell: bash
+        run: |
+          if [ -f repo/.github/bridge-latest.json ]; then
+            cp repo/.github/bridge-latest.json latest.json
+          fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -344,3 +427,10 @@ jobs:
             *.exe
             *.exe.sig
             latest.json
+            velopack_releases/*
+
+      - name: Fail if release is missing Velopack assets
+        shell: bash
+        run: |
+          ls velopack_releases/*.nupkg velopack_releases/releases.win.json
+          ls velopack_releases/*Setup.exe
