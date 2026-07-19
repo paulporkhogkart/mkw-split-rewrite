@@ -40,6 +40,7 @@ impl TestServer {
                 match listener.accept() {
                     Ok((mut sock, _)) => {
                         sock.set_nonblocking(false).unwrap();
+                        let _ = sock.set_read_timeout(Some(std::time::Duration::from_secs(5)));
                         let mut buf = Vec::new();
                         let mut tmp = [0u8; 1024];
                         while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
@@ -52,6 +53,8 @@ impl TestServer {
                         let text = String::from_utf8_lossy(&buf);
                         let path = text.lines().next()
                             .and_then(|l| l.split_whitespace().nth(1)).unwrap_or("/").to_string();
+                        // Open-ended ranges only ("bytes=N-"); bounded ranges parse as None
+                        // (treated as no Range). The pack downloader only ever sends "bytes=N-".
                         let range = text.lines()
                             .find(|l| l.to_ascii_lowercase().starts_with("range:"))
                             .and_then(|l| l.split('=').nth(1))

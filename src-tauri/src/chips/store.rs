@@ -49,6 +49,7 @@ pub fn set_current_tag(dir: &Path, tag: &str) -> Result<(), String> {
 /// `<dir>/<tag>/chips/<file>`, or None on anything traversal-shaped.
 pub fn resolve(dir: &Path, tag: &str, file: &str) -> Option<PathBuf> {
     if !valid_tag(tag) || file.is_empty() || file.contains('\\') { return None; }
+    if file.contains(':') || std::path::Path::new(file).is_absolute() { return None; }
     if file.split('/').any(|s| s.is_empty() || s == "." || s == "..") { return None; }
     Some(dir.join(tag).join("chips").join(file))
 }
@@ -113,7 +114,7 @@ mod tests {
         let d = Path::new("/data/chips");
         assert_eq!(resolve(d, "chips-v1", "a__idle.webp").unwrap(),
                    d.join("chips-v1").join("chips").join("a__idle.webp"));
-        for bad in ["../x", "a/../x", "a\\x", "", "."] {
+        for bad in ["../x", "a/../x", "a\\x", "", ".", "C:/Windows/System32/evil.dll", "C:x", "D:/foo"] {
             assert!(resolve(d, "chips-v1", bad).is_none(), "{bad}");
         }
         assert!(resolve(d, "chips-v1..", "a.webp").is_none());
