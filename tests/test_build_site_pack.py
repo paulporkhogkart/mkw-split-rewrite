@@ -109,3 +109,41 @@ def test_progress_line_per_combo(tmp_path, capsys):
     assert rc == 0
     out = capsys.readouterr().out
     assert "PROGRESS 1/2 " in out and "PROGRESS 2/2 " in out
+
+
+def test_replace_with_retry_survives_open_reader(tmp_path):
+    """Windows: os.replace onto a file held open by a reader (console 1Hz progress poll)
+    raises PermissionError until the handle closes — the retry must ride it out."""
+    import threading
+    import time as _time
+    dst = tmp_path / "book.json"
+    dst.write_text("{}")
+    tmp = tmp_path / "book.json.tmp"
+    tmp.write_text('{"a": 1}')
+
+    def hold_open():
+        with open(dst) as f:
+            f.read()
+            _time.sleep(0.4)          # hold the handle across several retry attempts
+
+    t = threading.Thread(target=hold_open)
+    t.start()
+    _time.sleep(0.05)                 # ensure the reader has the handle first
+    bsp._replace_with_retry(str(tmp), str(dst))   # must not raise
+    t.join()
+    assert json.load(open(dst)) == {"a": 1}
+
+
+def test_replace_with_retry_exhausts_and_raises(tmp_path, monkeypatch):
+    calls = []
+
+    def always_denied(a, b):
+        calls.append(1)
+        raise PermissionError("locked")
+
+    monkeypatch.setattr(bsp.os, "replace", always_denied)
+    monkeypatch.setattr(bsp.time, "sleep", lambda s: None)
+    import pytest as _pytest
+    with _pytest.raises(PermissionError):
+        bsp._replace_with_retry("x", "y", attempts=5)
+    assert len(calls) == 5

@@ -1739,7 +1739,7 @@ python tools/asset_matte/build_site_pack.py --src "D:/kartoff/asset_chips" \
   --out "D:/kartoff/asset_chips/site_pack" \
   --scale <LOCKED> --fps <LOCKED> --quality <LOCKED> --alpha-bits <LOCKED> --workers 12
 ```
-Expected: `done: 6426 encoded, 0 failed` (6,273 kart + 153 char combos). Any FAIL lines: re-run (book resumes); persistent failures → stop and investigate, do not ship a partial pack. Spot-check 3 random sheets in a browser.
+Expected: `done: 6273 encoded, 0 failed` (6,120 kart + 153 standalone char combos). Any FAIL lines: re-run (book resumes); persistent failures → stop and investigate, do not ship a partial pack. Spot-check 3 random sheets in a browser.
 
 - [ ] **Step 2: Shard + lock:**
 

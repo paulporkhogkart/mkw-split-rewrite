@@ -27,6 +27,20 @@ from tools.asset_matte.sil_masks import write_sil_masks           # noqa: E402
 ANIM_ORDER = ["spawn", "idle", "flourish"]
 
 
+def _replace_with_retry(tmp: str, dst: str, attempts: int = 50, delay: float = 0.05) -> None:
+    """os.replace that survives transient Windows share-locks. Any reader holding dst open
+    without FILE_SHARE_DELETE (the console's 1Hz progress poll, Explorer, backup tools) makes
+    os.replace raise PermissionError for the microseconds the handle lives — retry, don't die."""
+    for i in range(attempts):
+        try:
+            os.replace(tmp, dst)
+            return
+        except PermissionError:
+            if i == attempts - 1:
+                raise
+            time.sleep(delay)
+
+
 def plan_combos(src: str) -> dict[str, list[str]]:
     with open(os.path.join(src, "manifest.json"), encoding="utf-8") as f:
         masters = json.load(f)
@@ -135,7 +149,7 @@ def main(argv=None) -> int:
         tmp = book_path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(book, f)
-        os.replace(tmp, book_path)
+        _replace_with_retry(tmp, book_path)
         print(f"PROGRESS {len(combos_manifest)}/{len(plan)} {res['name']}")
         if done % 25 == 0:
             rate = done / (time.time() - t0)
