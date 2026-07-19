@@ -204,6 +204,13 @@ pub fn run_video(
         // why `null` was the safe choice before — so a dedicated drain thread below empties
         // it continuously into a bounded ring buffer.
         .stderr(std::process::Stdio::piped());
+    // GUI-subsystem parent + console-subsystem child = a visible console window per
+    // spawn unless suppressed (plugin-shell does the same for the live engine).
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
     #[cfg(debug_assertions)]
     cmd.current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).parent().expect("repo root"));
 

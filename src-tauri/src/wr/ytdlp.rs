@@ -104,10 +104,17 @@ fn run_download(
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Mutex;
 
-    let mut child = cmd
-        .stdin(std::process::Stdio::null())
+    cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    // GUI-subsystem parent + console-subsystem child = a visible console window per
+    // spawn unless suppressed (plugin-shell does the same for the live engine).
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let mut child = cmd
         .spawn()
         .map_err(|e| WrError::EngineFailed(format!("spawn yt-dlp: {e}")))?;
     let stderr = child.stderr.take().expect("piped stderr");

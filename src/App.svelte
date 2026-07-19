@@ -57,6 +57,7 @@
   let logs = [];
   let logEl;
   let unlisten;
+  let _unlistenTray = [];
 
   // ── Backend health ────────────────────────────────────────────────────────────
   let backendFps = 0;
@@ -429,6 +430,11 @@
   let pythonCameraStatus = "idle", pythonCameraError = "";
   let engineFrame = null;
   let _feedPollTimer = null;
+  // Hidden-to-tray (keep-tracking mode): the window is hidden, not destroyed, so this
+  // webview keeps driving Discord presence — but the browser camera + frame poll are
+  // pointless with nothing visible, so both stop on tray-hidden and resume on tray-shown.
+  let _trayHidden = false;
+  let _cameraWasOnBeforeTray = false;
   let pythonFrameW = 1920, pythonFrameH = 1080;
 
   // ── Feed audio / video controls ───────────────────────────────────────────────
@@ -1104,6 +1110,9 @@
   }
 
   async function startCamera(deviceId) {
+    // Hidden in the tray: don't open a stream nobody can see (a playing <video> keeps
+    // decoding 1080p60 regardless of visibility) — note the intent for tray-shown instead.
+    if (_trayHidden) { _cameraWasOnBeforeTray = true; return; }
     stopCamera(); cameraStatus = "requesting";
     const vc = deviceId
       ? { deviceId:{ exact:deviceId }, width:{ ideal:1920 }, height:{ ideal:1080 } }
@@ -1176,6 +1185,7 @@
 
   // Engine feed poll - runs continuously at 100ms so main view always has a fresh frame
   function startFeedPoll() {
+    if (_trayHidden) return; // no display to feed; tray-shown restarts it
     if (_feedPollTimer) return;
     _feedPollTimer = setInterval(() => {
       if (trackerConnected) send({ type:"capture_frame", scale:0.333 });
@@ -1445,6 +1455,22 @@
       catch { pushLog(String(ev.payload)); }
     });
     pushLog(`[app] listening for tracker events ${_elapsed()}`);
+    // Hide-to-tray (keep-tracking mode): the window hides instead of destroying so this
+    // webview keeps driving Discord presence. Release the camera + frame poll while
+    // hidden; reacquire on restore. Rust emits these around hide()/show().
+    _unlistenTray.push(await listen("tray-hidden", () => {
+      _cameraWasOnBeforeTray = cameraStatus === "ok" || cameraStatus === "requesting";
+      _trayHidden = true;
+      stopCamera(); stopFeedPoll();
+      pushLog("[app] hidden to tray - camera released, tracking continues");
+    }));
+    _unlistenTray.push(await listen("tray-shown", () => {
+      if (!_trayHidden) return; // shown/focused without a preceding tray-hide
+      _trayHidden = false;
+      startFeedPoll();
+      if (_cameraWasOnBeforeTray) startCamera(selectedBrowserDeviceId || undefined);
+      pushLog("[app] restored from tray");
+    }));
     // Warn periodically if the tracker hasn't connected yet.
     // First-run can be slow (60-90s) while Windows Defender scans _internal/ DLLs.
     const _startupTimer = setInterval(() => {
@@ -1495,6 +1521,7 @@
 
   onDestroy(()=>{
     if (unlisten) unlisten();
+    _unlistenTray.forEach((u) => u());
     stopCamera(); stopRoiPoll(); stopFeedPoll(); _teardownAudio();
     if (_shotTimer) clearTimeout(_shotTimer);
     if (trackerCameraPaused) send({type:"resume_camera"});

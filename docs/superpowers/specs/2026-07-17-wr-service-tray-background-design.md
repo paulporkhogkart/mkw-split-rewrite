@@ -38,6 +38,15 @@ programmatically:
   `sync::on_line` in Rust; the engine's events simply have no listener while trayed), so
   nothing is lost but the on-screen log history, which restarts empty on restore. With the
   checkbox off, close quits, as today.
+  - **Amended 2026-07-19:** with **keep-tracking-in-tray on**, the window is **hidden, not
+    destroyed** — the "pure viewer" rationale stopped holding once the webview became the
+    Discord presence driver (presence must keep updating while tracking in the tray). On
+    `tray-hidden` the frontend releases the browser camera and stops the engine-frame poll,
+    so the hidden webview is near-idle (Chromium throttles rendering at zero visibility);
+    `tray-shown` reacquires both. Presence also self-clears after 10 idle minutes
+    (`discord.js` mirrors `gate.rs`'s `WR_IDLE_MS` screen-change rule) and whenever the live
+    engine stops (`kill_sidecar` / `Terminated` clear it). The destroy path is unchanged for
+    keep-tracking **off**.
 - **Staying resident (found in review 2026-07-18):** destroying the last window fires
   `RunEvent::ExitRequested`, which unprevented exits the app — so close-to-tray requires a
   guarded `api.prevent_exit()`. The guard distinguishes cases with no extra state:

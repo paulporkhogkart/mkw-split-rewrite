@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computePresence, UNCHANGED } from "./discordPayload.js";
+import { computePresence, UNCHANGED, isIdle, IDLE_MS } from "./discordPayload.js";
 
 const base = {
   screen: "RACING", course: "Rainbow Road", character: "Mario", kart: "Pipe Frame",
@@ -113,5 +113,23 @@ describe("computePresence", () => {
   it("custom button label", () => {
     const p = computePresence({ ...base, twitchUrl: "https://twitch.tv/me", twitchLabel: "Join my stream!" });
     expect(p.button_label).toBe("Join my stream!");
+  });
+});
+
+describe("isIdle", () => {
+  const T0 = 1_700_000_000_000;
+
+  it("mirrors the Rust gate truth table (gate.rs): fresh activity is not idle", () => {
+    expect(isIdle(T0, T0)).toBe(false);
+    expect(isIdle(T0, T0 + 9 * 60 * 1000)).toBe(false);
+  });
+
+  it("exactly at the threshold is idle (>=, not >), matching gate_open", () => {
+    expect(isIdle(T0, T0 + IDLE_MS)).toBe(true);
+    expect(isIdle(T0, T0 + IDLE_MS + 1)).toBe(true);
+  });
+
+  it("the threshold is the gate's 10 minutes, not an invented one", () => {
+    expect(IDLE_MS).toBe(10 * 60 * 1000);
   });
 });

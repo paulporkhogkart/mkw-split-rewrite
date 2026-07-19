@@ -5,7 +5,7 @@ import { get } from "svelte/store";
 import { screen, selection, race, pbSplits, pbTotalMs } from "./stores.js";
 import { resets } from "./resets.js";
 import { discordEnabled, twitchButtonEnabled, twitchLabel, twitchUrl } from "./discordSettings.js";
-import { computePresence, UNCHANGED } from "./discordPayload.js";
+import { computePresence, UNCHANGED, isIdle } from "./discordPayload.js";
 import { parseTime } from "./discordFormat.js";
 
 function snapshot() {
@@ -28,14 +28,23 @@ function snapshot() {
   };
 }
 
+let _lastScreenChangeMs = Date.now();
+
 function push() {
   if (!get(discordEnabled)) { invoke("discord_clear_presence").catch(() => {}); return; }
+  if (isIdle(_lastScreenChangeMs, Date.now())) { invoke("discord_clear_presence").catch(() => {}); return; }
   const payload = computePresence(snapshot());
   if (payload === UNCHANGED) return;
   invoke("discord_set_presence", { payload }).catch(() => {});
 }
 
 export function initDiscordPresence() {
+  // Registered FIRST so a screen change moves the idle clock before the push
+  // subscriptions below re-evaluate (Svelte notifies subscribers in order).
+  screen.subscribe(() => { _lastScreenChangeMs = Date.now(); });
   [screen, selection, race, pbSplits, pbTotalMs, resets, discordEnabled, twitchButtonEnabled, twitchLabel, twitchUrl]
     .forEach((s) => s.subscribe(() => push()));
+  // Idle has no triggering store event — sweep for it. Clearing repeatedly is harmless
+  // (idempotent on the Rust side); the next screen change re-pushes presence.
+  setInterval(push, 60 * 1000);
 }

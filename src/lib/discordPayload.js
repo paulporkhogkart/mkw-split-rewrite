@@ -3,6 +3,14 @@ import { courseSlug, parseTime, formatDelta } from "./discordFormat.js";
 
 export const UNCHANGED = Symbol("unchanged");
 
+// Mirror of the Rust WR idle gate (wr/gate.rs WR_IDLE_MS): no screen change for 10
+// minutes = idle, and an idle tracker reports no activity. Same signal deliberately —
+// only screen changes count, not race ticks or other engine chatter.
+export const IDLE_MS = 10 * 60 * 1000;
+export function isIdle(lastScreenChangeMs, nowMs) {
+  return nowMs - lastScreenChangeMs >= IDLE_MS;
+}
+
 const IGNORE = new Set([
   "RACE_MENU", "RESET", "GHOST_RESET", "UNKNOWN_RESET",
   "REPLAY_MENU", "UNKNOWN_RACE_ACTIVE", "HOME",

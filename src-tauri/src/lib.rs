@@ -123,6 +123,9 @@ fn do_spawn_sidecar(app: tauri::AppHandle, state: &SidecarState) {
                         }
                         CommandEvent::Terminated(status) => {
                             wr::gate::ACTIVITY.set_tracking(false);
+                            // A dead tracker (crash or kill) means no activity to report;
+                            // without this a trayed app keeps the stale presence forever.
+                            discord::discord_clear_presence();
                             log::error!("[tracker] exited with {status:?}");
                             let msg = format!(
                                 "{{\"type\":\"stderr\",\"line\":{}}}",
@@ -173,11 +176,15 @@ fn restart_tracker(app: tauri::AppHandle, state: tauri::State<SidecarState>) {
 /// Open a URI (e.g. ms-settings:camera) via the system shell.
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
-    std::process::Command::new("cmd")
-        .args(["/c", "start", "", &url])
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+    let mut cmd = std::process::Command::new("cmd");
+    cmd.args(["/c", "start", "", &url]);
+    // Suppress the cmd console flash (GUI-subsystem parent spawning a console child).
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
 /// Write a newline-delimited JSON message to the tracker's stdin.
@@ -262,6 +269,9 @@ pub fn show_main_window(app: &tauri::AppHandle) {
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
+        // Undo a hide-to-tray: the frontend reacquires the camera + frame poll. A no-op
+        // listener-side unless a tray-hidden preceded it.
+        let _ = w.emit("tray-shown", ());
         return;
     }
     match tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
@@ -292,6 +302,10 @@ fn kill_sidecar(state: &SidecarState) {
             wr::gate::ACTIVITY.set_tracking(false);
         }
     }
+    // Not tracking = no activity to report. The webview (the only presence driver) may
+    // already be destroyed — e.g. close-to-tray — so the last payload would otherwise
+    // stay live on Discord until full app exit.
+    discord::discord_clear_presence();
 }
 
 pub fn run() {
@@ -368,18 +382,25 @@ pub fn run() {
                     return; // default: closing quits, exactly as today
                 }
                 api.prevent_close();
-                if !wr::state::get_flag(&c, wr::state::SETTING_KEEP_TRACKING_IN_TRAY) {
+                if wr::state::get_flag(&c, wr::state::SETTING_KEEP_TRACKING_IN_TRAY) {
+                    // Tracking continues in the tray: HIDE (don't destroy) so the webview
+                    // keeps driving Discord presence from live tracker events (2026-07-19,
+                    // amends spec §1's destroy decision). tray-hidden tells the frontend
+                    // to release the browser camera + stop the frame poll, so the hidden
+                    // window is near-idle; Chromium throttles all rendering at zero
+                    // visibility. show_main_window's tray-shown undoes both.
+                    let _ = window.emit("tray-hidden", ());
+                    let _ = window.hide();
+                } else {
                     // The camera light goes OFF on tray-enter unless the user opted to
-                    // keep tracking (spec §3).
+                    // keep tracking (spec §3) — kill the engine and destroy the webview
+                    // (a fresh onMount on restore is the same path as a normal launch;
+                    // destroy() bypasses CloseRequested, so no loop).
                     if let Some(state) = app.try_state::<SidecarState>() {
                         kill_sidecar(&state);
                     }
+                    let _ = window.destroy();
                 }
-                // Destroy (not hide): the webview is a pure viewer — run uploads flow
-                // through sync::on_line in Rust — and a fresh onMount on restore is the
-                // same path as a normal launch. destroy() bypasses CloseRequested, so
-                // no loop.
-                let _ = window.destroy();
             }
         })
         .build(tauri::generate_context!())
