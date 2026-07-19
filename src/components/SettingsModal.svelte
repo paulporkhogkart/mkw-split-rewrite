@@ -39,7 +39,7 @@
   async function deleteAppData() {
     if (deletingAppData) return;
     const yes = await ask(
-      "Delete ALL pbenguin data — settings, replays, minimap tuning — and quit?\nThis cannot be undone.",
+      "Delete ALL pbenguin data (settings, replays, minimap tuning) and quit?\nThis cannot be undone.",
       { title: "Delete app data", kind: "warning", okLabel: "Delete and quit", cancelLabel: "Cancel" },
     );
     if (!yes) return;
