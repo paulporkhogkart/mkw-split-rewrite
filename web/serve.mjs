@@ -43,13 +43,23 @@ export async function currentChipsTag(chipsDir) {
 
 export function createStaticServer(distDir, opts = {}) {
   const chipsDir = opts.chipsDir ?? process.env.MKW_CHIPS_DIR;
+  const lockFile = opts.lockFile ?? fileURLToPath(new URL("./chips.lock", import.meta.url));
   const indexHtml = join(distDir, "index.html");
   return createServer(async (req, res) => {
     try {
       const rawPath = decodeURIComponent((req.url || "/").split("?")[0]);
       if (rawPath.startsWith(CHIPS_PREFIX)) {
-        if (!chipsDir) { res.writeHead(404); res.end("not found"); return; }
         const rest = rawPath.slice(CHIPS_PREFIX.length);
+        // The lock pins the full-pack download (pbenguin): serve the checkout's committed
+        // chips.lock so the pack a client downloads always matches the manifest this Pi serves.
+        if (rest === "lock") {
+          const body = await readFile(lockFile).catch(() => null);
+          if (!body) { res.writeHead(404); res.end("not found"); return; }
+          res.writeHead(200, { "content-type": TYPES[".txt"], "cache-control": "public, max-age=300" });
+          res.end(body);
+          return;
+        }
+        if (!chipsDir) { res.writeHead(404); res.end("not found"); return; }
         if (rest === "manifest.json") {
           const tag = await currentChipsTag(chipsDir);
           const file = tag && resolveFile(`/${tag}/chips/manifest.json`, chipsDir);

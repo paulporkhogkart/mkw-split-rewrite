@@ -1,4 +1,5 @@
 mod bridge;
+mod chips;
 mod discord;
 mod sync;
 mod tray;
@@ -424,11 +425,34 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--tray-start"]),
         ))
-        .invoke_handler(tauri::generate_handler![start_tracker, stop_tracker, restart_tracker, delete_app_data, send_to_tracker, open_url, save_screenshot, copy_screenshot_to_clipboard, open_screenshot_dir, discord::discord_set_presence, discord::discord_clear_presence, sync::sync_set_config, sync::sync_test_connection, sync::sync_resolve_pending, sync::sync_discard_pending, sync::sync_list_pending, sync::sync_course_reads, sync::sync_roster, sync::sync_pb_best, wr::wr_process_one, wr::wr_get_settings, wr::wr_set_setting, updater::update_check, updater::update_download, updater::update_apply, bridge::bridge_check, bridge::bridge_migrate])
+        .register_asynchronous_uri_scheme_protocol("chips", |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            let path = request.uri().path().to_string();
+            // Blocking fs + reqwest work — never on the event loop thread.
+            tauri::async_runtime::spawn_blocking(move || {
+                let active = chips::active_pack_tag();
+                let (status, ct, body) = chips::protocol::serve(&chips::chips_root(&app), &path, active.as_deref());
+                let cache = if path.ends_with("manifest.json") { "no-cache" } else { "public, max-age=31536000, immutable" };
+                responder.respond(
+                    tauri::http::Response::builder()
+                        .status(status)
+                        .header("content-type", ct)
+                        .header("cache-control", cache)
+                        // The webview origin (localhost:1420 dev / tauri.localhost prod) is
+                        // cross-origin to chips.localhost: without this, fetch() is
+                        // CORS-blocked and createImageBitmap rejects on tainted images.
+                        .header("access-control-allow-origin", "*")
+                        .body(body)
+                        .unwrap(),
+                );
+            });
+        })
+        .invoke_handler(tauri::generate_handler![start_tracker, stop_tracker, restart_tracker, delete_app_data, send_to_tracker, open_url, save_screenshot, copy_screenshot_to_clipboard, open_screenshot_dir, discord::discord_set_presence, discord::discord_clear_presence, sync::sync_set_config, sync::sync_test_connection, sync::sync_resolve_pending, sync::sync_discard_pending, sync::sync_list_pending, sync::sync_course_reads, sync::sync_roster, sync::sync_pb_best, wr::wr_process_one, wr::wr_get_settings, wr::wr_set_setting, updater::update_check, updater::update_download, updater::update_apply, bridge::bridge_check, bridge::bridge_migrate, chips::commands::chips_get_status, chips::commands::chips_start_pack, chips::commands::chips_pause_pack, chips::commands::chips_cancel_pack, chips::commands::chips_delete_cache])
         .setup(|app| {
             app.manage(SidecarState(Mutex::new(None)));
             app.manage(RunnerState(Mutex::new(None)));
             app.manage(updater::PendingUpdate(Mutex::new(None)));
+            app.manage(chips::commands::ChipsState(std::sync::Arc::new(Mutex::new(None))));
             if let Ok(c) = wr::settings_db(app.handle()) {
                 if wr::state::get_flag(&c, wr::state::SETTING_RUN_WR_SERVICE) {
                     let runner = wr::runner::Runner::start(app.handle().clone());
@@ -445,6 +469,7 @@ pub fn run() {
                 }
             }
             tray::sync_tray(app.handle());
+            chips::commands::boot_resume(app.handle());
             if let Some(rs) = app.try_state::<RunnerState>() {
                 if let Ok(guard) = rs.0.lock() {
                     if let Some(r) = guard.as_ref() {

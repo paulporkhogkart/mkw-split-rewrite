@@ -143,3 +143,36 @@ describe("/chips/anim/", () => {
     });
   });
 });
+
+describe("chips lock route", () => {
+  let dir, server, base;
+  beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), "thekartoff-lock-"));
+    await writeFile(join(dir, "index.html"), "<!doctype html>");
+    await writeFile(join(dir, "the.lock"),
+      "tag chips-v1\nbase https://example.com/dl\nabc123  chips-mario.tar\n");
+    server = createStaticServer(dir, { lockFile: join(dir, "the.lock") });
+    await new Promise((res) => server.listen(0, res));
+    base = `http://127.0.0.1:${server.address().port}`;
+  });
+  afterAll(async () => {
+    await new Promise((res) => server.close(res));
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("serves the lock as text with a short max-age, without needing chipsDir", async () => {
+    const r = await fetch(`${base}/chips/anim/lock`);
+    expect(r.status).toBe(200);
+    expect(r.headers.get("content-type")).toContain("text/plain");
+    expect(r.headers.get("cache-control")).toBe("public, max-age=300");
+    expect(await r.text()).toContain("tag chips-v1");
+  });
+
+  it("404s when the lock file is missing", async () => {
+    const s2 = createStaticServer(dir, { lockFile: join(dir, "nope.lock") });
+    await new Promise((res) => s2.listen(0, res));
+    const r = await fetch(`http://127.0.0.1:${s2.address().port}/chips/anim/lock`);
+    expect(r.status).toBe(404);
+    await new Promise((res) => s2.close(res));
+  });
+});

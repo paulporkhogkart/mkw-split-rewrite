@@ -35,7 +35,7 @@ dev-dep tiny_http), Svelte 4, Node test via vitest (web/).
   be purely additive; never touch `updater.rs`/`bridge.rs`.
 - Rust tests: `cd src-tauri && cargo test` · web tests: `cd web && npx vitest run serve.test.js`.
 - Windows product: custom scheme surfaces as `http://chips.localhost/…`; app-data dir =
-  `app.path().app_data_dir()` (`%APPDATA%\mkw-tracker`).
+  `app.path().app_data_dir()` (`%APPDATA%\com.paulporkhogkart.mkw-tracker` — the bundle identifier dir, NOT the product name).
 - **STANDING RULE: NO `[dev-dependencies]` in `src-tauri/Cargo.toml`** (carried from the WR
   service + Velopack projects). Wherever a test block in this plan shows `tempfile::tempdir()`
   or `tiny_http`, substitute the std-only helpers `chips::testutil::TmpDir` /
@@ -815,7 +815,7 @@ fetch("http://chips.localhost/manifest.json").then(r => r.json()).then(m => cons
 ```
 
 Expected (online): `http://chips.localhost/chips-v1/ 6273`. Then fetch one sheet URL and
-confirm a second fetch is instant (file present under `%APPDATA%\mkw-tracker\chips\chips-v1\chips\`).
+confirm a second fetch is instant (file present under `%APPDATA%\com.paulporkhogkart.mkw-tracker\chips\chips-v1\chips\`).
 NOTE: this needs the chips pack live on thekartoff.com (deployed). If the deploy hasn't
 happened yet, run the Task 9 fake-pack rehearsal instead and smoke against `PBENGUIN_CHIPS_URL`.
 
@@ -1830,14 +1830,14 @@ PBENGUIN_CHIPS_URL=http://127.0.0.1:8000 npm run tauri dev
 
 Checklist (all against the fake server):
 1. Devtools: `fetch("http://chips.localhost/manifest.json")` → base rewritten, combos listed.
-2. Fetch a sheet URL twice → file appears under `%APPDATA%\mkw-tracker\chips\chips-v1\chips\`.
+2. Fetch a sheet URL twice → file appears under `%APPDATA%\com.paulporkhogkart.mkw-tracker\chips\chips-v1\chips\`.
 3. Settings → Chips → Download full pack → completes; `.complete` present; status "Installed".
 4. Delete cache → start download → Pause mid-flight → kill the app → relaunch → boot-resume
    continues from the partial (watch `.stage/` size, confirm it grows, not resets).
 5. Cancel → `.stage/`/`.pack-state.json` gone, flags cleared.
 
 - [ ] **Step 3: Docs.** CLAUDE.md "Key Data Files": add one row
-`| %APPDATA%\mkw-tracker\chips\ | pbenguin chip cache (on-demand + full pack; spec 2026-07-19) |`.
+`| %APPDATA%\com.paulporkhogkart.mkw-tracker\chips\ | pbenguin chip cache (on-demand + full pack; spec 2026-07-19) |`.
 Root CLAUDE.md chip-pack paragraph: append "pbenguin caches chips per-tag under its app data
 dir via the `chips://` protocol; full-pack download in Settings → Chips."
 
