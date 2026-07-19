@@ -53,4 +53,36 @@ describe("createBitmapCache", () => {
     const h = cache.get(MANIFEST, "mario__base");
     expect(h.ready("idle")).toBe(false);
   });
+  it("evicted-then-reacquired combo closes the late bitmap instead of leaking it", async () => {
+    const resolvers = new Map(); const closed = [];
+    const loader = (url) => new Promise((res) => {
+      const arr = resolvers.get(url) || [];
+      arr.push(res);
+      resolvers.set(url, arr);
+    });
+    const cache = createBitmapCache(1, loader);
+    const m2 = { ...MANIFEST, combos: { ...MANIFEST.combos, x__base: MANIFEST.combos["mario__base"] } };
+    const a = cache.get(MANIFEST, "mario__base");         // entry A, decode in flight
+    cache.get(m2, "x__base");                              // evicts A (limit 1) mid-decode
+    const b = cache.get(m2, "mario__base");                // re-acquire: NEW entry B (evicts x)
+    const firstUrl = [...resolvers.keys()][0];
+    resolvers.get(firstUrl)[0]({ url: firstUrl, close: () => closed.push(firstUrl) }); // A's late resolve
+    await Promise.resolve(); await Promise.resolve();
+    expect(closed).toContain(firstUrl);                    // late bitmap released, not leaked
+    expect(b.ready("idle")).toBe(false);                   // new entry untouched by A's resolve
+    expect(a.ready("idle")).toBe(false);                   // stale handle never flips ready
+  });
+  it("unknown combo returns never-ready handle without burning an LRU slot", async () => {
+    const closed = [];
+    const loader = (url) => Promise.resolve({ url, close: () => closed.push(url) });
+    const cache = createBitmapCache(1, loader);
+    const a = cache.get(MANIFEST, "mario__base");
+    await Promise.resolve(); await Promise.resolve();
+    expect(a.ready("idle")).toBe(true);
+    const u = cache.get(MANIFEST, "does_not_exist__base");
+    expect(u.ready("idle")).toBe(false);
+    // still ready: unknown combo didn't evict the real one
+    expect(a.ready("idle")).toBe(true);
+    expect(closed.length).toBe(0);
+  });
 });

@@ -48,13 +48,20 @@ export function createBitmapCache(limit = 12, loader = defaultBitmapLoader) {
       let entry = combos.get(combo);
       if (entry) { combos.delete(combo); combos.set(combo, entry); } // LRU touch
       else {
+        const def = manifest.combos[combo];
+        if (!def) return { bitmaps: {}, ready: () => false }; // unknown combo: no LRU slot burned
         entry = { bitmaps: {} };
         combos.set(combo, entry);
-        const def = manifest.combos[combo];
-        if (def) for (const anim of Object.keys(def.anims)) {
+        for (const anim of Object.keys(def.anims)) {
           entry.bitmaps[anim] = null;
           loader(sheetUrl(manifest, combo, anim))
-            .then((b) => { if (combos.has(combo)) entry.bitmaps[anim] = b; else b && b.close && b.close(); })
+            .then((b) => {
+              // Identity check, not key presence: the key may have been evicted and
+              // re-acquired under a fresh entry by the time this resolves. Only write
+              // into OUR entry; otherwise release the bitmap so it isn't leaked.
+              if (combos.get(combo) === entry) entry.bitmaps[anim] = b;
+              else if (b && b.close) b.close();
+            })
             .catch(() => {}); // missing sheet: stays null, draw skips forever (chipless)
         }
         evict();
