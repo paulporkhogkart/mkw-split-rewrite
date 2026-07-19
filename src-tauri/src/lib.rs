@@ -176,8 +176,8 @@ fn stop_tracker(state: tauri::State<SidecarState>) {
 /// calls `app.exit(0)` only after its own teardown; update_apply's
 /// `apply_updates_and_restart` exits the process directly, bypassing Tauri's exit
 /// event entirely) so this teardown must run explicitly before either proceeds.
-/// Runner stop joins from the main thread — same pattern as wr_set_setting and
-/// RunEvent::Exit.
+/// Runner stop joins are safe from any thread because the runner thread only posts to
+/// the main thread and never blocks on it.
 pub(crate) fn stop_engines(app: &tauri::AppHandle) {
     if let Some(rs) = app.try_state::<RunnerState>() {
         let taken = rs.0.lock().unwrap_or_else(|e| e.into_inner()).take();

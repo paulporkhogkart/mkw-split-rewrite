@@ -126,6 +126,10 @@ pub async fn bridge_migrate(app: tauri::AppHandle) -> Result<(), String> {
     );
     let mut helper = std::process::Command::new("powershell");
     helper.args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &cmd]);
+    // The helper must not inherit our cwd — for shortcut-launched installs
+    // that's the install dir itself, and a held cwd handle blocks the uninstaller's
+    // final RMDir, forcing the poll to always time out.
+    helper.current_dir(std::env::temp_dir());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt as _;

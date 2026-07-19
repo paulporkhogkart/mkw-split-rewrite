@@ -192,12 +192,16 @@ Sequence when `bridge_migrate()` runs:
 
 1. Download `pbenguin-win-Setup.exe` (same version) from the GitHub release, streaming
    progress over the same `update-progress` event the normal updater uses.
-2. Spawn a detached, hidden PowerShell helper that: waits for this process to exit, then
-   runs `Setup.exe --silent` (installs to `%LocalAppData%` and launches the new copy), then
-   runs the old install's `uninstall.exe /S`. Order is load-bearing — our process must be
-   gone before Setup launches the new app (single-instance plugin would otherwise refuse a
-   second launch), and the uninstall runs last so it's never fighting a live exe for file
-   locks.
+2. Spawn a detached, hidden PowerShell helper that:
+   (a) waits for this process to exit,
+   (b) runs the old install's `uninstall.exe /S` and waits,
+   (c) polls up to ~30s (60×500ms) for the install directory to vanish (the silent uninstaller
+       re-spawns from temp, so its own wait returns early),
+   (d) runs `Setup.exe --silent`, which installs and launches the new copy.
+   Order is load-bearing — NSIS and Velopack both use `%LocalAppData%\pbenguin`, so the old
+   tree must be gone before Setup writes there. The old process has already exited, so the
+   uninstaller never fights a live exe. A silent uninstall never shows the delete-app-data
+   checkbox, so both data roots survive.
 3. This process exits with code `0` (bypasses the close-to-tray `prevent_exit` guard;
    `RunEvent::Exit` teardown kills the sidecar + WR runner normally).
 
