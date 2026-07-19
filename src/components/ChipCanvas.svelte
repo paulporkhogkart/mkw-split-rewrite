@@ -14,8 +14,9 @@
   export let ink = "#101114";
   export let height = 92;
 
-  let canvas, raf = 0, player = null, handle = null, lastSeq = -1, curCombo = null;
+  let canvas, raf = 0, player = null, lastSeq = -1, curCombo = null;
   let scratch = null;
+  const ref = { handle: null };   // non-reactive per-frame state (draw() runs at 60Hz)
 
   $: entry = manifest && combo ? manifest.combos[combo] : null;
   $: fw = manifest?.fw ?? 205;
@@ -25,7 +26,7 @@
   // handle from an evicted combo stays not-ready forever (it's a snapshot of a dead entry).
   $: if (entry && bitmapCache && combo !== curCombo) {
     curCombo = combo;
-    handle = bitmapCache.get(manifest, combo);
+    ref.handle = bitmapCache.get(manifest, combo);
     player = createChipPlayer({ entry, fps: manifest.fps, fw, fh });
     lastSeq = -1; // a fresh combo consumes the pending action below
   }
@@ -38,15 +39,15 @@
 
   function draw() {
     raf = requestAnimationFrame(draw);
-    if (!canvas || !player || !handle || !entry) return;
+    if (!canvas || !player || !ref.handle || !entry) return;
     // Touch-on-draw: re-get every frame so mounted combos stay MRU in the shared LRU
     // (a stable combo would otherwise never be touched and could be evicted by another
     // card browsing selections — freezing this chip). get() on a live entry is a cheap
     // map touch; on an evicted one it transparently re-loads (instant from disk cache).
-    handle = bitmapCache.get(manifest, combo);
+    if (bitmapCache && manifest && combo) ref.handle = bitmapCache.get(manifest, combo);
     const { anim, frame } = player.tick();
-    if (!handle.ready(anim)) return;                 // skip + hold, never blank
-    const bmp = handle.bitmaps[anim];
+    if (!ref.handle.ready(anim)) return;                 // skip + hold, never blank
+    const bmp = ref.handle.bitmaps[anim];
     const a = entry.anims[anim];
     const { sx, sy } = frameRect(frame, a.cols, fw, fh);
     if (!scratch) { scratch = document.createElement("canvas"); scratch.width = fw; scratch.height = fh; }
