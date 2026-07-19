@@ -185,6 +185,12 @@ fn delete_app_data(app: tauri::AppHandle, state: tauri::State<SidecarState>) -> 
         }
     }
     kill_sidecar(&state);
+    // Close the sync outbox connection (a process-lifetime static under app_data_dir) so
+    // its file handle releases before we try to delete the directory it lives in — on
+    // Windows, remove_dir_all on a dir containing an exclusively-open file fails with a
+    // sharing violation, which otherwise makes the whole delete unreachable whenever
+    // sync is configured.
+    sync::shutdown();
     let mut targets: Vec<std::path::PathBuf> = Vec::new();
     if let Ok(d) = app.path().data_dir() {
         targets.push(d.join("mkw-tracker"));
@@ -194,10 +200,11 @@ fn delete_app_data(app: tauri::AppHandle, state: tauri::State<SidecarState>) -> 
     }
     let mut failures: Vec<String> = Vec::new();
     for dir in targets {
-        match std::fs::remove_dir_all(&dir) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => failures.push(format!("{}: {e}", dir.display())),
+        // Bounded retry: the engine we just killed (and the outbox handle we just closed)
+        // can take a few hundred ms to actually release the file on Windows — same class
+        // of fix as build_site_pack's book.json-swap retry (commit 808b7742).
+        if let Err(e) = remove_dir_all_retrying(&dir, 5, std::time::Duration::from_millis(300)) {
+            failures.push(format!("{}: {e}", dir.display()));
         }
     }
     if failures.is_empty() {
@@ -206,6 +213,35 @@ fn delete_app_data(app: tauri::AppHandle, state: tauri::State<SidecarState>) -> 
     } else {
         Err(failures.join("\n"))
     }
+}
+
+/// `remove_dir_all`, retried through transient Windows share-locks. A just-killed
+/// process (or a just-closed sqlite handle) can hold a file open for a few hundred ms
+/// without `FILE_SHARE_DELETE`, which makes `remove_dir_all` fail with a sharing
+/// violation for that brief window — same class of fix as the site-pack builder's
+/// `_replace_with_retry` for `book.json` (commit 808b7742). `NotFound` is treated as
+/// success on every attempt (nothing to delete); any other error is retried up to
+/// `attempts` times, `delay` apart, before giving up and returning the last error.
+fn remove_dir_all_retrying(
+    dir: &std::path::Path,
+    attempts: u32,
+    delay: std::time::Duration,
+) -> std::io::Result<()> {
+    let attempts = attempts.max(1);
+    let mut last_err = std::io::Error::new(std::io::ErrorKind::Other, "remove_dir_all_retrying: unreachable");
+    for i in 0..attempts {
+        match std::fs::remove_dir_all(dir) {
+            Ok(()) => return Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => {
+                last_err = e;
+                if i + 1 < attempts {
+                    std::thread::sleep(delay);
+                }
+            }
+        }
+    }
+    Err(last_err)
 }
 
 /// Kill the running tracker and immediately restart it (e.g. after a device change).
@@ -491,4 +527,85 @@ pub fn run() {
                 _ => {}
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmpdir(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("mkw_lib_test_{tag}"));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn remove_dir_all_retrying_treats_not_found_as_success() {
+        let d = std::env::temp_dir().join("mkw_lib_test_missing_never_created");
+        let _ = std::fs::remove_dir_all(&d);
+        assert!(!d.exists(), "precondition: dir must not exist");
+        assert!(remove_dir_all_retrying(&d, 5, std::time::Duration::from_millis(10)).is_ok());
+    }
+
+    #[test]
+    fn remove_dir_all_retrying_deletes_a_plain_dir_on_first_try() {
+        let d = tmpdir("plain");
+        std::fs::write(d.join("f.txt"), b"x").unwrap();
+        assert!(remove_dir_all_retrying(&d, 5, std::time::Duration::from_millis(300)).is_ok());
+        assert!(!d.exists());
+    }
+
+    // Windows-only: reproduces the exact failure mode the fix targets — a reader
+    // holding a file open inside the directory (std::fs::File::open does not set
+    // FILE_SHARE_DELETE) makes remove_dir_all fail with a sharing violation until the
+    // handle closes. Same shape as build_site_pack's book.json share-lock test.
+    // An exclusive handle (share_mode(0) — no FILE_SHARE_READ/WRITE/DELETE) opened on a
+    // file inside `dir`, held for `hold_ms` on a background thread. Modern Rust's
+    // default `File::open` sets FILE_SHARE_DELETE, so it does NOT reproduce the sharing
+    // violation the finding describes — forcing share_mode(0) does, matching a stricter
+    // reader (older tooling, AV scanners, some Explorer previews).
+    #[cfg(windows)]
+    fn hold_exclusive_lock(dir: &std::path::Path, hold_ms: u64) -> std::thread::JoinHandle<()> {
+        use std::os::windows::fs::OpenOptionsExt;
+        let held = dir.join("held.txt");
+        std::fs::write(&held, b"x").unwrap();
+        std::thread::spawn(move || {
+            let file = std::fs::OpenOptions::new()
+                .read(true)
+                .share_mode(0)
+                .open(&held)
+                .unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(hold_ms));
+            drop(file);
+        })
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn remove_dir_all_retrying_survives_a_transient_share_lock() {
+        let d = tmpdir("locked");
+        let t = hold_exclusive_lock(&d, 400);
+        std::thread::sleep(std::time::Duration::from_millis(50)); // reader gets the handle first
+
+        let result = remove_dir_all_retrying(&d, 20, std::time::Duration::from_millis(50));
+        t.join().unwrap();
+        assert!(result.is_ok(), "must ride out the transient lock: {:?}", result.err());
+        assert!(!d.exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn remove_dir_all_retrying_exhausts_and_returns_the_last_error() {
+        let d = tmpdir("exhaust");
+        // Held for the whole retry budget (3 * 20ms = 60ms) plus margin, so every
+        // attempt fails and the function must give up rather than loop forever.
+        let t = hold_exclusive_lock(&d, 300);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        let result = remove_dir_all_retrying(&d, 3, std::time::Duration::from_millis(20));
+        assert!(result.is_err(), "must surface an error once attempts are exhausted");
+        t.join().unwrap();
+        let _ = std::fs::remove_dir_all(&d);
+    }
 }

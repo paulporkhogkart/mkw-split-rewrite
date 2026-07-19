@@ -328,6 +328,7 @@ fn course_slug_of(line: &str) -> Option<String> {
     if s.is_empty() { None } else { Some(s) }
 }
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 #[derive(Default, Clone)]
@@ -335,6 +336,9 @@ struct Config { server_url: String, token: String }
 
 static CONFIG: Mutex<Config> = Mutex::new(Config { server_url: String::new(), token: String::new() });
 static OUTBOX: Mutex<Option<Connection>> = Mutex::new(None);
+/// Set by `shutdown()`. The drain loop checks this first thing on every wake — before
+/// touching `CONFIG` or `OUTBOX` — and exits instead of ticking once it's set.
+static SYNC_SHUTDOWN: AtomicBool = AtomicBool::new(false);
 /// Latest detected course (from selection_update), used as the course for the run_started ping.
 static LAST_COURSE: Mutex<String> = Mutex::new(String::new());
 /// Current screen + the epoch-ms we entered it, for screen-time intervals.
@@ -698,6 +702,22 @@ pub async fn sync_roster() -> String {
     }
 }
 
+/// Stop the background drain loop and close the outbox SQLite connection so its file
+/// handle releases — on Windows an open handle blocks `remove_dir_all` on the containing
+/// app-data dir (the delete-app-data flow's whole reason for calling this). Sets
+/// `SYNC_SHUTDOWN` first so the loop's very next wake sees it before touching `OUTBOX`,
+/// then takes + drops the connection under the same `OUTBOX` lock the loop uses — so
+/// this either runs between ticks or blocks briefly for a tick in flight to finish,
+/// never races one. Safe to call when sync was never initialized (`OUTBOX` is already
+/// `None`) and safe to call more than once. Nothing re-creates the connection afterward:
+/// `init()` is the only writer of `OUTBOX`, and it runs exactly once, at startup.
+pub fn shutdown() {
+    SYNC_SHUTDOWN.store(true, Ordering::SeqCst);
+    if let Ok(mut guard) = OUTBOX.lock() {
+        guard.take(); // drops the Connection here, closing the sync_outbox.db handle
+    }
+}
+
 /// Open the outbox DB in the app data dir, then spawn the drain loop.
 pub fn init(app: tauri::AppHandle) {
     use tauri::Manager;
@@ -738,6 +758,12 @@ pub fn init(app: tauri::AppHandle) {
         let mut seeded = false;
         loop {
             std::thread::sleep(std::time::Duration::from_secs(3));
+            // Gate BEFORE any CONFIG/OUTBOX access: once shutdown() has fired, the outbox
+            // connection is gone (or going) and this thread must never touch it again —
+            // no lazy re-open, no upload attempt. Exit the thread outright.
+            if SYNC_SHUTDOWN.load(Ordering::SeqCst) {
+                break;
+            }
             let cfg = CONFIG.lock().unwrap().clone();
             if cfg.server_url.is_empty() || cfg.token.is_empty() {
                 continue;
@@ -1185,6 +1211,33 @@ mod tests {
         assert_eq!(parse_screen_change(r#"{"type":"selection_update","course":"X"}"#), None);
         assert_eq!(parse_screen_change(r#"{"type":"screen_change","to":""}"#), None);
         assert_eq!(parse_screen_change("not json"), None);
+    }
+
+    #[test]
+    fn shutdown_flags_stop_and_drops_the_outbox_connection() {
+        // Simulate init() having opened the outbox.
+        *OUTBOX.lock().unwrap() = Some(Connection::open_in_memory().unwrap());
+        assert!(OUTBOX.lock().unwrap().is_some(), "precondition: outbox is open");
+
+        shutdown();
+
+        assert!(SYNC_SHUTDOWN.load(Ordering::SeqCst), "shutdown must flag the stop state");
+        assert!(OUTBOX.lock().unwrap().is_none(),
+                "shutdown must drop the connection so its file handle releases");
+
+        // A tick-shaped access after shutdown must see None, not panic or reopen anything —
+        // the loop's gate gives up before ever reaching a line like this.
+        let guard = OUTBOX.lock().unwrap();
+        assert!(guard.as_ref().is_none());
+    }
+
+    #[test]
+    fn shutdown_is_safe_when_sync_was_never_initialized() {
+        // Fresh-process shape: OUTBOX empty. Must not panic either way, called twice.
+        *OUTBOX.lock().unwrap() = None;
+        shutdown();
+        shutdown();
+        assert!(OUTBOX.lock().unwrap().is_none());
     }
 
     #[test]
