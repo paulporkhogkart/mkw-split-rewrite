@@ -43,6 +43,54 @@
   import shutterSnd from "./assets/shutter.wav";
   import { matchesKeybind } from "./lib/keybind.js";
   import { screenshotKeybind, screenshotSaveFile, screenshotClipboard, screenshotDir } from "./lib/screenshotSettings.js";
+  import LiveCard from "./components/LiveCard.svelte";
+  import { pushSample } from "./lib/raceTimerBuffer.js";
+
+  // ── ?cardlab harness (Task B7): the locked LiveCard state line-up behind a query
+  // flag, for Paul's eyeball pass against docs/design/site-redesign/live-card.html.
+  // Purely additive dev rig — B8 replaces it with the real panel wiring. Chips/tears
+  // need the site pack manifest, so they stay absent here (manifest null).
+  const cardlab = new URLSearchParams(location.search).has("cardlab");
+  let labNow = Date.now();
+  const _labT0 = Date.now();
+  const _labTimers = [];
+  const labEntries = !cardlab ? [] : [
+    // RACING (paul) — ticking timer; pb_delta_ms stays negative so fire lights after
+    // the 2s on-window (fire-live-card's on-fire racing card).
+    { player_id: 901, name: "paul pork", color: "#a78bfa", online: true, screen: "RACING",
+      character: "Toadette", costume: "Base", kart: "Mach Rocket", course: "Sky-High Sundae",
+      tot_lap: 3, pb_ms: 117757, resets: 15, screen_since_ms: _labT0 - (18 * 60 + 24) * 1000,
+      has_model: true, dividers: [0.33, 0.66] },
+    // FINISHED · BEAT PB (gub) — settled jank + wave, delta ok (forceFire also lights it)
+    { player_id: 902, name: "Gub", color: "#38bdf8", online: true, screen: "RACING",
+      final_time: "1:50.517", character: "Toadette", costume: "Base", kart: "Mach Rocket",
+      course: "Mario Bros. Circuit", tot_lap: 3, pb_ms: 110811, resets: 27,
+      screen_since_ms: _labT0 - (41 * 60 + 7) * 1000, completion: 1, has_model: true, dividers: [0.33, 0.66] },
+    // FINISHED · MISSED (luke) — settled jank, delta bad
+    { player_id: 903, name: "Luke", color: "#f87171", online: true, screen: "RACING",
+      final_time: "2:05.102", character: "Yoshi", costume: "Base", kart: "B Dasher",
+      course: "Sky-High Sundae", tot_lap: 3, pb_ms: 123225, resets: 8,
+      screen_since_ms: _labT0 - (12 * 60 + 51) * 1000, completion: 1, has_model: true, dividers: [0.33, 0.66] },
+    // IDLE online (aliias) — mutd + stats3 grid
+    { player_id: 904, name: "Aliias", color: "#4ade80", online: true, screen: "MAIN_MENU",
+      off_stats: { firsts: 1, runs_7d: 43, pbs_30d: 6 } },
+    // OFFLINE (alex) — offl + stats3
+    { player_id: 905, name: "Alex", color: "#fbbf24", online: false,
+      updated_at: _labT0 - 2 * 86400000, off_stats: { firsts: 0, runs_7d: 0, pbs_30d: 2 } },
+    // SELECTION (gub) — stacked char + kart tags, "Choosing kart…" course line
+    { player_id: 906, name: "Gub", color: "#38bdf8", online: true, screen: "KART_SELECT",
+      character: "Toadette", costume: "Base", kart: "Mach Rocket" },
+  ];
+  if (cardlab) {
+    const pushLab = () => {
+      const el = 72438 + (Date.now() - _labT0);
+      pushSample(901, { t: Date.now(), elapsed_ms: el, completion: Math.min(0.98, el / 138000), pb_delta_ms: -213 });
+    };
+    pushLab();
+    _labTimers.push(setInterval(pushLab, 250));           // ~4Hz, like the server feed
+    _labTimers.push(setInterval(() => (labNow = Date.now()), 33));
+  }
+  onDestroy(() => _labTimers.forEach(clearInterval));
 
   let appWindow = null;
   function winMinimize()       { appWindow?.minimize(); }
@@ -1614,6 +1662,19 @@
 
 <svelte:window on:keydown={onGlobalKeydown} />
 
+{#if cardlab}
+  <!-- ── Task B7 ?cardlab harness: locked LiveCard state line-up (eyeball rig) ──── -->
+  <div class="cardlab">
+    <div class="cardlab-row">
+      {#each labEntries as e (e.player_id)}
+        <div class="cardlab-cell"><LiveCard entry={e} now={labNow} stale={false} manifest={null} bitmapCache={null} /></div>
+      {/each}
+    </div>
+    <div class="cardlab-cap">?cardlab · racing+fire / finished-beat / finished-missed / idle / offline / selection ·
+      chips + tear plies need the site pack (manifest is null here)</div>
+  </div>
+{/if}
+
 <div class="app">
 
   <!-- ── Title bar ──────────────────────────────────────────────────────────── -->
@@ -2111,6 +2172,13 @@
 
   /* ── App shell ────────────────────────────────────────────────── */
   .app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── ?cardlab harness overlay (Task B7 eyeball rig; mockup page ground) ──────── */
+  .cardlab { position: fixed; inset: 0; z-index: 999; background: #0b0c0e; overflow: auto;
+             padding: 120px 40px 90px; }
+  .cardlab-row { display: flex; gap: 26px; flex-wrap: wrap; align-items: flex-start; }
+  .cardlab-cell { width: 250px; height: 150px; }
+  .cardlab-cap { margin-top: 40px; color: #6b6d73; font-size: 10.5px; letter-spacing: .06em; }
 
   /* ── Title bar (component: src/components/TitleBar.svelte) ───────── */
   /* Update-strip markup is slotted from App.svelte so its styles stay here */
