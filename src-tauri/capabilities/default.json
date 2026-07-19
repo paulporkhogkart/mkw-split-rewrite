@@ -15,6 +15,7 @@
     "log:default",
     "clipboard-manager:allow-write-image",
     "dialog:allow-open",
-    "dialog:allow-ask"
+    "dialog:allow-ask",
+    "dialog:allow-message"
   ]
 }

@@ -168,25 +168,44 @@ fn stop_tracker(state: tauri::State<SidecarState>) {
     kill_sidecar(&state);
 }
 
-/// Delete %APPDATA%\mkw-tracker (settings, replays, minimap tuning) and quit.
-/// The explicit in-app replacement for the old NSIS "delete app data" checkbox
-/// (spec 2026-07-19 §5) — uninstall itself never deletes data. The frontend
-/// shows a native confirm dialog before invoking this.
+/// Delete BOTH app-owned data roots — the engine's %APPDATA%\mkw-tracker and the
+/// Tauri identifier dir (wr_service.db background settings, sync outbox, WR video
+/// cache) — then quit. The explicit in-app replacement for the old NSIS
+/// "delete app data" checkbox (spec 2026-07-19 §5), which also covered both roots;
+/// uninstall itself never deletes data. The frontend confirms before invoking.
+/// On any failure: no exit — the error returns to the frontend, which shows it.
 #[tauri::command]
 fn delete_app_data(app: tauri::AppHandle, state: tauri::State<SidecarState>) -> Result<(), String> {
-    kill_sidecar(&state);
-    let dir = app
-        .path()
-        .data_dir()
-        .map_err(|e| e.to_string())?
-        .join("mkw-tracker");
-    match std::fs::remove_dir_all(&dir) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(e.to_string()),
+    // Stop everything that may hold files open under the data dirs. Runner stop
+    // joins from the main thread — same pattern as wr_set_setting and RunEvent::Exit.
+    if let Some(rs) = app.try_state::<RunnerState>() {
+        let taken = rs.0.lock().unwrap_or_else(|e| e.into_inner()).take();
+        if let Some(runner) = taken {
+            runner.stop();
+        }
     }
-    app.exit(0);
-    Ok(())
+    kill_sidecar(&state);
+    let mut targets: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(d) = app.path().data_dir() {
+        targets.push(d.join("mkw-tracker"));
+    }
+    if let Ok(d) = app.path().app_data_dir() {
+        targets.push(d);
+    }
+    let mut failures: Vec<String> = Vec::new();
+    for dir in targets {
+        match std::fs::remove_dir_all(&dir) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => failures.push(format!("{}: {e}", dir.display())),
+        }
+    }
+    if failures.is_empty() {
+        app.exit(0);
+        Ok(())
+    } else {
+        Err(failures.join("\n"))
+    }
 }
 
 /// Kill the running tracker and immediately restart it (e.g. after a device change).

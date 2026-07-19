@@ -23,7 +23,7 @@
   import { deltaMode } from "../lib/cardSettings.js";
   import KeybindRecorder from "./KeybindRecorder.svelte";
   import { screenshotKeybind, screenshotSaveFile, screenshotClipboard, screenshotDir } from "../lib/screenshotSettings.js";
-  import { open as openDialog, ask } from "@tauri-apps/plugin-dialog";
+  import { open as openDialog, ask, message } from "@tauri-apps/plugin-dialog";
 
   async function chooseScreenshotDir() {
     try {
@@ -34,12 +34,24 @@
 
   // The only data-delete path in the product (replaces the old NSIS uninstall
   // checkbox, spec 2026-07-19 §5) - uninstalling pbenguin never touches app data.
+  let deletingAppData = false;
   async function deleteAppData() {
+    if (deletingAppData) return;
     const yes = await ask(
       "Delete ALL pbenguin data — settings, replays, minimap tuning — and quit?\nThis cannot be undone.",
       { title: "Delete app data", kind: "warning", okLabel: "Delete and quit", cancelLabel: "Cancel" },
     );
-    if (yes) invoke("delete_app_data").catch((e) => console.error("delete_app_data failed", e));
+    if (!yes) return;
+    deletingAppData = true;
+    try {
+      await invoke("delete_app_data");   // exits the app on success
+    } catch (e) {
+      await message(
+        `Some data could not be deleted:\n${e}\n\nClose pbenguin and delete the folder(s) manually.`,
+        { title: "Delete app data", kind: "error" },
+      );
+      deletingAppData = false;
+    }
   }
 
   // Open the save folder in File Explorer (browse only). Empty dir → the default
@@ -176,7 +188,7 @@
 
             <div class="bg-section">
               <h3>Data</h3>
-              <button class="btn-sm btn-danger" on:click={deleteAppData}>Delete all app data…</button>
+              <button class="btn-sm btn-danger" disabled={deletingAppData} on:click={deleteAppData}>Delete all app data…</button>
               <div class="bg-hint">Removes settings, replays and tuning, then quits. Uninstalling pbenguin keeps this data.</div>
             </div>
 
