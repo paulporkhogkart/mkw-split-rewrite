@@ -340,6 +340,28 @@ jobs:
         run: ls -lh velopack_releases/
 
       # ── Bridge-only (v3.0.0): last NSIS artifacts so old clients update into the bridge ──
+      - name: Restore updater config for NSIS signing (bridge release only)
+        if: startsWith(github.ref_name, 'v3.0.0')
+        shell: bash
+        run: |
+          python - <<'EOF'
+          import json
+          # createUpdaterArtifacts (which emits the *-setup.exe.sig that latest.json
+          # carries for OLD clients) refuses to bundle unless plugins.updater exists.
+          # The runtime plugin was removed in the Velopack migration, so re-inject the
+          # pre-migration config block (verbatim) for this bridge-gated build only —
+          # it is bundler metadata here; nothing in the app reads it anymore.
+          cfg = json.load(open("src-tauri/tauri.conf.json"))
+          cfg.setdefault("plugins", {})["updater"] = {
+              "endpoints": [
+                  "https://github.com/paulporkhogkart/mkw-split-rewrite/releases/latest/download/latest.json"
+              ],
+              "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU4NDhGMUZEQTI1MkE3RDcKUldUWHAxS2kvZkZJV0VsRmhmK052NFJVSjEwZkp1NUg5VnZsNnhEQzdlRUtNeWYrS0tpNDhLVlAK"
+          }
+          json.dump(cfg, open("src-tauri/tauri.conf.json", "w"), indent=2)
+          print("plugins.updater restored for bridge NSIS build")
+          EOF
+
       - name: Build NSIS installer (bridge release only)
         if: startsWith(github.ref_name, 'v3.0.0')
         run: npm run tauri build -- --bundles nsis
