@@ -36,6 +36,14 @@ dev-dep tiny_http), Svelte 4, Node test via vitest (web/).
 - Rust tests: `cd src-tauri && cargo test` · web tests: `cd web && npx vitest run serve.test.js`.
 - Windows product: custom scheme surfaces as `http://chips.localhost/…`; app-data dir =
   `app.path().app_data_dir()` (`%APPDATA%\mkw-tracker`).
+- **STANDING RULE: NO `[dev-dependencies]` in `src-tauri/Cargo.toml`** (carried from the WR
+  service + Velopack projects). Wherever a test block in this plan shows `tempfile::tempdir()`
+  or `tiny_http`, substitute the std-only helpers `chips::testutil::TmpDir` /
+  `chips::testutil::TestServer` defined in Task 2 — same behaviour, no new deps.
+- **STANDING RULE: no em dashes in user-facing copy** (settings labels/notes use `·` or
+  plain text).
+- Subagents stage ONLY the files their task names (never `git add -A`); the main checkout
+  has concurrent Velopack work, but THIS plan runs in its own worktree.
 
 ---
 
@@ -159,13 +167,101 @@ tar = "0.4"
 fs2 = "0.4"
 ```
 
-and a new section (or extend if one exists):
+NO `[dev-dependencies]` (standing rule). Instead create the std-only test helpers module
+`src-tauri/src/chips/testutil.rs`, declared in `chips/mod.rs` as
+`#[cfg(test)] pub mod testutil;`:
 
-```toml
-[dev-dependencies]
-tiny_http = "0.12"
-tempfile = "3"
+```rust
+//! std-only test helpers (dev-dependencies are banned in this crate — standing rule).
+//! TmpDir ~= tempfile::tempdir(); TestServer ~= a one-route tiny_http with Range support.
+
+use std::io::{Read, Write};
+use std::sync::atomic::{AtomicU32, Ordering};
+
+static N: AtomicU32 = AtomicU32::new(0);
+
+pub struct TmpDir(std::path::PathBuf);
+impl TmpDir {
+    pub fn new() -> Self {
+        let p = std::env::temp_dir().join(format!(
+            "mkw-chips-test-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+        std::fs::create_dir_all(&p).unwrap();
+        TmpDir(p)
+    }
+    pub fn path(&self) -> &std::path::Path { &self.0 }
+}
+impl Drop for TmpDir {
+    fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+}
+
+/// Minimal HTTP/1.1 server: `route(path, range_from) -> (status, body)`. Serves until
+/// dropped. Connection: close per request; enough for blocking reqwest in tests.
+pub struct TestServer {
+    pub base: String,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl TestServer {
+    pub fn spawn(route: impl Fn(&str, Option<u64>) -> (u16, Vec<u8>) + Send + Sync + 'static) -> Self {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        listener.set_nonblocking(true).unwrap();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let s2 = stop.clone();
+        let handle = std::thread::spawn(move || {
+            while !s2.load(Ordering::SeqCst) {
+                match listener.accept() {
+                    Ok((mut sock, _)) => {
+                        sock.set_nonblocking(false).unwrap();
+                        let mut buf = Vec::new();
+                        let mut tmp = [0u8; 1024];
+                        while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                            match sock.read(&mut tmp) {
+                                Ok(0) => break,
+                                Ok(n) => buf.extend_from_slice(&tmp[..n]),
+                                Err(_) => break,
+                            }
+                        }
+                        let text = String::from_utf8_lossy(&buf);
+                        let path = text.lines().next()
+                            .and_then(|l| l.split_whitespace().nth(1)).unwrap_or("/").to_string();
+                        let range = text.lines()
+                            .find(|l| l.to_ascii_lowercase().starts_with("range:"))
+                            .and_then(|l| l.split('=').nth(1))
+                            .and_then(|v| v.trim().trim_end_matches('-').parse::<u64>().ok());
+                        let (status, body) = route(&path, range);
+                        let reason = if status == 206 { "Partial Content" } else if status >= 400 { "Error" } else { "OK" };
+                        let _ = sock.write_all(format!(
+                            "HTTP/1.1 {status} {reason}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                            body.len()).as_bytes());
+                        let _ = sock.write_all(&body);
+                    }
+                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+        TestServer { base, stop, handle: Some(handle) }
+    }
+}
+
+impl Drop for TestServer {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(h) = self.handle.take() { let _ = h.join(); }
+    }
+}
 ```
+
+Substitution rules for every test block in this plan: `tempfile::tempdir()` →
+`let t = crate::chips::testutil::TmpDir::new();` (same `t.path()` shape);
+`tiny_http`-based servers (incl. `spawn_pack_server*`) → `TestServer::spawn(route)` where
+the route closure implements the same path/Range behaviour, and `srv.server_addr()`-style
+address plumbing → `srv.base` (drop the manual thread + `.recv()` loops; assertions on the
+requested path move into the route closure or are dropped where redundant).
 
 - [ ] **Step 2: Create `src-tauri/src/chips/mod.rs`** (skeleton; grows in later tasks)
 
@@ -1435,8 +1531,8 @@ git commit -m "feat(chips): pack commands, chips-progress events, boot resume"
   `shard_bytes` stays snake_case inside the Progress payload)
 - Produces: `chipsSettings.js` pure helpers:
   - `fmtBytes(n) -> "0 B" | "512 KB" | "1.2 MB" | "6.23 GB"` (≥100 shows 0 decimals, ≥10 one, else two)
-  - `packLabel(status) -> string` — `"Download full pack (6.3 GB)"` | `"Downloading — shard
-    12/51"` | `"Paused — shard 12/51"` | `"Installed (chips-v1)"` | `"Pack update available
+  - `packLabel(status) -> string` — `"Download full pack (6.3 GB)"` | `"Downloading · shard
+    12/51"` | `"Paused · shard 12/51"` | `"Installed (chips-v1)"` | `"Pack update available
     (6.3 GB)"` (from `{packComplete, packWanted, packPaused, updateAvailable}` + last progress)
   - `progressFrac(progress) -> number` — `done/total` clamped 0..1 (`null` when total is 0)
 
@@ -1460,10 +1556,10 @@ describe("packLabel", () => {
   it("idle offer", () => expect(packLabel(base, null)).toBe("Download full pack (6.3 GB)"));
   it("downloading with progress", () =>
     expect(packLabel({ ...base, packWanted: true }, { done: 11, total: 51, state: "downloading" }))
-      .toBe("Downloading — shard 12/51"));
+      .toBe("Downloading · shard 12/51"));
   it("paused", () =>
     expect(packLabel({ ...base, packWanted: true, packPaused: true }, { done: 11, total: 51 }))
-      .toBe("Paused — shard 12/51"));
+      .toBe("Paused · shard 12/51"));
   it("installed", () =>
     expect(packLabel({ ...base, packComplete: true, packTag: "chips-v1" }, null)).toBe("Installed (chips-v1)"));
   it("update available", () =>
@@ -1498,7 +1594,7 @@ export function fmtBytes(n) {
 const OFFER = "Download full pack (6.3 GB)";
 
 export function packLabel(status, progress) {
-  const shard = progress && progress.total ? ` — shard ${Math.min(progress.done + 1, progress.total)}/${progress.total}` : "";
+  const shard = progress && progress.total ? ` · shard ${Math.min(progress.done + 1, progress.total)}/${progress.total}` : "";
   if (status.packPaused && status.packWanted) return `Paused${shard}`;
   if (status.packWanted && !status.packComplete) return `Downloading${shard}`;
   if (status.packComplete && status.updateAvailable) return `Pack update available (6.3 GB)`;
@@ -1584,8 +1680,8 @@ export function progressFrac(progress) {
           {status?.updateAvailable ? "Update pack" : "Download full pack (6.3 GB)"}</button>
       {/if}
     </div>
-    <p class="discord-note">Resumes where it left off after pause or app restart —
-       nothing re-downloads.</p>
+    <p class="discord-note">Resumes where it left off after pause or app restart.
+       Nothing re-downloads.</p>
   </div>
 </div>
 
