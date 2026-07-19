@@ -94,7 +94,12 @@ the lossless alpha plane is 38% of bytes at 8-bit; 5-bit cuts total ~31%, dimini
   time, skip the draw and hold the previous canvas frame — never blank. (URL/src swapping
   flashes 1–2 blank frames on async decode; an animated-webp `<img>`-swap approach would hit
   the same flash. Per-combo bitmap memory is trivial for the card — ~33MB decoded; the lab
-  pins ~100 sheets ≈ 1GB, fine for a desktop eye-test page.)
+  pins ~100 sheets ≈ 1GB, fine for a desktop eye-test page.) Size the backing store at
+  integral DEVICE pixels, derive the CSS display size from it (`W/dpr`), set
+  `imageSmoothingQuality:"high"`, and **snap the canvas to the device-pixel grid** after
+  layout (sub-pixel `translate` correction): a canvas on a fractional device position is
+  resampled and reads soft — on the lab this made identical encodes look crisp or blurry
+  depending on accidental flex-layout phase, which was mistaken for encode quality.
 
 ## Outputs (one pack dir, all data in one place)
 
