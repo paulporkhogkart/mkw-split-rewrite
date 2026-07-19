@@ -136,7 +136,7 @@ A bottom `StatusBar` shows connection dot, live screen name + confidence score, 
 | `images/timestamps/cropped/0.png`–`9.png` | Digit templates |
 | `images/mushrooms/1mush.png`–`3mush.png` | Mushroom count templates |
 | `images/heads/<player>.png` | Head images for replay bubbles (BGRA) |
-| `%APPDATA%\mkw-tracker\chips\` | pbenguin chip cache (on-demand + full pack; spec 2026-07-19) |
+| `%APPDATA%\com.paulporkhogkart.mkw-tracker\chips\` | pbenguin chip cache (on-demand + full pack; spec 2026-07-19) |
 
 **Chip sprite-sheet pack:** built by `tools/asset_matte/build_site_pack.py`, delivered as GitHub
 Release assets pinned by `web/chips.lock`, served at `/chips/anim/` — see
