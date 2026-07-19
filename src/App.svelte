@@ -1,6 +1,5 @@
 <script>
   import { onMount, onDestroy } from "svelte";
-  import { check } from "@tauri-apps/plugin-updater";
   import { listen } from "@tauri-apps/api/event";
   import { attachLogger } from "@tauri-apps/plugin-log";
   import { getVersion } from "@tauri-apps/api/app";
@@ -115,12 +114,10 @@
   let deviceSwitching = false;   // true while tracker is restarting after a device change
   let _pendingDeviceSwitchTimeout = null;
   let restartNeeded = false;
-  let pendingUpdate = null;
   let updateVersion = "";
-  let downloadTotal = 0;
-  let downloadReceived = 0;
+  let downloadPercent = null;   // set by update-progress events (0-100)
   let updateReady = false;
-  $: downloadPercent = downloadTotal > 0 ? Math.min(100, Math.round(downloadReceived / downloadTotal * 100)) : null;
+  let migrating = false;        // one-time NSIS→Velopack handover in flight
 
   // ── Language ──────────────────────────────────────────────────────────────────
   const LANGUAGES = [
@@ -1418,18 +1415,24 @@
     restartNeeded=false; devices=[]; trackerConnected=false; trackerSpawned=false; await invoke("restart_tracker");
   }
   async function applyUpdate() {
-    if (pendingUpdate) { await invoke("stop_tracker"); await pendingUpdate.install(); }
+    await invoke("stop_tracker");           // engine down before the app dir swaps
+    try { await invoke("update_apply"); }   // does not return on success
+    catch (e) { pushLog(`[update] apply failed: ${e}`); }
   }
   async function checkForUpdate() {
     try {
-      const u=await check(); if (!u) return;
-      pendingUpdate=u; updateVersion=u.version;
-      await u.download(ev=>{
-        if (ev.event==="Started")       { downloadTotal=ev.data.contentLength??0; downloadReceived=0; }
-        else if (ev.event==="Progress") { downloadReceived+=ev.data.chunkLength; }
-        else if (ev.event==="Finished") { updateReady=true; }
-      });
-    } catch { /* silent */ }
+      if (await invoke("bridge_check")) {
+        // One-time NSIS→Velopack handover: reuse the strip in "migrating" state.
+        migrating = true; updateVersion = version;
+        await invoke("bridge_migrate");     // downloads setup, then exits the app
+        return;
+      }
+      const v = await invoke("update_check");
+      if (!v) return;
+      updateVersion = v;
+      await invoke("update_download");      // progress arrives via update-progress
+      updateReady = true;
+    } catch (e) { pushLog(`[update] ${e}`); }
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────────
@@ -1455,6 +1458,7 @@
       catch { pushLog(String(ev.payload)); }
     });
     pushLog(`[app] listening for tracker events ${_elapsed()}`);
+    _unlistenTray.push(await listen("update-progress", ev => { downloadPercent = ev.payload; }));
     // Hide-to-tray (keep-tracking mode): the window hides instead of destroying so this
     // webview keeps driving Discord presence. Release the camera + frame poll while
     // hidden; reacquire on restore. Rust emits these around hide()/show().
@@ -1626,7 +1630,7 @@
     <svelte:fragment slot="update">
       {#if updateVersion}
         <div class="upd-strip">
-          <span class="upd-label">{updateReady ? `v${updateVersion} ready` : `v${updateVersion} ${downloadPercent !== null ? `${downloadPercent}%` : "…"}`}</span>
+          <span class="upd-label">{migrating ? `installer upgrade ${downloadPercent ?? 0}%` : updateReady ? `v${updateVersion} ready` : `v${updateVersion} ${downloadPercent !== null ? `${downloadPercent}%` : "…"}`}</span>
           {#if !updateReady}
             <div class="upd-track"><div class="upd-fill" style="width:{downloadPercent??0}%"></div></div>
           {:else}
