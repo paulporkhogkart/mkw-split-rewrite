@@ -81,6 +81,20 @@ def render_html(combos, variants, manifests, sizes, stepper_js) -> str:
 const DATA = {data};
 // One shared rAF ticks every player; cells register {{el, player, fw, fh, scaleCss}}.
 const cells = [];
+const DPR = window.devicePixelRatio || 1;
+// Snap every canvas to the device-pixel grid: fractional layout positions (flex
+// gaps, centering) resample the texture -> per-cell soft/crisp lottery.
+function snapAll() {{
+  for (const c of cells) c.el.style.transform = "";
+  for (const c of cells) {{
+    const r = c.el.getBoundingClientRect();
+    const dx = Math.round(r.left * DPR) / DPR - r.left;
+    const dy = Math.round(r.top * DPR) / DPR - r.top;
+    c.el.style.transform = `translate(${{dx}}px, ${{dy}}px)`;
+  }}
+}}
+window.addEventListener("resize", snapAll);
+window.addEventListener("load", snapAll);
 function addCell(root, variant, combo, cssH) {{
   const man = DATA.manifests[variant]; if (!man || !man.combos[combo]) return;
   const entry = man.combos[combo];
@@ -88,11 +102,13 @@ function addCell(root, variant, combo, cssH) {{
   const s = cssH / man.fh;
   // Canvas backing at DEVICE pixels of the display size: drawImage does one
   // high-quality resample per frame and a baked ring stamps at true device px
-  // (matches what the card integration will do).
-  const dpr = window.devicePixelRatio || 1;
+  // (matches what the card integration will do). Display size is derived FROM
+  // the integral backing (W/dpr) so texels map 1:1 to device pixels — a canvas
+  // sized/positioned on fractional device px gets resampled and looks soft,
+  // with per-cell variation set by accidental layout phase (see snapAll).
   const el = document.createElement("canvas"); el.className = "chip";
-  el.width = Math.round(man.fw * s * dpr); el.height = Math.round(man.fh * s * dpr);
-  el.style.width = man.fw * s + "px"; el.style.height = man.fh * s + "px";
+  el.width = Math.round(man.fw * s * DPR); el.height = Math.round(man.fh * s * DPR);
+  el.style.width = el.width / DPR + "px"; el.style.height = el.height / DPR + "px";
   // offscreen scratch for the baked ring (silhouette union, tinted)
   const oc = document.createElement("canvas");
   oc.width = el.width; oc.height = el.height;
@@ -110,8 +126,9 @@ function addCell(root, variant, combo, cssH) {{
       .catch(() => console.warn("sheet decode failed", im.src));
   }}
   const player = createChipPlayer({{entry, fps: man.fps, fw: man.fw, fh: man.fh}});
-  cells.push({{el, ctx: el.getContext("2d"), oc, octx: oc.getContext("2d"),
-              bmps, player, man, entry, last: "", variant, combo}});
+  const ctx = el.getContext("2d"), octx = oc.getContext("2d");
+  ctx.imageSmoothingQuality = "high"; octx.imageSmoothingQuality = "high";
+  cells.push({{el, ctx, oc, octx, bmps, player, man, entry, last: "", variant, combo}});
   const kb = (n, f) => {{ const b = document.createElement("button"); b.textContent = n; b.onclick = f; return b; }};
   wrap.append(el, kb("SELECT", () => player.select()), kb("CONFIRM", () => player.confirm()));
   const idleKB = (DATA.sizes[[variant, combo, "idle"].join("|")] / 1024) | 0;
@@ -230,6 +247,7 @@ for (const combo of DATA.combos) {{
 const probe30 = cells.find((c) => c.variant === "candidate");
 const probe60 = cells.find((c) => c.variant === "fps60");
 setRing("baked");
+snapAll();
 requestAnimationFrame(tickAll);
 </script></body></html>"""
 
