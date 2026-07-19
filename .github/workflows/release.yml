@@ -273,10 +273,13 @@ jobs:
       - name: Install vpk CLI
         run: dotnet tool install -g vpk
 
+      - name: Verify vpk CLI is on PATH
+        run: vpk --version
+
       - name: Download previous release (delta baseline)
         # First Velopack release has no baseline — that's fine, vpk just skips deltas.
         continue-on-error: true
-        run: vpk download github --repoUrl https://github.com/${{ github.repository }} -o velopack_releases
+        run: vpk download github --repoUrl https://github.com/${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }} -o velopack_releases
 
       - name: Velopack pack
         run: >-
@@ -284,6 +287,20 @@ jobs:
           -p pack -e pbenguin.exe
           -i src-tauri/icons/icon.ico --packTitle pbenguin
           -o velopack_releases
+
+      - name: Normalize Setup asset name
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          # bridge.rs SETUP_ASSET downloads exactly this name; vpk's default differs
+          # across versions ({packId}-Setup.exe per current docs), so pin it here.
+          if [ ! -f velopack_releases/pbenguin-win-Setup.exe ]; then
+            setups=(velopack_releases/*Setup.exe)
+            [ ${#setups[@]} -eq 1 ] || { echo "expected exactly one Setup exe, got: ${setups[*]:-none}"; exit 1; }
+            mv "${setups[0]}" velopack_releases/pbenguin-win-Setup.exe
+          fi
+          ls -lh velopack_releases/
 
       - name: List Velopack output (debug)
         shell: bash
@@ -433,4 +450,4 @@ jobs:
         shell: bash
         run: |
           ls velopack_releases/*.nupkg velopack_releases/releases.win.json
-          ls velopack_releases/*Setup.exe
+          test -f velopack_releases/pbenguin-win-Setup.exe
