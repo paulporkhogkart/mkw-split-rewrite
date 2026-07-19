@@ -136,10 +136,14 @@ A bottom `StatusBar` shows connection dot, live screen name + confidence score, 
 | `images/timestamps/cropped/0.png`–`9.png` | Digit templates |
 | `images/mushrooms/1mush.png`–`3mush.png` | Mushroom count templates |
 | `images/heads/<player>.png` | Head images for replay bubbles (BGRA) |
+| `%APPDATA%\mkw-tracker\chips\` | pbenguin chip cache (on-demand + full pack; spec 2026-07-19) |
 
 **Chip sprite-sheet pack:** built by `tools/asset_matte/build_site_pack.py`, delivered as GitHub
 Release assets pinned by `web/chips.lock`, served at `/chips/anim/` — see
-`docs/superpowers/specs/2026-07-18-chip-site-pack-design.md`.
+`docs/superpowers/specs/2026-07-18-chip-site-pack-design.md`. pbenguin caches chips per-tag under
+its app data dir via the `chips://` protocol; full-pack download in Settings → Chips. Rehearse the
+whole stack without the 6GB download via `scripts/make_fake_chip_pack.py` (fabricates a miniature
+pack + lock, servable with `python -m http.server` and picked up via `PBENGUIN_CHIPS_URL`).
 
 ## Important Constants
 
