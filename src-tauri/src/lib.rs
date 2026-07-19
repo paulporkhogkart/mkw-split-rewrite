@@ -1,4 +1,5 @@
 mod bridge;
+mod chips;
 mod discord;
 mod sync;
 mod tray;
