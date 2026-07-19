@@ -173,6 +173,9 @@ fn download(
         .map_err(|e| format!("chips: GET {url}: {e}"))?;
     match resp.status().as_u16() {
         416 => return Ok(None),
+        // 206 offset is not validated against Content-Range; a wrong-offset server corrupts
+        // the shard, which the sha verify catches (cost = one re-download). GitHub serves
+        // correct ranges.
         206 => {}
         200 => have = 0, // server ignored Range: restart from zero
         s => return Err(format!("chips: GET {url}: HTTP {s}")),
@@ -311,6 +314,12 @@ pub fn run_pack(
     if store::current_tag(dir).is_none() {
         store::set_current_tag(dir, &lock.tag)?;
     }
+    // No storage double-up (spec Eviction): a superseded complete pack would otherwise
+    // linger until the NEXT tag flip. Keep this tag + the current on-demand tag only.
+    let keep_current = store::current_tag(dir);
+    let mut keep: Vec<&str> = vec![lock.tag.as_str()];
+    if let Some(c) = keep_current.as_deref() { if c != lock.tag { keep.push(c); } }
+    store::evict_others(dir, &keep);
     emit(&prog("done", total, "", 0));
     Ok(Outcome::Complete)
 }
@@ -524,6 +533,30 @@ mod runner_tests {
             !td.join(".stage/chips-a.tar").exists(),
             "tar deleted after untar"
         );
+    }
+
+    /// No storage double-up (spec Eviction): completing pack v1 must evict a superseded
+    /// complete pack v0, not just leave it lingering until the next tag flip.
+    #[test]
+    fn completion_evicts_a_superseded_complete_pack() {
+        let _g = env_lock();
+        let (sha, tarbuf) = fixture();
+        let srv = spawn_pack_server(sha, tarbuf);
+        std::env::set_var("PBENGUIN_CHIPS_URL", &srv.base);
+        let t = TmpDir::new();
+        // Pre-existing complete pack on a superseded tag (v0).
+        let v0 = t.path().join("chips-v0");
+        std::fs::create_dir_all(v0.join("chips")).unwrap();
+        std::fs::write(v0.join(".complete"), b"").unwrap();
+        std::fs::write(v0.join("chips").join("leftover.webp"), b"stale").unwrap();
+        let ctl = AtomicU8::new(CTL_RUN);
+        let out = run_pack(t.path(), &ctl, &|_p| {}).unwrap();
+        std::env::remove_var("PBENGUIN_CHIPS_URL");
+        assert!(matches!(out, Outcome::Complete));
+        assert!(!v0.exists(), "superseded complete pack v0 must be evicted");
+        let td = t.path().join("chips-v1");
+        assert!(td.join(".complete").exists());
+        assert!(td.join("chips/a__idle.webp").exists());
     }
 
     #[test]

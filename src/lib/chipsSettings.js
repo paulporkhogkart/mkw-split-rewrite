@@ -24,6 +24,9 @@ const OFFER = "Download full pack (6.3 GB)";
 export function packLabel(status, progress) {
   const shard = progress && progress.total ? ` · shard ${Math.min(progress.done + 1, progress.total)}/${progress.total}` : "";
   if (status.packPaused && status.packWanted) return `Paused${shard}`;
+  if (status.packWanted && !status.packComplete && !status.packPaused && status.running === false) {
+    return `Interrupted${shard}`;
+  }
   if (status.packWanted && !status.packComplete) return `Downloading${shard}`;
   if (status.packComplete && status.updateAvailable) return `Pack update available (6.3 GB)`;
   if (status.packComplete) return `Installed (${status.packTag})`;

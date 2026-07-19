@@ -43,7 +43,7 @@ fn complete_pack_tag(dir: &Path) -> Option<String> {
 }
 
 #[tauri::command]
-pub fn chips_get_status(app: tauri::AppHandle) -> serde_json::Value {
+pub fn chips_get_status(app: tauri::AppHandle, state: tauri::State<ChipsState>) -> serde_json::Value {
     let dir = chips_root(&app);
     let (files, bytes) = cached_stats(&dir);
     let current = store::current_tag(&dir);
@@ -52,10 +52,14 @@ pub fn chips_get_status(app: tauri::AppHandle) -> serde_json::Value {
         wr::state::get_flag(&c, wr::state::SETTING_CHIPS_PACK_WANTED),
         wr::state::get_flag(&c, wr::state::SETTING_CHIPS_PACK_PAUSED),
     )).unwrap_or((false, false));
+    // Whether a runner thread currently occupies the job slot — lets the UI tell a live
+    // "downloading" apart from a dead one left by a failed run_pack (flags untouched by
+    // design, for boot-retry), which otherwise looks identical from status flags alone.
+    let running = state.0.lock().unwrap_or_else(|e| e.into_inner()).is_some();
     serde_json::json!({
         "currentTag": current, "cachedFiles": files, "cachedBytes": bytes,
         "packComplete": pack_tag.is_some(), "packTag": pack_tag,
-        "packWanted": wanted, "packPaused": paused,
+        "packWanted": wanted, "packPaused": paused, "running": running,
         "updateAvailable": matches!((&pack_tag, &current), (Some(p), Some(c)) if p != c),
     })
 }

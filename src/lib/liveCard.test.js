@@ -13,7 +13,7 @@ describe("digitSpans", () => {
 
 describe("zigzag", () => {
   it("one segment per lap, gapped, inside the well", () => {
-    const z = zigzag(3, 0, 128, 16);
+    const z = zigzag(3, 0, 128);
     expect(z.done.length + z.future.length + (z.current ? 1 : 0)).toBe(3);
     expect(z.done.length).toBe(0);
     expect(z.current).not.toBeNull();
@@ -22,18 +22,18 @@ describe("zigzag", () => {
     expect(Math.max(...xs)).toBeLessThanOrEqual(126);
   });
   it("fill walks laps from done to future", () => {
-    const z = zigzag(3, 2.5 / 3, 128, 16);   // in lap 3, half done
+    const z = zigzag(3, 2.5 / 3, 128);   // in lap 3, half done
     expect(z.done.length).toBe(2);
     expect(z.current.offset).toBeCloseTo(50, 0);
     expect(z.future.length).toBe(0);
   });
   it("finished = all done", () => {
-    const z = zigzag(3, 1, 128, 16);
+    const z = zigzag(3, 1, 128);
     expect(z.done.length).toBe(3);
     expect(z.current).toBeNull();
   });
   it("degenerate lap counts fall back to one segment", () => {
-    const z = zigzag(0, 0.4, 128, 16);
+    const z = zigzag(0, 0.4, 128);
     expect(z.done.length + (z.current ? 1 : 0) + z.future.length).toBe(1);
   });
 });

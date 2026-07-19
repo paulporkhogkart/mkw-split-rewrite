@@ -23,6 +23,12 @@ describe("packLabel", () => {
   it("update available", () =>
     expect(packLabel({ ...base, packComplete: true, updateAvailable: true }, null))
       .toBe("Pack update available (6.3 GB)"));
+  it("interrupted (runner dead, not paused) with progress", () =>
+    expect(packLabel({ ...base, packWanted: true, running: false }, { done: 11, total: 51 }))
+      .toBe("Interrupted · shard 12/51"));
+  it("interrupted (runner dead, not paused) with no progress", () =>
+    expect(packLabel({ ...base, packWanted: true, running: false }, null))
+      .toBe("Interrupted"));
 });
 
 describe("progressFrac", () => {

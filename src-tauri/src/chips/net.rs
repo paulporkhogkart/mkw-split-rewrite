@@ -49,8 +49,10 @@ pub fn refresh_manifest(dir: &Path, active_pack_tag: Option<&str>) -> Result<Str
     match get(&format!("{}/manifest.json", site_base())).and_then(|r| r.text().map_err(|e| e.to_string())) {
         Ok(body) => {
             let (tag, rewritten) = rewrite_manifest(&body)?;
-            store::write_atomic(&dir.join(&tag).join("chips").join("manifest.json"), body.as_bytes())
-                .map_err(|e| e.to_string())?;
+            let manifest_path = dir.join(&tag).join("chips").join("manifest.json");
+            if let Err(e) = store::write_atomic(&manifest_path, body.as_bytes()) {
+                log::warn!("[chips] manifest persist {manifest_path:?} failed: {e} — serving fetched copy uncached");
+            }
             let prev = store::current_tag(dir);
             store::set_current_tag(dir, &tag)?;
             if prev.as_deref() != Some(tag.as_str()) {

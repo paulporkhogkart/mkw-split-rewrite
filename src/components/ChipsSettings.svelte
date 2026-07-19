@@ -27,7 +27,11 @@
   const cancel = () => invoke("chips_cancel_pack").then(() => { progress = null; refresh(); });
   const nuke   = () => invoke("chips_delete_cache").then(() => { progress = null; refresh(); });
 
-  $: downloading = status?.packWanted && !status?.packComplete && !status?.packPaused;
+  // status.running === false means the runner thread is dead (a failed run_pack leaves
+  // flags untouched by design, for boot-retry) — tolerate older payloads lacking the field
+  // by only excluding the explicit false case.
+  $: downloading = status?.packWanted && !status?.packComplete && !status?.packPaused && status?.running !== false;
+  $: interrupted = status?.packWanted && !status?.packComplete && !status?.packPaused && status?.running === false;
   $: frac = progressFrac(progress);
 </script>
 
@@ -57,6 +61,9 @@
     <div class="btns">
       {#if downloading}
         <button class="btn-sm" on:click={pause}>Pause</button>
+        <button class="btn-sm" on:click={cancel}>Cancel</button>
+      {:else if interrupted}
+        <button class="btn-primary" on:click={start}>Retry</button>
         <button class="btn-sm" on:click={cancel}>Cancel</button>
       {:else if status?.packPaused}
         <button class="btn-primary" on:click={start}>Resume</button>
