@@ -8,6 +8,9 @@ describe("slug", () => {
     expect(slug("B Dasher")).toBe("b_dasher");
     expect(slug("Chargin' Chuck")).toBe("chargin_chuck");
   });
+  it("hyphens fold to underscores (pack truth: para_biddybud)", () => {
+    expect(slug("Para-Biddybud")).toBe("para_biddybud");
+  });
   it("null-safe", () => {
     expect(slug(null)).toBeNull();
     expect(slug("")).toBeNull();
@@ -25,4 +28,6 @@ describe("comboKey", () => {
     expect(comboKey({ character: "Luigi", costume: null, kart: null })).toBe("luigi__base"));
   it("no character -> null", () =>
     expect(comboKey({ character: null, costume: null, kart: "B Dasher" })).toBeNull());
+  it("null argument returns null", () =>
+    expect(comboKey(null)).toBeNull());
 });
