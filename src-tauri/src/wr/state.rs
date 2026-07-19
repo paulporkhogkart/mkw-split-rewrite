@@ -50,6 +50,12 @@ pub const SETTING_START_AT_LOGIN: &str = "start_at_login";
 pub const SETTING_RUN_WR_SERVICE: &str = "run_wr_service";
 pub const SETTING_KEEP_TRACKING_IN_TRAY: &str = "keep_tracking_in_tray";
 
+/// Chip store-pack download intent + pause state (spec 2026-07-19 Task A7). "Wanted"
+/// persists across restarts so a boot can quietly resume an interrupted download;
+/// "paused" suppresses that resume until the user explicitly restarts it.
+pub const SETTING_CHIPS_PACK_WANTED: &str = "chips_pack_wanted";
+pub const SETTING_CHIPS_PACK_PAUSED: &str = "chips_pack_paused";
+
 /// Read a boolean setting; unset = false (every setting defaults to today's behaviour).
 pub fn get_flag(conn: &Connection, key: &str) -> bool {
     get(conn, key).as_deref() == Some("1")

@@ -2,6 +2,7 @@
 //! store = disk layout/lock/tags (pure). net = site fetch + manifest rewrite.
 //! pack = full-pack downloader. commands = tauri commands + protocol glue.
 
+pub mod commands;
 pub mod net;
 pub mod pack;
 pub mod protocol;

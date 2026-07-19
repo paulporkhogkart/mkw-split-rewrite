@@ -373,11 +373,12 @@ pub fn run() {
                 );
             });
         })
-        .invoke_handler(tauri::generate_handler![start_tracker, stop_tracker, restart_tracker, delete_app_data, send_to_tracker, open_url, save_screenshot, copy_screenshot_to_clipboard, open_screenshot_dir, discord::discord_set_presence, discord::discord_clear_presence, sync::sync_set_config, sync::sync_test_connection, sync::sync_resolve_pending, sync::sync_discard_pending, sync::sync_list_pending, sync::sync_course_reads, sync::sync_roster, sync::sync_pb_best, wr::wr_process_one, wr::wr_get_settings, wr::wr_set_setting, updater::update_check, updater::update_download, updater::update_apply, bridge::bridge_check, bridge::bridge_migrate])
+        .invoke_handler(tauri::generate_handler![start_tracker, stop_tracker, restart_tracker, delete_app_data, send_to_tracker, open_url, save_screenshot, copy_screenshot_to_clipboard, open_screenshot_dir, discord::discord_set_presence, discord::discord_clear_presence, sync::sync_set_config, sync::sync_test_connection, sync::sync_resolve_pending, sync::sync_discard_pending, sync::sync_list_pending, sync::sync_course_reads, sync::sync_roster, sync::sync_pb_best, wr::wr_process_one, wr::wr_get_settings, wr::wr_set_setting, updater::update_check, updater::update_download, updater::update_apply, bridge::bridge_check, bridge::bridge_migrate, chips::commands::chips_get_status, chips::commands::chips_start_pack, chips::commands::chips_pause_pack, chips::commands::chips_cancel_pack, chips::commands::chips_delete_cache])
         .setup(|app| {
             app.manage(SidecarState(Mutex::new(None)));
             app.manage(RunnerState(Mutex::new(None)));
             app.manage(updater::PendingUpdate(Mutex::new(None)));
+            app.manage(chips::commands::ChipsState(Mutex::new(None)));
             if let Ok(c) = wr::settings_db(app.handle()) {
                 if wr::state::get_flag(&c, wr::state::SETTING_RUN_WR_SERVICE) {
                     let runner = wr::runner::Runner::start(app.handle().clone());
@@ -394,6 +395,7 @@ pub fn run() {
                 }
             }
             tray::sync_tray(app.handle());
+            chips::commands::boot_resume(app.handle());
             if let Some(rs) = app.try_state::<RunnerState>() {
                 if let Ok(guard) = rs.0.lock() {
                     if let Some(r) = guard.as_ref() {
