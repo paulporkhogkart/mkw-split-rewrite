@@ -6,19 +6,21 @@
   import { fmtBytes, packLabel, progressFrac } from "../lib/chipsSettings.js";
 
   let status = null, progress = null, unlisten = null, err = "";
+  let destroyed = false;
 
   async function refresh() {
     try { status = await invoke("chips_get_status"); } catch (e) { err = String(e); }
   }
   onMount(async () => {
     refresh();
-    unlisten = await listen("chips-progress", (ev) => {
+    const un = await listen("chips-progress", (ev) => {
       progress = ev.payload;
       if (progress.state === "error") err = progress.error || "download failed";
       if (progress.state === "done" || progress.state === "error") refresh();
     });
+    if (destroyed) un(); else unlisten = un;
   });
-  onDestroy(() => unlisten && unlisten());
+  onDestroy(() => { destroyed = true; if (unlisten) unlisten(); });
 
   const start  = () => { err = ""; invoke("chips_start_pack").then(refresh); };
   const pause  = () => invoke("chips_pause_pack").then(refresh);
@@ -49,7 +51,7 @@
     <div class="kvrow"><span>{status ? packLabel(status, progress) : "…"}</span></div>
     {#if frac != null && downloading}
       <div class="bar"><div class="fill" style="width:{frac * 100}%"></div></div>
-      <div class="discord-note">{progress.shard} · {fmtBytes(progress.shard_bytes)}</div>
+      <div class="discord-note">{progress.shard ? `${progress.shard} · ${fmtBytes(progress.shard_bytes)}` : fmtBytes(progress.shard_bytes)}</div>
     {/if}
     {#if err}<div class="err">{err}</div>{/if}
     <div class="btns">
@@ -59,6 +61,8 @@
       {:else if status?.packPaused}
         <button class="btn-primary" on:click={start}>Resume</button>
         <button class="btn-sm" on:click={cancel}>Cancel</button>
+      {:else if status?.packComplete && !status?.updateAvailable}
+        <!-- installed and current: nothing to offer -->
       {:else}
         <button class="btn-primary" on:click={start}>
           {status?.updateAvailable ? "Update pack" : "Download full pack (6.3 GB)"}</button>
