@@ -33,6 +33,16 @@ pub fn rewrite_manifest(body: &str) -> Result<(String, String), String> {
     Ok((tag, v.to_string()))
 }
 
+/// Rewrite for a cached manifest whose tag is already known (the dir it was read from).
+/// The full-pack copy of manifest.json has NO base field (base is injected by the Pi at
+/// serve time, and the release asset is the raw encoder output) — so the offline path
+/// must not depend on it.
+fn rewrite_manifest_local(body: &str, tag: &str) -> Result<String, String> {
+    let mut v: serde_json::Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
+    v["base"] = serde_json::Value::String(format!("{LOCAL_BASE}{tag}/"));
+    Ok(v.to_string())
+}
+
 /// Fetch the site manifest; persist the RAW copy, adopt its tag as current, evict other
 /// tags (spec Eviction — sparing an active pack download's tag). Offline → last cached.
 pub fn refresh_manifest(dir: &Path, active_pack_tag: Option<&str>) -> Result<String, String> {
@@ -54,7 +64,7 @@ pub fn refresh_manifest(dir: &Path, active_pack_tag: Option<&str>) -> Result<Str
             let tag = store::current_tag(dir).ok_or(format!("chips: offline, no cache: {e}"))?;
             let body = std::fs::read_to_string(dir.join(&tag).join("chips").join("manifest.json"))
                 .map_err(|e2| format!("chips: offline, cache unreadable: {e2}"))?;
-            Ok(rewrite_manifest(&body)?.1)
+            rewrite_manifest_local(&body, &tag)
         }
     }
 }
@@ -117,6 +127,20 @@ mod tests {
         store::set_current_tag(&dir, "chips-v1").unwrap();
         store::write_atomic(&dir.join("chips-v1/chips/manifest.json"),
             br#"{"base":"/chips/anim/chips-v1/","combos":{}}"#).unwrap();
+        std::env::set_var("PBENGUIN_CHIPS_URL", "http://127.0.0.1:9"); // nothing listens
+        let out = refresh_manifest(&dir, None).unwrap();
+        std::env::remove_var("PBENGUIN_CHIPS_URL");
+        assert!(out.contains("chips.localhost/chips-v1/"));
+    }
+
+    #[test]
+    fn offline_fallback_serves_pack_copied_manifest_without_base() {
+        let _g = env_lock();
+        let t = TmpDir::new();
+        let dir = t.path().to_path_buf();
+        store::set_current_tag(&dir, "chips-v1").unwrap();
+        store::write_atomic(&dir.join("chips-v1/chips/manifest.json"),
+            br#"{"version":1,"combos":{}}"#).unwrap();
         std::env::set_var("PBENGUIN_CHIPS_URL", "http://127.0.0.1:9"); // nothing listens
         let out = refresh_manifest(&dir, None).unwrap();
         std::env::remove_var("PBENGUIN_CHIPS_URL");

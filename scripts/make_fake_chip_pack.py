@@ -95,9 +95,14 @@ def main():
         write_tar(out, "chips-luigi.tar", fake_files("luigi__base")),
     ]
 
+    # The real release asset chips-manifest.json has NO base field (base is
+    # injected server-side by the Pi at serve time) - mirror that here so the
+    # shard-borne copy matches the actual shipped shape.
+    shard_manifest = dict(manifest)
+    del shard_manifest["base"]
     mpath = os.path.join(out, "chips-manifest.json")
     with open(mpath, "w") as f:
-        json.dump(manifest, f)
+        json.dump(shard_manifest, f)
 
     lock = ["tag chips-v1", "base http://127.0.0.1:8000"]
     for p in [mpath] + shards:
@@ -108,6 +113,7 @@ def main():
     # On-demand path needs /manifest.json + /chips-v1/<file> - mirror the site
     # layout. The chips-v1/ tree is extracted FROM the shards (not regenerated
     # from fake_files again) so on-demand bytes == shard bytes == lock shas.
+    # /manifest.json KEEPS the injected base - that's the Pi-served shape.
     with open(os.path.join(out, "manifest.json"), "w") as f:
         json.dump(manifest, f)
     chips_dir = os.path.join(out, "chips-v1")
