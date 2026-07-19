@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
 pub struct ChipsJob { pub ctl: Arc<AtomicU8> }
-pub struct ChipsState(pub Mutex<Option<ChipsJob>>);
+pub struct ChipsState(pub Arc<Mutex<Option<ChipsJob>>>);
 
 /// (file count, byte total) under every tag dir. Walks — called on settings open only.
 pub fn cached_stats(dir: &Path) -> (u64, u64) {
@@ -25,12 +25,21 @@ pub fn cached_stats(dir: &Path) -> (u64, u64) {
     acc
 }
 
+/// At most one `.complete` tag exists under the eviction contract (a new pack's `.complete`
+/// marker is only written after the previous tag is evicted). If that invariant is ever
+/// violated (exotic transient), pick deterministically: highest numeric suffix wins, rather
+/// than whatever order `read_dir` happens to yield (filesystem order is not guaranteed).
 fn complete_pack_tag(dir: &Path) -> Option<String> {
     let rd = std::fs::read_dir(dir).ok()?;
-    rd.flatten().find_map(|e| {
-        let n = e.file_name().to_str()?.to_string();
-        (store::valid_tag(&n) && e.path().join(".complete").exists()).then_some(n)
-    })
+    rd.flatten()
+        .filter_map(|e| {
+            let n = e.file_name().to_str()?.to_string();
+            (store::valid_tag(&n) && e.path().join(".complete").exists()).then_some(n)
+        })
+        .max_by_key(|n| {
+            // valid_tag already guarantees "chips-v<digits>"
+            n.strip_prefix("chips-v").and_then(|s| s.parse::<u64>().ok()).unwrap_or(0)
+        })
 }
 
 #[tauri::command]
@@ -51,29 +60,44 @@ pub fn chips_get_status(app: tauri::AppHandle) -> serde_json::Value {
     })
 }
 
+/// Run `work`, then clear the job slot — on EVERY outcome, including panic (the slot
+/// clear lives in a drop guard). A stale occupied slot wedges spawn_runner forever
+/// (the bug this fixes): ctl stays CTL_RUN after Complete/Err since run_pack never
+/// writes ctl, so the "already running" check must be backed by slot liveness.
+fn run_then_clear(slot: Arc<Mutex<Option<ChipsJob>>>, work: impl FnOnce()) {
+    struct Clear(Arc<Mutex<Option<ChipsJob>>>);
+    impl Drop for Clear {
+        fn drop(&mut self) { *self.0.lock().unwrap_or_else(|e| e.into_inner()) = None; }
+    }
+    let _c = Clear(slot);
+    work();
+}
+
 fn spawn_runner(app: tauri::AppHandle, state: &ChipsState) {
     let mut guard = state.0.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(j) = guard.as_ref() {
-        if j.ctl.load(Ordering::SeqCst) == pack::CTL_RUN { return; } // already running
-    }
+    if guard.is_some() { return; } // already running (slot is cleared on exit — see run_then_clear)
     let ctl = Arc::new(AtomicU8::new(pack::CTL_RUN));
     *guard = Some(ChipsJob { ctl: ctl.clone() });
+    drop(guard);
+    let slot = state.0.clone();
     let dir = chips_root(&app);
     std::thread::spawn(move || {
-        use tauri::Emitter;
-        let emit_app = app.clone();
-        let emit = move |p: &pack::Progress| { let _ = emit_app.emit("chips-progress", p); };
-        match pack::run_pack(&dir, &ctl, &emit) {
-            Ok(pack::Outcome::Complete) => log::info!("[chips] pack complete"),
-            Ok(_) => log::info!("[chips] pack interrupted (pause/cancel)"),
-            Err(e) => {
-                log::error!("[chips] pack failed: {e}");
-                let _ = app.emit("chips-progress", serde_json::json!({
-                    "tag": "", "done": 0, "total": 0, "shard": "", "shard_bytes": 0,
-                    "state": "error", "error": e,
-                }));
+        run_then_clear(slot, move || {
+            use tauri::Emitter;
+            let emit_app = app.clone();
+            let emit = move |p: &pack::Progress| { let _ = emit_app.emit("chips-progress", p); };
+            match pack::run_pack(&dir, &ctl, &emit) {
+                Ok(pack::Outcome::Complete) => log::info!("[chips] pack complete"),
+                Ok(_) => log::info!("[chips] pack interrupted (pause/cancel)"),
+                Err(e) => {
+                    log::error!("[chips] pack failed: {e}");
+                    let _ = app.emit("chips-progress", serde_json::json!({
+                        "tag": "", "done": 0, "total": 0, "shard": "", "shard_bytes": 0,
+                        "state": "error", "error": e,
+                    }));
+                }
             }
-        }
+        });
     });
 }
 
@@ -152,5 +176,44 @@ mod tests {
         let (files, bytes) = cached_stats(t.path());
         assert_eq!(files, 2);
         assert_eq!(bytes, 5 + 6);
+    }
+
+    #[test]
+    fn complete_pack_tag_picks_highest_numeric_suffix_not_lexicographic() {
+        let t = TmpDir::new();
+        std::fs::create_dir_all(t.path().join("chips-v1")).unwrap();
+        std::fs::write(t.path().join("chips-v1").join(".complete"), b"").unwrap();
+        std::fs::create_dir_all(t.path().join("chips-v10")).unwrap();
+        std::fs::write(t.path().join("chips-v10").join(".complete"), b"").unwrap();
+        // Lexicographically "chips-v1" > "chips-v10" would be wrong; numeric v10 must win.
+        assert_eq!(complete_pack_tag(t.path()), Some("chips-v10".to_string()));
+    }
+
+    /// Regression for the spawn_runner wedge: the OLD code never cleared the ChipsState
+    /// slot after the runner thread finished, so `chips_start_pack` after a completed run
+    /// would hit the (stale) "already running" guard forever. `run_then_clear` must leave
+    /// the slot empty once `work` returns — on both the normal path and a panic.
+    #[test]
+    fn run_then_clear_empties_slot_after_normal_completion() {
+        let slot: Arc<Mutex<Option<ChipsJob>>> = Arc::new(Mutex::new(Some(ChipsJob {
+            ctl: Arc::new(AtomicU8::new(pack::CTL_RUN)),
+        })));
+        let s2 = slot.clone();
+        let h = std::thread::spawn(move || run_then_clear(s2, || {}));
+        h.join().unwrap();
+        assert!(slot.lock().unwrap().is_none(), "slot must be cleared after work() returns");
+    }
+
+    #[test]
+    fn run_then_clear_empties_slot_even_on_panic() {
+        let slot: Arc<Mutex<Option<ChipsJob>>> = Arc::new(Mutex::new(Some(ChipsJob {
+            ctl: Arc::new(AtomicU8::new(pack::CTL_RUN)),
+        })));
+        let s2 = slot.clone();
+        let h = std::thread::spawn(move || {
+            run_then_clear(s2, || panic!("simulated pack failure"));
+        });
+        let _ = h.join(); // Err expected — panic is the point of this test
+        assert!(slot.lock().unwrap().is_none(), "slot must be cleared even when work() panics");
     }
 }

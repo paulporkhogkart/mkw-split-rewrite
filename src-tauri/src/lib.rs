@@ -378,7 +378,7 @@ pub fn run() {
             app.manage(SidecarState(Mutex::new(None)));
             app.manage(RunnerState(Mutex::new(None)));
             app.manage(updater::PendingUpdate(Mutex::new(None)));
-            app.manage(chips::commands::ChipsState(Mutex::new(None)));
+            app.manage(chips::commands::ChipsState(std::sync::Arc::new(Mutex::new(None))));
             if let Ok(c) = wr::settings_db(app.handle()) {
                 if wr::state::get_flag(&c, wr::state::SETTING_RUN_WR_SERVICE) {
                     let runner = wr::runner::Runner::start(app.handle().clone());
