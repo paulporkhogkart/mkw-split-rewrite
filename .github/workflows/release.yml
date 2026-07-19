@@ -1,31 +1,46 @@
 # Triggered by a version tag push: git tag v0.2.0 && git push --tags
 #
+# Distribution is Velopack-based (see docs/distribution.md): the app installs and
+# updates per-user via `vpk`-produced packages, no `tauri-plugin-updater` involved
+# in the normal flow. The one-time v3.0.0 tag additionally builds the legacy NSIS
+# installer so existing pre-Velopack clients can migrate through the bridge
+# (`src-tauri/src/bridge.rs`) — every later tag skips that pair of steps entirely.
+#
 # Three jobs:
 #   build-python  → PyInstaller portable bundle (unchanged from pre-Tauri)
-#   build-tauri   → Copies sidecar, runs a no-bundle tauri build, assembles the
-#                   Velopack pack dir, and packs it with `vpk` (full+delta
-#                   .nupkg, releases.win.json, Setup.exe). For the one-time
-#                   v3.0.0 bridge tag ONLY, it additionally builds + signs the
-#                   legacy NSIS installer and writes the old-style latest.json,
-#                   so pre-Velopack clients (Tauri updater) can update into the
-#                   bridge release; every later tag skips that pair entirely.
-#   publish       → Creates GitHub Release with the Velopack assets (+ NSIS/
-#                   latest.json when present, i.e. only on the bridge tag).
+#   build-tauri   → Copies sidecar, runs a no-bundle tauri build, assembles a
+#                   Velopack pack dir (pbenguin.exe + bin/ sidecar), installs the
+#                   `vpk` CLI, downloads the previous release as a delta baseline
+#                   (best-effort — the first-ever release has nothing to diff
+#                   against), then `vpk pack`s full+delta .nupkg, releases.win.json,
+#                   and the Setup bootstrapper (renamed to the canonical
+#                   pbenguin-win-Setup.exe by the Normalize step). ONLY on the
+#                   v3.0.0 tag (`startsWith(github.ref_name, 'v3.0.0')`), it also
+#                   builds + signs the legacy NSIS installer and writes the
+#                   old-style latest.json update manifest.
+#   publish       → Creates the GitHub Release with the Velopack asset set (+ the
+#                   NSIS installer and latest.json only on v3.0.0), and on every
+#                   *non*-bridge tag re-publishes the committed
+#                   .github/bridge-latest.json so straggler NSIS installs that
+#                   haven't run the bridge yet keep resolving latest.json.
 #
-# Required GitHub Secrets:
-#   TAURI_SIGNING_PRIVATE_KEY         private key (from: npm run tauri signer generate)
+# Required GitHub Secrets (used only by the bridge-only NSIS build/sign step, i.e.
+# only ever exercised on the v3.0.0 tag — remove once the post-bridge cleanup
+# checklist in docs/distribution.md runs):
+#   TAURI_SIGNING_PRIVATE_KEY         minisign private key (from: npm run tauri signer generate)
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD password chosen during key generation
-#                                     (both only used by the bridge-only NSIS step)
 #
-# One-time local setup:
+# One-time local setup for the bridge's NSIS signing (not needed once bridge-only
+# steps are removed post-v3.0.0):
 #   npm install
 #   npm run tauri signer generate -- -w ~/.tauri/mkw-tracker.key
-#   # Copy the printed public key into src-tauri/tauri.conf.json → plugins.updater.pubkey
-#   # Add private key + password to GitHub Secrets
+#   # Add the private key + password to GitHub Secrets (TAURI_SIGNING_PRIVATE_KEY[_PASSWORD])
 #
 # Velopack (vpk) notes:
-#   - packId is "pbenguin"; vpk emits the Setup exe as "pbenguin-win-Setup.exe",
-#     which matches the URL the Rust updater downloads — no rename needed.
+#   - packId is "pbenguin"; vpk's own default Setup filename is "pbenguin-Setup.exe"
+#     (no "-win-" infix) — the "Normalize Setup asset name" step renames it to
+#     "pbenguin-win-Setup.exe", which is what bridge.rs's SETUP_ASSET constant and
+#     the frontend both expect, hard-failing if that isn't unambiguous.
 #   - Delta baseline comes from `vpk download github` against this same repo;
 #     the first-ever Velopack release has nothing to download against, so that
 #     step is `continue-on-error: true` and vpk just falls back to a full pack.
@@ -288,6 +303,17 @@ jobs:
           -i src-tauri/icons/icon.ico --packTitle pbenguin
           -o velopack_releases
 
+      - name: Warn if no delta package was generated
+        # Non-fatal: a missing delta just means this release ships full-size only
+        # (worse update experience, not a broken one) — but silent is how it stays
+        # unnoticed, so surface it loudly instead of failing the job.
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! ls velopack_releases/pbenguin-*-delta.nupkg >/dev/null 2>&1; then
+            echo "::warning::no delta generated — baseline download likely failed; release will be full-size only"
+          fi
+
       - name: Normalize Setup asset name
         shell: bash
         run: |
@@ -431,6 +457,9 @@ jobs:
         run: |
           if [ -f repo/.github/bridge-latest.json ]; then
             cp repo/.github/bridge-latest.json latest.json
+          else
+            echo "::error::post-bridge checklist step 1 not done: commit .github/bridge-latest.json from the v3.0.0 release so NSIS stragglers keep resolving latest.json"
+            exit 1
           fi
 
       - name: Create GitHub Release
