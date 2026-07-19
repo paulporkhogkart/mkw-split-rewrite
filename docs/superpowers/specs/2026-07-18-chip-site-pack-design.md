@@ -106,6 +106,11 @@ the lossless alpha plane is 38% of bytes at 8-bit; 5-bit cuts total ~31%, dimini
   layout (sub-pixel `translate` correction): a canvas on a fractional device position is
   resampled and reads soft — on the lab this made identical encodes look crisp or blurry
   depending on accidental flex-layout phase, which was mistaken for encode quality.
+  **Ink ring: bake it in the canvas draw** (stamp the frame at ±1 device px in the four
+  directions into a scratch canvas, `source-in` fill with ink, composite under the frame —
+  the lab's `draw()` is the reference). Paul judged it indistinguishable from the card's
+  CSS `drop-shadow` chain (2026-07-19), and it avoids per-frame filter re-raster entirely;
+  if the CSS ring is ever preferred instead, measure page cadence at real card scale first.
 
 ## Outputs (one pack dir, all data in one place)
 
