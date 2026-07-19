@@ -1432,7 +1432,13 @@
       updateVersion = v;
       await invoke("update_download");      // progress arrives via update-progress
       updateReady = true;
-    } catch (e) { pushLog(`[update] ${e}`); }
+    } catch (e) {
+      pushLog(`[update] ${e}`);
+      // A failed bridge download (or normal update check/download) must not leave the
+      // strip wedged showing "installer upgrade 0%" (or a stale version/percent) until
+      // the user restarts — reset to the no-update state so it just disappears.
+      migrating = false; updateVersion = ""; downloadPercent = null;
+    }
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────────
