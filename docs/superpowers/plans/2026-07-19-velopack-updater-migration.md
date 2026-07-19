@@ -230,7 +230,8 @@ git commit -m "feat(updater): replace tauri-plugin-updater with velopack (delta 
 **Files:**
 - Create: `src-tauri/src/bridge.rs`
 - Modify: `src-tauri/src/lib.rs` (mod decl, invoke_handler, setup autostart re-assert)
-- Modify: `src-tauri/Cargo.toml` (dev-dependency `tempfile`)
+
+(No `[dev-dependencies]` in `src-tauri/Cargo.toml` — standing project rule. Tests use the repo's std-only `tmpdir(tag)` helper pattern, as in `src-tauri/src/wr/state.rs:143`.)
 
 **Interfaces:**
 - Consumes: `update-progress` event channel convention from Task 1 (same event name, integer percent payload).
@@ -249,22 +250,30 @@ Create `src-tauri/src/bridge.rs` containing only:
 mod tests {
     use super::*;
 
+    // Std-only temp dirs, same pattern as wr/state.rs (no dev-dependencies rule).
+    fn tmpdir(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("bridge_test_{tag}"));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
     #[test]
     fn nsis_layout_detected_by_uninstaller() {
-        let d = tempfile::tempdir().unwrap();
-        assert!(!is_nsis_layout(d.path()), "empty dir is not an NSIS install");
-        std::fs::write(d.path().join("uninstall.exe"), b"x").unwrap();
-        assert!(is_nsis_layout(d.path()));
+        let d = tmpdir("nsis");
+        assert!(!is_nsis_layout(&d), "empty dir is not an NSIS install");
+        std::fs::write(d.join("uninstall.exe"), b"x").unwrap();
+        assert!(is_nsis_layout(&d));
     }
 
     #[test]
     fn velopack_layout_wins_over_stray_uninstaller() {
         // Velopack layout: <root>/Update.exe + <root>/current/<exe>. Even if an
         // uninstall.exe somehow sits in current/, Update.exe above means "not NSIS".
-        let root = tempfile::tempdir().unwrap();
-        let cur = root.path().join("current");
+        let root = tmpdir("velopack");
+        let cur = root.join("current");
         std::fs::create_dir(&cur).unwrap();
-        std::fs::write(root.path().join("Update.exe"), b"x").unwrap();
+        std::fs::write(root.join("Update.exe"), b"x").unwrap();
         std::fs::write(cur.join("uninstall.exe"), b"x").unwrap();
         assert!(!is_nsis_layout(&cur));
     }
@@ -295,13 +304,6 @@ mod sync;
 mod tray;
 mod updater;
 mod wr;
-```
-
-Add to `src-tauri/Cargo.toml`:
-
-```toml
-[dev-dependencies]
-tempfile = "3"
 ```
 
 - [ ] **Step 2: Run to verify failure**
