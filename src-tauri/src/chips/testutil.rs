@@ -83,3 +83,10 @@ impl Drop for TestServer {
         if let Some(h) = self.handle.take() { let _ = h.join(); }
     }
 }
+
+/// Process-wide guard for tests that mutate PBENGUIN_CHIPS_URL. One lock shared by
+/// every test module (module-local locks raced under parallel cargo test).
+pub fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+    static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    ENV.lock().unwrap_or_else(|e| e.into_inner())
+}

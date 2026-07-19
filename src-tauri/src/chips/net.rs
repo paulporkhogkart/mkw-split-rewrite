@@ -73,9 +73,7 @@ pub fn fetch_file(dir: &Path, tag: &str, file: &str) -> Result<Vec<u8>, String> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chips::testutil::{TestServer, TmpDir};
-    use std::sync::Mutex;
-    static ENV: Mutex<()> = Mutex::new(());   // env-var tests must not interleave
+    use crate::chips::testutil::{env_lock, TestServer, TmpDir};
 
     #[test]
     fn rewrites_base_to_local_and_extracts_tag() {
@@ -94,7 +92,7 @@ mod tests {
 
     #[test]
     fn refresh_fetches_persists_and_evicts() {
-        let _g = ENV.lock().unwrap();
+        let _g = env_lock();
         let t = TmpDir::new();
         let dir = t.path().to_path_buf();
         std::fs::create_dir_all(dir.join("chips-v0/chips")).unwrap(); // stale tag to evict
@@ -113,7 +111,7 @@ mod tests {
 
     #[test]
     fn refresh_offline_serves_cached_copy() {
-        let _g = ENV.lock().unwrap();
+        let _g = env_lock();
         let t = TmpDir::new();
         let dir = t.path().to_path_buf();
         store::set_current_tag(&dir, "chips-v1").unwrap();
@@ -127,7 +125,7 @@ mod tests {
 
     #[test]
     fn fetch_file_caches_on_disk() {
-        let _g = ENV.lock().unwrap();
+        let _g = env_lock();
         let t = TmpDir::new();
         let dir = t.path().to_path_buf();
         let srv = TestServer::spawn(|path, _range| {

@@ -458,21 +458,18 @@ mod tests {
 #[cfg(test)]
 mod runner_tests {
     use super::*;
-    use crate::chips::testutil::{TestServer, TmpDir};
+    use crate::chips::testutil::{env_lock, TestServer, TmpDir};
     use std::sync::atomic::{AtomicU8, Ordering};
-    use std::sync::{Arc, Mutex, OnceLock};
-
-    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-        static ENV: Mutex<()> = Mutex::new(());
-        ENV.lock().unwrap_or_else(|e| e.into_inner())
-    }
+    use std::sync::{Arc, OnceLock};
 
     /// One-shard pack: tar containing a__idle.webp; returns (sha-of-tar, tar bytes).
     fn fixture() -> (String, Vec<u8>) {
         let mut tarbuf = Vec::new();
         {
             let mut b = tar::Builder::new(&mut tarbuf);
-            let data = vec![9u8; 300_000]; // big enough to pause mid-flight
+            // Payload must comfortably exceed the download() 1MB progress-tick threshold
+            // so a pause request lands mid-download (not just at the post-EOF re-check).
+            let data = vec![9u8; 3_000_000];
             let mut h = tar::Header::new_gnu();
             h.set_size(data.len() as u64);
             h.set_mode(0o644);
@@ -533,6 +530,7 @@ mod runner_tests {
     fn pause_persists_partial_and_resume_completes_via_range() {
         let _g = env_lock();
         let (sha, tarbuf) = fixture();
+        let tar_len = tarbuf.len() as u64;
         let srv = spawn_pack_server(sha, tarbuf);
         std::env::set_var("PBENGUIN_CHIPS_URL", &srv.base);
         let t = TmpDir::new();
@@ -550,6 +548,7 @@ mod runner_tests {
         assert!(partial.exists(), "partial shard survives pause");
         let before = std::fs::metadata(&partial).unwrap().len();
         assert!(before > 0);
+        assert!(before < tar_len, "pause must land mid-file");
         // resume: same code path, finishes from the partial
         let ctl2 = AtomicU8::new(CTL_RUN);
         let out2 = run_pack(t.path(), &ctl2, &|_p| {}).unwrap();
