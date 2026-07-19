@@ -31,9 +31,16 @@ pub enum WrError {
     /// Distinct from `NoTrail` on purpose: it gives the Pi's `last_error` an honest signal
     /// (this is our bug, not a hard-to-track video) and keeps the crash visible in logs
     /// instead of it silently folding into the same bucket as a video whose minimap simply
-    /// never locked. The job still stays claimable up to the attempts cap either way — the
-    /// split is about what gets reported, not about escalating to a different tier.
+    /// never locked. The job still stays claimable either way — the split is about what
+    /// gets reported, not about escalating to a different tier.
     EngineFailed(String),
+    /// The bundled engine REJECTED OUR CLI ARGS (argparse "unrecognized arguments") — a
+    /// stale engine build that predates the WR flags, not anything about this video. This
+    /// worker cannot process ANY job until the app ships a matching engine, so the caller
+    /// must release() (refund) and park the service rather than fail() — the 2026-07-19
+    /// rehearsal build burned Dandelion Depths' whole attempt budget exactly this way,
+    /// one claim->fail cycle at a time, and would have done the same to every queued WR.
+    EngineIncompatible(String),
     Timeout,
     /// Aborted by a pause or the idle gate closing. NEVER reported to the Pi — the caller
     /// `release`s instead, which refunds the attempt. A deliberate stop must not look
@@ -52,6 +59,10 @@ impl WrError {
             WrError::TimeMismatch { detected_ms, expected_ms } =>
                 format!("time_mismatch detected={detected_ms} expected={expected_ms}"),
             WrError::EngineFailed(m) => format!("engine_failed {m}"),
+            // Defensive, like Cancelled below: the caller must release() rather than
+            // fail() on an incompatible engine. If this reaches the Pi, that contract
+            // was broken — but keep it distinguishable from a video-caused engine_failed.
+            WrError::EngineIncompatible(m) => format!("engine_incompatible {m}"),
             WrError::Timeout => "timeout".into(),
             // Defensive: the caller must release() rather than fail() on a cancel. If this
             // string ever reaches the Pi, that contract was broken.

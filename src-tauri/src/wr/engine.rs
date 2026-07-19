@@ -333,7 +333,16 @@ pub fn run_video(
             let joined = stderr_tail.join("\n");
             log::error!("[wr engine] {label}: produced no trail; captured stderr tail:\n{}",
                 if joined.is_empty() { "<empty>" } else { &joined });
-            if stderr_tail.is_empty() { Err(WrError::NoTrail) } else { Err(WrError::EngineFailed(joined)) }
+            if stderr_tail.is_empty() {
+                Err(WrError::NoTrail)
+            } else if joined.contains("unrecognized arguments") {
+                // argparse's exact phrase for flags it doesn't know: the bundled engine
+                // predates --video/--video-once. A worker problem, not a video problem —
+                // the caller refunds the attempt and parks instead of burning the queue.
+                Err(WrError::EngineIncompatible(joined))
+            } else {
+                Err(WrError::EngineFailed(joined))
+            }
         }
     };
 
@@ -569,6 +578,24 @@ mod tests {
             WrError::EngineFailed(msg) => assert!(msg.contains("boom crash"),
                 "the captured stderr tail must be in the error: {msg}"),
             other => panic!("expected EngineFailed (stderr present, no trail), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_argparse_rejection_is_engine_incompatible_not_engine_failed() {
+        // The exact failure shape of the 2026-07-19 stale-engine build: argparse prints
+        // usage + "error: unrecognized arguments: --video ..." to stderr and exits 2.
+        // This must be distinguishable from a video-caused crash — the caller refunds
+        // and parks on it rather than burning the job's (and then the queue's) attempts.
+        let engine = crashing_child(
+            "import sys; sys.stderr.write('usage: mkw-tracker-engine.exe [-h] [--purge-tight]\\n\
+             mkw-tracker-engine.exe: error: unrecognized arguments: --video wr-1.mp4\\n'); sys.exit(2)");
+        let err = run_video(
+            &engine, Path::new("unused.mp4"), sel(), Duration::from_secs(10), &|| false,
+        ).expect_err("an arg rejection produces no trail");
+        match err {
+            WrError::EngineIncompatible(msg) => assert!(msg.contains("unrecognized arguments")),
+            other => panic!("expected EngineIncompatible, got {other:?}"),
         }
     }
 

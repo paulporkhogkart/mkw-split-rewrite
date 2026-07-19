@@ -152,7 +152,7 @@ describe('/v1/wr-jobs', () => {
     expect(res.status).toBe(500);
   });
 
-  it('announces wr_job_dead when a failure kills the job (cap reached)', async () => {
+  it('announces wr_job_stuck when a failure pushes the job into the retry cooldown', async () => {
     const { db, app, w1, events } = setup();
     db.prepare('UPDATE wr_jobs SET attempts=4 WHERE wr_id=10').run();
     await app.request('/v1/wr-jobs/claim', { method: 'POST', headers: w1 });   // attempts -> 5
@@ -160,19 +160,19 @@ describe('/v1/wr-jobs', () => {
       method: 'POST', headers: { ...w1, 'Content-Type': 'application/json' },
       body: JSON.stringify({ ok: false, error: 'timeout' }),
     });
-    expect(events.filter((e) => e.type === 'wr_job_dead')).toMatchObject([
+    expect(events.filter((e) => e.type === 'wr_job_stuck')).toMatchObject([
       { wr_id: 10, course: 'Mario Circuit', holder: 'JaK', reason: 'timeout', attempts: 5 },
     ]);
   });
 
-  it('announces wr_job_dead immediately on a terminal time_mismatch', async () => {
+  it('announces wr_job_stuck immediately on a parked time_mismatch', async () => {
     const { app, w1, events } = setup();
     await app.request('/v1/wr-jobs/claim', { method: 'POST', headers: w1 });
     await app.request('/v1/wr-jobs/10/result', {
       method: 'POST', headers: { ...w1, 'Content-Type': 'application/json' },
       body: JSON.stringify({ ok: false, error: 'time_mismatch detected=1 expected=2' }),
     });
-    expect(events.filter((e) => e.type === 'wr_job_dead')).toHaveLength(1);
+    expect(events.filter((e) => e.type === 'wr_job_stuck')).toHaveLength(1);
   });
 
   it('does not announce for a survivable failure', async () => {
@@ -182,10 +182,10 @@ describe('/v1/wr-jobs', () => {
       method: 'POST', headers: { ...w1, 'Content-Type': 'application/json' },
       body: JSON.stringify({ ok: false, error: 'download_failed: 403' }),
     });
-    expect(events.filter((e) => e.type === 'wr_job_dead')).toEqual([]);
+    expect(events.filter((e) => e.type === 'wr_job_stuck')).toEqual([]);
   });
 
-  it('a route-announced death is stamped so the sweep will not re-announce it', async () => {
+  it('a route-announced stall is stamped so the sweep will not re-announce it', async () => {
     const { db, app, w1 } = setup();
     await app.request('/v1/wr-jobs/claim', { method: 'POST', headers: w1 });
     await app.request('/v1/wr-jobs/10/result', {

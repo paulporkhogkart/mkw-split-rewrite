@@ -3,7 +3,7 @@ import type { EventHub } from '../api/events';
 import type { ActivityHub } from '../activity/hub';
 import { scrapeOnce, type ScrapeOpts } from './scrape';
 import type { WrReport } from './reconcile';
-import { sweepDeadJobAlerts } from '../db/wrJobs';
+import { sweepStuckJobAlerts } from '../db/wrJobs';
 
 type ScrapeFn = (db: DatabaseSync, hub: EventHub, opts: ScrapeOpts) => Promise<WrReport>;
 
@@ -26,7 +26,7 @@ export type SchedulerOpts = {
 export function startWrScraper(db: DatabaseSync, hub: EventHub, opts: SchedulerOpts): () => void {
   const { url, minIntervalSec, maxIntervalSec, activity } = opts;
   const scrape = opts.scrape ?? scrapeOnce;
-  const sweep = opts.sweep ?? sweepDeadJobAlerts;
+  const sweep = opts.sweep ?? sweepStuckJobAlerts;
   const random = opts.random ?? Math.random;
   if (!maxIntervalSec || maxIntervalSec <= 0) return () => {};
 
@@ -47,7 +47,7 @@ export function startWrScraper(db: DatabaseSync, hub: EventHub, opts: SchedulerO
       const rep = await scrape(db, hub, { url, activity });
       console.log(`[wr] scrape: ${JSON.stringify(rep)}`);
       const alerted = sweep(db, hub);
-      if (alerted) console.log(`[wr] dead-job sweep alerted ${alerted} job(s)`);
+      if (alerted) console.log(`[wr] stuck-job sweep alerted ${alerted} job(s)`);
     } catch (e) {
       console.error('[wr] scrape failed:', e);
     } finally {

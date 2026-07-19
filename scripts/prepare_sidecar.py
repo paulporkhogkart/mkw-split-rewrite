@@ -6,6 +6,7 @@ Called automatically via beforeBuildCommand in tauri.conf.json.
 Can also be run directly: python scripts/prepare_sidecar.py
 """
 
+import glob
 import os
 import shutil
 import subprocess
@@ -21,12 +22,35 @@ SIDECAR_EXE  = "mkw-tracker-engine.exe"
 # in tauri.conf.json handles the bin/ destination at bundle time.
 
 
+def newest_engine_source() -> tuple[float, str]:
+    """(mtime, path) of the most recently touched engine input: every mkw_tracker/*.py,
+    the spec, and requirements.txt."""
+    newest, which = 0.0, "<none>"
+    paths = glob.glob(os.path.join("mkw_tracker", "**", "*.py"), recursive=True)
+    paths += [SPEC_FILE, "requirements.txt"]
+    for p in paths:
+        try:
+            m = os.path.getmtime(p)
+        except OSError:
+            continue
+        if m > newest:
+            newest, which = m, p
+    return newest, which
+
+
 def main() -> None:
     dst_exe = os.path.join(SIDECAR_DIR, SIDECAR_EXE)
     dst_internal = os.path.join(SIDECAR_DIR, "_internal")
     if os.path.exists(dst_exe) and os.path.isdir(dst_internal):
-        print(f"==> Sidecar already present at {dst_exe}, skipping PyInstaller build.")
-        return
+        # Reuse only a FRESH exe. Skip-if-present with no staleness check is how the
+        # 2026-07-19 Velopack rehearsal shipped an April engine that predated --video:
+        # the WR service's args got argparse-rejected on every job, burning the Pi
+        # queue's attempts. An exe older than any engine source rebuilds instead.
+        src_mtime, src_path = newest_engine_source()
+        if os.path.getmtime(dst_exe) >= src_mtime:
+            print(f"==> Sidecar at {dst_exe} is newer than every engine source, reusing it.")
+            return
+        print(f"==> Sidecar at {dst_exe} is STALE (older than {src_path}), rebuilding.")
 
     # Run PyInstaller
     print("==> Building Python sidecar…")

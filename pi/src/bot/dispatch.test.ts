@@ -42,14 +42,25 @@ describe('dispatch', () => {
     expect(sent[0].data.title).toBe('UNMAPPED mkwrs NAME');
   });
 
-  it('announces a dead WR trail job', () => {
+  it('announces a stuck WR trail job', () => {
     const db = openDb(':memory:'); applySchema(db);
     const sent: any[] = [];
-    dispatch(db, { type: 'wr_job_dead', wr_id: 10, course: 'Mario Circuit', holder: 'JaK',
+    dispatch(db, { type: 'wr_job_stuck', wr_id: 10, course: 'Mario Circuit', holder: 'JaK',
                    record_str: '1:02.934', reason: 'time_mismatch detected=1 expected=2',
                    attempts: 1 }, (e) => sent.push(e));
     expect(sent).toHaveLength(1);
-    expect(sent[0].data.title).toBe('WR TRAIL JOB DEAD');
+    expect(sent[0].data.title).toBe('WR TRAIL JOB STUCK');
     expect(sent[0].data.footer.text).toContain('mkwrs corrects the link');
+  });
+
+  it('a non-mismatch stuck job reads as retrying, not dead', () => {
+    const db = openDb(':memory:'); applySchema(db);
+    const sent: any[] = [];
+    dispatch(db, { type: 'wr_job_stuck', wr_id: 11, course: 'Dandelion Depths', holder: 'JaK',
+                   record_str: '2:17.082', reason: 'engine_failed usage: ...',
+                   attempts: 5 }, (e) => sent.push(e));
+    expect(sent).toHaveLength(1);
+    expect(sent[0].data.description).toContain('keep retrying');
+    expect(sent[0].data.footer.text).toContain('stuck jobs');
   });
 });

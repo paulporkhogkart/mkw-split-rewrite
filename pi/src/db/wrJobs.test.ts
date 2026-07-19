@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { openDb, applySchema } from './connect';
-import { enqueueJob, seedWrJobs, claimJob, MAX_ATTEMPTS,
-  heartbeatJob, releaseJob, completeJob, failJob, deadJobs,
-  sweepDeadJobAlerts, markJobAlerted } from './wrJobs';
+import { enqueueJob, seedWrJobs, claimJob, FREE_ATTEMPTS,
+  heartbeatJob, releaseJob, completeJob, failJob, stuckJobs,
+  sweepStuckJobAlerts, markJobAlerted, reviveStaleEngineJobs } from './wrJobs';
 import { insertWrTrail, getWrTrail } from './wrTrails';
 import { EventHub } from '../api/events';
 import type { ServerEvent } from './types';
@@ -107,10 +107,28 @@ describe('claimJob', () => {
     expect(claimJob(db, 'w1')).toBeNull();
   });
 
-  it('skips a job at the attempts cap', () => {
+  it('cools down (not kills) a job past the free attempts: unclaimable now, claimable after an hour', () => {
+    // The 2026-07-19 stale-engine incident: a hard cap turned one broken WORKER into a
+    // permanently dead queue. Past FREE_ATTEMPTS the job must merely wait out a cooldown.
     const db = setup(); addWr(db, 10); seedWrJobs(db);
-    db.prepare('UPDATE wr_jobs SET attempts=? WHERE wr_id=10').run(MAX_ATTEMPTS);
-    expect(claimJob(db, 'w1')).toBeNull();
+    db.prepare("UPDATE wr_jobs SET attempts=?, updated_at=datetime('now') WHERE wr_id=10")
+      .run(FREE_ATTEMPTS);
+    expect(claimJob(db, 'w1')).toBeNull();                       // inside the 1h cooldown
+    db.prepare("UPDATE wr_jobs SET updated_at=datetime('now','-61 minutes') WHERE wr_id=10").run();
+    expect(claimJob(db, 'w1')).toMatchObject({ wr_id: 10, attempt: FREE_ATTEMPTS + 1 });
+  });
+
+  it('escalates the cooldown: 6h past 8 attempts, 24h past 12 — but never gives up', () => {
+    const db = setup(); addWr(db, 10); seedWrJobs(db);
+    db.prepare("UPDATE wr_jobs SET attempts=8, updated_at=datetime('now','-2 hours') WHERE wr_id=10").run();
+    expect(claimJob(db, 'w1')).toBeNull();                       // 2h < 6h tier
+    db.prepare("UPDATE wr_jobs SET updated_at=datetime('now','-7 hours') WHERE wr_id=10").run();
+    expect(claimJob(db, 'w1')).toMatchObject({ wr_id: 10, attempt: 9 });
+
+    db.prepare("UPDATE wr_jobs SET attempts=12, lease_owner=NULL, lease_until=NULL, updated_at=datetime('now','-7 hours') WHERE wr_id=10").run();
+    expect(claimJob(db, 'w2')).toBeNull();                       // 7h < 24h tier
+    db.prepare("UPDATE wr_jobs SET updated_at=datetime('now','-25 hours') WHERE wr_id=10").run();
+    expect(claimJob(db, 'w2')).toMatchObject({ wr_id: 10, attempt: 13 });
   });
 
   it('rolls back and surfaces the real error when the WR row is malformed', () => {
@@ -222,69 +240,95 @@ describe('lease lifecycle', () => {
     expect(claimJob(db, 'w2')).toBeNull();
   });
 
-  it('other failures stay retryable up to the attempts cap', () => {
+  it('other failures stay immediately retryable inside the free attempts', () => {
     const db = queued(); claimJob(db, 'w1');
     failJob(db, 10, 'w1', 'download_failed: HTTP 403');
     expect(claimJob(db, 'w2')).not.toBeNull();
   });
 });
 
-describe('deadJobs', () => {
-  const dead = () => { const db = setup(); addWr(db, 10); seedWrJobs(db); return db; };
+describe('stuckJobs', () => {
+  const queued = () => { const db = setup(); addWr(db, 10); seedWrJobs(db); return db; };
 
-  it('lists a job at the attempts cap', () => {
-    const db = dead();
+  it('lists a job past the free attempts', () => {
+    const db = queued();
     db.prepare('UPDATE wr_jobs SET attempts=5 WHERE wr_id=10').run();
-    expect(deadJobs(db)).toMatchObject([{ wr_id: 10, course: 'Mario Circuit', attempts: 5 }]);
+    expect(stuckJobs(db)).toMatchObject([{ wr_id: 10, course: 'Mario Circuit', attempts: 5 }]);
   });
 
-  it('lists a terminal time_mismatch even below the cap', () => {
-    const db = dead(); claimJob(db, 'w1');
+  it('lists a parked time_mismatch even below the threshold', () => {
+    const db = queued(); claimJob(db, 'w1');
     failJob(db, 10, 'w1', 'time_mismatch detected=1 expected=2');
-    expect(deadJobs(db)).toMatchObject([{ wr_id: 10, attempts: 1 }]);
+    expect(stuckJobs(db)).toMatchObject([{ wr_id: 10, attempts: 1 }]);
   });
 
   it('does not list healthy or already-trailed jobs', () => {
-    const db = dead();
-    expect(deadJobs(db)).toEqual([]);                            // healthy
+    const db = queued();
+    expect(stuckJobs(db)).toEqual([]);                           // healthy
     db.prepare('UPDATE wr_jobs SET attempts=5 WHERE wr_id=10').run();
     insertWrTrail(db, 10, [{ t_ms: 1, cx: 1, cy: 1, score: 0.9, lap: 1 }]);
-    expect(deadJobs(db)).toEqual([]);                            // done is not dead
+    expect(stuckJobs(db)).toEqual([]);                           // done is not stuck
   });
 
-  it('sweepDeadJobAlerts announces each dead job exactly once', () => {
-    const db = dead();
+  it('sweepStuckJobAlerts announces each stuck job exactly once', () => {
+    const db = queued();
     db.prepare('UPDATE wr_jobs SET attempts=5 WHERE wr_id=10').run();
     const hub = new EventHub();
     const events: ServerEvent[] = [];
     hub.subscribe((e) => events.push(e));
-    expect(sweepDeadJobAlerts(db, hub)).toBe(1);       // silent death found -> alert
-    expect(sweepDeadJobAlerts(db, hub)).toBe(0);       // second sweep: already alerted
-    expect(events.filter((e) => e.type === 'wr_job_dead')).toMatchObject([
+    expect(sweepStuckJobAlerts(db, hub)).toBe(1);      // silent stall found -> alert
+    expect(sweepStuckJobAlerts(db, hub)).toBe(0);      // second sweep: already alerted
+    expect(events.filter((e) => e.type === 'wr_job_stuck')).toMatchObject([
       { wr_id: 10, course: 'Mario Circuit', attempts: 5 },
     ]);
   });
 
   it('markJobAlerted keeps the route-alerted job out of the sweep', () => {
-    const db = dead(); claimJob(db, 'w1');
+    const db = queued(); claimJob(db, 'w1');
     failJob(db, 10, 'w1', 'time_mismatch detected=1 expected=2');
     markJobAlerted(db, 10);                            // the /result route alerted already
     const hub = new EventHub();
-    expect(sweepDeadJobAlerts(db, hub)).toBe(0);
+    expect(sweepStuckJobAlerts(db, hub)).toBe(0);
   });
 
-  it('a live final-attempt lease is in flight, not dead — no premature or double alert', () => {
-    const db = dead();
+  it('a live lease is in flight, not stuck — no premature or double alert', () => {
+    const db = queued();
     db.prepare('UPDATE wr_jobs SET attempts=4 WHERE wr_id=10').run();
     claimJob(db, 'w1');                                     // attempts -> 5, lease LIVE
-    expect(deadJobs(db)).toEqual([]);                       // being worked ≠ dead
+    expect(stuckJobs(db)).toEqual([]);                      // being worked ≠ stuck
     const hub = new EventHub();
     const events: ServerEvent[] = [];
     hub.subscribe((e) => events.push(e));
-    expect(sweepDeadJobAlerts(db, hub)).toBe(0);            // sweep silent mid-attempt
-    failJob(db, 10, 'w1', 'download_failed: 500');          // the real death (lease cleared)
-    expect(sweepDeadJobAlerts(db, hub)).toBe(1);            // now dead -> exactly one alert
-    expect(sweepDeadJobAlerts(db, hub)).toBe(0);
-    expect(events.filter((e) => e.type === 'wr_job_dead')).toHaveLength(1);
+    expect(sweepStuckJobAlerts(db, hub)).toBe(0);           // sweep silent mid-attempt
+    failJob(db, 10, 'w1', 'download_failed: 500');          // now genuinely stalled (lease cleared)
+    expect(sweepStuckJobAlerts(db, hub)).toBe(1);           // -> exactly one alert
+    expect(sweepStuckJobAlerts(db, hub)).toBe(0);
+    expect(events.filter((e) => e.type === 'wr_job_stuck')).toHaveLength(1);
+  });
+});
+
+describe('reviveStaleEngineJobs', () => {
+  const queued = () => { const db = setup(); addWr(db, 10); seedWrJobs(db); return db; };
+
+  it('zeroes attempts/error/alert for stale-engine argparse failures, and is idempotent', () => {
+    const db = queued(); claimJob(db, 'w1');
+    failJob(db, 10, 'w1',
+      'engine_failed usage: mkw-tracker-engine.exe [-h] [--purge-tight] [--history]\n' +
+      'mkw-tracker-engine.exe: error: unrecognized arguments: --video wr-10.mp4 --video-once');
+    db.prepare('UPDATE wr_jobs SET attempts=5 WHERE wr_id=10').run();
+    markJobAlerted(db, 10);
+    expect(reviveStaleEngineJobs(db)).toBe(1);
+    expect(db.prepare('SELECT attempts, last_error, alerted_at FROM wr_jobs WHERE wr_id=10').get())
+      .toMatchObject({ attempts: 0, last_error: null, alerted_at: null });
+    expect(claimJob(db, 'w2')).toMatchObject({ wr_id: 10, attempt: 1 });  // immediately claimable
+    expect(reviveStaleEngineJobs(db)).toBe(0);                            // no-op on rerun
+  });
+
+  it('leaves genuinely-failed and already-trailed jobs alone', () => {
+    const db = queued(); claimJob(db, 'w1');
+    failJob(db, 10, 'w1', 'no_trail');
+    expect(reviveStaleEngineJobs(db)).toBe(0);
+    expect(db.prepare('SELECT attempts FROM wr_jobs WHERE wr_id=10').get())
+      .toMatchObject({ attempts: 1 });
   });
 });

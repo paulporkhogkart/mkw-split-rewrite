@@ -28,6 +28,11 @@ pub fn next_backoff(outcome: &Outcome, prev_idle: Duration) -> Duration {
         Outcome::Error(_msg) => Duration::from_secs(120),
         Outcome::Failed(_id, _err) => Duration::from_secs(30),
         Outcome::Released(_id) => Duration::from_secs(30),
+        // A stale bundled engine fails EVERY job the same way, and each cycle costs a
+        // ~55MB video download before the engine even runs. Park until an app update
+        // (which restarts the runner anyway); the 6h re-try is just a safety net so a
+        // transiently-misread stderr can't disable the service forever.
+        Outcome::Incompatible(_id) => Duration::from_secs(6 * 3600),
     }
 }
 
@@ -189,5 +194,8 @@ mod tests {
         assert_eq!(next_backoff(&Outcome::Failed(1, WrError::NoTrail), base), Duration::from_secs(30));
         // Released (cancel/pause/gate): quick re-check — the gate logic decides the rest.
         assert_eq!(next_backoff(&Outcome::Released(1), base), Duration::from_secs(30));
+        // Incompatible engine: every job fails identically and each cycle re-downloads a
+        // video first — park (6h), don't churn the queue.
+        assert_eq!(next_backoff(&Outcome::Incompatible(1), base), Duration::from_secs(21600));
     }
 }

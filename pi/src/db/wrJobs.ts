@@ -38,7 +38,11 @@ export type WrJob = {
 // of it (src-tauri/src/wr/service.rs engine_timeout_for, deliberate 60s tail) and the
 // same never-heartbeated lease also covers download + upload.
 export const DEFAULT_LEASE_SEC = 600;
-export const MAX_ATTEMPTS = 5;          // claims per job before it is abandoned as poison
+/** Claims a job may burn back-to-back. At or past this the job is NOT abandoned — a
+ *  trail-less WR is always worth another try when a worker comes online (the worker
+ *  fleet is one PC that is off most of the day) — it just moves onto an escalating
+ *  retry cooldown (see claimJob) so a genuinely broken job cannot hammer downloads. */
+export const FREE_ATTEMPTS = 5;
 
 type ClaimRow = {
   wr_id: number; cc: number; course_slug: string; course_name: string;
@@ -51,7 +55,7 @@ type ClaimRow = {
  *
  * Claimable = enqueued, not removed, has a video, HAS A RESOLVED CHARACTER SLUG (an unslugged
  * WR cannot be turned into a set_selection, so it is unprocessable), has no trail yet, is not
- * under a live lease, and is under the attempts cap.
+ * under a live lease, and is not inside a retry cooldown (below).
  *
  * Deliberately NOT filtered on is_current: supersession changes priority, not eligibility — a
  * WR that fell before we got to it is still valid data for that wr_id.
@@ -81,7 +85,17 @@ export function claimJob(db: DatabaseSync, owner: string, leaseSec = DEFAULT_LEA
          AND w.character_slug IS NOT NULL
          AND NOT EXISTS (SELECT 1 FROM wr_trails t WHERE t.wr_id = j.wr_id)
          AND (j.lease_until IS NULL OR j.lease_until < datetime('now'))
-         AND j.attempts < ?
+         -- Retry cooldown, NOT a death cap: the first FREE_ATTEMPTS claims come with no
+         -- delay, then reclaims are rate-limited off updated_at (stamped on every claim
+         -- and fail) — hourly, then 6-hourly past 8 attempts, then daily past 12. The
+         -- job stays queued forever; the 2026-07-19 stale-engine incident proved that a
+         -- hard cap turns one broken WORKER into a permanently dead queue, when the only
+         -- thing actually wrong was which PC picked the job up.
+         AND (j.attempts < ?
+              OR j.updated_at <= datetime('now', CASE
+                   WHEN j.attempts >= 12 THEN '-24 hours'
+                   WHEN j.attempts >= 8  THEN '-6 hours'
+                   ELSE '-1 hour' END))
          -- time_mismatch is TERMINAL for claiming: the video itself is wrong for this
          -- record, and re-downloading it cannot change that verdict. It needs a human —
          -- or a new link: reconcile's backfill() clears it when video_url changes.
@@ -91,7 +105,7 @@ export function claimJob(db: DatabaseSync, owner: string, leaseSec = DEFAULT_LEA
        -- the queue over a dated one).
        ORDER BY w.is_current DESC, w.achieved_at DESC, j.enqueued_at ASC
        LIMIT 1`
-    ).get(MAX_ATTEMPTS) as ClaimRow | undefined;
+    ).get(FREE_ATTEMPTS) as ClaimRow | undefined;
 
     if (!row) { db.exec('COMMIT'); return null; }
 
@@ -181,13 +195,15 @@ export function failJob(db: DatabaseSync, wrId: number, owner: string, error: st
   return Number(info.changes) > 0;
 }
 
-export type DeadJob = { wr_id: number; course: string; holder_name: string | null;
+export type StuckJob = { wr_id: number; course: string; holder_name: string | null;
   record_str: string; attempts: number; last_error: string | null };
 
-/** Jobs that will never be claimed again without a human: at the attempts cap, or
- *  terminally time_mismatched — and still trail-less. Spec §6.4's "cap reached; flag for
- *  Paul": this is what `npm run wr-flags` prints and what the wr_job_dead alert announces. */
-export function deadJobs(db: DatabaseSync): DeadJob[] {
+/** Jobs that need eyes: past the free attempts (now retrying on the claim cooldown), or
+ *  terminally time_mismatched (parked until the mkwrs link changes — reconcile's
+ *  backfill revives those) — and still trail-less. This is what `npm run wr-flags`
+ *  prints and what the wr_job_stuck alert announces; only time_mismatch is truly
+ *  unclaimable, the rest keep retrying whenever a worker is online. */
+export function stuckJobs(db: DatabaseSync): StuckJob[] {
   return db.prepare(
     `SELECT j.wr_id, c.display_name AS course, w.holder_name, w.record_str,
             j.attempts, j.last_error
@@ -197,36 +213,53 @@ export function deadJobs(db: DatabaseSync): DeadJob[] {
      WHERE NOT EXISTS (SELECT 1 FROM wr_trails t WHERE t.wr_id = j.wr_id)
        AND w.removed_at IS NULL
        AND (j.attempts >= ? OR j.last_error LIKE 'time_mismatch%')
-       -- A live lease means the final attempt is still being worked: not dead YET.
+       -- A live lease means an attempt is still being worked: not stuck YET.
        -- Without this, the auto-firing sweep false-alerts mid-attempt and the /result
-       -- route re-announces the same death seconds later (double wr_job_dead).
+       -- route re-announces the same job seconds later (double wr_job_stuck).
        AND (j.lease_until IS NULL OR j.lease_until < datetime('now'))
      ORDER BY j.updated_at DESC`
-  ).all(MAX_ATTEMPTS) as DeadJob[];
+  ).all(FREE_ATTEMPTS) as StuckJob[];
 }
 
-/** Stamp a dead job as announced, whichever path announced it (the /result route or the
- *  sweep). Revival (reconcile backfill on a link change) clears it, so a revived-then-
- *  re-dead job legitimately re-alerts. */
+/** Stamp a stuck job as announced, whichever path announced it (the /result route or the
+ *  sweep). Revival (reconcile backfill on a link change, or reviveStaleEngineJobs)
+ *  clears it, so a revived-then-re-stuck job legitimately re-alerts. */
 export function markJobAlerted(db: DatabaseSync, wrId: number): void {
   db.prepare(`UPDATE wr_jobs SET alerted_at=datetime('now') WHERE wr_id=?`).run(wrId);
 }
 
-/** Announce dead jobs nobody has alerted yet. Catches the death class the /result route
- *  can't see: a job whose final attempts burned via crash + lease lapse never posts a
- *  result (spec §6.4's silent-crash note). Runs on the scraper tick; same deadJobs()
+/** Announce stuck jobs nobody has alerted yet. Catches the class the /result route
+ *  can't see: a job whose attempts burned via crash + lease lapse never posts a
+ *  result (spec §6.4's silent-crash note). Runs on the scraper tick; same stuckJobs()
  *  predicate as the route and wr-flags, so all three can never disagree. */
-export function sweepDeadJobAlerts(db: DatabaseSync, hub: EventHub): number {
+export function sweepStuckJobAlerts(db: DatabaseSync, hub: EventHub): number {
   let n = 0;
-  for (const d of deadJobs(db)) {
+  for (const d of stuckJobs(db)) {
     const row = db.prepare('SELECT alerted_at FROM wr_jobs WHERE wr_id=?').get(d.wr_id) as
       { alerted_at: string | null } | undefined;
     if (!row || row.alerted_at !== null) continue;
-    hub.publish({ type: 'wr_job_dead', wr_id: d.wr_id, course: d.course,
+    hub.publish({ type: 'wr_job_stuck', wr_id: d.wr_id, course: d.course,
       holder: d.holder_name, record_str: d.record_str,
       reason: d.last_error ?? 'attempts exhausted (no result ever posted)', attempts: d.attempts });
     markJobAlerted(db, d.wr_id);
     n++;
   }
   return n;
+}
+
+/** Boot-time recovery (idempotent): jobs whose failures were a stale bundled ENGINE
+ *  rejecting the WR service's CLI args (argparse "unrecognized arguments" — the
+ *  2026-07-19 Velopack-rehearsal build shipped an April engine with no --video flag)
+ *  burned their attempts through no fault of the video. Zero them so they are claimable
+ *  immediately instead of sitting out hours of retry cooldown after the engine is
+ *  fixed. After the reset last_error is NULL, so reruns are no-ops. */
+export function reviveStaleEngineJobs(db: DatabaseSync): number {
+  const info = db.prepare(
+    `UPDATE wr_jobs
+     SET attempts=0, last_error=NULL, alerted_at=NULL, updated_at=datetime('now')
+     WHERE (last_error LIKE 'engine_failed%unrecognized arg%'
+            OR last_error LIKE 'engine_failed usage:%')
+       AND NOT EXISTS (SELECT 1 FROM wr_trails t WHERE t.wr_id = wr_jobs.wr_id)`
+  ).run();
+  return Number(info.changes);
 }

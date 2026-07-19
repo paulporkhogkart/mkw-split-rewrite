@@ -23,6 +23,11 @@ pub enum Outcome {
     Failed(i64, WrError),
     /// Cancelled mid-job: discarded and handed back. The Pi refunds the attempt.
     Released(i64),
+    /// The bundled engine rejected our CLI args: THIS WORKER is broken for every job
+    /// until an app update ships a matching engine. The job was released (refunded);
+    /// the runner parks on a very long backoff instead of churning claim->download->
+    /// fail across the whole queue.
+    Incompatible(i64),
     /// Something went wrong before/around the job itself. Not reported to the Pi.
     Error(String),
 }
@@ -257,6 +262,14 @@ fn run_job(cfg: &ServiceCfg, client: &job::Client, j: &job::WrJob,
         // release() refunds the attempt; fail() deliberately does not.
         // (A lease-lost cancel lands here too: release() then 409s harmlessly — fine.)
         Err(WrError::Cancelled) => { let _ = client.release(j.wr_id); return Outcome::Released(j.wr_id); }
+        // A stale bundled engine rejecting our args fails every job identically: fail()ing
+        // would walk the ENTIRE queue into retry cooldowns one burnt attempt at a time
+        // (the 2026-07-19 rehearsal build did exactly that). Refund and park instead.
+        Err(WrError::EngineIncompatible(m)) => {
+            log::error!("[wr] bundled engine rejects our arguments (stale build?): {m}");
+            let _ = client.release(j.wr_id);
+            return Outcome::Incompatible(j.wr_id);
+        }
         Err(e) => { let _ = client.fail(j.wr_id, &e); return Outcome::Failed(j.wr_id, e); }
     };
 
@@ -449,6 +462,8 @@ mod tests {
             "a removed/private video is permanent — retrying just burns the fetch timeout");
         assert!(!is_staleness_explicable(&WrError::EngineFailed("spawn: x".into())),
             "our own spawn failure isn't a yt-dlp staleness symptom");
+        assert!(!is_staleness_explicable(&WrError::EngineIncompatible("unrecognized arguments".into())),
+            "a stale ENGINE is not a stale yt-dlp — refreshing yt-dlp cannot fix it");
         assert!(!is_staleness_explicable(&WrError::Timeout));
         assert!(!is_staleness_explicable(&WrError::Cancelled));
     }

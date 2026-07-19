@@ -4,7 +4,7 @@ import { migrateSeason0Recovered } from './db/season0Recovery';
 import { migratePlayerRenames } from './db/playerRenames';
 import { migrateTrails } from './db/trailMigrate';
 import { purgeRemovedPlayers } from './db/purgeRemovedPlayers';
-import { seedWrJobs } from './db/wrJobs';
+import { seedWrJobs, reviveStaleEngineJobs } from './db/wrJobs';
 import { backfillActivity } from './activity/backfill';
 import { EventHub } from './api/events';
 import { ActivityHub } from './activity/hub';
@@ -30,6 +30,10 @@ migratePlayerRenames(db);      // idempotent display-name corrections (e.g. Paul
 migrateTrails(db);             // one-time: run_points rows → run_trails blobs (bit-verified; see docs/replay-format.md)
 purgeRemovedPlayers(db);       // remove ex-participants entirely (after recovery + trail migration, before activity backfill)
 seedWrJobs(db);                // WR trail-extraction queue for the current board (idempotent)
+// Recovery: attempts burned by the 2026-07-19 stale-engine build (argparse rejected --video)
+// were the worker's fault, not the videos' — zero them so those jobs skip the retry cooldown.
+const revived = reviveStaleEngineJobs(db);
+if (revived) console.log(`[wr] revived ${revived} job(s) failed by a stale engine build`);
 try { backfillActivity(db); } catch { /* guard: safe to skip if activity_events absent */ }
 // Purge the legacy emit-at-end session events ('attempts'/'screen') from any pre-redesign DB;
 // sessions are presence-driven now and the new model never writes these types (idempotent).

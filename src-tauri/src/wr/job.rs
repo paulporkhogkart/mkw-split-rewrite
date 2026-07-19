@@ -243,6 +243,8 @@ mod tests {
         assert_eq!(WrError::Timeout.reason(), "timeout");
         assert_eq!(WrError::VideoUnavailable.reason(), "video_unavailable");
         assert!(WrError::EngineFailed("boom".into()).reason().starts_with("engine_failed"));
+        assert!(WrError::EngineIncompatible("x".into()).reason().starts_with("engine_incompatible"),
+            "must stay distinguishable from engine_failed if the release() contract is ever broken");
     }
 
     #[test]

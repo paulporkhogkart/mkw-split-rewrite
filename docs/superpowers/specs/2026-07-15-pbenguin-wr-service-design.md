@@ -490,18 +490,27 @@ at the same time, or you will have built a 197 MB escalation that fires on wrong
 |---|---|
 | 1 | native 1080p60 |
 | 2–4 | re-download — covers throttling, a 403, or a since-fixed mkwrs link |
-| 5 | cap reached; job is dead — announced via the wr_job_dead Discord alert and listed by npm run wr-flags |
+| 5+ | **REVISED 2026-07-20: no death cap.** The job moves onto an escalating claim cooldown (1h; 6h past 8 attempts; 24h past 12 — timed off `updated_at`) and stays queued forever. Crossing the threshold fires ONE `wr_job_stuck` Discord alert (amber, informational) and a `npm run wr-flags` listing. |
 
-**CLOSED 2026-07-17:** `time_mismatch` is now TERMINAL on the Pi — the claim predicate skips any
-job whose `last_error` starts with `time_mismatch` (`db/wrJobs.ts`), so a wrong/mislinked video
-no longer burns its remaining attempts re-downloading. The job revives automatically (attempts
-reset) when the scraper sees the video link change (`reconcile.ts backfill()`), and a killing
-failure — cap reached or terminal mismatch — fires a `wr_job_dead` Discord alert plus a
-`npm run wr-flags` listing. `tier_for` remains blind to WHY a prior attempt failed (the claim
-payload still carries no `last_error`); with a single tier that is moot, and any future
-escalation tier must revisit it. Silent-crash deaths (attempts burned via crash + lease lapse,
-no /result ever posted) are announced too: the scraper tick sweeps deadJobs() for unalerted
-rows (wr_jobs.alerted_at dedups; revival clears it).
+**REVISED 2026-07-20 (stale-engine incident):** the hard `MAX_ATTEMPTS=5` dead-letter is gone.
+The 2026-07-19 Velopack rehearsal ran a locally-packed build whose bundled engine predated
+`--video` (prepare_sidecar.py reused a stale exe); every claim it made got argparse-rejected,
+which burned entire attempt budgets on a WORKER bug and dead-lettered Dandelion Depths. With a
+one-PC worker fleet, "wait for a working PC" is the correct semantics, and the cooldown bounds a
+genuinely-poison job's download churn instead of a cap. Defense on the client too:
+`WrError::EngineIncompatible` (stderr contains argparse's "unrecognized arguments") makes
+`run_job` release (refund) rather than fail, and the runner parks for 6h instead of churning the
+queue. `reviveStaleEngineJobs()` (Pi boot) zeroes attempts burned by that incident's signature.
+
+**CLOSED 2026-07-17:** `time_mismatch` is TERMINAL on the Pi (the one true park) — the claim
+predicate skips any job whose `last_error` starts with `time_mismatch` (`db/wrJobs.ts`), so a
+wrong/mislinked video no longer burns attempts re-downloading. The job revives automatically
+(attempts reset) when the scraper sees the video link change (`reconcile.ts backfill()`), and it
+fires the `wr_job_stuck` alert (red variant) plus the `npm run wr-flags` listing. `tier_for`
+remains blind to WHY a prior attempt failed (the claim payload still carries no `last_error`);
+with a single tier that is moot, and any future escalation tier must revisit it. Silent-crash
+stalls (attempts burned via crash + lease lapse, no /result ever posted) are announced too: the
+scraper tick sweeps stuckJobs() for unalerted rows (wr_jobs.alerted_at dedups; revival clears it).
 
 ### 6.7 Local state
 
