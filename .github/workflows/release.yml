@@ -467,6 +467,11 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
+          # Hyphenated tags (v3.0.0-rc.1) publish as PRERELEASES: they never become
+          # "latest", so live NSIS clients resolving releases/latest/download/latest.json
+          # can't auto-update into a rehearsal build. Their per-tag download URLs still
+          # work, which is all the bridge rehearsal needs.
+          prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
           files: |
             *.zip
