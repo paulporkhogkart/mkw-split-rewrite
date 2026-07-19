@@ -305,12 +305,10 @@ apply** or automatically the next time the app starts, whichever comes first.
 
 ## Local rehearsal loop
 
-> **STATUS: NOT YET RUN.** Everything in this section is the manual QA checklist to execute
-> before tagging `v3.0.0` (reproduced here from the implementation plan's Task 7) — it is a
-> plan of commands to run on a real Windows session, not a report of results observed. A
-> previous status report mis-cited this section as already-executed results; it was not, and
-> nothing below should be read as evidence the flow works until someone actually runs it and
-> the results are appended (see Step 6).
+> **STATUS: local loop (Steps 1–4 core) RUN 2026-07-19 — see "Rehearsal results" below.**
+> The remaining unexecuted gates are: the strip visuals + tray-resident second-instance
+> observation + autostart Run-key check (Step 4, needs eyes/desktop), the bridge rehearsal
+> (Step 5), and the CI dry-run. Nothing about those should be read as working until run.
 
 ### Step 1: Build a local sidecar + app pack
 
@@ -348,6 +346,12 @@ strip (no newer version in the feed).
 ### Step 3: Pack version B and verify the delta update path
 
 Rebuild after any trivial code change, re-assemble `temp\vpk\pack`, then:
+
+> **Rebuild through the tauri CLI every time** (`npm run tauri build -- --no-bundle`) — a
+> plain `cargo build --release` compiles an exe wired to the dev URL (`localhost:1420`), so
+> the *updated* app boots to a WebView2 "can't reach this page" error with no engine and no
+> further update checks. Observed live 2026-07-19 during the first rehearsal run; CI is
+> immune (it always builds via the tauri CLI).
 
 ```powershell
 vpk pack -u pbenguin -v 2.99.1 -p temp\vpk\pack -e pbenguin.exe -i src-tauri\icons\icon.ico -o temp\vpk\releases
@@ -402,6 +406,38 @@ PBENGUIN_UPDATE_PATH ""`, uninstall pbenguin from Add/Remove Programs, confirm
    - `%APPDATA%\mkw-tracker` intact, settings/replays present in the new copy,
    - Add/Remove Programs shows exactly one pbenguin entry (the Velopack one).
 4. Delete the rehearsal release/tag afterwards.
+
+### Rehearsal results — 2026-07-19 (local loop, vpk 1.2.0, packId `pbenguin-rehearsal` for isolation)
+
+Executed scripted (Claude session, Paul's machine), verified by filesystem/process state:
+
+- **Setup asset name observed:** vpk 1.2.0 emits `{packId}-{channel}-Setup.exe`
+  (`pbenguin-rehearsal-win-Setup.exe`) — i.e. for the real packId the canonical
+  `pbenguin-win-Setup.exe` comes out already correctly named and CI's normalize step
+  no-ops. It stays as the guard against upstream renaming (the docs claim a different
+  default than 1.2.0 produces).
+- **Install:** silent, correct Velopack layout (`Update.exe`, stub, `current\`,
+  `packages\`), engine spawned t+5s from `current\bin\`.
+- **Delta size (headline):** code-only release pairs produced **4.50 MB and 1.43 MB
+  deltas vs ~178 MB full** (delta log: 2 patched / 3,561 unchanged / engine tree
+  untouched). The spec's efficiency assumption holds.
+- **Delta flow observed live:** delta downloaded → full package reconstructed locally
+  (~12–16 s) → superseded packages cleaned automatically.
+- **Interruption:** hard-kill at t+1.2 s mid-download → delta persisted in `packages\`,
+  installed version untouched; relaunch completed reconstruction at t+14 s **without
+  re-downloading**.
+- **Apply-on-boot (the original bug):** quit/kill without pressing the button →
+  relaunch → pending update applied during boot (proven twice: 2.99.0→2.99.1 on two
+  independent feeds), app + engine healthy after the swap.
+- **Uninstall (`Update.exe --uninstall`):** clean — install dir, registry key gone;
+  app data untouched.
+- **Gotcha found (see warning box in Step 3):** exes rebuilt with plain
+  `cargo build --release` embed the dev URL → updated app boots to a WebView2 error
+  page with no engine and no further update checks. Rehearsal-only hazard; CI immune.
+- **Not covered locally:** real-network resume semantics (FileSource completes too
+  fast to distinguish resume-vs-restart), update-strip visuals, tray-resident
+  second-instance observation, autostart Run-key path (shares the real install's
+  settings DB — left manual), bridge rehearsal, CI run.
 
 ### Step 6: Record results
 
