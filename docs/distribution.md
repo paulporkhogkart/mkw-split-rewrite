@@ -14,7 +14,7 @@ GitHub Release (v3.1.0)
 ├── pbenguin-3.1.0-full.nupkg            ← Velopack full package
 ├── pbenguin-3.1.0-delta.nupkg           ← Velopack delta package (vs previous release)
 ├── releases.win.json                    ← Velopack release feed index
-└── assets.win.json                      ← Velopack per-asset manifest (vpk-emitted)
+└── assets.win.json                      ← Velopack vpk build artifact (may accompany release; not consumed by updater)
 ```
 
 The one-time **v3.0.0 bridge** release additionally ships the legacy NSIS installer + `latest.json`
@@ -72,13 +72,16 @@ sidecar straight into the install tree, relative to the app exe:
 }
 ```
 
-`src-tauri/src/lib.rs`'s `do_spawn_sidecar` resolves the current exe's directory
-(`std::env::current_exe()`) and spawns `bin/mkw-tracker-engine.exe` directly as a plain
-child process, piping stdio for the existing IPC protocol. This resolves correctly both
-under a Velopack install (`…\current\bin\mkw-tracker-engine.exe`) and a `--no-bundle` dev
-build (`src-tauri/sidecar/…`, copied there by CI/local rehearsal before packing), since it's
-always relative to wherever `pbenguin.exe` itself is running from — no dependency on Tauri's
-sidecar path resolution at all.
+`src-tauri/src/lib.rs`'s `do_spawn_sidecar` handles two modes:
+
+- **Debug builds** (`cargo tauri dev`): spawns `python -m mkw_tracker` directly from the
+  repository root, skipping the bundled engine entirely.
+- **Release builds**: resolves the current exe's directory (`std::env::current_exe()`) and
+  spawns `bin/mkw-tracker-engine.exe` directly as a plain child process relative to wherever
+  `pbenguin.exe` is running from (e.g. `…\current\bin\mkw-tracker-engine.exe` under Velopack).
+
+Both modes pipe stdio for the existing IPC protocol and have no dependency on Tauri's sidecar
+path resolution.
 
 ---
 
@@ -274,7 +277,7 @@ apply** or automatically the next time the app starts, whichever comes first.
 | `pbenguin-<ver>-full.nupkg` | `vpk pack` | every release |
 | `pbenguin-<ver>-delta.nupkg` | `vpk pack` (present once a previous release exists as a delta baseline) | every release after the first |
 | `releases.win.json` | `vpk pack` | every release |
-| `assets.win.json` | `vpk pack` | every release |
+| `assets.win.json` | `vpk pack` (build artifact; not consumed by updater or bridge) | may accompany release |
 | `*x64-setup.exe` + `.sig` (legacy Tauri NSIS installer) | bridge-only `npm run tauri build -- --bundles nsis`, signed with `TAURI_SIGNING_PRIVATE_KEY[_PASSWORD]` | **`v3.0.0` only** |
 | `latest.json` (legacy Tauri-updater manifest) | bridge-only Python step | **`v3.0.0` only**, then re-published verbatim (as `.github/bridge-latest.json`) on every later release until the [post-bridge cleanup](#post-bridge-cleanup-checklist) removes that step |
 
