@@ -74,10 +74,12 @@ pub fn bridge_check() -> Result<bool, String> {
 #[tauri::command]
 pub async fn bridge_migrate(app: tauri::AppHandle) -> Result<(), String> {
     let install_dir = nsis_install_dir().ok_or("not an NSIS install")?;
-    let url = format!(
-        "{REPO_URL}/releases/download/v{}/{SETUP_ASSET}",
-        env!("CARGO_PKG_VERSION")
-    );
+    // The RUNTIME app version (tauri.conf.json, which CI stamps on every tag) — not
+    // env!("CARGO_PKG_VERSION"): Cargo.toml is only rewritten by set_version.py, so on
+    // tags that skip it (the rc rehearsals) the compile-time constant lags behind the
+    // release tag and this download 404s (observed live on rc.3, 2026-07-20).
+    let version = app.package_info().version.to_string();
+    let url = format!("{REPO_URL}/releases/download/v{version}/{SETUP_ASSET}");
     let setup_path = std::env::temp_dir().join(SETUP_ASSET);
 
     // Blocking streamed download with progress on the same channel the normal
