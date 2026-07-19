@@ -1,3 +1,4 @@
+mod bridge;
 mod discord;
 mod sync;
 mod tray;
@@ -332,7 +333,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--tray-start"]),
         ))
-        .invoke_handler(tauri::generate_handler![start_tracker, stop_tracker, restart_tracker, send_to_tracker, open_url, save_screenshot, copy_screenshot_to_clipboard, open_screenshot_dir, discord::discord_set_presence, discord::discord_clear_presence, sync::sync_set_config, sync::sync_test_connection, sync::sync_resolve_pending, sync::sync_discard_pending, sync::sync_list_pending, sync::sync_course_reads, sync::sync_roster, sync::sync_pb_best, wr::wr_process_one, wr::wr_get_settings, wr::wr_set_setting, updater::update_check, updater::update_download, updater::update_apply])
+        .invoke_handler(tauri::generate_handler![start_tracker, stop_tracker, restart_tracker, send_to_tracker, open_url, save_screenshot, copy_screenshot_to_clipboard, open_screenshot_dir, discord::discord_set_presence, discord::discord_clear_presence, sync::sync_set_config, sync::sync_test_connection, sync::sync_resolve_pending, sync::sync_discard_pending, sync::sync_list_pending, sync::sync_course_reads, sync::sync_roster, sync::sync_pb_best, wr::wr_process_one, wr::wr_get_settings, wr::wr_set_setting, updater::update_check, updater::update_download, updater::update_apply, bridge::bridge_check, bridge::bridge_migrate])
         .setup(|app| {
             app.manage(SidecarState(Mutex::new(None)));
             app.manage(RunnerState(Mutex::new(None)));
@@ -341,6 +342,15 @@ pub fn run() {
                 if wr::state::get_flag(&c, wr::state::SETTING_RUN_WR_SERVICE) {
                     let runner = wr::runner::Runner::start(app.handle().clone());
                     *app.state::<RunnerState>().0.lock().unwrap() = Some(runner);
+                }
+                // Re-assert the login autostart entry every boot: the Run key stores an absolute
+                // exe path, and the NSIS→Velopack migration (and any future install move) makes
+                // the stored path stale. enable() is an idempotent registry write.
+                if wr::state::get_flag(&c, wr::state::SETTING_START_AT_LOGIN) {
+                    use tauri_plugin_autostart::ManagerExt;
+                    if let Err(e) = app.autolaunch().enable() {
+                        log::warn!("autostart re-assert failed: {e}");
+                    }
                 }
             }
             tray::sync_tray(app.handle());
