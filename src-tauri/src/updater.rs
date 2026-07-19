@@ -84,7 +84,10 @@ pub async fn update_download(
 }
 
 #[tauri::command]
-pub async fn update_apply(pending: tauri::State<'_, PendingUpdate>) -> Result<(), String> {
+pub async fn update_apply(
+    app: tauri::AppHandle,
+    pending: tauri::State<'_, PendingUpdate>,
+) -> Result<(), String> {
     let info = pending
         .0
         .lock()
@@ -92,8 +95,12 @@ pub async fn update_apply(pending: tauri::State<'_, PendingUpdate>) -> Result<()
         .clone()
         .ok_or("no pending update")?;
     let um = manager().map_err(|e| e.to_string())?;
-    // Exits this process on success (Update.exe swaps the app dir and relaunches).
-    // The frontend has already invoked stop_tracker, so the engine is down.
+    // apply_updates_and_restart exits this process directly on success (Update.exe
+    // swaps current\ and relaunches) — it never goes through Tauri's RunEvent::Exit,
+    // so unlike a normal quit nothing there stops the WR runner or its sidecar
+    // engine child (which lives under current\bin\, right where Update.exe is about
+    // to write). Stop both explicitly first, same as delete_app_data.
+    crate::stop_engines(&app);
     um.apply_updates_and_restart(&info.TargetFullRelease)
         .map_err(|e| e.to_string())
 }

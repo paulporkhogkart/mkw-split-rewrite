@@ -168,6 +168,28 @@ fn stop_tracker(state: tauri::State<SidecarState>) {
     kill_sidecar(&state);
 }
 
+/// Stop the WR runner and kill the sidecar — everything that may hold files open
+/// under the app-owned data dirs, or (for the sidecar) a live engine child under
+/// `current\bin\` during a Velopack update swap. Shared by `delete_app_data` and
+/// `update_apply`: both replace/delete the install or data tree out from under a
+/// running process, and neither goes through `RunEvent::Exit` (delete_app_data
+/// calls `app.exit(0)` only after its own teardown; update_apply's
+/// `apply_updates_and_restart` exits the process directly, bypassing Tauri's exit
+/// event entirely) so this teardown must run explicitly before either proceeds.
+/// Runner stop joins from the main thread — same pattern as wr_set_setting and
+/// RunEvent::Exit.
+pub(crate) fn stop_engines(app: &tauri::AppHandle) {
+    if let Some(rs) = app.try_state::<RunnerState>() {
+        let taken = rs.0.lock().unwrap_or_else(|e| e.into_inner()).take();
+        if let Some(runner) = taken {
+            runner.stop();
+        }
+    }
+    if let Some(state) = app.try_state::<SidecarState>() {
+        kill_sidecar(&state);
+    }
+}
+
 /// Delete BOTH app-owned data roots — the engine's %APPDATA%\mkw-tracker and the
 /// Tauri identifier dir (wr_service.db background settings, sync outbox, WR video
 /// cache) — then quit. The explicit in-app replacement for the old NSIS
@@ -175,16 +197,9 @@ fn stop_tracker(state: tauri::State<SidecarState>) {
 /// uninstall itself never deletes data. The frontend confirms before invoking.
 /// On any failure: no exit — the error returns to the frontend, which shows it.
 #[tauri::command]
-fn delete_app_data(app: tauri::AppHandle, state: tauri::State<SidecarState>) -> Result<(), String> {
-    // Stop everything that may hold files open under the data dirs. Runner stop
-    // joins from the main thread — same pattern as wr_set_setting and RunEvent::Exit.
-    if let Some(rs) = app.try_state::<RunnerState>() {
-        let taken = rs.0.lock().unwrap_or_else(|e| e.into_inner()).take();
-        if let Some(runner) = taken {
-            runner.stop();
-        }
-    }
-    kill_sidecar(&state);
+fn delete_app_data(app: tauri::AppHandle) -> Result<(), String> {
+    // Stop everything that may hold files open under the data dirs.
+    stop_engines(&app);
     // Close the sync outbox connection (a process-lifetime static under app_data_dir) so
     // its file handle releases before we try to delete the directory it lives in — on
     // Windows, remove_dir_all on a dir containing an exclusively-open file fails with a

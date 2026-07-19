@@ -1,12 +1,27 @@
 //! One-time NSIS → Velopack handover (spec 2026-07-19 §3). The v3.0.0 bridge
 //! release reaches existing installs through the OLD updater as a normal NSIS
-//! update; this module then moves the install to Velopack:
-//!   download pbenguin-win-Setup.exe (same version) → detached helper waits for
-//!   this process to exit → Setup --silent installs to %LocalAppData% and
-//!   launches the new copy → NSIS uninstall.exe /S removes the old install.
-//! A silent NSIS uninstall never shows the delete-app-data checkbox, so
-//! %APPDATA%\mkw-tracker is untouched. Self-gating: on a Velopack install
-//! bridge_check is false forever.
+//! update; this module then moves the install to Velopack.
+//!
+//! NSIS (Tauri's default, per-user) and Velopack both install to
+//! `%LocalAppData%\pbenguin` — the SAME directory — so the old install must be
+//! **fully gone** before Setup runs there, or the two collide (Setup writing
+//! into an occupied tree, then an uninstall that can rip out the just-installed
+//! files — failure modes up to "no app installed"). The detached helper this
+//! module spawns therefore runs, in order:
+//!   1. wait for this process to exit (our own exe is a live lock the
+//!      uninstaller would otherwise have to fight; by construction it's
+//!      already gone by the time step 2 starts),
+//!   2. run the old install's `uninstall.exe /S`,
+//!   3. poll until the install dir actually vanishes — a silent NSIS
+//!      uninstaller re-spawns itself from a temp copy and returns control to
+//!      `-Wait` before that copy has finished deleting the tree, so a fixed
+//!      "run it and move on" would race Setup against the tail of the delete,
+//!   4. run `Setup.exe --silent`, which now lands on empty ground.
+//! If the dir somehow lingers past the poll timeout we proceed anyway — Setup
+//! is the only remaining path forward at that point.
+//! A silent NSIS uninstall never shows the delete-app-data checkbox, so both
+//! %APPDATA% data roots (mkw-tracker and the Tauri identifier dir) survive.
+//! Self-gating: on a Velopack install bridge_check is false forever.
 use std::path::{Path, PathBuf};
 use tauri::Emitter;
 
@@ -32,19 +47,22 @@ fn nsis_install_dir() -> Option<PathBuf> {
     is_nsis_layout(&dir).then_some(dir)
 }
 
-/// The PowerShell the detached helper runs. Order is load-bearing: our process
-/// must be gone before Setup launches the new app (single-instance plugin), and
-/// the uninstaller runs last so it never fights a live exe for file locks.
-fn helper_command(pid: u32, setup: &Path, uninstaller: &Path) -> String {
+/// The PowerShell the detached helper runs. Order is load-bearing (see module
+/// doc comment): wait for our exit → uninstall the old NSIS tree → poll for the
+/// install dir to actually vanish → run Setup into the now-empty dir.
+fn helper_command(pid: u32, setup: &Path, uninstaller: &Path, install_dir: &Path) -> String {
     // Escape single quotes in paths for PowerShell single-quoted strings by doubling them.
     let setup_escaped = setup.display().to_string().replace('\'', "''");
     let uninst_escaped = uninstaller.display().to_string().replace('\'', "''");
+    let installdir_escaped = install_dir.display().to_string().replace('\'', "''");
     format!(
         "Wait-Process -Id {pid} -ErrorAction SilentlyContinue; \
-         Start-Process -Wait -FilePath '{setup}' -ArgumentList '--silent'; \
-         Start-Process -FilePath '{uninst}' -ArgumentList '/S'",
-        setup = setup_escaped,
+         Start-Process -Wait -FilePath '{uninst}' -ArgumentList '/S'; \
+         for ($i=0; $i -lt 60 -and (Test-Path -LiteralPath '{installdir}'); $i++) {{ Start-Sleep -Milliseconds 500 }}; \
+         Start-Process -Wait -FilePath '{setup}' -ArgumentList '--silent'",
         uninst = uninst_escaped,
+        installdir = installdir_escaped,
+        setup = setup_escaped,
     )
 }
 
@@ -104,6 +122,7 @@ pub async fn bridge_migrate(app: tauri::AppHandle) -> Result<(), String> {
         std::process::id(),
         &setup_path,
         &install_dir.join("uninstall.exe"),
+        &install_dir,
     );
     let mut helper = std::process::Command::new("powershell");
     helper.args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &cmd]);
@@ -157,26 +176,40 @@ mod tests {
         let cmd = helper_command(
             7,
             std::path::Path::new("C:\\Users\\o'brien\\AppData\\Local\\Temp\\pbenguin-win-Setup.exe"),
-            std::path::Path::new("C:\\Program Files\\pbenguin\\uninstall.exe"),
+            std::path::Path::new("C:\\Users\\o'brien\\AppData\\Local\\pbenguin\\uninstall.exe"),
+            std::path::Path::new("C:\\Users\\o'brien\\AppData\\Local\\pbenguin"),
         );
         assert!(cmd.contains("o''brien"), "embedded ' must be doubled for PowerShell");
-        assert!(!cmd.contains("o'brien'"), "no raw un-escaped apostrophe path may survive");
+        // Every occurrence of the name must be the doubled form — no raw un-escaped
+        // apostrophe may survive in any of the three interpolated paths.
+        assert_eq!(cmd.matches("o'brien").count(), 0);
+        assert!(cmd.matches("o''brien").count() >= 3, "setup, uninstaller, AND installdir must all be escaped");
     }
 
     #[test]
-    fn helper_command_shape() {
+    fn helper_command_shape_uninstalls_before_reinstalling() {
+        // Reordered per spec: NSIS (per-user default) and Velopack both install to
+        // %LocalAppData%\pbenguin, so the old tree must be fully gone (uninstall +
+        // poll for the dir to vanish) before Setup runs — never the old collision
+        // order (Setup into the occupied dir, then uninstall).
         let cmd = helper_command(
             1234,
             std::path::Path::new("C:\\tmp\\pbenguin-win-Setup.exe"),
-            std::path::Path::new("C:\\Program Files\\pbenguin\\uninstall.exe"),
+            std::path::Path::new("C:\\Users\\paul\\AppData\\Local\\pbenguin\\uninstall.exe"),
+            std::path::Path::new("C:\\Users\\paul\\AppData\\Local\\pbenguin"),
         );
         assert!(cmd.contains("Wait-Process -Id 1234"));
-        assert!(cmd.contains("pbenguin-win-Setup.exe' -ArgumentList '--silent'"));
         assert!(cmd.contains("uninstall.exe' -ArgumentList '/S'"));
+        assert!(cmd.contains("pbenguin-win-Setup.exe' -ArgumentList '--silent'"));
+        assert!(cmd.contains("Test-Path"), "must poll for the install dir to actually vanish");
+
         let wait_pos = cmd.find("Wait-Process").unwrap();
-        let setup_pos = cmd.find("Setup.exe").unwrap();
         let uninst_pos = cmd.find("uninstall.exe").unwrap();
-        assert!(wait_pos < setup_pos, "helper must wait for our exit before running Setup");
-        assert!(setup_pos < uninst_pos, "setup must run before uninstall");
+        let poll_pos = cmd.find("Test-Path").unwrap();
+        let setup_pos = cmd.find("Setup.exe").unwrap();
+
+        assert!(wait_pos < uninst_pos, "helper must wait for our exit before uninstalling");
+        assert!(uninst_pos < poll_pos, "uninstall must run before the poll loop");
+        assert!(poll_pos < setup_pos, "poll loop must sit between uninstall and setup");
     }
 }
