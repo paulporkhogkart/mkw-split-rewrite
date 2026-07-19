@@ -39,7 +39,13 @@ up to 12,300px wide risk GPU texture limits), stepped by a small shared rAF JS s
   modern browsers first, Safari-class gaps handled later as exceptions.
 - The card's ink-ring finish is realtime CSS (four 1px `drop-shadow`s) — nothing baked.
 
-## Encode recipe (candidate — gated by the A/B eye test)
+## Encode recipe
+
+**LOCKED (A/B eye test, 2026-07-19): scale 0.2 (205×216) · 60fps · quality 60 · 5-bit alpha.**
+Paul's rounds: fps60 over fps30 (round 1); after device-pixel-snapping fixed the lab's
+rendering, q50/q60/q75 and alpha4/5/8 were visually indistinguishable — q60/5-bit kept as
+the pivot for headroom on unsampled combos (q50/alpha4 saved only ~3–7%); scale015 visibly
+soft, rejected. 60fps pack ≈ 4.1GB webps (+~0.3GB sils), ~650KB per kart combo.
 
 Measured on `baby_daisy__base__b_dasher` (Pillow, pure-Python pipeline, no external tools):
 
