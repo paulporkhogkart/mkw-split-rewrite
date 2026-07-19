@@ -93,7 +93,8 @@ pub fn untar_into(tar_path: &Path, dest: &Path) -> Result<(), String> {
     let f = std::fs::File::open(tar_path).map_err(|e| e.to_string())?;
     let mut ar = tar::Archive::new(f);
     ar.set_overwrite(true);
-    // tar-rs `unpack` already refuses paths escaping dest; keep it (no per-entry loop).
+    // tar-rs 0.4.46 `unpack` silently skips or errors on paths escaping dest (proven by test
+    // `untar_extracts_and_rejects_traversal`); keep it (no per-entry loop needed).
     ar.unpack(dest)
         .map_err(|e| format!("untar {tar_path:?}: {e}"))
 }
@@ -191,5 +192,49 @@ mod tests {
             b"hello"
         );
         untar_into(&tarp, &dest).unwrap(); // overwrite-idempotent (resume re-untars)
+
+        // Second tar: build one with a traversal entry ../escaped.bin.
+        // tar-rs Builder::append_data() and set_path() refuse .. paths at the API level.
+        // Construct the header manually and write via write_all to bypass safety checks.
+        let tarp2 = t.path().join("x2.tar");
+        {
+            use std::io::Write;
+            let mut f = std::fs::File::create(&tarp2).unwrap();
+            let data = b"bad";
+            let mut h = tar::Header::new_gnu();
+            h.set_size(data.len() as u64);
+            h.set_mode(0o644);
+            // Set the path field (first 100 bytes of the header) to the traversal string.
+            // This bypasses the set_path() safety check.
+            let path = b"../escaped.bin";
+            h.as_mut_bytes()[0..path.len()].copy_from_slice(path);
+            h.set_cksum();
+            // Write header + data + padding directly
+            f.write_all(h.as_bytes()).unwrap();
+            f.write_all(data).unwrap();
+            // Pad to 512-byte boundary
+            let padding = (512 - (data.len() % 512)) % 512;
+            f.write_all(&vec![0u8; padding]).unwrap();
+            // Write end-of-archive marker (two zero blocks)
+            f.write_all(&[0u8; 512]).unwrap();
+            f.write_all(&[0u8; 512]).unwrap();
+        }
+        let dest2 = t.path().join("out2");
+        // Verify untar_into rejects or skips the traversal entry
+        let result = untar_into(&tarp2, &dest2);
+        // tar-rs 0.4.46 silently skips entries escaping dest (observed behavior).
+        // Verify nothing escaped to the parent directory:
+        assert!(!t.path().join("escaped.bin").exists(),
+            "traversal entry must not escape to parent dir");
+        // Verify the out2 dir either doesn't exist (Err case) or exists but escaped.bin isn't there
+        if dest2.exists() {
+            assert!(!dest2.join("escaped.bin").exists(),
+                "escaped entry must not exist in dest");
+        }
+        // Observed: tar-rs 0.4.46 unpack() silently skips the traversal entry and returns Ok
+        match result {
+            Ok(_) => {}, // tar-rs silently skips entries escaping dest
+            Err(e) => panic!("untar_into returned error (unexpected): {}", e),
+        }
     }
 }
