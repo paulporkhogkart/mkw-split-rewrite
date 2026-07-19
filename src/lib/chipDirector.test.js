@@ -31,4 +31,11 @@ describe("directorStep", () => {
     const r = directorStep(e({ screen: "KART_SELECT" }), e({ screen: "COURSE_SELECT", kart: "B Dasher" }));
     expect(r).toEqual({ combo: "mario__base__b_dasher", action: "confirm" });
   });
+  it("retreat to character select with a swap -> spawn, not flourish", () => {
+    const r = directorStep(e({ screen: "KART_SELECT" }), e({ screen: "CHARACTER_SELECT", character: "Luigi" }));
+    expect(r.action).toBe("select");
+  });
+  it("abort to home keeps quiet (no lock-in flourish)", () => {
+    expect(directorStep(e({ screen: "KART_SELECT" }), e({ screen: "HOME" })).action).toBeNull();
+  });
 });
