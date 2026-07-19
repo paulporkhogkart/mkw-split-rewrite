@@ -1,0 +1,383 @@
+<!doctype html>
+<!--
+  LIVE CARD — LOCKED 2026-07-05 (rounds 1-21, user: "I think we're good here")
+  Pixel truth for Plan 1b's site-native live card. DECISIONS (all user-approved):
+  · SITE-WIDE: timers always m:ss.mmm (3 decimals, always; totals >1h use h:mm:ss.mmm).
+  · JANK RULE: jank marks SETTLED facts; live-ticking numbers run straight. Finished times
+    settle INTO jank. Beat-PB celebration = digit mexican wave in the player's own colour
+    (shadow NEVER flips colour); missed PB settles plain, red lives in the delta tag only.
+  · TEXT RENDER RULE (sharpness lab: C): hero text authored at 2x inside scale(.5) wrappers,
+    original jank angles, full stroke + soft shadow. Small text never rotates.
+  · CARD: 250x150 (wall 224x134) torn slab + offset colour border ALWAYS on the figure side
+    (right); halftone face; photo figure on EVERY card (identity/on-fire frame), head pops the
+    torn top; kart chip (60fps webp) rides ABOVE the photo; per-figure --fx nudges.
+  · CHIP FINISH: thin (1px) hard 4-way ink ring — cel outline. (Smooth morphology version
+    tried + rejected.)
+  · TEAROUT (two-ply scrapbook, rounds 5-20): 12-point radial jagged cut, margins 18-34 srcpx,
+    shared jag seeds across frames (variance = pose only), 4 frames cycled at 300ms + gentle
+    steps() wobble; INK under-ply is the SAME mask scaled 1.055 + skewX(-1.5deg) at (2px,3px);
+    colour cut counter-shifted (-2px,2px). No white rim (tried + rejected), no grid look
+    (rejected), no drop shadows (rejected). Chips + plies render ABOVE the zigzag well.
+  · PROGRESS: segmented ZIGZAG MINI-TRACK on a keylined ink well — one zigzag segment per lap
+    with breaks between (lap count implicit, no lap tag); done laps inked, current fills live,
+    future ghost. Wall zigzag 114px wide.
+  · SESSION TELEMETRY: ATT + ticking RACING micro-tags (ink, keylined); wall keeps them.
+  · SELECTION (S-C): stacked character + kart tags (kart tag paper-white, misregister offset),
+    chip + tears at z8/9 ABOVE the tags, chip bumped right (--kx 44); swap -> SPAWN replays
+    (interruptible), confirm -> FLOURISH (also the race-finish celebration candidate).
+    No HOVERING/LOCKED kickers, no ON PACE tag (fire implies it), no PB star, PB label always "PB".
+  · STATES: racing / finished-beat (wave) / finished-missed / idle (muted + FIRSTS/RUNS-7D/
+    PBS-30D micro-grid) / offline (deep mute, grayscale). Fire treatment INTENTIONALLY ABSENT —
+    decided in the fire A/B round; the gold glow marks the slot.
+  · Placeholder note: baby_daisy chips + generated sil/ masks are placeholders; production
+    pipeline emits per-animation __sil_k{0..3}.png and real mains swap in via the asset pass.
+  Do not edit without user sign-off.
+-->
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KART-OFF · live card · R8</title>
+<style>
+  @font-face{font-family:Inter;src:url("../../../web/public/fonts/inter-700.woff2") format("woff2");font-weight:700}
+  @font-face{font-family:Inter;src:url("../../../web/public/fonts/inter-800.woff2") format("woff2");font-weight:800}
+  @font-face{font-family:Inter;src:url("../../../web/public/fonts/inter-900.woff2") format("woff2");font-weight:900}
+  :root{--ink:#101114;--ink-2:#191a1d;--paper:#f3f4f6;--ground:#0b0c0e;--mut:#9a9ca1;--dim:#6b6d73;--rule:#26272c;
+        --gub:#38bdf8;--aliias:#4ade80;--paul:#a78bfa;--luke:#f87171;--alex:#fbbf24;
+        --ok:#30c161;--bad:#e5484d;--gold:#e3b341}
+  *{box-sizing:border-box;margin:0}
+  body{background:var(--ground);color:var(--paper);font-family:Inter,system-ui,sans-serif;
+       padding:34px 40px 90px;font-size:13px;font-weight:700}
+  .lab{display:inline-block;background:#ff4438;color:var(--ink);font-weight:900;font-style:italic;
+       padding:2px 8px 3px;font-size:11px;box-shadow:1.5px 1.5px 0 rgba(0,0,0,.45);transform:rotate(-1.2deg);margin:0 0 18px}
+  .cap{margin:10px 0 40px;color:var(--dim);font-size:10.5px;letter-spacing:.06em;max-width:1280px}
+  .row{display:flex;gap:26px;flex-wrap:wrap;align-items:flex-start}
+
+  .card{position:relative;width:250px;height:150px;transform:rotate(var(--tilt,-1.3deg));--c:var(--pc)}
+  .card .bd,.card .face{position:absolute;inset:0;
+       clip-path:polygon(2% 3%,32% 0,68% 4%,100% 1%,97% 48%,100% 86%,66% 97%,38% 88%,12% 99%,0 80%,3% 42%)}
+  .card .bd{background:var(--c);opacity:.92;transform:translate(6px,5px)}
+  .card .face{background:var(--ink-2)}
+  .card .face::after{content:"";position:absolute;inset:0;opacity:.14;pointer-events:none;
+       background-image:radial-gradient(circle,var(--c) 1px,transparent 1.5px);background-size:7px 7px}
+  .figmask{position:absolute;inset:0;z-index:3;pointer-events:none;
+       clip-path:polygon(0 -40%,100% -40%,97% 48%,100% 86%,66% 97%,38% 88%,12% 99%,0 80%,3% 42%)}
+  .figmask img{position:absolute;bottom:-4px;right:var(--fx,-6px);height:140px;
+       filter:drop-shadow(-1px 3px 4px rgba(0,0,0,.45))}
+
+  /* ===== TEAROUT v3: BOXY PAPER CUT — same box as the chip, offset down-right; mask = coarse
+     grid cut (sil/*_k0..3). .live steps masks at ~7fps via JS; settled holds k0. ===== */
+  .tearW{position:absolute;z-index:4;pointer-events:none;
+       right:var(--kx,40px);bottom:0;height:92px;aspect-ratio:494/540}
+  /* FINAL (user pick): two-ply, 12 points, offset C strong — ink sheet pushed right-down,
+     colour cut counter-shifted left-up, tones do the separation (no rings) */
+  .tearW.ply2{transform:translate(2px,3px) scale(1.055) skewX(-1.5deg) rotate(-1deg);
+       animation:jitP 1.3s steps(1,end) infinite}
+  .tearW.plyC{transform:translate(-2px,2px) rotate(.8deg);animation:jitC 1.3s steps(1,end) infinite}
+  .ply2 .tearS{background:#101114}
+  @keyframes jitP{0%,100%{transform:translate(2px,3px) scale(1.055) skewX(-1.5deg) rotate(-1deg)}
+    50%{transform:translate(3px,3px) scale(1.05) skewX(-1deg) rotate(-.6deg)}}
+  @keyframes jitC{0%,100%{transform:translate(-2px,2px) rotate(.8deg)}50%{transform:translate(-1px,3px) rotate(.3deg)}}
+  .tearS{position:absolute;inset:0;background:var(--c);
+       -webkit-mask-size:100% 100%;-webkit-mask-repeat:no-repeat;
+       mask-size:100% 100%;mask-repeat:no-repeat}
+  .tearW.bigT{height:112px;right:var(--kx,44px)}
+  .kchip{position:absolute;right:var(--kx,40px);bottom:0;z-index:5;height:92px;pointer-events:none;
+       filter:drop-shadow(1px 0 0 #101114) drop-shadow(-1px 0 0 #101114)
+              drop-shadow(0 1px 0 #101114) drop-shadow(0 -1px 0 #101114)}  /* F1 hard ring, thin */
+  .kchip.big{height:112px;right:var(--kx,44px)}
+
+  .in{position:absolute;inset:0;padding:11px 12px;pointer-events:none}
+  .in > *{position:relative;z-index:7}
+  .in > .pbrow,.in > .twell{position:absolute}
+  .ntag{display:inline-block;background:var(--c);color:var(--ink);font-weight:900;font-style:italic;
+       padding:2px 7px 3px;font-size:11px;box-shadow:1.5px 1.5px 0 rgba(0,0,0,.45);white-space:nowrap}
+  .course{margin-top:5px;font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut)}
+  .ssw{position:relative;height:25px;margin-top:8px}
+  .ssw .timer{position:absolute;left:0;top:0;transform:scale(.5);transform-origin:top left;
+       font-weight:900;font-style:italic;font-size:50px;line-height:1;letter-spacing:-.02em;
+       color:#fff;-webkit-text-stroke:3.6px var(--ink);paint-order:stroke fill;
+       text-shadow:5px 5px 0 var(--c),2px 4px 0 rgba(0,0,0,.5);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .timer .d{display:inline-block;transform:var(--tj,none)}
+  @keyframes wavehop{0%,100%{transform:var(--tj,none)}30%{transform:translateY(-14px) var(--tj,none)}}
+  .wave .d{animation:wavehop .62s cubic-bezier(.3,1.6,.4,1) var(--wd,0s) 3}
+  .sess{margin-top:6px;display:flex;gap:5px}
+  .mt{background:var(--ink);color:#cfd2d7;font-size:8.5px;letter-spacing:.1em;padding:2px 6px 3px;
+      box-shadow:0 0 0 1.5px rgba(255,255,255,.10);font-variant-numeric:tabular-nums}
+  .mt b{color:var(--paper);font-style:italic}
+  .pbrow{position:absolute;left:12px;bottom:32px;display:flex;gap:6px;align-items:center;font-size:10px}
+  .pbrow .k{color:var(--dim);letter-spacing:.1em}
+  .pbrow .v{color:#cfd2d7;font-variant-numeric:tabular-nums}
+  .delta{display:inline-block;color:var(--ink);font-weight:900;font-style:italic;font-size:9.5px;
+       padding:1px 5px 2px;box-shadow:1px 1px 0 rgba(0,0,0,.45)}
+  .delta.ok{background:var(--ok)} .delta.bad{background:var(--bad)} .delta.gold{background:var(--gold)}
+
+  .twell{position:absolute;left:12px;bottom:10px;background:var(--ink);z-index:3;
+       box-shadow:0 0 0 1.5px rgba(255,255,255,.14),2px 2px 0 rgba(0,0,0,.4);
+       padding:3px 5px;transform:rotate(-1deg)}
+  .twell svg{display:block}
+  .twell .ghost{stroke:#3a3c42;stroke-width:3.2;fill:none;stroke-linecap:butt;stroke-linejoin:miter}
+  .twell .run{stroke:var(--c);stroke-width:3.2;fill:none;stroke-linecap:butt;stroke-linejoin:miter}
+
+  .card.mutd{filter:saturate(.32) brightness(.72)}
+  .card.offl{filter:saturate(.12) brightness(.55)}
+  .card.offl .figmask img{filter:grayscale(1) brightness(.8) drop-shadow(-1px 3px 4px rgba(0,0,0,.45))}
+  .stats3{margin-top:10px;display:grid;grid-template-columns:repeat(2,66px);gap:6px}
+  .ms{background:var(--ink);padding:4px 7px 5px;box-shadow:0 0 0 1.5px rgba(255,255,255,.10)}
+  .ms .n{font-weight:900;font-style:italic;font-size:15px;color:#e6e8ec}
+  .ms .k{font-size:7.5px;letter-spacing:.12em;color:var(--dim);margin-top:2px}
+  .firenote{position:absolute;left:-6px;top:-10px;z-index:7;border:1.5px dashed var(--dim);
+       color:var(--mut);font-size:8.5px;letter-spacing:.1em;padding:2px 6px;transform:rotate(-2deg)}
+  .onpace .figmask img{filter:drop-shadow(0 0 14px color-mix(in srgb,var(--c) 75%,transparent)) drop-shadow(-1px 3px 4px rgba(0,0,0,.45))}
+
+  /* SELECTION (S-C, chosen): stacked character + kart tags; chip + tear ride ABOVE the tags */
+  .stags{margin-top:10px;display:flex;flex-direction:column;align-items:flex-start;gap:5px}
+  .stags .ntag{font-size:14px}
+  .stags .ntag.k2{transform:rotate(1.4deg) translateX(7px);background:var(--paper)}
+  .tearW.front{z-index:8}
+  .kchip.front{z-index:9}
+
+  /* tear tune variants */
+  .u1 .tearW.ply2{transform:translate(2px,2px) rotate(-1.2deg);animation:none}
+  .u2 .tearW.ply2{transform:translate(4px,4px) rotate(-1.6deg)}
+  .tearW.plyT{z-index:4;transform:translate(0,1px) rotate(-.4deg);animation:jitC 1.3s steps(1,end) infinite}
+  .plyT .tearS{background:#101114}
+  .gridzoom{transform:scale(1.4);transform-origin:top left;margin-bottom:64px}
+  .board{display:flex;gap:26px;align-items:flex-start;flex-wrap:wrap}
+  .frame{width:250px}
+  .frame .cap2{margin-top:8px;color:var(--dim);font-size:10px;letter-spacing:.06em}
+  .btn{margin-top:14px;background:var(--ink-2);border:1px solid var(--rule);color:var(--paper);
+       font:inherit;font-size:11px;letter-spacing:.1em;padding:7px 14px;cursor:pointer}
+  .btn:hover{background:#22232a}
+  .wall{display:flex;gap:14px;flex-wrap:wrap}
+  .wall .card{width:224px;height:134px}
+  .wall .card .in{padding:9px 10px}
+  .wall .card .course{margin-top:3px}
+  .wall .card .ssw{margin-top:6px;height:21px}
+  .wall .card .ssw .timer{font-size:42px}
+  .wall .card .sess{margin-top:4px}
+  .wall .card .sess .mt{font-size:7.5px;padding:1.5px 4px 2px}
+  .wall .card .pbrow{bottom:27px}
+  .wall .card .twell{bottom:8px;padding:2px 4px}
+  .wall .card .twell svg{width:114px;height:12px}
+  .wall .card .kchip{height:76px;right:32px}
+  .wall .card .tearW{height:76px;right:32px}
+  .zoom{transform:scale(1.5) rotate(-1.3deg);transform-origin:top left;margin:0 0 80px}
+</style></head><body>
+
+<div class="lab">STATE LINE-UP</div>
+<div class="row" id="staterow">
+  <!-- RACING (paul) -->
+  <div class="card" style="--pc:var(--paul);--tilt:-1.3deg">
+    <div class="bd"></div><div class="face"></div>
+    <div class="figmask"><img src="../../../src/assets/players/paul__on.png" alt="" style="--fx:-10px"></div>
+    <div class="tearW ply2"><div class="tearS" data-anim="p12C__idle"></div></div>
+    <div class="tearW plyC"><div class="tearS" data-anim="p12C__idle"></div></div>
+    <img class="kchip" src="../../../web/public/chips/paul__idle.webp" alt="">
+    <div class="in">
+      <span class="ntag">paul pork</span>
+      <div class="course">Sky-High Sundae</div>
+      <div class="ssw"><div class="timer" id="tick">1:12.438</div></div>
+      <div class="sess"><span class="mt"><b>15</b> ATT</span><span class="mt" id="sess"><b>18:24</b> RACING</span></div>
+      <div class="pbrow"><span class="k">PB</span><span class="v">1:57.757</span><span class="delta ok">−0.213</span></div>
+      <div class="twell"><svg width="128" height="16" viewBox="0 0 128 16">
+        <path class="run"   d="M2,12 L12,4 L22,12 L32,5 L38,10"/>
+        <path class="ghost" d="M46,10 L56,3 L66,13 L76,5 L82,11"/>
+        <path class="run"   id="runpath" d="M46,10 L56,3 L66,13 L76,5 L82,11" pathLength="100" stroke-dasharray="100" stroke-dashoffset="38"/>
+        <path class="ghost" d="M90,11 L100,4 L110,12 L120,5 L126,10"/>
+      </svg></div>
+    </div>
+  </div>
+  <!-- FINISHED · BEAT PB (gub) -->
+  <div class="card" style="--pc:var(--gub);--tilt:1.2deg">
+    <div class="bd"></div><div class="face"></div>
+    <div class="figmask"><img src="../../../src/assets/players/gub__on.png" alt="" style="--fx:-8px"></div>
+    <div class="tearW ply2"><div class="tearS" data-anim="g12C__idle"></div></div>
+    <div class="tearW plyC"><div class="tearS" data-anim="g12C__idle"></div></div>
+    <img class="kchip" src="../../../web/public/chips/gub__idle.webp" alt="">
+    <div class="in">
+      <span class="ntag">Gub</span>
+      <div class="course">Mario Bros. Circuit</div>
+      <div class="ssw"><div class="timer wave" id="wavet"><span class="d" style="--wd:.00s;--tj:rotate(-3deg)">1</span><span class="d" style="--wd:.07s;--tj:rotate(4deg) translateY(-5px)">:</span><span class="d" style="--wd:.14s;--tj:rotate(-2.5deg) translateY(3px)">5</span><span class="d" style="--wd:.21s;--tj:rotate(3deg) translateY(-4px)">0</span><span class="d" style="--wd:.28s;--tj:rotate(-4deg) translateY(2px)">.</span><span class="d" style="--wd:.35s;--tj:rotate(-3deg)">5</span><span class="d" style="--wd:.42s;--tj:rotate(4deg) translateY(-5px)">1</span><span class="d" style="--wd:.49s;--tj:rotate(-2.5deg) translateY(3px)">7</span></div></div>
+      <div class="sess"><span class="mt"><b>27</b> ATT</span><span class="mt"><b>41:07</b> RACING</span></div>
+      <div class="pbrow"><span class="k">PB</span><span class="v">1:50.811</span><span class="delta ok">−0.294</span></div>
+      <div class="twell"><svg width="128" height="16" viewBox="0 0 128 16">
+        <path class="run" d="M2,12 L12,4 L22,12 L32,5 L38,10"/>
+        <path class="run" d="M46,10 L56,3 L66,13 L76,5 L82,11"/>
+        <path class="run" d="M90,11 L100,4 L110,12 L120,5 L126,10"/>
+      </svg></div>
+    </div>
+  </div>
+  <!-- FINISHED · MISSED (luke) -->
+  <div class="card" style="--pc:var(--luke);--tilt:-1deg">
+    <div class="bd"></div><div class="face"></div>
+    <div class="figmask"><img src="../../../src/assets/players/luke__on.png" alt="" style="--fx:-6px"></div>
+    <div class="tearW ply2"><div class="tearS" data-anim="l12C__idle"></div></div>
+    <div class="tearW plyC"><div class="tearS" data-anim="l12C__idle"></div></div>
+    <img class="kchip" src="../../../web/public/chips/luke__idle.webp" alt="">
+    <div class="in">
+      <span class="ntag">Luke</span>
+      <div class="course">Sky-High Sundae</div>
+      <div class="ssw"><div class="timer"><span class="d" style="--tj:rotate(-3deg)">2</span><span class="d" style="--tj:rotate(4deg) translateY(-5px)">:</span><span class="d" style="--tj:rotate(-2.5deg) translateY(3px)">0</span><span class="d" style="--tj:rotate(3deg) translateY(-4px)">5</span><span class="d" style="--tj:rotate(-4deg) translateY(2px)">.</span><span class="d" style="--tj:rotate(-3deg)">1</span><span class="d" style="--tj:rotate(4deg) translateY(-5px)">0</span><span class="d" style="--tj:rotate(-2.5deg) translateY(3px)">2</span></div></div>
+      <div class="sess"><span class="mt"><b>8</b> ATT</span><span class="mt"><b>12:51</b> RACING</span></div>
+      <div class="pbrow"><span class="k">PB</span><span class="v">2:03.225</span><span class="delta bad">+1.877</span></div>
+      <div class="twell"><svg width="128" height="16" viewBox="0 0 128 16">
+        <path class="run" d="M2,12 L12,4 L22,12 L32,5 L38,10"/>
+        <path class="run" d="M46,10 L56,3 L66,13 L76,5 L82,11"/>
+        <path class="run" d="M90,11 L100,4 L110,12 L120,5 L126,10"/>
+      </svg></div>
+    </div>
+  </div>
+  <!-- IDLE (aliias) -->
+  <div class="card mutd" style="--pc:var(--aliias);--tilt:1.4deg">
+    <div class="bd"></div><div class="face"></div>
+    <div class="figmask"><img src="../../../src/assets/players/aliias__on.png" alt="" style="--fx:-26px;height:138px"></div>
+    <div class="in">
+      <span class="ntag">Aliias</span>
+      <div class="course">Idle</div>
+      <div class="stats3">
+        <div class="ms"><div class="n">1</div><div class="k">FIRSTS</div></div>
+        <div class="ms"><div class="n">43</div><div class="k">RUNS·7D</div></div>
+        <div class="ms"><div class="n">6</div><div class="k">PBS·30D</div></div>
+      </div>
+    </div>
+  </div>
+  <!-- OFFLINE (alex) -->
+  <div class="card offl" style="--pc:var(--alex);--tilt:-1.2deg">
+    <div class="bd"></div><div class="face"></div>
+    <div class="figmask"><img src="../../../src/assets/players/alex__on.png" alt="" style="--fx:-4px;height:138px"></div>
+    <div class="in">
+      <span class="ntag">Alex</span>
+      <div class="course">Offline · last seen 2d</div>
+      <div class="stats3">
+        <div class="ms"><div class="n">0</div><div class="k">FIRSTS</div></div>
+        <div class="ms"><div class="n">0</div><div class="k">RUNS·7D</div></div>
+        <div class="ms"><div class="n">2</div><div class="k">PBS·30D</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+<button class="btn" onclick="rewave()">↻ REPLAY PB WAVE</button>
+<div class="cap">tearout = boxy scissor-cut of the figure (coarse grid + margin), chip-sized, offset down-right — spills bottom-right on EVERY size ·
+performing cards step through 4 cuts sampled across the animation at ~7fps · settled cards hold one cut</div>
+
+<div class="lab">SELECTION · S-C stacked tags · chip above the tags</div>
+<div class="board">
+  <div class="frame">
+    <div class="card" style="--pc:var(--gub);--tilt:-1.3deg">
+      <div class="bd"></div><div class="face"></div>
+      <div class="figmask"><img src="../../../src/assets/players/gub__on.png" alt="" style="--fx:-8px"></div>
+      <div class="tearW ply2 bigT front"><div class="tearS" data-anim="g12C__spawn"></div></div>
+      <div class="tearW plyC bigT front"><div class="tearS" data-anim="g12C__spawn"></div></div>
+      <img class="kchip big front" id="an1" src="../../../web/public/chips/gub__spawn.webp" alt="">
+      <div class="in">
+        <span class="ntag">Gub</span>
+        <div class="course">Choosing kart…</div>
+        <div class="stags">
+          <span class="ntag">TOADETTE</span>
+          <span class="ntag k2" id="stag2">MACH ROCKET</span>
+        </div>
+      </div>
+    </div>
+    <div class="cap2">choosing: swap → kart tag flips + SPAWN replays (interruptible)</div>
+  </div>
+  <div class="frame">
+    <div class="card" style="--pc:var(--gub);--tilt:1.2deg">
+      <div class="bd"></div><div class="face"></div>
+      <div class="figmask"><img src="../../../src/assets/players/gub__on.png" alt="" style="--fx:-8px"></div>
+      <div class="tearW ply2 bigT front"><div class="tearS" data-anim="g12C__flourish"></div></div>
+      <div class="tearW plyC bigT front"><div class="tearS" data-anim="g12C__flourish"></div></div>
+      <img class="kchip big front" id="an2" src="../../../web/public/chips/gub__flourish.webp" alt="">
+      <div class="in">
+        <span class="ntag">Gub</span>
+        <div class="course">Kart locked in</div>
+        <div class="stags">
+          <span class="ntag">TOADETTE</span>
+          <span class="ntag k2">MACH ROCKET</span>
+        </div>
+      </div>
+    </div>
+    <div class="cap2">locked in → FLOURISH · tear holds still once settled</div>
+  </div>
+  <div class="frame" style="align-self:center">
+    <button class="btn" onclick="simulateSwaps()">▶ SIMULATE SWAPS</button>
+    <button class="btn" onclick="replay()">↻ REPLAY ANIMS</button>
+  </div>
+</div>
+
+<div class="lab">WALL CONTEXT · 5-UP AT 224px</div>
+<div class="wall" id="wall"></div>
+<div class="cap">fire treatment still absent — next round's A/B</div>
+
+<div class="lab">DETAIL · 1.5× · ON PACE</div>
+<div class="zoom">
+  <div class="card onpace" style="--pc:var(--paul);--tilt:0deg">
+    <div class="bd"></div><div class="face"></div>
+    <div class="firenote">FIRE SLOT · A/B next round</div>
+    <div class="figmask"><img src="../../../src/assets/players/paul__on.png" alt="" style="--fx:-10px"></div>
+    <div class="tearW ply2"><div class="tearS" data-anim="p12C__idle"></div></div>
+    <div class="tearW plyC"><div class="tearS" data-anim="p12C__idle"></div></div>
+    <img class="kchip" src="../../../web/public/chips/paul__idle.webp" alt="">
+    <div class="in">
+      <span class="ntag">paul pork</span>
+      <div class="course">Sky-High Sundae</div>
+      <div class="ssw"><div class="timer">1:41.882</div></div>
+      <div class="sess"><span class="mt"><b>15</b> ATT</span><span class="mt"><b>18:24</b> RACING</span></div>
+      <div class="pbrow"><span class="k">PB</span><span class="v">1:57.757</span><span class="delta gold">−0.213</span></div>
+      <div class="twell"><svg width="128" height="16" viewBox="0 0 128 16">
+        <path class="run" d="M2,12 L12,4 L22,12 L32,5 L38,10"/>
+        <path class="run" d="M46,10 L56,3 L66,13 L76,5 L82,11"/>
+        <path class="ghost" d="M90,11 L100,4 L110,12 L120,5 L126,10"/>
+        <path class="run" d="M90,11 L100,4 L110,12 L120,5 L126,10" pathLength="100" stroke-dasharray="100" stroke-dashoffset="42"/>
+      </svg></div>
+    </div>
+  </div>
+</div>
+
+<div class="cap" style="border-top:1px solid var(--rule);padding-top:14px">
+  KART-OFF print · live card · round 8</div>
+
+<script>
+  let t0 = performance.now(), base = 72.438, sess0 = 18*60+24;
+  const tick = document.getElementById("tick"), runp = document.getElementById("runpath"), sess = document.getElementById("sess");
+  setInterval(() => {
+    const s = base + (performance.now() - t0) / 1000;
+    const m = Math.floor(s / 60), rem = s % 60;
+    tick.textContent = m + ":" + String(Math.floor(rem)).padStart(2, "0") + "." + String(Math.floor((rem % 1) * 1000)).padStart(3, "0");
+    runp.setAttribute("stroke-dashoffset", Math.max(38 - (performance.now() - t0) / 1000 * 1.4, 0));
+    const ss = sess0 + Math.floor((performance.now() - t0) / 1000);
+    sess.innerHTML = "<b>" + Math.floor(ss / 60) + ":" + String(ss % 60).padStart(2, "0") + "</b> RACING";
+  }, 100);
+  // wall clones FIRST so their tears join the mask cycler below
+  const wall = document.getElementById("wall");
+  document.querySelectorAll("#staterow > .card").forEach((c) => {
+    const k = c.cloneNode(true);
+    k.querySelectorAll("[id]").forEach((n) => n.removeAttribute("id"));
+    wall.appendChild(k);
+  });
+  // boxy tear cycling: .live tears step through k0..k3 at ~7fps; data-static holds k0
+  function applyMask(el, url){ el.style.webkitMaskImage = "url(" + url + ")"; el.style.maskImage = "url(" + url + ")"; }
+  const tears = [...document.querySelectorAll(".tearS")];
+  tears.forEach((el) => applyMask(el, "sil/" + el.dataset.anim + "_k0.png"));
+  let tk = 0;
+  setInterval(() => {
+    tk = (tk + 1) % 4;
+    tears.forEach((el) => applyMask(el, "sil/" + el.dataset.anim + "_k" + tk + ".png"));
+  }, 300);
+  function replay(){
+    for (const id of ["an1","an2"]) { const el = document.getElementById(id); if (el) { const s = el.src; el.src = ""; el.src = s; } }
+  }
+  function rewave(){
+    const w = document.getElementById("wavet"); w.classList.remove("wave"); void w.offsetWidth; w.classList.add("wave");
+  }
+  const KARTS = ["MACH ROCKET","B DASHER","BILLDOZER","HOT ROD","BIG HORN"];
+  let ki = 0, simT = null;
+  function simulateSwaps(){
+    clearInterval(simT); let n = 0;
+    simT = setInterval(() => {
+      ki = (ki + 1) % KARTS.length;
+      document.getElementById("stag2").textContent = KARTS[ki];
+      const el = document.getElementById("an1"); const src = el.src; el.src = ""; el.src = src;
+      if (++n >= 5) clearInterval(simT);
+    }, 700);
+  }
+</script>
+</body></html>
