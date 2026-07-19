@@ -50,6 +50,13 @@ SHIP_DIR = _CFG.ship                            # None = write in place; set = s
 PP_W, PP_H = 200, 219                          # processing-preview box (matched to the 988x1080 chip crop)
 PP_BG = (0, 177, 64)                           # greenscreen chroma-key green behind the chip preview
 PP_BG_HEX = "#%02x%02x%02x" % PP_BG            # same colour for the Tk box, so the whole pane keys green
+# Site-pack sprite-sheet encoder (chip-site-pack spec). Recipe LOCKED by the A/B eye test
+# 2026-07-19 — change it there (spec) first if it ever changes here.
+SITEPACK_SRC = os.path.join(DATA_ROOT, "asset_chips")
+SITEPACK_OUT = os.path.join(DATA_ROOT, "asset_chips", "site_pack")
+SITEPACK_BOOK = os.path.join(SITEPACK_OUT, "book.json")
+SITEPACK_STOP = os.path.join(SITEPACK_OUT, ".sitepack_stop")
+SITEPACK_RECIPE = {"scale": 0.2, "fps": 60, "quality": 60, "alpha_bits": 5, "workers": 12}
 
 
 def _fmt_eta(s):
@@ -67,9 +74,11 @@ class ConsoleApp:
         self.q = queue.Queue()                       # (callable) marshalled to the Tk thread
         self.state = cs.ControlState()
         self.pstate = ps.ProcessState()              # independent asset-processing lifecycle
+        self.sstate = ps.ProcessState()              # site-pack encoder lifecycle (same machine)
         self.health = HealthModel()
         self.progress = ProgressModel(TOTAL)
         self.pprogress = ProgressModel(0)            # total set per-tick from the clip count
+        self.sprogress = ProgressModel(0)            # total read once from the masters manifest
         self.sup = ProcessSupervisor(REPO_ROOT, self._on_line)
         self.sup.set_clips_dir(CLIPS_DIR)            # rig records + sweep control files live on the data drive
         _bootstrap = [CLIPS_DIR, PROCESS_OUT]
@@ -124,6 +133,14 @@ class ConsoleApp:
         self.btn_verify.pack(side="left", padx=2)
         self.pstatus = ttk.Label(bar2, text="● idle"); self.pstatus.pack(side="right")
 
+        bar3 = ttk.Frame(self.root); bar3.pack(fill="x", padx=6, pady=(0, 4))
+        ttk.Label(bar3, text="Site pack:").pack(side="left", padx=(0, 6))
+        self.sbtn = {}
+        for key, label in [("sstart", "Encode"), ("spause", "Pause"), ("sstop", "Stop")]:
+            b = ttk.Button(bar3, text=label, command=lambda k=key: self._click_sitepack(k))
+            b.pack(side="left", padx=2); self.sbtn[key] = b
+        self.sstatus = ttk.Label(bar3, text="● idle"); self.sstatus.pack(side="right")
+
         body = ttk.Frame(self.root); body.pack(fill="both", expand=True)
         left = ttk.Frame(body); left.pack(side="left", fill="y", padx=6, pady=6)
         # Fix the preview to 320x180 PIXELS. A bare tk.Label sizes width/height in TEXT units until
@@ -160,7 +177,7 @@ class ConsoleApp:
         self.phl = ttk.Label(right, justify="left", font=("Consolas", 10), foreground="#2a7")
         self.phl.pack(anchor="w")
         self.logs = {}
-        for name in ("agent", "tracker", "sweep", "process"):
+        for name in ("agent", "tracker", "sweep", "process", "sitepack"):
             lf = ttk.LabelFrame(right, text=name); lf.pack(fill="both", expand=True, pady=2)
             txt = tk.Text(lf, height=7, wrap="none", font=("Consolas", 8))
             txt.pack(fill="both", expand=True); txt.configure(state="disabled")
@@ -374,6 +391,62 @@ class ConsoleApp:
             self._refresh_buttons()                      # unlock Process
         self.q.put(done)
 
+    # ── site-pack encoder (chip sprite sheets; independent of rig + matte) ───────
+    def _click_sitepack(self, key):
+        if key == "sstart" and self.sstate.state == ps.IDLE:
+            # Guard: an encoder started OUTSIDE the console (CLI) also writes book.json.
+            # A fresh book mtime means someone else is mid-run — starting a second writer
+            # would race the book. Progress still shows (it reads the book), just no Start.
+            try:
+                age = time.time() - os.path.getmtime(SITEPACK_BOOK)
+            except OSError:
+                age = None
+            if age is not None and age < 120:
+                self._on_line("sitepack",
+                              f"[console] book.json written {age:.0f}s ago — an external encoder "
+                              "run looks active; watching its progress instead (Start refused)")
+                return
+            self.sprogress = ProgressModel(self._sitepack_total())
+        event = {"sstart": ps.START, "sstop": ps.STOP}.get(key)
+        if key == "spause":
+            event = ps.RESUME if self.sstate.state == ps.PAUSED else ps.PAUSE
+        for act in self.sstate.on_event(event):
+            self._do_sitepack(act)
+        self._refresh_buttons()
+
+    def _do_sitepack(self, action):
+        if action == "start_processing":
+            self.sup.start_sitepack(SITEPACK_SRC, SITEPACK_OUT, SITEPACK_STOP,
+                                    SITEPACK_RECIPE, on_exit=self._sitepack_exited)
+        elif action == "request_process_stop":
+            self.sup.request_stop_file(SITEPACK_STOP)
+        elif action == "completed":
+            self._on_line("sitepack", "[console] site pack encode complete")
+
+    def _sitepack_exited(self, code=None):
+        self.q.put(lambda: self._after_sitepack_exit(code))
+
+    def _after_sitepack_exit(self, code=None):
+        if code not in (0, None) and self.sstate.state == ps.RUNNING:
+            self._on_line("sitepack", f"[console] encoder exited {code} — see the sitepack pane; "
+                                      "book.json keeps finished combos, press Encode to resume")
+            self.sstate.on_event(ps.EXITED)          # RUNNING -> IDLE, drop 'completed'
+            self._refresh_buttons()
+            return
+        for act in self.sstate.on_event(ps.EXITED):
+            self._do_sitepack(act)
+        self._refresh_buttons()
+
+    def _sitepack_total(self):
+        """Planned combo count = done entries in the masters manifest (read once per Start)."""
+        try:
+            import json
+            with open(os.path.join(SITEPACK_SRC, "manifest.json"), encoding="utf-8") as f:
+                return sum(1 for v in json.load(f).values()
+                           if isinstance(v, dict) and v.get("status") == "done")
+        except (OSError, ValueError):
+            return 0
+
     def _manual(self, key):
         if self.manual and self.state.state in (cs.RIG_WARM, cs.PAUSED):
             self.manual.press(key)
@@ -402,6 +475,13 @@ class ConsoleApp:
             state=("normal" if pp in (ps.RUNNING, ps.PAUSED) else "disabled"))
         self.pbtn["pstop"].configure(state=("disabled" if pp == ps.IDLE else "normal"))
         self.pstatus.configure(text=f"● {pp.lower().replace('_', ' ')}")
+        sp = self.sstate.state
+        self.sbtn["sstart"].configure(state=("normal" if sp == ps.IDLE else "disabled"))
+        self.sbtn["spause"].configure(
+            text=("Resume" if sp == ps.PAUSED else "Pause"),
+            state=("normal" if sp in (ps.RUNNING, ps.PAUSED) else "disabled"))
+        self.sbtn["sstop"].configure(state=("disabled" if sp == ps.IDLE else "normal"))
+        self.sstatus.configure(text=f"● {sp.lower().replace('_', ' ')}")
 
     def _free_gb(self):
         try:
@@ -450,10 +530,17 @@ class ConsoleApp:
         self.pprogress.update(self.sup.process_done_count(PROCESS_MANIFEST, claims_dir=CLAIMS_DIR),
                               time.monotonic())
         pp = self.pprogress.snapshot()
+        # Site-pack progress attaches to book.json, so it tracks CLI-started runs too.
+        if not self.sprogress.total:
+            self.sprogress.total = self._sitepack_total()
+        self.sprogress.update(self.sup.sitepack_done_count(SITEPACK_BOOK), time.monotonic())
+        sp = self.sprogress.snapshot()
         self.phl.configure(text=(
             f"processed {pp['done']}/{pp['total']}  {pp['pct'] * 100:4.1f}%   "
             f"ETA {_fmt_eta(pp['eta_seconds'])}   [{self.pstate.state.lower().replace('_', ' ')}]\n"
-            f"{self._proc_last[:72]}"))
+            f"{self._proc_last[:72]}\n"
+            f"site pack {sp['done']}/{sp['total']}  {sp['pct'] * 100:4.1f}%   "
+            f"ETA {_fmt_eta(sp['eta_seconds'])}   [{self.sstate.state.lower().replace('_', ' ')}]"))
         self._update_proc_preview()
         self.root.after(1000, self._tick)
 
@@ -468,6 +555,9 @@ class ConsoleApp:
         if self.pstate.state in (ps.RUNNING, ps.PAUSE_REQUESTED, ps.STOP_REQUESTED):
             self.sup.request_stop_file(PROCESS_STOP)   # clean-stop the batch between clips
             self.sup.wait_processing(timeout=120)
+        if self.sstate.state in (ps.RUNNING, ps.PAUSE_REQUESTED, ps.STOP_REQUESTED):
+            self.sup.request_stop_file(SITEPACK_STOP)  # clean-stop between combos (book resumes)
+            self.sup.wait_sitepack(timeout=120)
         self.root.destroy()
 
 

@@ -45,3 +45,14 @@ def test_start_processing_uses_engine_default_direction(tmp_path):
     sup.start_processing(str(tmp_path / "clips"), str(out), str(out / ".stop"))
     assert captured["name"] == "process"
     assert captured["env"] is None
+
+
+def test_sitepack_done_count_reads_book(tmp_path):
+    import json
+    sup = ProcessSupervisor(str(tmp_path), lambda n, t: None)
+    book = tmp_path / "book.json"
+    assert sup.sitepack_done_count(str(book)) == 0          # missing file -> 0
+    book.write_text(json.dumps({"a": {"done": True}, "b": {"done": True}, "c": {}}))
+    assert sup.sitepack_done_count(str(book)) == 2
+    book.write_text("{corrupt")                             # mid-write read -> 0, no raise
+    assert sup.sitepack_done_count(str(book)) == 0

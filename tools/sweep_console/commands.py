@@ -40,6 +40,16 @@ def process_cmd(gpu_py, repo_root, clips_dir, out_dir, stop_file, claims_dir=Non
     return cmd
 
 
+def sitepack_cmd(py, repo_root, src, out, stop_file, scale, fps, quality, alpha_bits, workers):
+    """Site-pack sprite-sheet batch encoder (chip-site-pack spec). Pure PIL/numpy — runs in the
+    console's build python, NOT the GPU venv. Recipe values come from the app's locked constants;
+    resume is free (book.json), pause/stop via the stop-file checked between combos."""
+    return [py, os.path.join(repo_root, "tools", "asset_matte", "build_site_pack.py"),
+            "--src", src, "--out", out, "--stop-file", stop_file,
+            "--scale", str(scale), "--fps", str(fps), "--quality", str(quality),
+            "--alpha-bits", str(alpha_bits), "--workers", str(workers)]
+
+
 def viewer_cmd(py, repo_root, matte_dir, title="asset chips - all segments"):
     """Build the spawn/idle/flourish HTML viewer over a matte dir. Pure stdlib, so it runs in the
     console's build python (no GPU venv needed)."""

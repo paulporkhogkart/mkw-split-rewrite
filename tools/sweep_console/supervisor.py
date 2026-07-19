@@ -114,6 +114,39 @@ class ProcessSupervisor:
             except subprocess.TimeoutExpired:
                 p.kill()
 
+    def start_sitepack(self, src, out_dir, stop_file, recipe, on_exit=None):
+        """Spawn the site-pack sprite-sheet encoder (build python — pure PIL/numpy, no GPU venv).
+        Resumable via <out>/book.json; pause/stop via the stop-file checked between combos."""
+        try:
+            if os.path.exists(stop_file):
+                os.remove(stop_file)                 # clear any stale pause/stop flag
+        except OSError:
+            pass
+        os.makedirs(out_dir, exist_ok=True)
+        return self._spawn("sitepack",
+                           commands.sitepack_cmd(self.py, self.repo_root, src, out_dir, stop_file,
+                                                 **recipe),
+                           on_exit=on_exit)
+
+    def wait_sitepack(self, timeout=120.0):
+        p = self.procs.get("sitepack")
+        if p:
+            try:
+                p.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                p.kill()
+
+    def sitepack_done_count(self, book_path):
+        """Combos recorded done in the encoder's book.json — works whether the encoder was
+        started by this console or externally (progress attaches to the file, not the process).
+        A mid-write/corrupt/missing read just reports 0 for this tick."""
+        try:
+            import json
+            with open(book_path, encoding="utf-8") as f:
+                return sum(1 for v in json.load(f).values() if isinstance(v, dict) and v.get("done"))
+        except (OSError, ValueError):
+            return 0
+
     def build_viewer(self, matte_dir, title="asset chips - all segments"):
         """Regenerate the spawn/idle/flourish HTML viewer over a matte dir (synchronous,
         best-effort, build python). Returns the tool's last output line, or None if there's

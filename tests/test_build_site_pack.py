@@ -77,3 +77,35 @@ def test_resume_skips_done_combos(tmp_path, capsys):
     assert os.path.getmtime(os.path.join(out, "chips", "a__base__k1__idle.webp")) == stamp
     book = json.load(open(os.path.join(out, "book.json")))
     assert book["a__base__k1"]["done"] is True
+
+
+def test_stop_file_stops_between_combos_and_keeps_book(tmp_path, capsys):
+    src = _mini_masters(str(tmp_path / "masters"))
+    out = str(tmp_path / "pack")
+    stop = str(tmp_path / ".stop")
+    with open(stop, "w") as f:
+        f.write("stop")
+    rc = bsp.main(["--src", src, "--out", out, "--scale", "0.5", "--fps", "30",
+                   "--quality", "60", "--alpha-bits", "5", "--workers", "1",
+                   "--stop-file", stop])
+    assert rc == 0
+    assert "stopped by stop-file" in capsys.readouterr().out
+    book = json.load(open(os.path.join(out, "book.json")))
+    done = sum(1 for v in book.values() if v.get("done"))
+    assert done == 1          # stop is checked BETWEEN combos: exactly one completed
+    # resume without the stop file finishes the rest
+    os.remove(stop)
+    assert bsp.main(["--src", src, "--out", out, "--scale", "0.5", "--fps", "30",
+                     "--quality", "60", "--alpha-bits", "5", "--workers", "1",
+                     "--stop-file", stop]) == 0
+    book = json.load(open(os.path.join(out, "book.json")))
+    assert sum(1 for v in book.values() if v.get("done")) == 2
+
+
+def test_progress_line_per_combo(tmp_path, capsys):
+    src = _mini_masters(str(tmp_path / "masters"))
+    rc = bsp.main(["--src", src, "--out", str(tmp_path / "pack"), "--scale", "0.5",
+                   "--fps", "30", "--quality", "60", "--alpha-bits", "5", "--workers", "1"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "PROGRESS 1/2 " in out and "PROGRESS 2/2 " in out

@@ -48,3 +48,13 @@ def test_viewer_cmd_builds_make_viewer_invocation():
     assert cmd[0] == "python" and cmd[1].endswith("make_viewer.py")
     assert cmd[cmd.index("--matte") + 1] == "/repo/out/matte"
     assert cmd[cmd.index("--title") + 1] == "dark bd"
+
+
+def test_sitepack_cmd_locked_recipe_and_stop_file():
+    cmd = c.sitepack_cmd("python", "/repo", "D:/masters", "D:/pack", "/x/.sp_stop",
+                         scale=0.2, fps=60, quality=60, alpha_bits=5, workers=12)
+    assert cmd[0] == "python" and cmd[1].endswith("build_site_pack.py")
+    for flag, val in [("--src", "D:/masters"), ("--out", "D:/pack"),
+                      ("--stop-file", "/x/.sp_stop"), ("--scale", "0.2"), ("--fps", "60"),
+                      ("--quality", "60"), ("--alpha-bits", "5"), ("--workers", "12")]:
+        assert cmd[cmd.index(flag) + 1] == val

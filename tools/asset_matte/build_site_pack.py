@@ -94,6 +94,9 @@ def main(argv=None) -> int:
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 4) - 2))
     ap.add_argument("--force", action="store_true", help="ignore book.json, re-encode everything")
     ap.add_argument("--only", nargs="*", help="limit to these combo names (A/B sampling)")
+    ap.add_argument("--stop-file", default=None,
+                    help="stop cleanly between combos when this file appears (console pause/stop; "
+                         "in-flight combos are lost and simply re-run on resume)")
     args = ap.parse_args(argv)
 
     out_chips = os.path.join(args.out, "chips")
@@ -116,6 +119,9 @@ def main(argv=None) -> int:
     fw = fh = None
     t0, done, failed = time.time(), 0, 0
 
+    def _stopped():
+        return args.stop_file and os.path.exists(args.stop_file)
+
     def _record(res):
         nonlocal fw, fh, done, failed
         if "error" in res:
@@ -130,17 +136,29 @@ def main(argv=None) -> int:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(book, f)
         os.replace(tmp, book_path)
+        print(f"PROGRESS {len(combos_manifest)}/{len(plan)} {res['name']}")
         if done % 25 == 0:
             rate = done / (time.time() - t0)
             print(f"{done}/{len(jobs)} ({rate:.1f}/s, eta {int((len(jobs)-done)/max(rate,1e-6)/60)}m)")
 
+    stopped = False
     if args.workers <= 1:
         for j in jobs:
             _record(_worker(j))
+            if _stopped():                           # after each combo, matching the pool path
+                stopped = True
+                break
     else:
         with mp.Pool(args.workers) as pool:
             for res in pool.imap_unordered(_worker, jobs):
                 _record(res)
+                if _stopped():
+                    stopped = True
+                    pool.terminate()     # in-flight combos are lost; book resume re-runs them
+                    break
+    if stopped:
+        print(f"stopped by stop-file after {done} combos "
+              f"({len(combos_manifest)}/{len(plan)} in book) — resume by relaunching")
 
     if fw is None and combos_manifest:  # resume run with nothing new: recover fw/fh from a sheet
         any_name = next(iter(combos_manifest))
