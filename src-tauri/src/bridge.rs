@@ -36,12 +36,15 @@ fn nsis_install_dir() -> Option<PathBuf> {
 /// must be gone before Setup launches the new app (single-instance plugin), and
 /// the uninstaller runs last so it never fights a live exe for file locks.
 fn helper_command(pid: u32, setup: &Path, uninstaller: &Path) -> String {
+    // Escape single quotes in paths for PowerShell single-quoted strings by doubling them.
+    let setup_escaped = setup.display().to_string().replace('\'', "''");
+    let uninst_escaped = uninstaller.display().to_string().replace('\'', "''");
     format!(
         "Wait-Process -Id {pid} -ErrorAction SilentlyContinue; \
          Start-Process -Wait -FilePath '{setup}' -ArgumentList '--silent'; \
          Start-Process -FilePath '{uninst}' -ArgumentList '/S'",
-        setup = setup.display(),
-        uninst = uninstaller.display(),
+        setup = setup_escaped,
+        uninst = uninst_escaped,
     )
 }
 
@@ -64,7 +67,15 @@ pub async fn bridge_migrate(app: tauri::AppHandle) -> Result<(), String> {
     let emitter = app.clone();
     let dest = setup_path.clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-        let mut resp = reqwest::blocking::get(&url).map_err(|e| e.to_string())?;
+        let client = reqwest::blocking::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(30))
+            // Whole-request bound: the Setup exe is ~120 MB; 15 min covers a slow
+            // connection while still guaranteeing a stalled transfer eventually errors
+            // instead of wedging the migration forever.
+            .timeout(std::time::Duration::from_secs(900))
+            .build()
+            .map_err(|e| e.to_string())?;
+        let mut resp = client.get(&url).send().map_err(|e| e.to_string())?;
         if !resp.status().is_success() {
             return Err(format!("setup download failed: HTTP {}", resp.status()));
         }
@@ -142,6 +153,17 @@ mod tests {
     }
 
     #[test]
+    fn helper_command_escapes_single_quotes_in_paths() {
+        let cmd = helper_command(
+            7,
+            std::path::Path::new("C:\\Users\\o'brien\\AppData\\Local\\Temp\\pbenguin-win-Setup.exe"),
+            std::path::Path::new("C:\\Program Files\\pbenguin\\uninstall.exe"),
+        );
+        assert!(cmd.contains("o''brien"), "embedded ' must be doubled for PowerShell");
+        assert!(!cmd.contains("o'brien'"), "no raw un-escaped apostrophe path may survive");
+    }
+
+    #[test]
     fn helper_command_shape() {
         let cmd = helper_command(
             1234,
@@ -151,8 +173,10 @@ mod tests {
         assert!(cmd.contains("Wait-Process -Id 1234"));
         assert!(cmd.contains("pbenguin-win-Setup.exe' -ArgumentList '--silent'"));
         assert!(cmd.contains("uninstall.exe' -ArgumentList '/S'"));
+        let wait_pos = cmd.find("Wait-Process").unwrap();
         let setup_pos = cmd.find("Setup.exe").unwrap();
         let uninst_pos = cmd.find("uninstall.exe").unwrap();
+        assert!(wait_pos < setup_pos, "helper must wait for our exit before running Setup");
         assert!(setup_pos < uninst_pos, "setup must run before uninstall");
     }
 }
