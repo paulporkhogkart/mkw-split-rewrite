@@ -23,13 +23,23 @@
   import { deltaMode } from "../lib/cardSettings.js";
   import KeybindRecorder from "./KeybindRecorder.svelte";
   import { screenshotKeybind, screenshotSaveFile, screenshotClipboard, screenshotDir } from "../lib/screenshotSettings.js";
-  import { open as openDialog } from "@tauri-apps/plugin-dialog";
+  import { open as openDialog, ask } from "@tauri-apps/plugin-dialog";
 
   async function chooseScreenshotDir() {
     try {
       const picked = await openDialog({ directory: true, title: "Choose screenshot folder" });
       if (typeof picked === "string" && picked) screenshotDir.set(picked);
     } catch (_) { /* dialog cancelled/unavailable */ }
+  }
+
+  // The only data-delete path in the product (replaces the old NSIS uninstall
+  // checkbox, spec 2026-07-19 §5) - uninstalling pbenguin never touches app data.
+  async function deleteAppData() {
+    const yes = await ask(
+      "Delete ALL pbenguin data — settings, replays, minimap tuning — and quit?\nThis cannot be undone.",
+      { title: "Delete app data", kind: "warning", okLabel: "Delete and quit", cancelLabel: "Cancel" },
+    );
+    if (yes) invoke("delete_app_data").catch((e) => console.error("delete_app_data failed", e));
   }
 
   // Open the save folder in File Explorer (browse only). Empty dir → the default
@@ -162,6 +172,12 @@
                        on:change={(e) => setBg("keepTrackingInTray", e.currentTarget.checked)} />
                 Keep live tracking running
               </label>
+            </div>
+
+            <div class="bg-section">
+              <h3>Data</h3>
+              <button class="btn-sm btn-danger" on:click={deleteAppData}>Delete all app data…</button>
+              <div class="bg-hint">Removes settings, replays and tuning, then quits. Uninstalling pbenguin keeps this data.</div>
             </div>
 
             <button class="btn-primary btn-lg" on:click={() => onGoStep("camera")}>Continue</button>
@@ -470,6 +486,8 @@
     cursor: pointer; flex-shrink: 0; transition: background .12s, color .12s;
   }
   .btn-sm:hover { background: var(--raised); color: var(--tx); }
+  .btn-danger { color: var(--err, #cf5b4e); border-color: rgba(207,91,78,.35); }
+  .btn-danger:hover { background: rgba(207,91,78,.12); color: var(--err, #cf5b4e); }
 
   .hint { font-size: .7rem; color: var(--tx-dim); margin: 0; line-height: 1.55; }
 

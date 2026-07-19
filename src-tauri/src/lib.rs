@@ -168,6 +168,27 @@ fn stop_tracker(state: tauri::State<SidecarState>) {
     kill_sidecar(&state);
 }
 
+/// Delete %APPDATA%\mkw-tracker (settings, replays, minimap tuning) and quit.
+/// The explicit in-app replacement for the old NSIS "delete app data" checkbox
+/// (spec 2026-07-19 §5) — uninstall itself never deletes data. The frontend
+/// shows a native confirm dialog before invoking this.
+#[tauri::command]
+fn delete_app_data(app: tauri::AppHandle, state: tauri::State<SidecarState>) -> Result<(), String> {
+    kill_sidecar(&state);
+    let dir = app
+        .path()
+        .data_dir()
+        .map_err(|e| e.to_string())?
+        .join("mkw-tracker");
+    match std::fs::remove_dir_all(&dir) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.to_string()),
+    }
+    app.exit(0);
+    Ok(())
+}
+
 /// Kill the running tracker and immediately restart it (e.g. after a device change).
 #[tauri::command]
 fn restart_tracker(app: tauri::AppHandle, state: tauri::State<SidecarState>) {
@@ -333,7 +354,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--tray-start"]),
         ))
-        .invoke_handler(tauri::generate_handler![start_tracker, stop_tracker, restart_tracker, send_to_tracker, open_url, save_screenshot, copy_screenshot_to_clipboard, open_screenshot_dir, discord::discord_set_presence, discord::discord_clear_presence, sync::sync_set_config, sync::sync_test_connection, sync::sync_resolve_pending, sync::sync_discard_pending, sync::sync_list_pending, sync::sync_course_reads, sync::sync_roster, sync::sync_pb_best, wr::wr_process_one, wr::wr_get_settings, wr::wr_set_setting, updater::update_check, updater::update_download, updater::update_apply, bridge::bridge_check, bridge::bridge_migrate])
+        .invoke_handler(tauri::generate_handler![start_tracker, stop_tracker, restart_tracker, delete_app_data, send_to_tracker, open_url, save_screenshot, copy_screenshot_to_clipboard, open_screenshot_dir, discord::discord_set_presence, discord::discord_clear_presence, sync::sync_set_config, sync::sync_test_connection, sync::sync_resolve_pending, sync::sync_discard_pending, sync::sync_list_pending, sync::sync_course_reads, sync::sync_roster, sync::sync_pb_best, wr::wr_process_one, wr::wr_get_settings, wr::wr_set_setting, updater::update_check, updater::update_download, updater::update_apply, bridge::bridge_check, bridge::bridge_migrate])
         .setup(|app| {
             app.manage(SidecarState(Mutex::new(None)));
             app.manage(RunnerState(Mutex::new(None)));
