@@ -3,6 +3,7 @@
 //! pack = full-pack downloader. commands = tauri commands + protocol glue.
 
 pub mod net;
+pub mod pack;
 pub mod protocol;
 pub mod store;
 
