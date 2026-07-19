@@ -39,6 +39,11 @@
   function draw() {
     raf = requestAnimationFrame(draw);
     if (!canvas || !player || !handle || !entry) return;
+    // Touch-on-draw: re-get every frame so mounted combos stay MRU in the shared LRU
+    // (a stable combo would otherwise never be touched and could be evicted by another
+    // card browsing selections — freezing this chip). get() on a live entry is a cheap
+    // map touch; on an evicted one it transparently re-loads (instant from disk cache).
+    handle = bitmapCache.get(manifest, combo);
     const { anim, frame } = player.tick();
     if (!handle.ready(anim)) return;                 // skip + hold, never blank
     const bmp = handle.bitmaps[anim];
