@@ -72,6 +72,33 @@ describe("createBitmapCache", () => {
     expect(b.ready("idle")).toBe(false);                   // new entry untouched by A's resolve
     expect(a.ready("idle")).toBe(false);                   // stale handle never flips ready
   });
+  it("dispose closes every resolved bitmap, clears entries, and late in-flight loads self-close without double-close", async () => {
+    const closeCounts = new Map();
+    const resolvers = new Map();
+    const loader = (url) => new Promise((res) => {
+      const arr = resolvers.get(url) || [];
+      arr.push(res);
+      resolvers.set(url, arr);
+    });
+    const closeFor = (url) => () => closeCounts.set(url, (closeCounts.get(url) || 0) + 1);
+    const cache = createBitmapCache(12, loader);
+    const m2 = { ...MANIFEST, combos: { ...MANIFEST.combos, x__base: MANIFEST.combos["mario__base"] } };
+    cache.get(MANIFEST, "mario__base"); // entry A, resolves before dispose
+    cache.get(m2, "x__base");           // entry B, resolves after dispose
+    const urlA = sheetUrl(MANIFEST, "mario__base", "idle");
+    const urlB = sheetUrl(m2, "x__base", "idle");
+    resolvers.get(urlA)[0]({ url: urlA, close: closeFor(urlA) }); // resolves before dispose
+    await Promise.resolve(); await Promise.resolve();
+
+    cache.dispose();
+
+    resolvers.get(urlB)[0]({ url: urlB, close: closeFor(urlB) }); // resolves after dispose
+    await Promise.resolve(); await Promise.resolve();
+
+    expect(closeCounts.get(urlA)).toBe(1); // closed once by dispose
+    expect(closeCounts.get(urlB)).toBe(1); // closed once by its own late-resolve else-branch
+  });
+
   it("unknown combo returns never-ready handle without burning an LRU slot", async () => {
     const closed = [];
     const loader = (url) => Promise.resolve({ url, close: () => closed.push(url) });

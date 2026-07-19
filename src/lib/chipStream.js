@@ -68,5 +68,12 @@ export function createBitmapCache(limit = 12, loader = defaultBitmapLoader) {
       }
       return { bitmaps: entry.bitmaps, ready: (anim) => !!entry.bitmaps[anim] };
     },
+    /** Release every cached bitmap and drop all entries. Late-resolving loads are
+     *  already handled: after dispose the identity check fails and they self-close. */
+    dispose() {
+      for (const entry of combos.values())
+        for (const b of Object.values(entry.bitmaps)) b && b.close && b.close();
+      combos.clear();
+    },
   };
 }

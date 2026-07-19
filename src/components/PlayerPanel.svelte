@@ -35,7 +35,10 @@
     else slow = setInterval(() => (now = Date.now()), 1000);
   }
   $: setClock(anyRacing);
-  onDestroy(() => { clearInterval(fast); clearInterval(slow); });
+  onDestroy(() => {
+    clearInterval(fast); clearInterval(slow);
+    bitmapCache.dispose(); // view toggles destroy/recreate this panel; deterministic GPU-bitmap release beats GC
+  });
 
   $: empty = emptyState(configured);
 
