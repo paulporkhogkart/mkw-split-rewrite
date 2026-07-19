@@ -907,7 +907,10 @@ Cleanup: `reg delete` nothing — instead toggle Start-at-login off in Settings;
    - old app auto-updates to the bridge build and relaunches,
    - strip shows `installer upgrade N%`, app exits,
    - Velopack copy launches by itself within ~30s,
-   - `C:\Program Files\pbenguin` is gone (silent NSIS uninstall ran),
+   - `%LocalAppData%\pbenguin` now has the Velopack layout (`Update.exe` +
+     `current\pbenguin.exe`) and no `uninstall.exe` — NSIS and Velopack share this same
+     per-user directory, so the bridge uninstalls the old tree first rather than
+     "moving" anything from Program Files,
    - `%APPDATA%\mkw-tracker` intact, settings/replays present in the new copy,
    - Add/Remove Programs shows exactly one pbenguin entry (the Velopack one).
 4. Delete the rehearsal release/tag afterwards.

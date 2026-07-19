@@ -204,9 +204,24 @@ Sequence when `bridge_migrate()` runs:
 A silent NSIS uninstall never shows the delete-app-data checkbox, so `%APPDATA%\mkw-tracker`
 survives untouched — the new Velopack copy picks up the same settings/replays.
 
+The bridge's `Setup.exe` download is verified only by GitHub's TLS (HTTPS to
+`github.com`/`objects.githubusercontent.com`) — there is no additional signature check on
+that one download, unlike the steady-state Velopack updater, which hash-verifies each
+downloaded package against the signed release feed over that same GitHub TLS trust anchor.
+
 ---
 
 ## Releasing a New Version
+
+> **CRITICAL — the next tag after this merge MUST be `v3.0.0`.** Tagging anything
+> else first (e.g. a `v2.9.x` patch) strands every existing NSIS client: the "Pin
+> bridge latest.json for stragglers" step in `release.yml` only has a
+> `.github/bridge-latest.json` to re-publish *after* the v3.0.0 bridge release exists,
+> so an intervening tag ships with no `latest.json` on the latest release at all —
+> old installs' updater simply stops resolving anything, and the release itself would
+> carry Velopack-only assets nobody's NSIS install can consume yet. This warning is
+> removable once the [post-bridge cleanup checklist](#post-bridge-cleanup-checklist)
+> has run and no NSIS stragglers remain.
 
 ### 1. Bump the version
 
@@ -276,6 +291,7 @@ apply** or automatically the next time the app starts, whichever comes first.
 | `pbenguin-win-Setup.exe` | `vpk pack`, renamed by the "Normalize Setup asset name" CI step (raw `vpk` default is `pbenguin-Setup.exe`) | every release |
 | `pbenguin-<ver>-full.nupkg` | `vpk pack` | every release |
 | `pbenguin-<ver>-delta.nupkg` | `vpk pack` (present once a previous release exists as a delta baseline) | every release after the first |
+| `pbenguin-<prev-ver>-full.nupkg` (the *previous* release's full package) | `vpk download github`'s delta-baseline fetch lands its downloaded file in the same `velopack_releases/` upload dir that `vpk pack` writes into, so it rides along into the next release's asset list too | every release after the first — Velopack-conventional and harmless (just a redundant copy of an asset already published under the previous tag) |
 | `releases.win.json` | `vpk pack` | every release |
 | `assets.win.json` | `vpk pack` (build artifact; not consumed by updater or bridge) | may accompany release |
 | `*x64-setup.exe` + `.sig` (legacy Tauri NSIS installer) | bridge-only `npm run tauri build -- --bundles nsis`, signed with `TAURI_SIGNING_PRIVATE_KEY[_PASSWORD]` | **`v3.0.0` only** |
@@ -346,6 +362,15 @@ delta `.nupkg` size in `temp\vpk\releases` (should be a small fraction of the fu
 - With the update "ready", **quit without pressing the button**. Relaunch. Expected:
   `VelopackApp` applies the pending update during boot — app comes up as 2.99.2. This is the
   headline bug fix; if it doesn't happen, stop and investigate before anything ships.
+- With a close-to-tray-resident instance (Settings → close-to-tray on) and an update
+  downloaded but **not yet applied**, launch the app again from its shortcut instead of
+  quitting — this spawns a *second* process whose own `VelopackApp::build().run()` boot
+  hook runs before the single-instance plugin hands off to the tray-resident instance.
+  Observe and record the **actual** behavior: does the second instance's `VelopackApp`
+  auto-apply and swap `current\` out from under the still-running tray instance (which
+  would still be holding the old exe/DLLs open), does it no-op because Velopack detects
+  another instance, or something else? This decides whether `bridge_migrate`/`update_apply`
+  need extra guarding against a concurrent tray-resident instance.
 - `reg query HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (with Start-at-login enabled
   in Settings) → the entry points at `%LocalAppData%\pbenguin\current\pbenguin.exe`.
 
@@ -366,7 +391,10 @@ PBENGUIN_UPDATE_PATH ""`, uninstall pbenguin from Add/Remove Programs, confirm
    - old app auto-updates to the bridge build and relaunches,
    - strip shows `installer upgrade N%`, app exits,
    - Velopack copy launches by itself within ~30s,
-   - `C:\Program Files\pbenguin` is gone (silent NSIS uninstall ran),
+   - `%LocalAppData%\pbenguin` now has the Velopack layout (`Update.exe` +
+     `current\pbenguin.exe`) and no `uninstall.exe` — NSIS and Velopack share this same
+     directory (both install per-user), so the bridge uninstalls the old tree first
+     rather than "moving" anything from a different location,
    - `%APPDATA%\mkw-tracker` intact, settings/replays present in the new copy,
    - Add/Remove Programs shows exactly one pbenguin entry (the Velopack one).
 4. Delete the rehearsal release/tag afterwards.

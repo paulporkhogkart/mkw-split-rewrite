@@ -99,7 +99,9 @@ python sidecar build job, the portable-zip artifact, tag-driven Pi deploy.
 
 ### 3. One-time bridge migration (v3.0.0)
 
-Existing installs are NSIS in Program Files; they migrate **automatically**:
+Existing installs are NSIS, installed per-user to `%LocalAppData%\pbenguin` (Tauri's
+NSIS default) — the SAME directory Velopack targets, not Program Files; they migrate
+**automatically**:
 
 - The bridge release publishes **both artifact sets**: the old-style NSIS installer
   + `latest.json` (so every existing v2.x install auto-updates into the bridge via
@@ -107,10 +109,13 @@ Existing installs are NSIS in Program Files; they migrate **automatically**:
 - On startup the app detects its install mode via the Velopack locator (a Velopack
   install has `Update.exe` above the app dir; locator fails on an NSIS install).
   When NSIS-installed, a migration module: downloads the same-version Velopack
-  `Setup.exe` from the release → runs it silently (installs per-user to
-  `%LocalAppData%`, launches the new copy) → runs the NSIS uninstaller silently
-  (`uninstall.exe /S` — silent mode never deletes app data; the delete-app-data
-  hook requires the interactive checkbox) → exits.
+  `Setup.exe` from the release → spawns a detached helper that waits for this process
+  to exit, then runs the NSIS uninstaller silently (`uninstall.exe /S` — silent mode
+  never deletes app data; the delete-app-data hook requires the interactive checkbox),
+  then polls until the (shared) install directory is actually gone, then runs
+  `Setup.exe --silent` (installs per-user to `%LocalAppData%`, launches the new copy)
+  → exits. Uninstall runs **before** Setup because both land in the same directory —
+  Setup must never write into a tree the old install still occupies.
 - **Straggler safety net:** every future release re-uploads a pinned static
   `latest.json` (committed at `.github/bridge-latest.json`, pointing at the bridge's
   NSIS installer asset in the v3.0.0 release). Old clients resolve
@@ -121,8 +126,9 @@ Existing installs are NSIS in Program Files; they migrate **automatically**:
 
 ### 4. Behavior changes (accepted in review)
 
-- Install location moves Program Files → `%LocalAppData%` (per-user, no UAC).
-  Velopack recreates Start Menu/desktop shortcuts. Tray autostart survives: the
+- Install stays per-user at `%LocalAppData%\pbenguin` (no UAC) — both NSIS (Tauri's
+  default) and Velopack use this same directory; there is no Program Files involved
+  and nothing "moves". Velopack recreates Start Menu/desktop shortcuts. Tray autostart survives: the
   Run key is (re)registered from `current_exe()` via `tauri-plugin-autostart`, and
   Velopack's `current/` exe path is stable across updates.
 - Install/uninstall run silently — the NSIS wizard art and prompts go away.
