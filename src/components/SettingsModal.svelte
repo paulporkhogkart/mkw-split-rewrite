@@ -18,6 +18,7 @@
   import LanguageSelectors from "./LanguageSelectors.svelte";
   import TrailSettings     from "./TrailSettings.svelte";
   import SyncSettings      from "./SyncSettings.svelte";
+  import ChipsSettings     from "./ChipsSettings.svelte";
   import { invoke }        from "@tauri-apps/api/core";
   import { discordEnabled, twitchButtonEnabled, twitchLabel, twitchUrl } from "../lib/discordSettings.js";
   import { deltaMode } from "../lib/cardSettings.js";
@@ -367,6 +368,10 @@
           <div class="cam-nav" style="justify-content:flex-end; max-width:600px; margin:.6rem auto 0;">
             <button class="btn-primary" on:click={onClose}>Done</button>
           </div>
+
+        <!-- ── CHIPS step ─────────────────────────────────────────────────── -->
+        {:else if wizardStep === "chips"}
+          <ChipsSettings />
 
         {/if}
 
