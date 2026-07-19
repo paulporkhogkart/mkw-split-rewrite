@@ -36,7 +36,11 @@
   $: fig = fireOn ? (onpaceFigure(vm.name) || figureFor(vm.name, true)) : figureFor(vm.name, vm.online);
 
   // ── chip choreography (prev-tracking: compute step, bump seq, THEN store prev) ──
-  let prevEntry = null, actionSeq = 0, chip = { combo: null, action: null };
+  // prevEntry starts AT entry (not null) so the first reactive pass is a no-action step:
+  // directorStep(null, entry) on a finished/settled entry would fire "confirm" and replay
+  // the flourish celebration on every remount (view switch) — the chip still renders fine,
+  // ChipCanvas starts its player on idle when the combo binds.
+  let prevEntry = entry, actionSeq = 0, chip = { combo: null, action: null };
   $: {
     const step = directorStep(prevEntry, entry);
     if (step.action) { actionSeq += 1; chip = step; }
@@ -54,12 +58,15 @@
   const fireT = setInterval(() => (fireK = (fireK + 1) % 3), 125);
   onDestroy(() => { clearInterval(tearT); clearInterval(fireT); });
   $: k = performing ? tearK : 0;
-  $: tearAnim = chip.action === "select" ? "spawn" : chip.action === "confirm" ? "flourish" : "idle";
+  // Tear masks follow the chip's ACTUAL currently-playing anim (from ChipCanvas via
+  // bind:currentAnim below), not the last director action — otherwise racing cards (which
+  // never re-fire an action) would cycle flourish sils forever while the chip itself idles.
+  let chipAnim = "idle";
   // A combo may not ship the mapped animation (e.g. no spawn): fall back like the
   // chip player does (spawn -> idle -> first available), so the sil URL always exists.
   $: tearAnimEff = (() => {
     const anims = manifest?.combos?.[chip.combo]?.anims;
-    if (!anims || anims[tearAnim]) return tearAnim;
+    if (!anims || anims[chipAnim]) return chipAnim;
     return anims.idle ? "idle" : Object.keys(anims)[0];
   })();
   $: sess = sessTags(vm.activity, typeof now === "number" ? now : Date.now());
@@ -74,9 +81,12 @@
     : (vm.state === "finished" || vm.state === "dnf" || vm.state === "invalidated") ? "finished"
     : "idle";
 
-  // Mockup delta tags are ok/bad/gold; fire forces gold ("gold delta marks the pace").
+  // Mockup delta tags are ok/bad/gold; fire forces gold ("gold delta marks the pace") but
+  // ONLY while actually racing on fire — a finished-beat card keeps forceFire's lit fire
+  // visuals but its delta stays the locked mockup's green `ok` (forceFire is post-mockup
+  // product behaviour for the fire visuals only, not the delta tag).
   $: deltaCls = !vm.delta ? null
-    : fireOn ? "gold"
+    : (mode === "racing" && onFire) ? "gold"
     : vm.delta.cls === "gold" ? "gold"
     : vm.delta.cls.startsWith("ahead") ? "ok" : "bad";
 
@@ -88,9 +98,12 @@
 
   $: spans = mode === "finished" ? digitSpans(vm.primary.text) : [];
 
-  // Chips + tear plies render only with a combo AND a manifest, on online cards
-  // (the mockup idle/offline cards carry no chip).
-  $: showChip = !!(vm.online && chip.combo && manifest);
+  // Chips + tear plies render only with a combo AND a manifest AND a manifest entry for
+  // that combo (a combo missing from the manifest gets neither canvas nor tear plies), on
+  // online cards, and only in the selection/racing/finished modes — the mockup idle/offline
+  // cards carry no chip.
+  $: showChip = !!(vm.online && chip.combo && manifest && manifest.combos?.[chip.combo]
+      && (mode === "selecting" || mode === "racing" || mode === "finished"));
   $: tearUrl = showChip ? silUrl(manifest, chip.combo, tearAnimEff, k) : null;
 
   // Card tilt: the mockup hand-assigns per-card --tilt from this set; derive stably
@@ -155,7 +168,7 @@
       </div>
       <div class="kchip" class:big={selecting} class:front={selecting}>
         <ChipCanvas {manifest} {bitmapCache} combo={chip.combo} action={chip.action} {actionSeq}
-          height={selecting ? 112 : 92} />
+          height={selecting ? 112 : 92} bind:currentAnim={chipAnim} />
       </div>
     {/if}
     <div class="in">

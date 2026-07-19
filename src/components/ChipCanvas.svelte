@@ -13,6 +13,7 @@
   export let actionSeq = 0;      // bump to re-fire the same action
   export let ink = "#101114";
   export let height = 92;
+  export let currentAnim = "idle";  // the chip's live anim, for the tear mask to follow
 
   let canvas, raf = 0, player = null, lastSeq = -1, curCombo = null;
   let scratch = null;
@@ -46,6 +47,7 @@
     // map touch; on an evicted one it transparently re-loads (instant from disk cache).
     if (bitmapCache && manifest && combo) ref.handle = bitmapCache.get(manifest, combo);
     const { anim, frame } = player.tick();
+    if (anim !== currentAnim) currentAnim = anim;         // change-only: avoid per-frame reactive churn
     if (!ref.handle.ready(anim)) return;                 // skip + hold, never blank
     const bmp = ref.handle.bitmaps[anim];
     const a = entry.anims[anim];
