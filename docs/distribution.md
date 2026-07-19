@@ -453,6 +453,36 @@ Executed scripted (Claude session, Paul's machine), verified by filesystem/proce
   fast to distinguish resume-vs-restart), autostart Run-key path (shares the real
   install's settings DB — left manual), bridge rehearsal, CI run.
 
+### Bridge rehearsal results — 2026-07-20 (rc tags on the real repo, Paul's machine)
+
+Executed against real prerelease CI builds (prereleases are invisible to
+`releases/latest/...`, so live clients were never exposed — verified `latest`
+stayed `v2.9.0` throughout). Five rc tags, one first-contact bug each:
+
+- **rc.1:** `dotnet tool install -g` writes the persistent user PATH which later job
+  steps never inherit → `GITHUB_PATH` append + vpk pinned 1.2.0 (also: `vpk --version`
+  is not a valid invocation; the fail-fast step uses `vpk -h`).
+- **rc.2:** the whole Velopack chain passed; `createUpdaterArtifacts` refused to bundle
+  without `plugins.updater` in tauri.conf.json (removed with the runtime plugin) → the
+  bridge-gated step re-injects the pre-migration block as bundler metadata.
+- **rc.3:** bridge downloaded `/v2.9.0/...` → 404: `CARGO_PKG_VERSION` comes from
+  Cargo.toml, which only `set_version.py` bumps — CI stamps tauri.conf.json only →
+  bridge now uses the runtime app version (`package_info()`).
+- **rc.4:** full handover verified perfect ON A REAL INSTALL (ordering, shared-dir
+  uninstall→install, data intact, single registry entry) — but the user was left with
+  nothing running: **silent Setup installs and stops, it never launches the app** →
+  helper gained a final non-blocking stub launch.
+- **rc.5: complete success** — `installer upgrade N%` → app exits → self-relaunches
+  ~30s later as the Velopack copy. End state verified: Velopack layout, no
+  `uninstall.exe`, one Add/Remove entry, app data intact, app + engine running from
+  `current\`. Cosmetic note: the strip may show ~70-something % at exit — the download
+  is complete; the final progress frames just race the app's exit.
+
+All rc releases and tags were deleted afterwards. Remaining before v3.0.0: nothing
+technical — run `set_version.py 3.0.0`, commit, tag, push, then IMMEDIATELY commit the
+release's `latest.json` as `.github/bridge-latest.json` (CI hard-fails later releases
+without it).
+
 ### Step 6: Record results
 
 Append a dated "rehearsal results" note (delta size observed, any deviations) below this
