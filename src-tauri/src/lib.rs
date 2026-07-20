@@ -415,6 +415,12 @@ pub fn run() {
                 .target(tauri_plugin_log::Target::new(
                     tauri_plugin_log::TargetKind::Webview,
                 ))
+                // Dependencies stay at info: velopack's ureq hex-dumps every 16 bytes
+                // of the update download at trace, and each record crosses IPC to the
+                // webview — an unfiltered GitHub download is millions of events and
+                // freezes the app (v3.0.0 rollout incident, 2026-07-20).
+                .level(log::LevelFilter::Info)
+                .level_for("mkw_tracker_lib", log::LevelFilter::Debug)
                 .build(),
         )
         .plugin(tauri_plugin_shell::init())

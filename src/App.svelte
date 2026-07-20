@@ -1541,13 +1541,17 @@
       }
       if (secs >= 120) { sidecarStartupError = true; clearInterval(_startupTimer); }
     }, 10000);
-    // Forward Rust log::* records to the log pane, skipping tauri plugin noise.
-    const _levelPrefix = { error:"[rust/err]", warn:"[rust/warn]", info:"[rust]", debug:"[rust/dbg]", trace:null };
+    // Forward Rust log::* records to the log pane. The record is { level, message }
+    // with a NUMERIC LogLevel (Trace=1..Error=5) and no target field — the target is
+    // baked into the formatted message. Unknown/trace levels are dropped, never
+    // defaulted to visible: a chatty dependency (ureq's per-16-byte trace hex dump
+    // during the v3.0.0 update download) once flooded this callback and froze the app.
+    const _levelPrefix = { 2:"[rust/dbg]", 3:"[rust]", 4:"[rust/warn]", 5:"[rust/err]" };
     attachLogger(record => {
-      if (record.target?.startsWith("tauri")) return;
-      if (record.message?.includes("[tauri_")) return;  // pre-formatted plugin records
-      const prefix = _levelPrefix[record.level] ?? "[rust]";
-      if (prefix) pushLog(`${prefix} ${record.message}`);
+      const prefix = _levelPrefix[record.level];
+      if (!prefix) return;
+      if (record.message?.includes("[tauri")) return;  // tauri/plugin framework noise
+      pushLog(`${prefix} ${record.message}`);
     }).catch(() => {});
     setInterval(()=>{ _tick++; },1000);
     checkForUpdate();
