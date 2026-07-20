@@ -2,9 +2,9 @@
 #
 # Distribution is Velopack-based (see docs/distribution.md): the app installs and
 # updates per-user via `vpk`-produced packages, no `tauri-plugin-updater` involved
-# in the normal flow. The one-time v3.0.0 tag additionally builds the legacy NSIS
-# installer so existing pre-Velopack clients can migrate through the bridge
-# (`src-tauri/src/bridge.rs`) — every later tag skips that pair of steps entirely.
+# in the normal flow. Designated BRIDGE tags (see the env block below) additionally
+# build the legacy NSIS installer so existing pre-Velopack clients can migrate
+# through the bridge (`src-tauri/src/bridge.rs`) — all other tags skip those steps.
 #
 # Three jobs:
 #   build-python  → PyInstaller portable bundle (unchanged from pre-Tauri)
@@ -14,24 +14,24 @@
 #                   (best-effort — the first-ever release has nothing to diff
 #                   against), then `vpk pack`s full+delta .nupkg, releases.win.json,
 #                   and the Setup bootstrapper (renamed to the canonical
-#                   pbenguin-win-Setup.exe by the Normalize step). ONLY on the
-#                   v3.0.0 tag (`startsWith(github.ref_name, 'v3.0.0')`), it also
+#                   pbenguin-win-Setup.exe by the Normalize step). ONLY on
+#                   bridge tags (BRIDGE_TAG env below), it also
 #                   builds + signs the legacy NSIS installer and writes the
 #                   old-style latest.json update manifest.
 #   publish       → Creates the GitHub Release with the Velopack asset set (+ the
-#                   NSIS installer and latest.json only on v3.0.0), and on every
+#                   NSIS installer and latest.json only on bridge tags), and on every
 #                   *non*-bridge tag re-publishes the committed
 #                   .github/bridge-latest.json so straggler NSIS installs that
 #                   haven't run the bridge yet keep resolving latest.json.
 #
 # Required GitHub Secrets (used only by the bridge-only NSIS build/sign step, i.e.
-# only ever exercised on the v3.0.0 tag — remove once the post-bridge cleanup
+# only ever exercised on bridge tags — remove once the post-bridge cleanup
 # checklist in docs/distribution.md runs):
 #   TAURI_SIGNING_PRIVATE_KEY         minisign private key (from: npm run tauri signer generate)
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD password chosen during key generation
 #
 # One-time local setup for the bridge's NSIS signing (not needed once bridge-only
-# steps are removed post-v3.0.0):
+# steps are removed by the post-bridge cleanup):
 #   npm install
 #   npm run tauri signer generate -- -w ~/.tauri/mkw-tracker.key
 #   # Add the private key + password to GitHub Secrets (TAURI_SIGNING_PRIVATE_KEY[_PASSWORD])
@@ -55,6 +55,16 @@ on:
 
 permissions:
   contents: write
+
+# Bridge tags build the FULL combined asset set: Velopack + legacy NSIS installer
+# + old-style latest.json, so pre-Velopack clients can update into the bridge.
+#   v3.0.0 — original NSIS→Velopack bridge
+#   v3.0.3 — re-bridge: v3.0.0's binary floods the webview log (ureq trace hex
+#            dump, fixed in 3.0.2) during Velopack downloads, so stragglers must
+#            bridge straight onto a fixed binary instead of passing through it.
+# rc forms (v3.0.3-rc.1) also match and publish as prereleases — bridge rehearsal.
+env:
+  BRIDGE_TAG: ${{ startsWith(github.ref_name, 'v3.0.0') || startsWith(github.ref_name, 'v3.0.3') }}
 
 jobs:
   # ── 0. Decide whether this tag actually touches pbenguin (the desktop app) ────
@@ -207,7 +217,7 @@ jobs:
           path: ${{ steps.names.outputs.zip }}
           retention-days: 1
 
-  # ── 2. Build Tauri app + Velopack pack (+ bridge-only NSIS on v3.0.0) ────────
+  # ── 2. Build Tauri app + Velopack pack (+ bridge-only NSIS on bridge tags) ───
   build-tauri:
     name: Build Tauri installer (Windows x64)
     runs-on: windows-latest
@@ -339,9 +349,9 @@ jobs:
         shell: bash
         run: ls -lh velopack_releases/
 
-      # ── Bridge-only (v3.0.0): last NSIS artifacts so old clients update into the bridge ──
+      # ── Bridge-only (BRIDGE_TAG): NSIS artifacts so old clients update into the bridge ──
       - name: Restore updater config for NSIS signing (bridge release only)
-        if: startsWith(github.ref_name, 'v3.0.0')
+        if: env.BRIDGE_TAG == 'true'
         shell: bash
         run: |
           python - <<'EOF'
@@ -363,19 +373,19 @@ jobs:
           EOF
 
       - name: Build NSIS installer (bridge release only)
-        if: startsWith(github.ref_name, 'v3.0.0')
+        if: env.BRIDGE_TAG == 'true'
         run: npm run tauri build -- --bundles nsis
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: List NSIS bundle output (debug)
-        if: startsWith(github.ref_name, 'v3.0.0')
+        if: env.BRIDGE_TAG == 'true'
         shell: bash
         run: ls src-tauri/target/release/bundle/nsis/
 
       - name: Generate update manifest (bridge release only)
-        if: startsWith(github.ref_name, 'v3.0.0')
+        if: env.BRIDGE_TAG == 'true'
         shell: bash
         run: |
           python - <<'EOF'
@@ -422,7 +432,7 @@ jobs:
           TAG: ${{ github.ref_name }}
 
       - name: Upload NSIS installer artifact
-        if: startsWith(github.ref_name, 'v3.0.0')
+        if: env.BRIDGE_TAG == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: tauri-installer
@@ -432,7 +442,7 @@ jobs:
           retention-days: 1
 
       - name: Upload update manifest artifact
-        if: startsWith(github.ref_name, 'v3.0.0')
+        if: env.BRIDGE_TAG == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: update-manifest
@@ -464,30 +474,30 @@ jobs:
           path: velopack_releases
 
       - uses: actions/download-artifact@v8
-        if: startsWith(github.ref_name, 'v3.0.0')
+        if: env.BRIDGE_TAG == 'true'
         with:
           name: tauri-installer
 
       - uses: actions/download-artifact@v8
-        if: startsWith(github.ref_name, 'v3.0.0')
+        if: env.BRIDGE_TAG == 'true'
         with:
           name: update-manifest
 
-      # After v3.0.0 ships, its latest.json gets committed as .github/bridge-latest.json
-      # (post-bridge checklist). Re-publishing it on every later release keeps
-      # releases/latest/download/latest.json resolving for straggler NSIS installs,
-      # which then funnel through the bridge.
+      # After a bridge release ships, its latest.json gets committed as
+      # .github/bridge-latest.json (post-bridge checklist). Re-publishing it on every
+      # later release keeps releases/latest/download/latest.json resolving for
+      # straggler NSIS installs, which then funnel through the bridge.
       - uses: actions/checkout@v6
         with:
           path: repo
       - name: Pin bridge latest.json for stragglers
-        if: ${{ !startsWith(github.ref_name, 'v3.0.0') }}
+        if: env.BRIDGE_TAG != 'true'
         shell: bash
         run: |
           if [ -f repo/.github/bridge-latest.json ]; then
             cp repo/.github/bridge-latest.json latest.json
           else
-            echo "::error::post-bridge checklist step 1 not done: commit .github/bridge-latest.json from the v3.0.0 release so NSIS stragglers keep resolving latest.json"
+            echo "::error::post-bridge checklist step 1 not done: commit .github/bridge-latest.json from the newest bridge release so NSIS stragglers keep resolving latest.json"
             exit 1
           fi
 

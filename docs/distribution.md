@@ -495,20 +495,46 @@ git commit -m "docs(distribution): velopack rehearsal results"
 
 ---
 
+## Re-bridge: v3.0.3 (2026-07-20, ureq log-flood incident)
+
+v3.0.0's binary trace-logs a hex dump of every 16 bytes of HTTP body during Velopack
+downloads (velopack → ureq → `ureq_proto`, with no level filter on the log plugin and a
+broken trace filter in the webview) — millions of IPC events, frozen UI, memory into the
+GBs. Fixed in 3.0.2 (`0d0ccc72`), but the flood lives in the *old running binary*, so any
+NSIS straggler bridging through v3.0.0 would eat it on their first Velopack update.
+
+Remedy: `v3.0.3` is a second **bridge tag** (workflow-level `BRIDGE_TAG` env in
+`release.yml` — bridge tags now live there, not in per-step `startsWith` conditions). It
+ships the combined asset set exactly like v3.0.0 did (NSIS installer + `latest.json` +
+Velopack), so stragglers NSIS-update straight onto a fixed binary and never run 3.0.0.
+
+After the v3.0.3 release is up:
+1. Commit **its** `latest.json` as `.github/bridge-latest.json` (replacing the v3.0.0 pin).
+2. Delete the Setup installers from the v3.0.0 release (`pbenguin_3.0.0_x64-setup.exe`,
+   `pbenguin-win-Setup.exe`) so stale links can't fresh-install the flooding binary. Keep
+   the `.nupkg`s and `releases.win.json` — the Velopack feed history stays intact.
+
+Existing *Velopack* v3.0.0 installs still flood once (small delta) when they auto-update
+to v3.0.3 — unavoidable, their binary can't be fixed remotely; the download completes
+under the freeze and applies on restart. The clean path for them is a manual run of the
+v3.0.3 `pbenguin-win-Setup.exe`.
+
+---
+
 ## Post-bridge cleanup checklist
 
-Execute manually, once, after `v3.0.0` is confirmed to have migrated the active install base
-(no meaningful trickle of old-updater check-ins left):
+Execute manually, once, after the newest bridge release (`v3.0.3`) is confirmed to have
+migrated the active install base (no meaningful trickle of old-updater check-ins left):
 
-1. Download `latest.json` from the `v3.0.0` release and commit it as
+1. Download `latest.json` from the newest bridge release and commit it as
    `.github/bridge-latest.json` (if not already committed from CI's own copy).
 2. Remove `bundle.windows.nsis` (the `"nsis"` bundle target, `windows.nsis` config block) and
    `createUpdaterArtifacts` from `src-tauri/tauri.conf.json`; delete
    `src-tauri/installer-hooks.nsh`.
 3. Delete the bridge-gated steps from `.github/workflows/release.yml` (every step under
-   `if: startsWith(github.ref_name, 'v3.0.0')` in the `build-tauri` job, plus the
-   `tauri-installer`/`update-manifest` downloads and the "Pin bridge latest.json for
-   stragglers" step in `publish`) once no NSIS stragglers remain.
+   `if: env.BRIDGE_TAG == 'true'` in the `build-tauri` job, the `BRIDGE_TAG` env block,
+   plus the `tauri-installer`/`update-manifest` downloads and the "Pin bridge latest.json
+   for stragglers" step in `publish`) once no NSIS stragglers remain.
 4. Delete the `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` GitHub
    secrets.
 5. (Optional) remove `src-tauri/src/bridge.rs` and its two commands
