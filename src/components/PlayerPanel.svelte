@@ -45,9 +45,9 @@
   // Card scale: LiveCard is a fixed 250x150 design-space card that scales itself via the
   // CSS var --s (transform: scale, origin top-left) — a transform never changes layout size,
   // so the per-card "cell" wrapper below must carry the POST-scale footprint explicitly
-  // (width/height in px) for the grid track to lay out at the right size. One measurement
-  // (the grid's own clientWidth/clientHeight) sizes every card; --s is whichever axis is
-  // tighter so the card never overflows its cell in either dimension.
+  // (width/height in px) for the centered flex row to lay out at the right size. One
+  // measurement (the panel's own clientWidth/clientHeight) sizes every card; --s is
+  // whichever axis is tighter so the card never overflows its cell in either dimension.
   let panelW = 0, panelH = 0;
   const GAP = 1; // px — mirrors .panel's `gap: 1px` below
   $: n = players.length;
@@ -59,7 +59,7 @@
 
 {#if players.length}
   <div class="stage">
-    <div class="panel" style="--n:{n}" bind:clientWidth={panelW} bind:clientHeight={panelH}>
+    <div class="panel" bind:clientWidth={panelW} bind:clientHeight={panelH}>
       {#each players as p (p.player_id)}
         <div class="cell" style="--s:{cardScale};width:{cardW}px;height:{cardH}px">
           <LiveCard entry={p} {now} stale={!connected && !p._localSelf} {manifest} {bitmapCache} />
@@ -81,9 +81,9 @@
      (App.svelte, out of scope here) — .panel itself stays flush so the --s measurement
      below reflects exactly the space the grid tracks get. */
   .stage { height: 100%; box-sizing: border-box; padding: 4px 24px 20px 4px; overflow: visible; }
-  .panel { display: grid; grid-template-columns: repeat(var(--n, 5), 1fr); gap: 1px;
-           background: var(--bd); height: 100%; overflow: visible; }
-  .cell { position: relative; overflow: visible; }
+  .panel { display: flex; justify-content: center; align-items: center; gap: 1px;
+           height: 100%; overflow: visible; }
+  .cell { position: relative; overflow: visible; flex: 0 0 auto; }
   .empty { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
            gap: 4px; text-align: center; }
   .empty-title { font-size: .8rem; color: var(--tx-mut); }
