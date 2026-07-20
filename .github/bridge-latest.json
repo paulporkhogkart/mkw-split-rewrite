@@ -1,0 +1,11 @@
+{
+  "version": "3.0.0",
+  "notes": "See https://github.com/paulporkhogkart/mkw-split-rewrite/releases/tag/v3.0.0",
+  "pub_date": "2026-07-19T17:21:17Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUWHAxS2kvZkZJV0dZcXozcUZGaUNodUM0d3hnL0llTVEvL1pQN3p2QlI0Unl6ZXlzemNrTTR6ZlprWmVSVVRtS2ZhdEZ0Zi8rUjN5aDRpTE10dkxyRmhBNndlakFmU0FJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0NDgxNjc3CWZpbGU6cGJlbmd1aW5fMy4wLjBfeDY0LXNldHVwLmV4ZQphMzRlR2NKRDFwd2c1Ulk4b1laQWFzRzNWbzlaYmtkUTJGVjk5ZHYydXdOU2NQQzVUWlZVd1dLZHdEMWhIbFZJUlN4Z1pvYlAzNDRsYU1ZZU5GL29DUT09Cg==",
+      "url": "https://github.com/paulporkhogkart/mkw-split-rewrite/releases/download/v3.0.0/pbenguin_3.0.0_x64-setup.exe"
+    }
+  }
+}
