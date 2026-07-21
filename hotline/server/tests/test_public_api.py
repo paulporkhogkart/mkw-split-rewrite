@@ -112,8 +112,8 @@ async def test_unplugged_claim_409s(tmp_path, unused_tcp_port):
 async def test_page_assets_served(tmp_path, unused_tcp_port):
     _, bus, db, ctl, client = await make_stack(tmp_path, unused_tcp_port)
     for path in ("/", "/static/phone.js", "/static/phone.css",
-                 "/static/sfx/ringing.wav", "/static/sfx/hangup.wav",
-                 "/static/sfx/ringtone.wav"):
+                 "/static/sfx/ringback.wav", "/static/sfx/busy.wav",
+                 "/static/sfx/dialtone.wav"):
         resp = await client.get(path)
         assert resp.status == 200, path
     body = await (await client.get("/")).text()

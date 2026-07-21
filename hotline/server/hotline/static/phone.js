@@ -43,7 +43,7 @@
       if (store.output && fallbackEl.setSinkId)
         await fallbackEl.setSinkId(store.output).catch(() => {});
     }
-    for (const name of ["ringing", "hangup", "ringtone"]) {
+    for (const name of ["ringback", "busy", "dialtone"]) {
       const resp = await fetch(`/static/sfx/${name}.wav`);
       sfxBuf[name] = await ctx.decodeAudioData(await resp.arrayBuffer());
     }
@@ -132,7 +132,7 @@
 
   spkTest.addEventListener("click", async () => {
     await ensureCtx();
-    playSfx("ringtone");
+    playSfx("dialtone");
   });
 
   micSel.addEventListener("change", () => {
@@ -263,7 +263,7 @@
                              { method: "POST" });
       if (!rr.ok) { endCallCleanup(); lease = null; return syncFromLine(); }
       page = "ringing";
-      ringLoop = playSfx("ringing", { loop: true });
+      ringLoop = playSfx("ringback", { loop: true });
       render();
     } catch {
       // a lease may already be ours here (claim succeeded, then worklet/WS
@@ -283,7 +283,7 @@
     if (tellServer && l)
       fetch(`/call/hangup?lease=${encodeURIComponent(l)}`, { method: "POST" })
         .catch(() => {});
-    playSfx("hangup");
+    playSfx("busy");
     toIdle(page === "ringing" ? undefined : undefined);
     // toIdle's caption comes from line events; explicit outcomes handled in onLine
   }
@@ -312,7 +312,7 @@
         page = "oncall"; render();
       } else if (ev.state === "idle") {
         const wasRinging = page === "ringing";
-        endCallCleanup(); playSfx("hangup");
+        endCallCleanup(); playSfx("busy");
         toIdle(wasRinging ? "no answer" : undefined);
       }
       return;
