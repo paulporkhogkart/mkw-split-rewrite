@@ -164,3 +164,13 @@ async def test_ring_rejected_when_attached_ws_bound_to_other_lease(tmp_path, unu
 
     await ws.close()
     await close_stack(client, ctl, bus, db)
+
+
+async def test_page_and_static_send_no_cache(tmp_path, unused_tcp_port):
+    _, bus, db, ctl, client = await make_stack(tmp_path, unused_tcp_port)
+    for path in ("/", "/static/phone.js", "/static/sfx/ringback.wav"):
+        resp = await client.get(path)
+        assert resp.headers.get("Cache-Control") == "no-cache", path
+    resp = await client.get("/healthz")
+    assert resp.status == 200
+    await close_stack(client, ctl, bus, db)
