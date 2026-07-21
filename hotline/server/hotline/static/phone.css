@@ -29,7 +29,7 @@ body{background:var(--ground);color:var(--paper);
   transition:filter .12s}
 .callbtn:hover{filter:brightness(1.12)}
 .callbtn:active{filter:brightness(.92)}
-.callbtn svg{width:48px;height:48px;fill:var(--paper);transition:transform .15s}
+.callbtn svg{width:60px;height:60px;fill:var(--paper);transition:transform .15s}
 .callbtn.red{background:var(--red)}
 .callbtn.red svg{transform:rotate(135deg)}
 .callbtn.off{background:var(--ink-2);cursor:default}
