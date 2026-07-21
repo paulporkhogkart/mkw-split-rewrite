@@ -38,7 +38,15 @@ body{background:var(--ground);color:var(--paper);
    "settling" glitch). Instant swap, like every other call app. */
 .callbtn svg path{transform-box:fill-box;transform-origin:center}
 .callbtn.red{background:var(--red)}
+/* the swing-in: the path is statically rotated the moment .red lands (crisp),
+   while the svg element animates -135deg -> 0. Composed, the icon visually
+   swings 0 -> 135 as before, but the animation ENDS AT IDENTITY, so the
+   GPU-layer handoff lands on the exact pixels of the static render and the
+   settle glitch cannot show. */
 .callbtn.red svg path{transform:rotate(135deg)}
+.callbtn.red svg{animation:swing-in .15s ease}
+@keyframes swing-in{from{transform:rotate(-135deg)}to{transform:rotate(0)}}
+@media (prefers-reduced-motion: reduce){.callbtn.red svg{animation:none}}
 .callbtn.off{background:var(--ink-2);cursor:default}
 .callbtn.off:hover,.callbtn.off:active{filter:none}
 .callbtn.off svg{fill:var(--mut)}
