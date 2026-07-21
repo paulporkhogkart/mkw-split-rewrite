@@ -42,7 +42,7 @@ runs `npm --prefix web run build` on each tagged deploy.
 
 - `API_BASE` = `VITE_API_BASE`, else `http://127.0.0.1:8787` in dev, else `https://api.thekartoff.com`.
 - Only hits token-free `PUBLIC_READS` (`/v1/territory`, `/v1/territory/timeline`, `/v1/version`,
-  `/v1/activity`, `/v1/roster`, and `/v1/players/:slug` — the public player summary, opened by a
+  `/v1/activity`, `/v1/roster`, `/v1/wr-jobs`, and `/v1/players/:slug` — the public player summary, opened by a
   single-segment regex exception in `pi/src/api/app.ts`, NOT the token-gated `/v1/players/:id/pbs`)
   + receive-only WS (`/v1/presence`, `/v1/activity/stream`).
 

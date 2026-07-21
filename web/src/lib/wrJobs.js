@@ -24,8 +24,9 @@ export function splitRows(jobs) {
   return { current, superseded };
 }
 
-/** Header-line counts. "stuck" = needs eyes (cooldown, parked, unprocessable) — a superset of
- *  the Pi's stuckJobs() in that it also counts unprocessable WRs, which can never be claimed.
+/** Header-line counts. "stuck" = needs eyes (cooldown, parked, unprocessable). This overlaps
+ *  but does NOT contain the Pi's stuckJobs(): an elapsed-cooldown high-attempt job counts as
+ *  queued here but still lists in wr-flags, and unprocessable WRs count here but not there.
  *  coverage = trailed current WRs / all current WRs (what `wr-flags` prints). */
 export function summary(jobs) {
   const n = (pred) => jobs.filter(pred).length;
@@ -48,9 +49,10 @@ export function relTime(s, now = Date.now()) {
   if (!d) return "—";
   const ms = d.getTime() - now;
   const abs = Math.abs(ms);
-  const [v, u] = abs >= 3600e3 ? [Math.round(abs / 3600e3), "h"]
-               : abs >= 60e3   ? [Math.round(abs / 60e3), "m"]
-               :                 [Math.round(abs / 1e3), "s"];
+  const [v, u] = abs >= 86400e3 ? [Math.round(abs / 86400e3), "d"]
+               : abs >= 3600e3  ? [Math.round(abs / 3600e3), "h"]
+               : abs >= 60e3    ? [Math.round(abs / 60e3), "m"]
+               :                  [Math.round(abs / 1e3), "s"];
   return ms >= 0 ? `in ${v} ${u}` : `${v} ${u} ago`;
 }
 

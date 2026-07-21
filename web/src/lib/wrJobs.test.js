@@ -64,7 +64,8 @@ describe("relTime / parseUtc", () => {
   it("renders past and future times relative to now", () => {
     expect(relTime("2026-07-21 11:57:00", now)).toBe("3 m ago");
     expect(relTime("2026-07-21 12:42:00", now)).toBe("in 42 m");
-    expect(relTime("2026-07-20 12:00:00", now)).toBe("24 h ago");
+    expect(relTime("2026-07-20 12:00:00", now)).toBe("1 d ago");
+    expect(relTime("2026-07-01 12:00:00", now)).toBe("20 d ago");
     expect(relTime(null, now)).toBe("—");
   });
 });

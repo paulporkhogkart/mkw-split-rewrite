@@ -43,7 +43,7 @@ npm run typecheck    # tsc --noEmit — NON-GATING (not in CI); keep source AND 
 - **Intentionally OPEN (no token) — do NOT "fix":** `/health`, WS `/v1/events` + `/v1/presence` +
   `/v1/activity/stream` (the on-Pi bot / public site subscribe token-less over localhost), and the
   `PUBLIC_READS` GET allowlist (`/v1/leaderboard`, `/v1/world-records`, `/v1/roster`,
-  `/v1/territory`, `/v1/territory/timeline`, `/v1/version`, `/v1/activity`) which also gets
+  `/v1/territory`, `/v1/territory/timeline`, `/v1/version`, `/v1/activity`, `/v1/wr-jobs`, `/v1/wr-trails`) which also gets
   permissive CORS for the cross-origin website. `PUBLIC_READS` matches the exact `c.req.path`.
 - `/v1/presence` sockets are receive-only; `?token=` only attributes inbound frames to a player.
 
