@@ -36,11 +36,11 @@ body{background:var(--ground);color:var(--paper);
 .callbtn.off:hover,.callbtn.off:active{filter:none}
 .callbtn.off svg{fill:var(--mut)}
 /* dialling: amber with an ink icon (white on amber fails contrast), inert,
-   icon recoils per DTMF digit via the .press pulse */
+   icon pulses bigger per DTMF digit via the .press class */
 .callbtn.dial{background:#f59e0b;cursor:default}
 .callbtn.dial:hover,.callbtn.dial:active{filter:none}
 .callbtn.dial svg{fill:var(--ground);transition:transform .05s}
-.callbtn.dial.press svg{transform:scale(.85) translateY(1.5px)}
+.callbtn.dial.press svg{transform:scale(1.16)}
 @media (prefers-reduced-motion: reduce){.callbtn.dial.press svg{transform:none}}
 .sub{font-size:12.5px;color:var(--mut);margin-top:16px;min-height:16px;transition:opacity .3s}
 .settings{display:flex;flex-direction:column;gap:12px}
