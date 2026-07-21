@@ -137,3 +137,12 @@ the internet.**
   DUMP button, mic gating, OBS wiring.
 - **Phase 4:** Stripe / YouTube.
 - **Before first stream (posture roadmap, spec §13):** site/API/bot move off the Pi.
+
+---
+
+## Closing the line
+
+To stop calls, yank the ATA's **power cord** (not the 605 phone cord). The page at
+`phone.thekartoff.com/` shows "phone unplugged" within ~30 seconds. Plugging the power
+back in reopens the line automatically. Note: `/test` remains token-gated for benching
+only; production calls ring on the subdomain root.
