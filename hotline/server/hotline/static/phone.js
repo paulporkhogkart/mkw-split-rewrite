@@ -85,6 +85,17 @@
     await new Promise((r) => setTimeout(r, total * 1000));
   }
 
+  // Browsers treat boot-time audio plumbing as autoplay: the context starts
+  // suspended, and the setSinkId-fallback <audio> element's play() rejects.
+  // Every sound on this page follows a gesture, so unlocking on any gesture
+  // (and before each play path) makes policy a non-issue. Both calls are
+  // no-ops once unlocked.
+  async function unlockAudio() {
+    if (ctx && ctx.state === "suspended") await ctx.resume().catch(() => {});
+    fallbackEl?.play().catch(() => {});
+  }
+  document.addEventListener("pointerdown", () => { unlockAudio(); }, { capture: true });
+
   function playSfx(name, { loop = false } = {}) {
     if (!ctx || !sfxBuf[name]) return null;
     const src = new AudioBufferSourceNode(ctx, { buffer: sfxBuf[name], loop });
@@ -165,7 +176,7 @@
   }
 
   micListen.addEventListener("click", async () => {
-    if (ctx?.state === "suspended") await ctx.resume().catch(() => {});
+    await unlockAudio();
     if (!meterSrc) await startMeter();
     if (!meterSrc) return;
     listening = !listening;
@@ -177,6 +188,7 @@
 
   spkTest.addEventListener("click", async () => {
     await ensureCtx();
+    await unlockAudio();
     const src = playSfx("dialtone");
     if (!src) return;
     spkTest.disabled = true;
@@ -284,6 +296,7 @@
     page = "dialling"; render();
     try {
       await ensureCtx();
+      await unlockAudio();
       await playDialSequence();   // theatre first: also the double-tap guard
       callStream = await navigator.mediaDevices.getUserMedia(micConstraints());
       const r = await fetch("/call/claim", { method: "POST" });
@@ -438,9 +451,5 @@
       st.onchange = () => { if (st.state !== "denied") location.reload(); };
     } catch {}   // permissions API absent: the call-button tap re-prompts
   }
-  // AudioContext may boot suspended (no user gesture yet): resume on first tap
-  document.addEventListener("pointerdown", () => {
-    if (ctx?.state === "suspended") ctx.resume().catch(() => {});
-  }, { capture: true });
   boot();
 })();
