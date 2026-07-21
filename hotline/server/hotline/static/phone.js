@@ -7,7 +7,7 @@
   const btn = $("callbtn"), caption = $("caption"),
         pill = $("pill"), pillText = $("pill-text"), dot = $("dot"),
         micSel = $("mic-sel"), spkSel = $("spk-sel"),
-        micTest = $("mic-test"), spkTest = $("spk-test"),
+        micListen = $("mic-listen"), spkTest = $("spk-test"),
         vol = $("vol"), micLevel = $("mic-level");
 
   const store = {
@@ -91,19 +91,24 @@
       ...(store.input ? { deviceId: { ideal: store.input } } : {}) } };
   }
 
-  // ---- mic test (meter only, mic held only while testing) ------------------
-  let testStream = null, meterRaf = 0;
-  micTest.addEventListener("click", async () => {
-    if (testStream) return stopMicTest();
-    await ensureCtx();
-    testStream = await navigator.mediaDevices.getUserMedia(micConstraints())
-      .catch(() => null);
-    if (!testStream) return;
-    micTest.textContent = "Stop"; micTest.classList.add("on");
-    await refreshDevices();   // labels appear once permission is granted
-    const src = ctx.createMediaStreamSource(testStream);
+  // ---- always-on level meter + mic monitor ("Listen") ----------------------
+  // The meter holds its own mic stream for the whole page life (separate from
+  // a call's stream, so it survives calls and mic swaps independently).
+  let meterStream = null, meterSrc = null, meterRaf = 0, listening = false;
+
+  async function startMeter() {
+    cancelAnimationFrame(meterRaf); meterRaf = 0;
+    micLevel.style.width = "0";
+    meterSrc?.disconnect(); meterSrc = null;
+    meterStream?.getTracks().forEach(t => t.stop()); meterStream = null;
+    if (!ctx) return;
+    try {
+      meterStream = await navigator.mediaDevices.getUserMedia(micConstraints());
+    } catch { return; }   // denied or no device: meter stays flat
+    meterSrc = ctx.createMediaStreamSource(meterStream);
     const an = new AnalyserNode(ctx, { fftSize: 512 });
-    src.connect(an);
+    meterSrc.connect(an);
+    if (listening) meterSrc.connect(gain);
     const buf = new Uint8Array(an.fftSize);
     (function tick() {
       an.getByteTimeDomainData(buf);
@@ -112,21 +117,28 @@
       micLevel.style.width = Math.min(100, (peak / 128) * 140) + "%";
       meterRaf = requestAnimationFrame(tick);
     })();
-  });
-  function stopMicTest() {
-    cancelAnimationFrame(meterRaf);
-    micLevel.style.width = "0";
-    testStream?.getTracks().forEach(t => t.stop());
-    testStream = null;
-    micTest.textContent = "Test"; micTest.classList.remove("on");
   }
+
+  micListen.addEventListener("click", async () => {
+    if (ctx?.state === "suspended") await ctx.resume().catch(() => {});
+    if (!meterSrc) await startMeter();
+    if (!meterSrc) return;
+    listening = !listening;
+    if (listening) meterSrc.connect(gain);
+    else meterSrc.disconnect(gain);
+    micListen.textContent = listening ? "Stop" : "Listen";
+    micListen.classList.toggle("on", listening);
+  });
 
   spkTest.addEventListener("click", async () => {
     await ensureCtx();
     playSfx("ringtone");
   });
 
-  micSel.addEventListener("change", () => { store.input = micSel.value; });
+  micSel.addEventListener("change", () => {
+    store.input = micSel.value;
+    startMeter();   // re-arm the meter (and monitor, if listening) on the new mic
+  });
   spkSel.addEventListener("change", () => setOutput(spkSel.value));
   vol.value = store.volume;
   vol.addEventListener("input", () => {
@@ -301,7 +313,26 @@
   }
 
   // ---- boot ----------------------------------------------------------------
-  refreshDevices();
-  render();
-  connectEvents();
+  // Ask for mic permission up front (Meet-style pre-join): device labels only
+  // exist after a grant, and the pickers must work BEFORE the first call.
+  // Returning visitors have a standing grant, so no prompt appears.
+  async function boot() {
+    render();
+    connectEvents();
+    try {
+      const devs = await navigator.mediaDevices.enumerateDevices();
+      if (!devs.some((d) => d.kind === "audioinput" && d.label)) {
+        const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+        s.getTracks().forEach((t) => t.stop());
+      }
+    } catch {}   // denied: pickers stay generic, call re-prompts later
+    await refreshDevices();
+    await ensureCtx().catch(() => {});
+    await startMeter();
+  }
+  // AudioContext may boot suspended (no user gesture yet): resume on first tap
+  document.addEventListener("pointerdown", () => {
+    if (ctx?.state === "suspended") ctx.resume().catch(() => {});
+  }, { capture: true });
+  boot();
 })();

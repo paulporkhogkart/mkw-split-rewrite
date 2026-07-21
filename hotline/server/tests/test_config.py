@@ -49,3 +49,14 @@ def test_allowed_origins_env_override():
     assert "https://b.example" in cfg.allowed_origins
     # localhost dev origins are still appended so echo-mode dev keeps working
     assert "http://127.0.0.1:9100" in cfg.allowed_origins
+
+
+def test_echo_ring_delay_default_zero():
+    cfg = Config.from_env({"HOTLINE_DATA_DIR": "/tmp/x"})
+    assert cfg.echo_ring_s == 0.0
+
+
+def test_echo_ring_delay_parsed():
+    cfg = Config.from_env({"HOTLINE_DATA_DIR": "/tmp/x",
+                           "HOTLINE_ECHO_RING_S": "3.5"})
+    assert cfg.echo_ring_s == 3.5

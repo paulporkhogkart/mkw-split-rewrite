@@ -57,15 +57,18 @@ lease/claim machinery never appears in copy (no countdowns, no "slots").
 The ringing pill's dot twitches in the real AU double-ring cadence (400/200/400/2000 ms),
 matching what the physical bell is doing.
 
-### 2.2 First call, zero setup
+### 2.2 First visit (amended 2026-07-22)
 
-Meet-style: pressing call on a fresh browser asks for mic permission right then and uses
-default devices. Settings exist for those who care. No setup gate.
+Meet-style pre-join: the page asks for mic permission **on load** (device labels only exist
+after a grant, and the pickers must be usable before the first call). Returning visitors
+have a standing grant, so no prompt appears. If denied, pickers stay generic and pressing
+call re-prompts. No setup gate on the call button.
 
-### 2.3 Settings behaviour
+### 2.3 Settings behaviour (amended 2026-07-22)
 
-- Mic is live **only** during a call or a mic test. Mic test holds the mic while the meter
-  runs (released on stop/navigate away); no self-monitor loopback in v1.
+- The mic level meter is **always on** while the page is open (its own stream, independent
+  of a call's). The mic button is **Listen**: toggles monitoring your mic through the
+  configured output at the configured volume (speaker feedback is the user's own lookout).
 - Speaker test plays `ringtone.wav` once through the chosen output at the chosen volume.
 - Output device via `AudioContext.setSinkId` (Chromium); fallback for browsers without it:
   route through a `MediaStreamAudioDestinationNode` + `<audio>` element `setSinkId`; if
@@ -188,6 +191,8 @@ today's unlisted posture).
 ## 6. Testing
 
 - pytest: everything in §5's test list; existing 58+ tests stay green.
+- Echo mode answers instantly by default; set `HOTLINE_ECHO_RING_S=4` to hold the fake
+  phone in ringing for 4 s so the ringing state and ringback are experiencable locally.
 - Manual: `HOTLINE_ECHO=1 python -m hotline` → `http://127.0.0.1:9100/` full loop (claim,
   ring, echo call, hangup, SFX, settings persistence, two-tab busy view) with zero
   telephony; then Pi deploy per runbook and a real ring from outside the LAN.

@@ -22,12 +22,23 @@ class PhoneUnplugged(Exception):
 
 
 class EchoPhoneLeg:
-    """Dev/e2e phone: answers instantly, loops audio back."""
+    """Dev/e2e phone: answers instantly (or after ring_delay_s, so the ringing
+    state and ringback are experiencable locally), loops audio back."""
 
-    def __init__(self, session_getter: Callable[[], CallSession]) -> None:
+    def __init__(self, session_getter: Callable[[], CallSession],
+                 ring_delay_s: float = 0.0) -> None:
         self._get = session_getter
+        self._ring_delay_s = ring_delay_s
 
     async def ring(self, caller_name: str) -> None:
+        if self._ring_delay_s > 0:
+            asyncio.create_task(self._answer_later())
+        else:
+            self._get().on_phone_answered()
+
+    async def _answer_later(self) -> None:
+        # on_phone_answered no-ops if the call ended while we "rang"
+        await asyncio.sleep(self._ring_delay_s)
         self._get().on_phone_answered()
 
     async def hangup(self) -> None:
@@ -210,7 +221,8 @@ class Controller:
         recorder = CallRecorder(self._recordings_root() / call_id)
         holder: list[CallSession] = []
         if self.cfg.echo_mode or self._factory is None:
-            phone: PhoneLeg = EchoPhoneLeg(lambda: holder[0])
+            phone: PhoneLeg = EchoPhoneLeg(lambda: holder[0],
+                                           self.cfg.echo_ring_s)
         else:
             phone = None  # type: ignore  # replaced below
         call = CallSession(call_id=call_id, caller_label=caller_label,

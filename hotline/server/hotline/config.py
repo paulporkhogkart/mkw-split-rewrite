@@ -23,6 +23,7 @@ class Config:
     ring_timeout_s: int
     call_backstop_s: int
     ata_poll_s: float
+    echo_ring_s: float
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str]) -> "Config":
@@ -58,4 +59,5 @@ class Config:
             ring_timeout_s=int(environ.get("HOTLINE_RING_TIMEOUT_S", "30")),
             call_backstop_s=int(environ.get("HOTLINE_CALL_BACKSTOP_S", "1800")),
             ata_poll_s=float(environ.get("HOTLINE_ATA_POLL_S", "15")),
+            echo_ring_s=float(environ.get("HOTLINE_ECHO_RING_S", "0")),
         )

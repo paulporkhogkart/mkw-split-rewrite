@@ -115,3 +115,16 @@ async def test_ws_drop_grace_releases_lease(tmp_path, unused_tcp_port):
     await asyncio.sleep(0.5)             # grace 0.05 + teardown
     assert ctl.lease.state == "idle"
     await teardown(bus, db, ctl)
+
+
+async def test_echo_ring_delay_rings_before_answering(tmp_path, unused_tcp_port):
+    _, bus, db, ctl = await make_ctl(tmp_path, unused_tcp_port,
+                                     HOTLINE_ECHO_RING_S="0.3")
+    lid = ctl.claim_line()
+    await attach(ctl, lid)
+    await ctl.ring_with_lease(lid)
+    assert ctl.lease.state == "ringing"     # not answered yet
+    await asyncio.sleep(0.6)
+    assert ctl.lease.state == "oncall"      # echo answered after the delay
+    await ctl.hangup_with_lease(lid)
+    await teardown(bus, db, ctl)
