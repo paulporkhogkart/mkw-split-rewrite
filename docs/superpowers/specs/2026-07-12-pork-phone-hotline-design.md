@@ -520,13 +520,22 @@ blocking sign-off): implementation language for the app and the daemon (Python v
 small compiled binary — the implementation plan decides).
 
 **Known-unverified (re-check first at build/bench):** the "CANCELED refunds points"
-sentence · 802 bell vs HT802 ring generator (Phase 0 #1; fallbacks §5.1) · OBS Video Delay
-(Async) max + audio sync-offset cap on current OBS (Phase 3) · WS-audio behaviour through
-tunnel + 5G under real caller networks (Phase 1; ladder §11) · coupler levels/hum/balance on
-the real line (Phase 0) · iD4 DI level match (Phase 0) · zone-based-firewall feature names
-on Paul's current UniFi Network version (config-time) · JK coupler AU pricing/availability
+sentence · OBS Video Delay
+(Async) max + audio sync-offset cap on current OBS (Phase 3) · coupler levels/hum/balance on
+the real line (Phase 0) · iD4 DI level match (Phase 0) · JK coupler AU pricing/availability
 (purchase-time) · YouTube Super Chat API terms (Phase 4) · current Twitch Community
 Guidelines wording (build).
+
+**Verified since sign-off:** 802 bell vs HT802 ring generator — RINGS (bench day
+2026-07-21: HT802V2, Ring Power 55 Vrms, 20 Hz; loudness wheel just below max) ·
+WS-audio through tunnel + cellular — HOLDS (Phase 1 internet ring 2026-07-21:
+clean two-way audio from a phone hotspot via phone.thekartoff.com, ~1 s
+end-to-end lag, no stutter; ladder stays at rung 1, TURN/VPS not needed) ·
+ARI externalMedia `encapsulation=audiosocket` — works on Asterisk 22.10.1
+(source-built on the Pi; no dialplan fallback) · UniFi firewall — Paul's console
+has both UIs; classic "traffic & firewall rules" (LAN In + explicit
+established/related return rule) used instead of zone migration, per §4's
+"equivalent inter-VLAN rules" clause.
 
 All shape-safe: none can invalidate the architecture, only tweak numbers, models, or which
 rung of a named ladder gets used.

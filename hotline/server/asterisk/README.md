@@ -13,6 +13,24 @@ Install: Asterisk is NOT in Raspberry Pi OS / Debian Bookworm's default repos
      `systemctl restart asterisk` below has nothing to restart.
 Record which route was taken + `asterisk -rx "core show version"` below at Task 15.
 
+## Task 15 verification record (2026-07-21)
+
+- **OS reality check:** the Pi runs Debian 13 (trixie), not Bookworm — asterisk has
+  no apt candidate there either. **Route 3 (source build) taken.**
+- **Version:** `Asterisk 22.10.1` (asterisk-22-current.tar.gz, LTS), built on the
+  Pi 3B itself: `install_prereq install`, `./configure --with-pjproject-bundled
+  --with-jansson-bundled`, menuselect-enabled res/chan/app_audiosocket, `make -j2`
+  (~30 min), `make install`. NO `make samples` — minimal explicit confs instead:
+  the four templates plus asterisk.conf (runuser/rungroup asterisk), modules.conf
+  (autoload), logger.conf. Runs as system user `asterisk` via a hand-written
+  systemd unit; hotline.service already carried After/Wants=asterisk.service.
+- **`module show like audiosocket`:** all three (res/chan/app) Running.
+- **externalMedia audiosocket verdict: WORKS.** 22.10.1 accepts
+  `encapsulation=audiosocket`; test-ring end-to-end with two-way audio and
+  per-leg recordings — the dialplan fallback below was NOT needed.
+- Registration: HT802V2 registered as `ata` (qualify RTT ~4 ms). Note the V2
+  needed Account Active ON + "Use Random SIP Port" unticked (bench-day fix).
+
 Copy each `*.tmpl` into /etc/asterisk/ (merge, don't clobber existing dialplan
 if any), substituting __ATA_IP__, __PI_LAN_IP__, __SIP_PASSWORD__,
 __ARI_PASSWORD__, __AUDIOSOCKET_PORT__ (default 9101). Then
