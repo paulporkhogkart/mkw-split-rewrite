@@ -196,3 +196,36 @@ describe('/v1/wr-jobs', () => {
       .not.toMatchObject({ alerted_at: null });
   });
 });
+
+describe('GET /v1/wr-jobs (public status read)', () => {
+  it('200s with no token and returns the status rows', async () => {
+    const { app } = setup();
+    const res = await app.request('/v1/wr-jobs');
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.jobs).toHaveLength(1);
+    expect(body.jobs[0]).toMatchObject({
+      wr_id: 10, course: 'Mario Circuit', cc: 150, status: 'queued',
+      attempts: 0, is_current: 1,
+    });
+  });
+
+  it('reflects a live claim as in_progress', async () => {
+    const { app, w1 } = setup();
+    await app.request('/v1/wr-jobs/claim', { method: 'POST', headers: w1 });
+    const body = await (await app.request('/v1/wr-jobs')).json() as any;
+    expect(body.jobs[0]).toMatchObject({ status: 'in_progress', lease_owner: 'machine-a', attempts: 1 });
+  });
+
+  it('serves permissive CORS for the cross-origin website', async () => {
+    const { app } = setup();
+    const res = await app.request('/v1/wr-jobs', { headers: { Origin: 'https://thekartoff.com' } });
+    expect(res.headers.get('access-control-allow-origin')).toBe('*');
+  });
+
+  it('leaves the worker POST routes token-gated', async () => {
+    const { app } = setup();
+    const res = await app.request('/v1/wr-jobs/claim', { method: 'POST', headers: { 'X-Worker-Id': 'machine-a' } });
+    expect(res.status).toBe(401);
+  });
+});

@@ -5,7 +5,7 @@ import type { Env } from './app';
 import type { Point } from '../db/types';
 import type { EventHub } from './events';
 import { requireToken } from './auth';
-import { claimJob, heartbeatJob, releaseJob, completeJob, failJob, stuckJobs, markJobAlerted, DEFAULT_LEASE_SEC } from '../db/wrJobs';
+import { claimJob, heartbeatJob, releaseJob, completeJob, failJob, stuckJobs, markJobAlerted, DEFAULT_LEASE_SEC, wrJobsStatus } from '../db/wrJobs';
 
 type ResultBody = { ok: true; points: Point[] } | { ok: false; error: string };
 
@@ -34,6 +34,10 @@ const isValidPoint = (p: unknown): p is Point =>
  *  requireTokenAny runs first, then requireToken here narrows it to header-only. */
 export function wrJobsRoutes(db: DatabaseSync, hub: EventHub): Hono<Env> {
   const r = new Hono<Env>();
+
+  // Public read-only status board for the hidden site page (/wr-jobs). Token-free via
+  // PUBLIC_READS (exact path — the worker POST routes below live on subpaths and stay gated).
+  r.get('/v1/wr-jobs', (c) => c.json({ jobs: wrJobsStatus(db) }));
 
   r.post('/v1/wr-jobs/claim', requireToken(db), (c) => {
     const worker = workerIdOf(c);
