@@ -27,3 +27,25 @@ def test_overrides_parse():
     })
     assert cfg.http_port == 9200 and cfg.delay_n == 2.5
     assert cfg.admin_token == "s3cret" and cfg.echo_mode is True
+
+
+def test_new_knobs_defaults():
+    cfg = Config.from_env({"HOTLINE_DATA_DIR": "/tmp/x"})
+    assert cfg.claim_window_s == 10.0
+    assert cfg.ws_grace_s == 15.0
+    assert cfg.ring_timeout_s == 30
+    assert cfg.call_backstop_s == 1800
+    assert cfg.ata_poll_s == 15.0
+    # dev origins derived from the http port; prod origin always present
+    assert "https://phone.thekartoff.com" in cfg.allowed_origins
+    assert "http://127.0.0.1:9100" in cfg.allowed_origins
+    assert "http://localhost:9100" in cfg.allowed_origins
+
+
+def test_allowed_origins_env_override():
+    cfg = Config.from_env({"HOTLINE_DATA_DIR": "/tmp/x",
+                           "HOTLINE_ALLOWED_ORIGINS": "https://a.example, https://b.example"})
+    assert "https://a.example" in cfg.allowed_origins
+    assert "https://b.example" in cfg.allowed_origins
+    # localhost dev origins are still appended so echo-mode dev keeps working
+    assert "http://127.0.0.1:9100" in cfg.allowed_origins
