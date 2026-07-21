@@ -118,10 +118,23 @@ async def _ws_audio(request: web.Request) -> web.WebSocketResponse:
         if not ws.closed:
             await ws.send_bytes(frame)
 
+    def kick() -> None:
+        # fires when this WS's lease is released out from under it (claim-window
+        # expiry, backstop, ring failure, or normal hangup) so a stale WS never
+        # keeps holding the one caller slot; bench (token, no-lease) connections
+        # are never kicked since they're never attached with a lease.
+        if not ws.closed:
+            asyncio.ensure_future(ws.close(code=4008, message=b"lease expired"))
+
     try:
-        await controller.attach_caller_ws(send, lease_id=lease if lease_ok else None)
+        await controller.attach_caller_ws(
+            send, lease_id=lease if lease_ok else None,
+            kick=kick if lease_ok else None)
     except RuntimeError:
         await ws.close(code=4009, message=b"caller slot busy")
+        return ws
+    except KeyError:
+        await ws.close(code=4008, message=b"lease expired")
         return ws
     try:
         async for msg in ws:

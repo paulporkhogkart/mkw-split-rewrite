@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
+import aiohttp
 from aiohttp.test_utils import TestClient, TestServer
 
 from hotline.config import Config
@@ -118,4 +119,48 @@ async def test_page_assets_served(tmp_path, unused_tcp_port):
     body = await (await client.get("/")).text()
     assert "pork phone" in body
     assert "—" not in body          # no em dashes in page copy, ever
+    await close_stack(client, ctl, bus, db)
+
+
+async def test_expired_lease_kicks_attached_ws_and_line_recovers(tmp_path, unused_tcp_port):
+    # a WS attached with a lease that then expires (claim window, no ring)
+    # must not brick the line: the server should force-close it, and a
+    # fresh caller must be able to claim + attach + ring right after.
+    _, bus, db, ctl, client = await make_stack(
+        tmp_path, unused_tcp_port, HOTLINE_CLAIM_WINDOW_S="0.05")
+    lease = (await (await client.post("/call/claim")).json())["lease_id"]
+    ws = await client.ws_connect(f"/ws/audio?lease={lease}")
+
+    msg = await asyncio.wait_for(ws.receive(), 5)
+    assert msg.type == aiohttp.WSMsgType.CLOSE
+    assert msg.data == 4008
+    assert ws.closed
+
+    lease2 = (await (await client.post("/call/claim")).json())["lease_id"]
+    ws2 = await client.ws_connect(f"/ws/audio?lease={lease2}")
+    resp = await client.post(f"/call/ring?lease={lease2}")
+    assert resp.status == 200
+    assert "call_id" in await resp.json()
+    await ws2.close()
+    await close_stack(client, ctl, bus, db)
+
+
+async def test_ring_rejected_when_attached_ws_bound_to_other_lease(tmp_path, unused_tcp_port):
+    # A attaches its caller WS with lease A. Lease A gets released out from
+    # under the WS (without the WS itself having been kicked yet -- e.g. a
+    # kick still in flight) and a second client claims the now-free line as
+    # lease B. Ringing with B must not hijack A's still-attached WS as the
+    # caller leg of B's call; it must 409.
+    _, bus, db, ctl, client = await make_stack(tmp_path, unused_tcp_port)
+    lease_a = (await (await client.post("/call/claim")).json())["lease_id"]
+    ws = await client.ws_connect(f"/ws/audio?lease={lease_a}")
+    await asyncio.sleep(0.05)   # let the attach land
+
+    ctl.lease.release(lease_a)   # simulate a release that raced ahead of the kick
+
+    lease_b = (await (await client.post("/call/claim")).json())["lease_id"]
+    resp = await client.post(f"/call/ring?lease={lease_b}")
+    assert resp.status == 409
+
+    await ws.close()
     await close_stack(client, ctl, bus, db)

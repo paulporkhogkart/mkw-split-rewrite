@@ -137,6 +137,9 @@
   // ---- call machine --------------------------------------------------------
   // page states: idle | calling (claim+ws setup) | ringing | oncall | busy | unplugged
   let page = "idle", lease = null, audioWs = null, callStream = null;
+  // nodes created fresh for the current call; disconnected + nulled in
+  // endCallCleanup so a second call never doubles up on the first's graph
+  let callSrc = null, callLp1 = null, callLp2 = null, callCap = null, callLp3 = null;
   let line = { state: "idle", since: 0 };   // latest broadcast
   let timerIv = 0, captionTimeout = 0;
 
@@ -186,6 +189,10 @@
     stopRingback();
     audioWs?.close(); audioWs = null;
     callStream?.getTracks().forEach(t => t.stop()); callStream = null;
+    if (callCap) callCap.port.onmessage = null;
+    callSrc?.disconnect(); callLp1?.disconnect(); callLp2?.disconnect();
+    callCap?.disconnect(); playNode?.disconnect(); callLp3?.disconnect();
+    callSrc = callLp1 = callLp2 = callCap = playNode = callLp3 = null;
   }
 
   async function startCall() {
@@ -199,22 +206,22 @@
       lease = (await r.json()).lease_id;
 
       // capture chain: mic -> 2x lowpass 3400 -> capture worklet -> ws
-      const src = ctx.createMediaStreamSource(callStream);
-      const lp1 = new BiquadFilterNode(ctx, { type: "lowpass", frequency: 3400 });
-      const lp2 = new BiquadFilterNode(ctx, { type: "lowpass", frequency: 3400 });
-      const cap = new AudioWorkletNode(ctx, "capture-worklet");
-      src.connect(lp1).connect(lp2).connect(cap);
+      callSrc = ctx.createMediaStreamSource(callStream);
+      callLp1 = new BiquadFilterNode(ctx, { type: "lowpass", frequency: 3400 });
+      callLp2 = new BiquadFilterNode(ctx, { type: "lowpass", frequency: 3400 });
+      callCap = new AudioWorkletNode(ctx, "capture-worklet");
+      callSrc.connect(callLp1).connect(callLp2).connect(callCap);
       playNode = new AudioWorkletNode(ctx, "playback-worklet",
                                       { outputChannelCount: [1] });
-      const lp3 = new BiquadFilterNode(ctx, { type: "lowpass", frequency: 3400 });
-      playNode.connect(lp3).connect(gain);
+      callLp3 = new BiquadFilterNode(ctx, { type: "lowpass", frequency: 3400 });
+      playNode.connect(callLp3).connect(gain);
 
       const proto = location.protocol === "https:" ? "wss" : "ws";
       audioWs = new WebSocket(
         `${proto}://${location.host}/ws/audio?lease=${encodeURIComponent(lease)}`);
       audioWs.binaryType = "arraybuffer";
       audioWs.onmessage = (e) => playNode.port.postMessage(e.data);
-      cap.port.onmessage = (e) => {
+      callCap.port.onmessage = (e) => {
         if (audioWs && audioWs.readyState === 1) audioWs.send(e.data);
       };
       audioWs.onclose = () => { if (page === "ringing" || page === "oncall") hangup(false); };
@@ -229,7 +236,13 @@
       ringLoop = playSfx("ringing", { loop: true });
       render();
     } catch {
+      // a lease may already be ours here (claim succeeded, then worklet/WS
+      // setup blew up) -- release it now instead of leaving it held until
+      // the claim window times it out from under us
+      const l = lease;
       endCallCleanup();
+      if (l) fetch(`/call/hangup?lease=${encodeURIComponent(l)}`, { method: "POST" })
+        .catch(() => {});
       toIdle();
     }
   }

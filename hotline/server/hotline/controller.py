@@ -11,7 +11,7 @@ from .call import CallSession, PhoneLeg
 from .config import Config
 from .db import Db
 from .events import EventBus
-from .lease import HELD, ONCALL, RINGING, LineBusy, LineLease
+from .lease import HELD, ONCALL, LineBusy, LineLease
 from .recording import CallRecorder, free_space_gib, sweep_retention
 
 MIN_FREE_GIB = 1.0
@@ -48,6 +48,8 @@ class Controller:
         self._audiosocket = AudioSocketServer(cfg.audiosocket_port,
                                               self._on_audiosocket_session)
         self._caller_send: Optional[Callable[[bytes], Awaitable[None]]] = None
+        self._caller_lease_id: Optional[str] = None
+        self._caller_kick: Optional[Callable[[], object]] = None
         self._call: Optional[CallSession] = None
         self._call_phone_leg: Optional[PhoneLeg] = None
         self._phone_sess: Optional[AudioSocketSession] = None
@@ -80,17 +82,22 @@ class Controller:
     # -- caller WS -----------------------------------------------------------
     async def attach_caller_ws(
             self, send: Callable[[bytes], Awaitable[None]],
-            lease_id: Optional[str] = None) -> None:
+            lease_id: Optional[str] = None,
+            kick: Optional[Callable[[], object]] = None) -> None:
         if lease_id is not None and not self.lease.valid(lease_id):
             raise KeyError("stale lease")
         if self._caller_send is not None:
             raise RuntimeError("caller slot busy")
         self._caller_send = send
+        self._caller_lease_id = lease_id
+        self._caller_kick = kick
         if self._call is not None:
             self._call.on_caller_recovered()
 
     def detach_caller_ws(self) -> None:
         self._caller_send = None
+        self._caller_lease_id = None
+        self._caller_kick = None
         if self._call:
             self._call.on_caller_lost()
 
@@ -125,13 +132,17 @@ class Controller:
             raise KeyError("stale lease")
         if self.lease.state != HELD:
             raise RuntimeError("lease not in held state")
+        if self._caller_lease_id != lease_id:
+            # closes the hijack window even if a stale-WS kick is in flight:
+            # a caller WS bound to a different (or no) lease can't ring this one
+            raise RuntimeError("caller not attached with this lease")
         self.lease.mark_ringing(lease_id)
         try:
             call_id = await self.test_ring(self.cfg.call_backstop_s,
                                            caller_label="web",
                                            lease_id=lease_id)
         except Exception:
-            self.lease.release(lease_id)
+            self._release_lease(lease_id)
             raise
         self._call_lease_id = lease_id
         return call_id
@@ -143,7 +154,7 @@ class Controller:
             outcome = "completed" if self.lease.state == ONCALL else "dropped"
             await self._call.end(outcome)
             return True
-        self.lease.release(lease_id)   # held/ringing with no live call
+        self._release_lease(lease_id)   # held/ringing with no live call
         return False
 
     def _on_lease_expired(self, lease_id: str) -> None:
@@ -153,7 +164,25 @@ class Controller:
         if self._call is not None and self._call_lease_id == lease_id:
             await self._call.end("dropped")   # reap releases the lease
         else:
-            self.lease.release(lease_id)
+            self._release_lease(lease_id)
+
+    def _release_lease(self, lease_id: Optional[str]) -> None:
+        """Release the lease AND kick the caller WS if it's still attached
+        with this exact lease -- every release path funnels through here so
+        a stale-lease WS never keeps holding the one caller slot."""
+        self.lease.release(lease_id)
+        if (lease_id is not None and self._caller_lease_id == lease_id
+                and self._caller_send is not None and self._caller_kick is not None):
+            asyncio.create_task(self._run_kick(self._caller_kick))
+
+    @staticmethod
+    async def _run_kick(kick: Callable[[], object]) -> None:
+        try:
+            result = kick()
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception:
+            pass   # fire-and-forget: a kick failure must never break release
 
     def _safe_mark_oncall(self, lease_id: str) -> None:
         try:
@@ -220,7 +249,7 @@ class Controller:
             self._call = None
             self._call_phone_leg = None
             if self._call_lease_id is not None:
-                self.lease.release(self._call_lease_id)
+                self._release_lease(self._call_lease_id)
                 self._call_lease_id = None
         if self._phone_sess:
             await self._phone_sess.terminate()
