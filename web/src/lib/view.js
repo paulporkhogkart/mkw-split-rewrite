@@ -1,5 +1,5 @@
 // Views selected by the URL path (History API — no more #/ hash). Unknown paths fall back
-// to "live". `heat` and `version` are URL-only. `/players` and `/players/:slug` share the
+// to "live". `heat`, `version`, and `wr-jobs` are URL-only. `/players` and `/players/:slug` share the
 // "players" view; the slug (via playerSlugFromPath) selects index vs profile. Likewise
 // `/tracks` and `/tracks/:slug` share the "courses" view; the slug (via courseSlugFromPath)
 // selects index vs per-track profile.
@@ -8,6 +8,7 @@ export function viewFromPath(pathname) {
   if (p === "turf") return "turf";
   if (p === "heat") return "heat";
   if (p === "version") return "version";
+  if (p === "wr-jobs") return "wr-jobs";
   if (p === "players" || p.startsWith("players/")) return "players";
   if (p === "tracks" || p.startsWith("tracks/")) return "courses";
   return "live";

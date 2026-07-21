@@ -17,6 +17,10 @@ describe("viewFromPath", () => {
   it("returns version for the unlisted /version path", () => {
     expect(viewFromPath("/version")).toBe("version");
   });
+  it("maps /wr-jobs to the wr-jobs view (URL-only, like /version)", () => {
+    expect(viewFromPath("/wr-jobs")).toBe("wr-jobs");
+    expect(viewFromPath("/wr-jobs/")).toBe("wr-jobs");
+  });
 });
 
 describe("players routing", () => {
