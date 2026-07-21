@@ -263,3 +263,64 @@ export function reviveStaleEngineJobs(db: DatabaseSync): number {
   ).run();
   return Number(info.changes);
 }
+
+export type WrJobStatus =
+  'done' | 'in_progress' | 'parked' | 'unprocessable' | 'not_queued' | 'cooldown' | 'queued';
+
+export type WrJobStatusRow = {
+  wr_id: number; course: string; course_slug: string; cc: number;
+  holder_name: string | null; record_str: string; is_current: number;
+  status: WrJobStatus;
+  attempts: number; last_error: string | null; updated_at: string | null;
+  lease_owner: string | null;        // only while in_progress — a lapsed lease's owner is noise
+  next_eligible_at: string | null;   // only while in cooldown
+  trail_points: number | null;       // only when done
+};
+
+/** Read-only status of every WR trail job, for the hidden /wr-jobs site page. One row per
+ *  current non-removed WR, plus non-current WRs that have a job row or a trail (processed
+ *  history stays visible; untouched history stays out).
+ *
+ *  The status CASE mirrors claimJob's WHERE clause term for term (live lease, terminal
+ *  time_mismatch, FREE_ATTEMPTS + the 1h/6h/24h cooldown tiers off updated_at) so this page
+ *  can never disagree with the queue — if you change one, change both. `not_queued` is the
+ *  transient gap between a WR being scraped and its job being enqueued/boot-seeded. */
+export function wrJobsStatus(db: DatabaseSync): WrJobStatusRow[] {
+  return db.prepare(
+    `SELECT s.wr_id, s.course, s.course_slug, s.cc, s.holder_name, s.record_str, s.is_current,
+            s.status, s.attempts, s.last_error, s.updated_at,
+            CASE WHEN s.status = 'in_progress' THEN s.lease_owner END AS lease_owner,
+            CASE WHEN s.status = 'cooldown'
+                 THEN datetime(s.updated_at, CASE WHEN s.attempts >= 12 THEN '+24 hours'
+                                                  WHEN s.attempts >= 8  THEN '+6 hours'
+                                                  ELSE '+1 hour' END)
+            END AS next_eligible_at,
+            s.trail_points
+     FROM (
+       SELECT w.id AS wr_id, c.display_name AS course, c.slug AS course_slug, w.cc,
+              w.holder_name, w.record_str, w.is_current,
+              COALESCE(j.attempts, 0) AS attempts, j.last_error, j.updated_at,
+              j.lease_owner, t.n AS trail_points,
+              CASE
+                WHEN t.wr_id IS NOT NULL THEN 'done'
+                WHEN j.lease_until IS NOT NULL AND j.lease_until >= datetime('now') THEN 'in_progress'
+                WHEN j.last_error LIKE 'time_mismatch%' THEN 'parked'
+                WHEN w.video_url IS NULL OR w.character_slug IS NULL THEN 'unprocessable'
+                WHEN j.wr_id IS NULL THEN 'not_queued'
+                WHEN j.attempts >= ?
+                     AND j.updated_at > datetime('now', CASE WHEN j.attempts >= 12 THEN '-24 hours'
+                                                             WHEN j.attempts >= 8  THEN '-6 hours'
+                                                             ELSE '-1 hour' END)
+                  THEN 'cooldown'
+                ELSE 'queued'
+              END AS status
+       FROM world_records w
+       JOIN courses c ON c.id = w.course_id
+       LEFT JOIN wr_jobs j ON j.wr_id = w.id
+       LEFT JOIN wr_trails t ON t.wr_id = w.id
+       WHERE w.removed_at IS NULL
+         AND (w.is_current = 1 OR j.wr_id IS NOT NULL OR t.wr_id IS NOT NULL)
+     ) s
+     ORDER BY s.is_current DESC, s.course ASC, s.cc ASC`
+  ).all(FREE_ATTEMPTS) as WrJobStatusRow[];
+}

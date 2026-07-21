@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { openDb, applySchema } from './connect';
 import { enqueueJob, seedWrJobs, claimJob, FREE_ATTEMPTS,
   heartbeatJob, releaseJob, completeJob, failJob, stuckJobs,
-  sweepStuckJobAlerts, markJobAlerted, reviveStaleEngineJobs } from './wrJobs';
+  sweepStuckJobAlerts, markJobAlerted, reviveStaleEngineJobs, wrJobsStatus } from './wrJobs';
 import { insertWrTrail, getWrTrail } from './wrTrails';
 import { EventHub } from '../api/events';
 import type { ServerEvent } from './types';
@@ -330,5 +330,124 @@ describe('reviveStaleEngineJobs', () => {
     expect(reviveStaleEngineJobs(db)).toBe(0);
     expect(db.prepare('SELECT attempts FROM wr_jobs WHERE wr_id=10').get())
       .toMatchObject({ attempts: 1 });
+  });
+});
+
+describe('wrJobsStatus', () => {
+  const rowOf = (db: any, wrId: number) =>
+    wrJobsStatus(db).find((r) => r.wr_id === wrId);
+
+  it('reports a freshly seeded job as queued', () => {
+    const db = setup(); addWr(db, 10); seedWrJobs(db);
+    expect(rowOf(db, 10)).toMatchObject({
+      wr_id: 10, course: 'Mario Circuit', course_slug: 'mario_circuit', cc: 150,
+      holder_name: 'JaK', record_str: '1:02.934', is_current: 1,
+      status: 'queued', attempts: 0, last_error: null, lease_owner: null,
+      next_eligible_at: null, trail_points: null,
+    });
+  });
+
+  it('reports a live lease as in_progress with the worker id', () => {
+    const db = setup(); addWr(db, 10); seedWrJobs(db);
+    claimJob(db, 'w1');
+    expect(rowOf(db, 10)).toMatchObject({ status: 'in_progress', lease_owner: 'w1', attempts: 1 });
+  });
+
+  it('reports a lapsed lease as queued again, without leaking the stale owner', () => {
+    const db = setup(); addWr(db, 10); seedWrJobs(db);
+    claimJob(db, 'w1');
+    db.prepare("UPDATE wr_jobs SET lease_until = datetime('now','-1 minute') WHERE wr_id=10").run();
+    expect(rowOf(db, 10)).toMatchObject({ status: 'queued', lease_owner: null, attempts: 1 });
+  });
+
+  it('reports a completed job as done with the trail point count', () => {
+    const db = setup(); addWr(db, 10); seedWrJobs(db);
+    claimJob(db, 'w1');
+    completeJob(db, 10, 'w1', [[0, 1, 2, 0.9, 1], [100, 3, 4, 0.9, 1]]);
+    expect(rowOf(db, 10)).toMatchObject({ status: 'done', trail_points: 2, lease_owner: null });
+  });
+
+  it('keeps a failed-but-under-cap job queued, with the error visible', () => {
+    const db = setup(); addWr(db, 10); seedWrJobs(db);
+    claimJob(db, 'w1');
+    failJob(db, 10, 'w1', 'download_failed: 403');
+    expect(rowOf(db, 10)).toMatchObject({ status: 'queued', attempts: 1, last_error: 'download_failed: 403' });
+  });
+
+  // Cooldown tiers mirror claimJob: 1h at FREE_ATTEMPTS, 6h at 8, 24h at 12 — off updated_at.
+  it.each([
+    [FREE_ATTEMPTS, '+1 hour'],
+    [8, '+6 hours'],
+    [12, '+24 hours'],
+  ])('reports attempts=%i inside its window as cooldown with next_eligible_at %s', (attempts, win) => {
+    const db = setup(); addWr(db, 10); seedWrJobs(db);
+    db.prepare("UPDATE wr_jobs SET attempts=?, updated_at=datetime('now'), last_error='engine_failed x' WHERE wr_id=10")
+      .run(attempts);
+    const row = rowOf(db, 10)!;
+    expect(row.status).toBe('cooldown');
+    const expected = db.prepare(
+      'SELECT datetime(updated_at, ?) AS t FROM wr_jobs WHERE wr_id=10').get(win) as any;
+    expect(row.next_eligible_at).toBe(expected.t);
+  });
+
+  it('reports a cooled-down job as queued once the window has elapsed (matches claimJob)', () => {
+    const db = setup(); addWr(db, 10); seedWrJobs(db);
+    db.prepare("UPDATE wr_jobs SET attempts=?, updated_at=datetime('now','-61 minutes') WHERE wr_id=10")
+      .run(FREE_ATTEMPTS);
+    expect(rowOf(db, 10)).toMatchObject({ status: 'queued', next_eligible_at: null });
+    expect(claimJob(db, 'w1')).not.toBeNull();   // the page and the queue agree
+  });
+
+  it('reports time_mismatch as parked, even past the attempt cap', () => {
+    const db = setup(); addWr(db, 10); seedWrJobs(db);
+    db.prepare("UPDATE wr_jobs SET attempts=6, updated_at=datetime('now'), last_error='time_mismatch got 1:03.001' WHERE wr_id=10").run();
+    expect(rowOf(db, 10)).toMatchObject({ status: 'parked' });
+  });
+
+  it('reports a current WR with no video as unprocessable (no job row exists)', () => {
+    const db = setup(); addWr(db, 10, { video: null });
+    seedWrJobs(db);   // seeds nothing — no video
+    expect(rowOf(db, 10)).toMatchObject({ status: 'unprocessable', attempts: 0 });
+  });
+
+  it('reports an unresolved character_slug as unprocessable even with a job row', () => {
+    const db = setup(); addWr(db, 10); seedWrJobs(db);
+    db.prepare('UPDATE world_records SET character_slug=NULL WHERE id=10').run();
+    expect(rowOf(db, 10)).toMatchObject({ status: 'unprocessable' });
+  });
+
+  it('reports a current videoed WR with no job row yet as not_queued (pre-seed transient)', () => {
+    const db = setup(); addWr(db, 10);   // no seedWrJobs call
+    expect(rowOf(db, 10)).toMatchObject({ status: 'not_queued', attempts: 0 });
+  });
+
+  it('includes a superseded WR that has a job row', () => {
+    const db = setup(); addWr(db, 11, { current: 0 });
+    enqueueJob(db, 11);
+    expect(rowOf(db, 11)).toMatchObject({ is_current: 0, status: 'queued' });
+  });
+
+  it('excludes a superseded WR with neither job nor trail', () => {
+    const db = setup(); addWr(db, 11, { current: 0 });
+    expect(rowOf(db, 11)).toBeUndefined();
+  });
+
+  it('excludes soft-removed WRs entirely', () => {
+    const db = setup(); addWr(db, 10); seedWrJobs(db);
+    db.prepare("UPDATE world_records SET removed_at=datetime('now') WHERE id=10").run();
+    expect(rowOf(db, 10)).toBeUndefined();
+  });
+
+  it('orders current WRs before superseded, by course name within each', () => {
+    const db = setup();
+    db.exec("INSERT INTO courses(id,slug,display_name) VALUES (2,'acorn_heights','Acorn Heights')");
+    addWr(db, 10);                                 // current, Mario Circuit
+    db.prepare(`INSERT INTO world_records(id, course_id, cc, holder_name, record_ms, record_str,
+                  achieved_at, video_url, character_slug, is_current)
+                VALUES (11,2,150,'JaK',60000,'1:00.000','2026-04-06T00:00:00.000Z',
+                        'https://youtu.be/y','toadette',1)`).run();   // current, Acorn Heights
+    addWr(db, 12, { current: 0 }); enqueueJob(db, 12);               // superseded, Mario Circuit
+    seedWrJobs(db);
+    expect(wrJobsStatus(db).map((r) => r.wr_id)).toEqual([11, 10, 12]);
   });
 });
