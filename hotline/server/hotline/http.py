@@ -188,8 +188,19 @@ async def _ws_events(request: web.Request) -> web.WebSocketResponse:
     return ws
 
 
+@web.middleware
+async def _no_cache_static(request: web.Request, handler):
+    """Cloudflare edge-caches extensionful static for 4h when the origin is
+    silent, which serves stale page JS against a freshly deployed server.
+    no-cache forces revalidation (aiohttp's ETag/Last-Modified make it a 304)."""
+    resp = await handler(request)
+    if request.path == "/" or request.path.startswith("/static/"):
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
 def make_app(cfg: Config, controller=None) -> web.Application:
-    app = web.Application()
+    app = web.Application(middlewares=[_no_cache_static])
     app[CFG_KEY] = cfg
     app[CONTROLLER_KEY] = controller
     app[BUS_KEY] = controller.bus if controller else None
