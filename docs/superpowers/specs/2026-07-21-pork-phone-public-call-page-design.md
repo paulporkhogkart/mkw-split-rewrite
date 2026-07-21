@@ -44,12 +44,19 @@ No decoration beyond the controls. Reference: `states-locked.html`.
 | State | Pill | Button | Caption | Sound |
 |---|---|---|---|---|
 | Idle (line free) | grey dot · `idle` | green, handset | `press to call` | — |
-| Ringing (you) | grey dot (twitching in bell cadence) · `ringing…` | red, handset rotated 135° | `hang up` | `ringing.wav` looped |
+| Dialling (theatre, ~1.1s) | grey dot · `dialling…` | amber `#f59e0b`, ink icon, inert; icon recoils per digit | `dialling…` | 8 random DTMF digits, rapid |
+| Ringing (you) | grey dot (twitching in bell cadence) · `ringing…` | red, handset rotated 135° | `hang up` | `ringback.wav` looped |
 | On call (you) | green dot · `on call · m:ss` | red | `hang up` | live call audio |
-| Line busy (someone else) | grey dot · `line busy` | disabled | `wait for their call to end` | optional quiet tick on change |
-| No answer (rang out, 30s) | grey dot · `idle` | green | `no answer`, fades back to `press to call` after ~4s | `hangup.wav` once |
-| Call ended | grey dot · `idle` | green | `press to call` | `hangup.wav` once |
+| Line busy (someone else) | grey dot · `line busy` | disabled | `wait for their call to end` | — (claim-race loser also gets one `busy.wav`) |
+| Ending: you hung up | grey dot · `idle` | disabled for the sound's length | `you hung up` | `clunk.wav` (real handset recording) |
+| Ending: far side hung up | grey dot · `idle` | disabled for the sound's length | `you were hung up on` | `busy.wav` |
+| Ending: rang out (30s) | grey dot · `idle` | disabled for the sound's length | `no answer` | `busy.wav` |
 | Phone unplugged | grey dot · `phone unplugged` | disabled | `not taking calls right now` | — |
+
+The dialling phase is pure audio theatre before the claim happens (it doubles as the
+accidental-double-tap guard); the claim/ring fire after it, so a busy line surfaces as a
+busy tone right after "dialling", like a real phone. The ending lockout lasts exactly as
+long as its sound, then the page resyncs to the live line state.
 
 Copy rules: captions and statuses lowercase; page copy never uses em dashes; the internal
 lease/claim machinery never appears in copy (no countdowns, no "slots").
@@ -89,11 +96,13 @@ dropped after Paul's audition, 2026-07-22):
 | File | What it is | Use |
 |---|---|---|
 | `ringback.wav` | 413 + 438 Hz (25 Hz beat = the purr), 400/200/400/2000 ms, the cadence the 802's bell physically does | loop while ringing, stop on answer/timeout/hangup |
-| `busy.wav` | AU busy tone, 425 Hz 375/375 ms, three beeps | once on any call end (incl. no answer) |
-| `dialtone.wav` | AU dial tone, 413 + 438 Hz continuous, 2 s | speaker test sound |
+| `busy.wav` | AU busy tone, 425 Hz 375/375 ms, three beeps | far-side call end (hung up on, no answer) + claim-race busy |
+| `dialtone.wav` | AU dial tone, 413 + 438 Hz continuous, 2 s | speaker test sound (button disables + reads `Playing…` while it runs) |
+| `clunk.wav` | Paul's real handset-hangup recording (2026-07-22), trimmed to 0.35 s, normalized to ~30% FS | user-initiated hangup |
 
-All SFX play through the chosen output at the chosen volume via WebAudio (decoded once,
-not `<audio>` tags).
+DTMF dialling tones are synthesized live with WebAudio oscillators (standard pairs), not
+wav files. All SFX play through the chosen output at the chosen volume via WebAudio
+(decoded once, not `<audio>` tags).
 
 ## 4. Server design
 

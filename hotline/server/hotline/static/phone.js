@@ -43,10 +43,46 @@
       if (store.output && fallbackEl.setSinkId)
         await fallbackEl.setSinkId(store.output).catch(() => {});
     }
-    for (const name of ["ringback", "busy", "dialtone"]) {
+    for (const name of ["ringback", "busy", "dialtone", "clunk"]) {
       const resp = await fetch(`/static/sfx/${name}.wav`);
       sfxBuf[name] = await ctx.decodeAudioData(await resp.arrayBuffer());
     }
+  }
+
+  // ---- DTMF dialling theatre ----------------------------------------------
+  // A rapid random number dialled before the line is actually claimed: pure
+  // audio set dressing. Standard DTMF pairs, scheduled sample-accurately; the
+  // button icon recoils once per digit in step with the tones.
+  const DTMF = { 1: [697, 1209], 2: [697, 1336], 3: [697, 1477],
+                 4: [770, 1209], 5: [770, 1336], 6: [770, 1477],
+                 7: [852, 1209], 8: [852, 1336], 9: [852, 1477],
+                 0: [941, 1336] };
+  function dtmfTone(digit, at, dur) {
+    for (const f of DTMF[digit]) {
+      const o = new OscillatorNode(ctx, { frequency: f });
+      const g = new GainNode(ctx, { gain: 0 });
+      o.connect(g).connect(gain);
+      g.gain.setValueAtTime(0, at);
+      g.gain.linearRampToValueAtTime(0.12, at + 0.005);
+      g.gain.setValueAtTime(0.12, at + dur - 0.005);
+      g.gain.linearRampToValueAtTime(0, at + dur);
+      o.start(at); o.stop(at + dur + 0.01);
+    }
+  }
+  async function playDialSequence() {
+    const digits = Array.from({ length: 8 }, () => (Math.random() * 10) | 0);
+    const TONE = 0.07, GAP = 0.055;
+    const t0 = ctx.currentTime + 0.08;
+    digits.forEach((d, i) => {
+      const at = t0 + i * (TONE + GAP);
+      dtmfTone(d, at, TONE);
+      setTimeout(() => {
+        btn.classList.add("press");
+        setTimeout(() => btn.classList.remove("press"), 65);
+      }, Math.max(0, (at - ctx.currentTime) * 1000));
+    });
+    const total = 0.08 + digits.length * (TONE + GAP) + 0.15;
+    await new Promise((r) => setTimeout(r, total * 1000));
   }
 
   function playSfx(name, { loop = false } = {}) {
@@ -141,7 +177,14 @@
 
   spkTest.addEventListener("click", async () => {
     await ensureCtx();
-    playSfx("dialtone");
+    const src = playSfx("dialtone");
+    if (!src) return;
+    spkTest.disabled = true;
+    spkTest.textContent = "Playing…";
+    src.onended = () => {
+      spkTest.textContent = "Test";
+      if (micAccess === "granted") spkTest.disabled = false;
+    };
   });
 
   micSel.addEventListener("change", () => {
@@ -184,7 +227,10 @@
   function render() {
     if (micAccess !== "granted") return applyMicGate();
     clearInterval(timerIv); timerIv = 0;
-    if (page === "ringing") {
+    if (page === "dialling") {
+      pill.hidden = false; dot.className = "dot"; pillText.textContent = "dialling…";
+      btn.className = "callbtn dial"; caption.textContent = "dialling…";
+    } else if (page === "ringing") {
       pill.hidden = false; dot.className = "dot cadence"; pillText.textContent = "ringing…";
       btn.className = "callbtn red"; caption.textContent = "hang up";
     } else if (page === "oncall") {
@@ -235,13 +281,17 @@
   }
 
   async function startCall() {
-    page = "calling"; btn.className = "callbtn off"; caption.textContent = "";
+    page = "dialling"; render();
     try {
       await ensureCtx();
+      await playDialSequence();   // theatre first: also the double-tap guard
       callStream = await navigator.mediaDevices.getUserMedia(micConstraints());
-      await refreshDevices();
       const r = await fetch("/call/claim", { method: "POST" });
-      if (!r.ok) { endCallCleanup(); lease = null; return syncFromLine(); }
+      if (!r.ok) {
+        endCallCleanup(); lease = null; page = "idle";
+        playSfx("busy");   // dialled into an engaged line
+        return syncFromLine();
+      }
       lease = (await r.json()).lease_id;
 
       // capture chain: mic -> 2x lowpass 3400 -> capture worklet -> ws
@@ -263,14 +313,17 @@
       callCap.port.onmessage = (e) => {
         if (audioWs && audioWs.readyState === 1) audioWs.send(e.data);
       };
-      audioWs.onclose = () => { if (page === "ringing" || page === "oncall") hangup(false); };
+      audioWs.onclose = () => {
+        if (page === "ringing" || page === "oncall")
+          enterEnding("you were hung up on", "busy");
+      };
 
       await new Promise((res, rej) => {
         audioWs.onopen = res; audioWs.onerror = rej;
       });
       const rr = await fetch(`/call/ring?lease=${encodeURIComponent(lease)}`,
                              { method: "POST" });
-      if (!rr.ok) { endCallCleanup(); lease = null; return syncFromLine(); }
+      if (!rr.ok) { endCallCleanup(); lease = null; page = "idle"; return syncFromLine(); }
       page = "ringing";
       ringLoop = playSfx("ringback", { loop: true });
       render();
@@ -286,48 +339,65 @@
     }
   }
 
-  async function hangup(tellServer = true) {
-    const l = lease;
+  // End-of-call lockout: the outcome caption holds and the button stays dead
+  // for exactly as long as the end sound plays, then the page resyncs.
+  // "you hung up" rides the physical handset clunk; everything ended from the
+  // far side ("you were hung up on", "no answer") rides the AU busy tone.
+  function enterEnding(text, sfxName) {
+    if (page === "ending") return;
     endCallCleanup();
-    if (tellServer && l)
-      fetch(`/call/hangup?lease=${encodeURIComponent(l)}`, { method: "POST" })
-        .catch(() => {});
-    playSfx("busy");
-    toIdle(page === "ringing" ? undefined : undefined);
-    // toIdle's caption comes from line events; explicit outcomes handled in onLine
+    lease = null;
+    page = "ending";
+    clearTimeout(captionTimeout); captionTimeout = 0;
+    const src = playSfx(sfxName);
+    const ms = (sfxBuf[sfxName]?.duration ?? 1.5) * 1000 + 150;
+    pill.hidden = false; dot.className = "dot"; pillText.textContent = "idle";
+    btn.className = "callbtn off";
+    caption.textContent = text;
+    setTimeout(() => {
+      if (page !== "ending") return;
+      page = "idle";
+      syncFromLine();   // catches line changes that happened during the lockout
+    }, src ? ms : 300);
+  }
+
+  function hangup() {   // user-initiated: the physical clunk
+    const l = lease;
+    if (l) fetch(`/call/hangup?lease=${encodeURIComponent(l)}`, { method: "POST" })
+      .catch(() => {});
+    enterEnding("you hung up", "clunk");
   }
 
   btn.addEventListener("click", () => {
     if (micAccess !== "granted") { boot(); return; }   // re-prompt on tap
     if (page === "idle") startCall();
-    else if (page === "ringing" || page === "oncall") hangup(true);
-    // busy / unplugged / calling: inert
+    else if (page === "ringing" || page === "oncall") hangup();
+    // dialling / ending / busy / unplugged: inert
   });
 
   // ---- events feed ---------------------------------------------------------
   function syncFromLine() {
     if (lease) return;   // my own flow drives the UI while I hold the lease
+    if (page === "ending" || page === "dialling") return;   // lockout/theatre first
     if (line.state === "idle") { page = "idle"; render(); }
     else if (line.state === "unplugged") { page = "unplugged"; render(); }
     else { page = "busy"; render(); }
   }
 
   function onLine(ev) {
-    const prev = line; line = ev;
+    line = ev;
     if (lease) {
       // my lease: server-side transitions I care about
       if (ev.state === "oncall" && page === "ringing") {
         stopRingback(); oncallOffset = Math.max(0, (Date.now() / 1000) - ev.since);
         page = "oncall"; render();
       } else if (ev.state === "idle") {
-        const wasRinging = page === "ringing";
-        endCallCleanup(); playSfx("busy");
-        toIdle(wasRinging ? "no answer" : undefined);
+        enterEnding(page === "ringing" ? "no answer" : "you were hung up on",
+                    "busy");
       }
       return;
     }
-    if ((prev.state === "idle") !== (ev.state === "idle")) syncFromLine();
-    else syncFromLine();
+    syncFromLine();
   }
 
   function connectEvents() {

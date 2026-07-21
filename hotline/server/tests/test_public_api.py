@@ -113,7 +113,7 @@ async def test_page_assets_served(tmp_path, unused_tcp_port):
     _, bus, db, ctl, client = await make_stack(tmp_path, unused_tcp_port)
     for path in ("/", "/static/phone.js", "/static/phone.css",
                  "/static/sfx/ringback.wav", "/static/sfx/busy.wav",
-                 "/static/sfx/dialtone.wav"):
+                 "/static/sfx/dialtone.wav", "/static/sfx/clunk.wav"):
         resp = await client.get(path)
         assert resp.status == 200, path
     body = await (await client.get("/")).text()
