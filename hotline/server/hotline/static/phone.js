@@ -155,7 +155,25 @@
   let line = { state: "idle", since: 0 };   // latest broadcast
   let timerIv = 0, captionTimeout = 0;
 
+  // ---- mic permission gate -------------------------------------------------
+  // Without mic access the site cannot work at all: gate every control and say
+  // so plainly. "pending" = prompt not yet answered, "denied" = blocked.
+  let micAccess = "pending";
+
+  function applyMicGate() {
+    const blocked = micAccess !== "granted";
+    for (const el of [micSel, spkSel, micListen, spkTest, vol]) el.disabled = blocked;
+    if (blocked) {
+      pill.hidden = true;
+      btn.className = "callbtn off";
+      caption.textContent = micAccess === "denied"
+        ? "microphone access is blocked, allow it for this site and reload"
+        : "allow microphone access to get started";
+    }
+  }
+
   function render() {
+    if (micAccess !== "granted") return applyMicGate();
     clearInterval(timerIv); timerIv = 0;
     if (page === "ringing") {
       pill.hidden = false; dot.className = "dot cadence"; pillText.textContent = "ringing…";
@@ -271,6 +289,7 @@
   }
 
   btn.addEventListener("click", () => {
+    if (micAccess !== "granted") { boot(); return; }   // re-prompt on tap
     if (page === "idle") startCall();
     else if (page === "ringing" || page === "oncall") hangup(true);
     // busy / unplugged / calling: inert
@@ -316,19 +335,34 @@
   // Ask for mic permission up front (Meet-style pre-join): device labels only
   // exist after a grant, and the pickers must work BEFORE the first call.
   // Returning visitors have a standing grant, so no prompt appears.
+  let eventsStarted = false;
   async function boot() {
-    render();
-    connectEvents();
+    applyMicGate();   // "allow microphone access" until the prompt resolves
+    if (!eventsStarted) { eventsStarted = true; connectEvents(); }
     try {
       const devs = await navigator.mediaDevices.enumerateDevices();
       if (!devs.some((d) => d.kind === "audioinput" && d.label)) {
         const s = await navigator.mediaDevices.getUserMedia({ audio: true });
         s.getTracks().forEach((t) => t.stop());
       }
-    } catch {}   // denied: pickers stay generic, call re-prompts later
+      micAccess = "granted";
+    } catch { micAccess = "denied"; }
+    applyMicGate();
+    if (micAccess !== "granted") { watchPermission(); return; }
+    render();
     await refreshDevices();
     await ensureCtx().catch(() => {});
     await startMeter();
+  }
+  // if the user unblocks the mic in browser settings, come back to life
+  let watching = false;
+  async function watchPermission() {
+    if (watching) return;
+    watching = true;
+    try {
+      const st = await navigator.permissions.query({ name: "microphone" });
+      st.onchange = () => { if (st.state !== "denied") location.reload(); };
+    } catch {}   // permissions API absent: the call-button tap re-prompts
   }
   // AudioContext may boot suspended (no user gesture yet): resume on first tap
   document.addEventListener("pointerdown", () => {

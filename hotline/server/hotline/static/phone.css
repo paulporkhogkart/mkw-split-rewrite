@@ -53,4 +53,5 @@ select:hover,select:focus{border-color:var(--dim);outline:none}
 .meter{height:5px;background:var(--ink-2);border:1px solid var(--rule);flex:1;overflow:hidden}
 .lv{height:100%;width:0;background:var(--dot-green);transition:width .06s linear}
 input[type=range]{flex:1;accent-color:var(--paper);background:transparent}
+select:disabled,.testbtn:disabled,input[type=range]:disabled{opacity:.35;cursor:default;pointer-events:none}
 @media (prefers-reduced-motion: reduce){.dot.cadence{animation:none}}
