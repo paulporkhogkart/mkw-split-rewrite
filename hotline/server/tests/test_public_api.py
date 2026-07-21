@@ -106,3 +106,16 @@ async def test_unplugged_claim_409s(tmp_path, unused_tcp_port):
     resp = await client.post("/call/claim")
     assert resp.status == 409 and (await resp.json())["error"] == "unplugged"
     await close_stack(client, ctl, bus, db)
+
+
+async def test_page_assets_served(tmp_path, unused_tcp_port):
+    _, bus, db, ctl, client = await make_stack(tmp_path, unused_tcp_port)
+    for path in ("/", "/static/phone.js", "/static/phone.css",
+                 "/static/sfx/ringing.wav", "/static/sfx/hangup.wav",
+                 "/static/sfx/ringtone.wav"):
+        resp = await client.get(path)
+        assert resp.status == 200, path
+    body = await (await client.get("/")).text()
+    assert "pork phone" in body
+    assert "—" not in body          # no em dashes in page copy, ever
+    await close_stack(client, ctl, bus, db)
