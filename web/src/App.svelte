@@ -7,6 +7,7 @@
   import WorldMap from "./WorldMap.svelte";
   import HeatGraph from "./HeatGraph.svelte";
   import VersionPage from "./VersionPage.svelte";
+  import WrJobsPage from "./WrJobsPage.svelte";
   import PlayersIndex from "./PlayersIndex.svelte";
   import PlayerProfile from "./PlayerProfile.svelte";
   import CoursesIndex from "./CoursesIndex.svelte";
@@ -88,6 +89,7 @@
   {#if view === "turf"}<WorldMap />
   {:else if view === "heat"}<HeatGraph />
   {:else if view === "version"}<VersionPage />
+  {:else if view === "wr-jobs"}<WrJobsPage />
   {:else if view === "players"}
     {#if playerSlug}<PlayerProfile slug={playerSlug} />{:else}<PlayersIndex />{/if}
   {:else if view === "courses"}

@@ -23,8 +23,9 @@ runs `npm --prefix web run build` on each tagged deploy.
 - `main.js` → mounts `App.svelte` + `startPresence(API_BASE)`.
 - `App.svelte` — shell + navbar, **History-API routing** (no hash) via `lib/view.js`:
   `/` → Live (`CardWall`), `/turf` → `WorldMap`, `/players` → `PlayersIndex` (roster grid) /
-  `/players/:slug` → `PlayerProfile`, plus URL-only `/heat` (`HeatGraph`) and `/version`
-  (`VersionPage`). `view.js` also exports `playerSlugFromPath` (the `:slug` for the profile).
+  `/players/:slug` → `PlayerProfile`, plus URL-only `/heat` (`HeatGraph`), `/version`
+  (`VersionPage`), and `/wr-jobs` (`WrJobsPage`, WR trail job statuses). `view.js` also exports
+  `playerSlugFromPath` (the `:slug` for the profile).
 - Components: `CardWall`, `WorldMap`, `MapFireLayer`, `TurfLeaderboard`, `HeatGraph`,
   `TimelineScrubber`, `ActivityLog`, `CoursePopup`, `VersionPage`, `PlayersIndex`,
   `PlayerProfile`, `StrategyPanel` (GOLF/TURF/TIME toggle on a player profile).
