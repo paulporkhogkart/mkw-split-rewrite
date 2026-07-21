@@ -11,9 +11,14 @@ from .call import CallSession, PhoneLeg
 from .config import Config
 from .db import Db
 from .events import EventBus
+from .lease import HELD, ONCALL, RINGING, LineBusy, LineLease
 from .recording import CallRecorder, free_space_gib, sweep_retention
 
 MIN_FREE_GIB = 1.0
+
+
+class PhoneUnplugged(Exception):
+    pass
 
 
 class EchoPhoneLeg:
@@ -47,12 +52,19 @@ class Controller:
         self._call_phone_leg: Optional[PhoneLeg] = None
         self._phone_sess: Optional[AudioSocketSession] = None
         self._reap_task: Optional[asyncio.Task] = None
+        self.lease = LineLease(self._publish_line_state,
+                               cfg.claim_window_s, cfg.call_backstop_s)
+        self.lease.on_expired(self._on_lease_expired)
+        self._phone_reachable = True   # echo mode never flips this; real mode
+                                       # is driven by the ARI poll (Task 5)
+        self._call_lease_id: Optional[str] = None
 
     # -- lifecycle -----------------------------------------------------------
     async def start(self) -> None:
         await self._audiosocket.start()
         sweep_retention(self._recordings_root())
         self.bus.publish({"type": "lines_state", "open": False})
+        self.bus.publish(self.line_snapshot())
 
     async def stop(self) -> None:
         if self._call:
@@ -67,7 +79,10 @@ class Controller:
 
     # -- caller WS -----------------------------------------------------------
     async def attach_caller_ws(
-            self, send: Callable[[bytes], Awaitable[None]]) -> None:
+            self, send: Callable[[bytes], Awaitable[None]],
+            lease_id: Optional[str] = None) -> None:
+        if lease_id is not None and not self.lease.valid(lease_id):
+            raise KeyError("stale lease")
         if self._caller_send is not None:
             raise RuntimeError("caller slot busy")
         self._caller_send = send
@@ -83,8 +98,72 @@ class Controller:
         if self._call:
             self._call.on_caller_frame(frame)
 
+    # -- line lease ----------------------------------------------------------
+    def line_snapshot(self) -> dict:
+        snap = self.lease.snapshot()
+        if snap["state"] == "idle" and not self._phone_reachable:
+            snap["state"] = "unplugged"
+        return snap
+
+    def _publish_line_state(self, _snap: dict) -> None:
+        # always publish the composed view, not the raw lease snapshot
+        self.bus.publish(self.line_snapshot())
+
+    def set_phone_reachable(self, ok: bool) -> None:
+        if ok == self._phone_reachable:
+            return
+        self._phone_reachable = ok
+        self.bus.publish(self.line_snapshot())
+
+    def claim_line(self) -> str:
+        if not self._phone_reachable:
+            raise PhoneUnplugged()
+        return self.lease.claim()
+
+    async def ring_with_lease(self, lease_id: str) -> str:
+        if not self.lease.valid(lease_id):
+            raise KeyError("stale lease")
+        if self.lease.state != HELD:
+            raise RuntimeError("lease not in held state")
+        self.lease.mark_ringing(lease_id)
+        try:
+            call_id = await self.test_ring(self.cfg.call_backstop_s,
+                                           caller_label="web",
+                                           lease_id=lease_id)
+        except Exception:
+            self.lease.release(lease_id)
+            raise
+        self._call_lease_id = lease_id
+        return call_id
+
+    async def hangup_with_lease(self, lease_id: str) -> bool:
+        if not self.lease.valid(lease_id):
+            raise KeyError("stale lease")
+        if self._call is not None and self._call_lease_id == lease_id:
+            outcome = "completed" if self.lease.state == ONCALL else "dropped"
+            await self._call.end(outcome)
+            return True
+        self.lease.release(lease_id)   # held/ringing with no live call
+        return False
+
+    def _on_lease_expired(self, lease_id: str) -> None:
+        asyncio.create_task(self._expire_lease(lease_id))
+
+    async def _expire_lease(self, lease_id: str) -> None:
+        if self._call is not None and self._call_lease_id == lease_id:
+            await self._call.end("dropped")   # reap releases the lease
+        else:
+            self.lease.release(lease_id)
+
+    def _safe_mark_oncall(self, lease_id: str) -> None:
+        try:
+            self.lease.mark_oncall(lease_id)
+        except KeyError:
+            pass   # lease died between answer and mark; reap will clean up
+
     # -- calls -----------------------------------------------------------------
-    async def test_ring(self, seconds: float = 60) -> str:
+    async def test_ring(self, seconds: float = 60, caller_label: str = "test",
+                        lease_id: Optional[str] = None) -> str:
         if self._caller_send is None:
             raise RuntimeError("no caller connected")
         if self._call is not None:
@@ -93,7 +172,7 @@ class Controller:
             raise RuntimeError("low disk space")
         call_id = str(uuid.uuid4())
         await asyncio.to_thread(
-            self.db.create_call, call_id, "test", int(seconds))
+            self.db.create_call, call_id, caller_label, int(seconds))
 
         async def send_to_caller(frame: bytes) -> None:
             if self._caller_send:
@@ -105,9 +184,13 @@ class Controller:
             phone: PhoneLeg = EchoPhoneLeg(lambda: holder[0])
         else:
             phone = None  # type: ignore  # replaced below
-        call = CallSession(call_id=call_id, caller_label="test",
+        call = CallSession(call_id=call_id, caller_label=caller_label,
                            seconds=seconds, phone=phone, bus=self.bus,
-                           recorder=recorder, send_to_caller=send_to_caller)
+                           recorder=recorder, send_to_caller=send_to_caller,
+                           grace_s=self.cfg.ws_grace_s,
+                           on_answered=(
+                               (lambda: self._safe_mark_oncall(lease_id))
+                               if lease_id else None))
         holder.append(call)
         if phone is None:
             phone = self._factory(call)  # real leg needs the session
@@ -136,6 +219,9 @@ class Controller:
         if self._call is call:
             self._call = None
             self._call_phone_leg = None
+            if self._call_lease_id is not None:
+                self.lease.release(self._call_lease_id)
+                self._call_lease_id = None
         if self._phone_sess:
             await self._phone_sess.terminate()
             self._phone_sess = None

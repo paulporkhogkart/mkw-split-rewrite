@@ -32,7 +32,8 @@ class CallSession:
     def __init__(self, call_id: str, caller_label: str, seconds: float,
                  phone: PhoneLeg, bus: EventBus, recorder: CallRecorder,
                  send_to_caller: Callable[[bytes], Awaitable[None]],
-                 grace_s: float = 10.0) -> None:
+                 grace_s: float = 10.0,
+                 on_answered: Optional[Callable[[], None]] = None) -> None:
         self.call_id = call_id
         self.caller_label = caller_label
         self.seconds = seconds
@@ -44,6 +45,7 @@ class CallSession:
         self._recorder = recorder
         self._send_to_caller = send_to_caller
         self._grace_s = grace_s
+        self._on_answered = on_answered
         self._jitter = JitterBuffer()
         self._inject_phone: list[bytes] = []    # tones bound for the phone (mixed in pump)
         self._inject_caller: list[bytes] = []   # tones bound for the caller (mixed on forward)
@@ -66,6 +68,8 @@ class CallSession:
         if self._answered_at is not None or self._ending:
             return
         self._answered_at = time.monotonic()
+        if self._on_answered:
+            self._on_answered()
         self._bus.publish({"type": "call_active", "call_id": self.call_id,
                            "caller": self.caller_label, "seconds": self.seconds})
         self._pump_task = asyncio.create_task(self._pump())
