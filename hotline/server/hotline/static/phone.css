@@ -32,8 +32,11 @@ body{background:var(--ground);color:var(--paper);
 .callbtn svg{width:60px;height:60px;fill:var(--paper)}
 /* transforms live on the PATH, not the svg element: path transforms render as
    vector geometry (no rasterize-then-rotate blur) and fill-box puts the
-   origin at the glyph's own centre, not the viewBox's */
-.callbtn svg path{transform-box:fill-box;transform-origin:center;transition:transform .15s}
+   origin at the glyph's own centre, not the viewBox's. The green->red rotate
+   is NOT transitioned: animating it composites the icon on the GPU and the
+   end-of-transition de-promotion re-rasters it a couple of pixels off (the
+   "settling" glitch). Instant swap, like every other call app. */
+.callbtn svg path{transform-box:fill-box;transform-origin:center}
 .callbtn.red{background:var(--red)}
 .callbtn.red svg path{transform:rotate(135deg)}
 .callbtn.off{background:var(--ink-2);cursor:default}
