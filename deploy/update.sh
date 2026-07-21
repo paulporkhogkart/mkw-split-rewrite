@@ -20,13 +20,15 @@ export GIT_SSH_COMMAND="ssh -i $KEY -o IdentitiesOnly=yes -o StrictHostKeyChecki
 
 # Keep the checkout lean. The Pi only uses pi/ (server+bot), web/ (site build - which imports the
 # desktop src/), src/, server/ (schema.sql + season0 data read at boot) and deploy/ (this script +
-# the units). Everything else - screenshots/ (~840MB), captures/ (~350MB), images/, mkw_tracker/,
+# the units). hotline/ is needed at (re)install time only - its runtime is rsync'd to /opt/hotline -
+# but must stay in the set or this tick wipes it between installs. Everything else - screenshots/
+# (~840MB), captures/ (~350MB), images/, mkw_tracker/,
 # src-tauri/, docs/, tests/, ... - is desktop-only. `sparse-checkout set` is idempotent and
 # self-healing: on a legacy full clone it drops those dirs from the working tree on the next tick
 # (~1.2GB reclaimed) and they stay gone across every future --force checkout; on an already-sparse
 # clone it's a near no-op. It canNOT shrink an existing .git (those blobs are already downloaded) -
 # reclaim that ~800MB once with a --filter=blob:none re-clone (see docs/pi-deploy.md section 13).
-git sparse-checkout set pi web src server deploy \
+git sparse-checkout set pi web src server deploy hotline \
   || echo "warn: sparse-checkout not applied (git too old?); continuing with a full checkout"
 
 git fetch --tags --prune --quiet origin
