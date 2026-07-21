@@ -123,13 +123,16 @@ IDLE ──claim──► HELD ──ring──► RINGING ──answer──►
 the admin surfaces). The bus gains `line_state` publishes:
 
 ```json
-{"type": "line_state", "state": "idle|held|ringing|oncall|unplugged",
- "since": <epoch>, "lease": "<id or null>"}
+{"type": "line_state", "state": "idle|held|ringing|oncall|unplugged", "since": <epoch>}
 ```
 
-Pages derive their view: my lease → ringing/on-call UI; someone else's → line busy; the
-timer runs from `since`. State is also included in the WS hello so a fresh page renders
-correctly without waiting for a transition.
+The lease id is deliberately **not** broadcast (it is the credential for ring/hangup; leaking
+it would let any viewer kill someone else's call). A page knows whether the line is *its own*
+because it holds its lease locally; anyone else seeing `held|ringing|oncall` renders line
+busy. If a page's lease has expired server-side, its next ring/hangup gets 404 and the page
+resyncs to the broadcast state. The timer runs from `since`. Current state is also sent as a
+hello on events-WS connect so a fresh page renders correctly without waiting for a
+transition.
 
 ### 4.3 Unplugged detection
 
