@@ -96,15 +96,23 @@
   // a call's stream, so it survives calls and mic swaps independently).
   let meterStream = null, meterSrc = null, meterRaf = 0, listening = false;
 
+  // Returns true when the mic is live. This getUserMedia doubles as the page's
+  // ONE permission prompt: the meter keeps its stream for the page's life, so
+  // the grant stays active (even a one-time "allow this time" grant) and no
+  // later request (calls, listen) ever prompts again.
   async function startMeter() {
+    if (!ctx) return false;
+    let stream;
+    try {
+      // acquire the new stream BEFORE dropping the old one: the grant never
+      // hits a zero-track moment, and a failed swap keeps the old mic alive
+      stream = await navigator.mediaDevices.getUserMedia(micConstraints());
+    } catch { return false; }   // denied or no device: meter unchanged/flat
     cancelAnimationFrame(meterRaf); meterRaf = 0;
     micLevel.style.width = "0";
     meterSrc?.disconnect(); meterSrc = null;
-    meterStream?.getTracks().forEach(t => t.stop()); meterStream = null;
-    if (!ctx) return;
-    try {
-      meterStream = await navigator.mediaDevices.getUserMedia(micConstraints());
-    } catch { return; }   // denied or no device: meter stays flat
+    meterStream?.getTracks().forEach(t => t.stop());
+    meterStream = stream;
     meterSrc = ctx.createMediaStreamSource(meterStream);
     const an = new AnalyserNode(ctx, { fftSize: 512 });
     meterSrc.connect(an);
@@ -117,6 +125,7 @@
       micLevel.style.width = Math.min(100, (peak / 128) * 140) + "%";
       meterRaf = requestAnimationFrame(tick);
     })();
+    return true;
   }
 
   micListen.addEventListener("click", async () => {
@@ -339,20 +348,12 @@
   async function boot() {
     applyMicGate();   // "allow microphone access" until the prompt resolves
     if (!eventsStarted) { eventsStarted = true; connectEvents(); }
-    try {
-      const devs = await navigator.mediaDevices.enumerateDevices();
-      if (!devs.some((d) => d.kind === "audioinput" && d.label)) {
-        const s = await navigator.mediaDevices.getUserMedia({ audio: true });
-        s.getTracks().forEach((t) => t.stop());
-      }
-      micAccess = "granted";
-    } catch { micAccess = "denied"; }
+    await ensureCtx().catch(() => {});
+    micAccess = (await startMeter()) ? "granted" : "denied";
     applyMicGate();
     if (micAccess !== "granted") { watchPermission(); return; }
     render();
-    await refreshDevices();
-    await ensureCtx().catch(() => {});
-    await startMeter();
+    await refreshDevices();   // labels exist now that the grant is live
   }
   // if the user unblocks the mic in browser settings, come back to life
   let watching = false;
