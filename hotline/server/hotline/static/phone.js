@@ -348,6 +348,7 @@
     endCallCleanup();
     lease = null;
     page = "ending";
+    clearInterval(timerIv); timerIv = 0;   // or the on-call tick keeps stamping the pill
     clearTimeout(captionTimeout); captionTimeout = 0;
     const src = playSfx(sfxName);
     // the clunk is much shorter than the busy tone: hold every outcome caption
