@@ -37,8 +37,15 @@ async def _healthz(_request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
 
 
-async def _index(_request: web.Request) -> web.FileResponse:
-    return web.FileResponse(STATIC_DIR / "index.html")
+async def _index(_request: web.Request) -> web.Response:
+    """Serve index.html with asset urls stamped by the assets' mtime: a deploy
+    IS a cache-bust (browsers hold versioned urls up to Cloudflare's browser
+    TTL; the html itself is never cached, so a new stamp reaches everyone)."""
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    stamp = int(max((STATIC_DIR / n).stat().st_mtime
+                    for n in ("phone.js", "phone.css")))
+    html = html.replace("?v=1", f"?v={stamp}")
+    return web.Response(text=html, content_type="text/html")
 
 
 async def _test_page(_request: web.Request) -> web.FileResponse:

@@ -174,3 +174,18 @@ async def test_page_and_static_send_no_cache(tmp_path, unused_tcp_port):
     resp = await client.get("/healthz")
     assert resp.status == 200
     await close_stack(client, ctl, bus, db)
+
+
+async def test_index_assets_auto_versioned(tmp_path, unused_tcp_port):
+    # asset urls carry a server-stamped version derived from file mtimes, so
+    # a deploy IS a cache-bust: nobody has to remember to bump anything
+    import re
+    from hotline import http as http_mod
+    _, bus, db, ctl, client = await make_stack(tmp_path, unused_tcp_port)
+    body = await (await client.get("/")).text()
+    versions = re.findall(r'\?v=(\d+)', body)
+    assert len(versions) == 2          # phone.css + phone.js
+    expect = str(int(max((http_mod.STATIC_DIR / n).stat().st_mtime
+                         for n in ("phone.js", "phone.css"))))
+    assert set(versions) == {expect}
+    await close_stack(client, ctl, bus, db)
