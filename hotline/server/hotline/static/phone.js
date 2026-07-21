@@ -8,7 +8,7 @@
         pill = $("pill"), pillText = $("pill-text"), dot = $("dot"),
         micSel = $("mic-sel"), spkSel = $("spk-sel"),
         micListen = $("mic-listen"), spkTest = $("spk-test"),
-        vol = $("vol"), micLevel = $("mic-level");
+        vol = $("vol"), micLevel = $("mic-level"), grant = $("grant");
 
   const store = {
     get input()  { return localStorage.getItem("pp.input") || ""; },
@@ -147,9 +147,12 @@
   }
 
   // ---- always-on level meter + mic monitor ("Listen") ----------------------
-  // The meter holds its own mic stream for the whole page life (separate from
-  // a call's stream, so it survives calls and mic swaps independently).
-  let meterStream = null, meterSrc = null, meterRaf = 0, listening = false;
+  // The meter holds the page's one mic stream (processed: echo-cancel + noise
+  // suppress, same as the call). Listen uses a SEPARATE raw stream (all
+  // processing off) so you hear your true voice, not the gated/pumping sound
+  // the processing makes when you monitor yourself.
+  let meterStream = null, meterSrc = null, meterRaf = 0;
+  let monitorStream = null, monitorSrc = null, listening = false;
 
   // Returns true when the mic is live. This getUserMedia doubles as the page's
   // ONE permission prompt: the meter keeps its stream for the page's life, so
@@ -170,8 +173,7 @@
     meterStream = stream;
     meterSrc = ctx.createMediaStreamSource(meterStream);
     const an = new AnalyserNode(ctx, { fftSize: 512 });
-    meterSrc.connect(an);
-    if (listening) meterSrc.connect(gain);
+    meterSrc.connect(an);   // analyser only: the meter is never audible
     const buf = new Uint8Array(an.fftSize);
     (function tick() {
       an.getByteTimeDomainData(buf);
@@ -183,15 +185,28 @@
     return true;
   }
 
+  function stopMonitor() {
+    listening = false;
+    monitorSrc?.disconnect(); monitorSrc = null;
+    monitorStream?.getTracks().forEach(t => t.stop()); monitorStream = null;
+    micListen.textContent = "Listen"; micListen.classList.remove("on");
+  }
+
   micListen.addEventListener("click", async () => {
     await unlockAudio();
-    if (!meterSrc) await startMeter();
-    if (!meterSrc) return;
-    listening = !listening;
-    if (listening) meterSrc.connect(gain);
-    else meterSrc.disconnect(gain);
-    micListen.textContent = listening ? "Stop" : "Listen";
-    micListen.classList.toggle("on", listening);
+    if (listening) return stopMonitor();
+    try {
+      // raw mic (no echo-cancel / noise-suppress / AGC) -> your true voice.
+      // meterStream keeps the grant hot, so this never re-prompts.
+      monitorStream = await navigator.mediaDevices.getUserMedia({ audio: {
+        channelCount: 1, echoCancellation: false, noiseSuppression: false,
+        autoGainControl: false,
+        ...(store.input ? { deviceId: { ideal: store.input } } : {}) } });
+    } catch { return; }
+    monitorSrc = ctx.createMediaStreamSource(monitorStream);
+    monitorSrc.connect(gain);
+    listening = true;
+    micListen.textContent = "Stop"; micListen.classList.add("on");
   });
 
   spkTest.addEventListener("click", async () => {
@@ -209,7 +224,8 @@
 
   micSel.addEventListener("change", () => {
     store.input = micSel.value;
-    startMeter();   // re-arm the meter (and monitor, if listening) on the new mic
+    stopMonitor();  // a live monitor was on the old mic; drop it
+    startMeter();   // re-arm the meter on the new mic
   });
   spkSel.addEventListener("change", () => setOutput(spkSel.value));
   vol.value = store.volume;
@@ -235,19 +251,21 @@
   function applyMicGate() {
     const blocked = micAccess !== "granted";
     for (const el of [micSel, spkSel, micListen, spkTest, vol]) el.disabled = blocked;
+    grant.hidden = !blocked;   // the explicit re-request button
     if (blocked) {
       pill.hidden = true;
       btn.className = "callbtn off";
       caption.textContent = micAccess === "denied"
-        ? "microphone access is blocked, allow it for this site and reload"
+        ? "microphone access is blocked, allow it in your browser settings"
         : "allow microphone access to get started";
     }
   }
 
   function render() {
     if (micAccess !== "granted") return applyMicGate();
-    // the mic select restarts the shared stream, so lock it while on a call
-    micSel.disabled = page !== "idle";
+    grant.hidden = true;
+    // mic select restarts the shared stream, Listen emits audio: lock off-idle
+    micSel.disabled = micListen.disabled = page !== "idle";
     clearInterval(timerIv); timerIv = 0;
     if (page === "dialling") {
       pill.hidden = false; dot.className = "dot"; pillText.textContent = "dialling…";
@@ -304,6 +322,7 @@
   }
 
   async function startCall() {
+    stopMonitor();   // don't leave your own voice playing over the call
     page = "dialling"; render();
     try {
       await ensureCtx();
@@ -398,6 +417,9 @@
       .catch(() => {});
     enterEnding("you hung up", "clunk");
   }
+
+  // explicit re-request for a dismissed/missed prompt (desktop + mobile)
+  grant.addEventListener("click", () => boot());
 
   btn.addEventListener("click", () => {
     if (micAccess !== "granted") { boot(); return; }   // re-prompt on tap
