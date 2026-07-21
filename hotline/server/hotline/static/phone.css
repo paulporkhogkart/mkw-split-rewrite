@@ -78,6 +78,7 @@ body{background:var(--ground);color:var(--paper);
   font:inherit;font-size:11px;padding:8px 14px;cursor:pointer;flex-shrink:0}
 .testbtn:hover{color:var(--paper);border-color:var(--dim)}
 .testbtn.on{color:var(--paper);border-color:var(--dim)}
+.testbtn[hidden]{display:none}
 .meter{height:6px;background:var(--ink-2);border:1px solid var(--rule);overflow:hidden}
 .lv{height:100%;width:0;background:var(--dot-green);transition:width .06s linear}
 input[type=range]{width:100%;accent-color:var(--paper);background:transparent}

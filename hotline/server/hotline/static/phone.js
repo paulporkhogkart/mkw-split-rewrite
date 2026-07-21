@@ -147,12 +147,11 @@
   }
 
   // ---- always-on level meter + mic monitor ("Listen") ----------------------
-  // The meter holds the page's one mic stream (processed: echo-cancel + noise
-  // suppress, same as the call). Listen uses a SEPARATE raw stream (all
-  // processing off) so you hear your true voice, not the gated/pumping sound
-  // the processing makes when you monitor yourself.
-  let meterStream = null, meterSrc = null, meterRaf = 0;
-  let monitorStream = null, monitorSrc = null, listening = false;
+  // ONE mic stream for the whole page (the meter's). Listen doesn't acquire a
+  // second stream -- a 2nd getUserMedia re-prompts on mobile -- it just flips
+  // the live track's processing off via applyConstraints (never re-prompts)
+  // so you hear your true voice, then connects the existing source to output.
+  let meterStream = null, meterSrc = null, meterRaf = 0, listening = false;
 
   // Returns true when the mic is live. This getUserMedia doubles as the page's
   // ONE permission prompt: the meter keeps its stream for the page's life, so
@@ -185,26 +184,29 @@
     return true;
   }
 
+  // flip the LIVE track's processing (no new getUserMedia, no re-prompt);
+  // best-effort, silently ignored where unsupported
+  function setMicProcessing(on) {
+    const track = meterStream?.getAudioTracks?.()[0];
+    track?.applyConstraints?.({ echoCancellation: on, noiseSuppression: on,
+                                autoGainControl: on }).catch(() => {});
+  }
+
   function stopMonitor() {
+    if (!listening) return;
     listening = false;
-    monitorSrc?.disconnect(); monitorSrc = null;
-    monitorStream?.getTracks().forEach(t => t.stop()); monitorStream = null;
+    meterSrc?.disconnect(gain);
+    setMicProcessing(true);        // restore call-ready processing
     micListen.textContent = "Listen"; micListen.classList.remove("on");
   }
 
   micListen.addEventListener("click", async () => {
     await unlockAudio();
     if (listening) return stopMonitor();
-    try {
-      // raw mic (no echo-cancel / noise-suppress / AGC) -> your true voice.
-      // meterStream keeps the grant hot, so this never re-prompts.
-      monitorStream = await navigator.mediaDevices.getUserMedia({ audio: {
-        channelCount: 1, echoCancellation: false, noiseSuppression: false,
-        autoGainControl: false,
-        ...(store.input ? { deviceId: { ideal: store.input } } : {}) } });
-    } catch { return; }
-    monitorSrc = ctx.createMediaStreamSource(monitorStream);
-    monitorSrc.connect(gain);
+    if (!meterSrc) await startMeter();
+    if (!meterSrc) return;
+    setMicProcessing(false);       // hear your raw voice
+    meterSrc.connect(gain);
     listening = true;
     micListen.textContent = "Stop"; micListen.classList.add("on");
   });
@@ -488,5 +490,10 @@
       st.onchange = () => { if (st.state !== "denied") location.reload(); };
     } catch {}   // permissions API absent: the call-button tap re-prompts
   }
+  // Listen is desktop-only: on phones a 2nd mic path re-prompts / ignores the
+  // raw-audio constraint, and monitoring through the earpiece feeds back. The
+  // always-on meter (mic works) + Test (output works) cover mobile setup.
+  if (matchMedia("(hover: none) and (pointer: coarse)").matches)
+    micListen.hidden = true;
   boot();
 })();
