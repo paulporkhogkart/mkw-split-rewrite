@@ -350,7 +350,9 @@
     page = "ending";
     clearTimeout(captionTimeout); captionTimeout = 0;
     const src = playSfx(sfxName);
-    const ms = (sfxBuf[sfxName]?.duration ?? 1.5) * 1000 + 150;
+    // the clunk is much shorter than the busy tone: hold every outcome caption
+    // for at least ~2s so "you hung up" is actually readable
+    const ms = Math.max((sfxBuf[sfxName]?.duration ?? 1.5) * 1000 + 150, 2000);
     pill.hidden = false; dot.className = "dot"; pillText.textContent = "idle";
     btn.className = "callbtn off";
     caption.textContent = text;
