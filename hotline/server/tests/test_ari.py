@@ -43,12 +43,19 @@ def make_fake_ari(record: dict):
         record["hungup"] = request.match_info["cid"]
         return web.Response(status=204)
 
+    async def endpoint(request: web.Request):
+        record["endpoint_asked"] = (request.match_info["tech"],
+                                    request.match_info["res"])
+        return web.json_response({"technology": "PJSIP", "resource": "ata",
+                                  "state": record.get("endpoint_state", "online")})
+
     app.router.add_get("/ari/events", events_ws)
     app.router.add_post("/ari/channels", channels)
     app.router.add_post("/ari/channels/externalMedia", external)
     app.router.add_post("/ari/bridges", bridges)
     app.router.add_post("/ari/bridges/{bid}/addChannel", add_channel)
     app.router.add_delete("/ari/channels/{cid}", hangup)
+    app.router.add_get("/ari/endpoints/{tech}/{res}", endpoint)
     return app
 
 
@@ -181,5 +188,52 @@ async def test_bridge_cleans_up_on_addchannel_failure():
     with pytest.raises(aiohttp.ClientResponseError):
         await client.bridge(["ch-1", "ch-em"])
     assert record["deleted"] == "br-9"
+    await client.close()
+    await server.close()
+
+
+async def test_endpoint_state():
+    record: dict = {}
+    server = TestServer(make_fake_ari(record))
+    await server.start_server()
+    client = AriClient(f"http://127.0.0.1:{server.port}", "hotline", "pw")
+    await client.connect()
+    assert await client.endpoint_state() == "online"
+    assert record["endpoint_asked"] == ("PJSIP", "ata")
+    record["endpoint_state"] = "offline"
+    assert await client.endpoint_state() == "offline"
+    await client.close()
+    await server.close()
+
+
+async def test_endpoint_state_unknown_on_error():
+    # no /ari/endpoints route at all -> 404 -> "unknown", no raise
+    app = web.Application()
+
+    async def events_ws(request: web.Request):
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        async for _ in ws:
+            pass
+        return ws
+
+    app.router.add_get("/ari/events", events_ws)
+    server = TestServer(app)
+    await server.start_server()
+    client = AriClient(f"http://127.0.0.1:{server.port}", "u", "p")
+    await client.connect()
+    assert await client.endpoint_state() == "unknown"
+    await client.close()
+    await server.close()
+
+
+async def test_originate_sends_timeout():
+    record: dict = {}
+    server = TestServer(make_fake_ari(record))
+    await server.start_server()
+    client = AriClient(f"http://127.0.0.1:{server.port}", "hotline", "pw")
+    await client.connect()
+    await client.originate_phone("web", "u-9", timeout_s=30)
+    assert record["originate"]["timeout"] == 30
     await client.close()
     await server.close()

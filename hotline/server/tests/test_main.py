@@ -44,7 +44,8 @@ class FakeAri:
         if cb in self.listeners:
             self.listeners.remove(cb)
 
-    async def originate_phone(self, caller_id: str, u: str) -> str:
+    async def originate_phone(self, caller_id: str, u: str,
+                              timeout_s: int = 30) -> str:
         return "ch-7"
 
     async def external_media(self, u: str, host: str) -> str:
@@ -112,7 +113,8 @@ async def test_ari_leg_hangup_disposes_listener():
 
 async def test_ari_leg_ring_failure_disposes():
     class FailingAri(FakeAri):
-        async def originate_phone(self, caller_id: str, u: str) -> str:
+        async def originate_phone(self, caller_id: str, u: str,
+                                  timeout_s: int = 30) -> str:
             raise RuntimeError("asterisk down")
 
     ari = FailingAri()

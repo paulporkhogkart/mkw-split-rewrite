@@ -75,11 +75,23 @@ class AriClient:
             resp.raise_for_status()
             return await resp.json() if resp.status != 204 else {}
 
-    async def originate_phone(self, caller_id: str, channel_var_uuid: str) -> str:
+    async def originate_phone(self, caller_id: str, channel_var_uuid: str,
+                              timeout_s: int = 30) -> str:
         data = await self._post("/ari/channels", {
             "endpoint": "PJSIP/ata", "app": self.app, "callerId": caller_id,
-            "appArgs": "phone", "variables": {"PORK_UUID": channel_var_uuid}})
+            "timeout": timeout_s, "appArgs": "phone",
+            "variables": {"PORK_UUID": channel_var_uuid}})
         return data["id"]
+
+    async def endpoint_state(self, tech: str = "PJSIP",
+                             resource: str = "ata") -> str:
+        assert self._session is not None
+        async with self._session.get(
+                f"{self._base}/ari/endpoints/{tech}/{resource}") as resp:
+            if resp.status != 200:
+                return "unknown"
+            data = await resp.json()
+            return data.get("state", "unknown")
 
     async def external_media(self, audiosocket_uuid: str, host: str) -> str:
         data = await self._post("/ari/channels/externalMedia", {

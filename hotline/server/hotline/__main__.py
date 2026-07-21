@@ -27,10 +27,11 @@ class AriPhoneLeg:
     the channel dies -> ChannelDestroyed -> on_phone_hungup."""
 
     def __init__(self, session: CallSession, ari: AriClient,
-                 audiosocket_port: int) -> None:
+                 audiosocket_port: int, ring_timeout_s: int = 30) -> None:
         self._session = session
         self._ari = ari
         self._port = audiosocket_port
+        self._ring_timeout_s = ring_timeout_s
         self._channel_id: Optional[str] = None
         self._send_audio: Optional[Callable[[bytes], Awaitable[None]]] = None
         self._answered_task: Optional[asyncio.Task] = None
@@ -44,7 +45,7 @@ class AriPhoneLeg:
     async def ring(self, caller_name: str) -> None:
         try:
             self._channel_id = await self._ari.originate_phone(
-                caller_name, self._session.call_id)
+                caller_name, self._session.call_id, self._ring_timeout_s)
         except Exception:
             self._dispose()
             raise
@@ -111,6 +112,19 @@ class AriPhoneLeg:
             await self._send_audio(frame)
 
 
+async def watch_ata(ari: AriClient, controller: Controller,
+                    poll_s: float, stop: asyncio.Event) -> None:
+    """Poll the ATA endpoint; drive the line's unplugged state."""
+    while not stop.is_set():
+        try:
+            state = await ari.endpoint_state()
+        except Exception:
+            state = "unknown"
+        controller.set_phone_reachable(state == "online")
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(stop.wait(), poll_s)
+
+
 async def build_and_run(cfg: Config, stop: asyncio.Event) -> None:
     db = Db(cfg.data_dir / "hotline.db")
     db.init()
@@ -126,10 +140,17 @@ async def build_and_run(cfg: Config, stop: asyncio.Event) -> None:
         await ari.connect()
 
         def factory(session: CallSession) -> AriPhoneLeg:
-            return AriPhoneLeg(session, ari, cfg.audiosocket_port)
+            return AriPhoneLeg(session, ari, cfg.audiosocket_port,
+                               cfg.ring_timeout_s)
 
     controller = Controller(cfg, bus, db, phone_leg_factory=factory)
     await controller.start()
+
+    watch_task: Optional[asyncio.Task] = None
+    if ari is not None:
+        controller.set_phone_reachable(False)   # unknown until first poll answers
+        watch_task = asyncio.create_task(
+            watch_ata(ari, controller, cfg.ata_poll_s, stop))
 
     app = make_app(cfg, controller)
     runner = web.AppRunner(app)
@@ -140,6 +161,10 @@ async def build_and_run(cfg: Config, stop: asyncio.Event) -> None:
     await stop.wait()
 
     await runner.cleanup()
+    if watch_task:
+        watch_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await watch_task
     await controller.stop()
     await bus.stop()
     if ari:
