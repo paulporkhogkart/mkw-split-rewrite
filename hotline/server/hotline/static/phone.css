@@ -30,20 +30,16 @@ body{background:var(--ground);color:var(--paper);
 .callbtn:hover{filter:brightness(1.12)}
 .callbtn:active{filter:brightness(.92)}
 .callbtn svg{width:60px;height:60px;fill:var(--paper)}
-/* transforms live on the PATH, not the svg element: path transforms render as
-   vector geometry (no rasterize-then-rotate blur) and fill-box puts the
-   origin at the glyph's own centre, not the viewBox's. The green->red rotate
-   is NOT transitioned: animating it composites the icon on the GPU and the
-   end-of-transition de-promotion re-rasters it a couple of pixels off (the
-   "settling" glitch). Instant swap, like every other call app. */
+/* two purpose-drawn glyphs (rotating the call glyph reads optically high in
+   the red state): .p-call for green, .p-end (real call-end icon) for red */
 .callbtn svg path{transform-box:fill-box;transform-origin:center}
+.callbtn svg .p-end{display:none}
 .callbtn.red{background:var(--red)}
-/* the swing-in: the path is statically rotated the moment .red lands (crisp),
-   while the svg element animates -135deg -> 0. Composed, the icon visually
-   swings 0 -> 135 as before, but the animation ENDS AT IDENTITY, so the
+.callbtn.red svg .p-call{display:none}
+.callbtn.red svg .p-end{display:block}
+/* the swing-in animates the svg ELEMENT and ends at identity, so the
    GPU-layer handoff lands on the exact pixels of the static render and the
-   settle glitch cannot show. */
-.callbtn.red svg path{transform:rotate(135deg)}
+   old settle glitch cannot show */
 .callbtn.red svg{animation:swing-in .15s ease}
 @keyframes swing-in{from{transform:rotate(-135deg)}to{transform:rotate(0)}}
 @media (prefers-reduced-motion: reduce){.callbtn.red svg{animation:none}}
