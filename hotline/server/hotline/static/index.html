@@ -23,19 +23,23 @@
 
   <section class="settings">
     <h2 class="ttl">Settings</h2>
-    <div class="row">
-      <svg class="ic" viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V21h2v-3.1A7 7 0 0 0 19 11h-2z"/></svg>
-      <select id="mic-sel"></select>
-      <button class="testbtn" id="mic-listen">Listen</button>
+    <div class="ctl">
+      <div class="ctl-head">
+        <svg class="ic" viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V21h2v-3.1A7 7 0 0 0 19 11h-2z"/></svg>
+        <span class="ctl-label">Microphone</span>
+        <button class="testbtn" id="mic-listen">Listen</button>
+      </div>
+      <div class="meter"><div class="lv" id="mic-level"></div></div>
+      <select id="mic-sel" class="dev-sel" aria-label="microphone"></select>
     </div>
-    <div class="row meter-row"><div class="meter"><div class="lv" id="mic-level"></div></div></div>
-    <div class="row">
-      <svg class="ic" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4z"/></svg>
-      <select id="spk-sel"></select>
-      <button class="testbtn" id="spk-test">Test</button>
-    </div>
-    <div class="row vol-row">
+    <div class="ctl">
+      <div class="ctl-head">
+        <svg class="ic" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4z"/></svg>
+        <span class="ctl-label">Output</span>
+        <button class="testbtn" id="spk-test">Test</button>
+      </div>
       <input type="range" id="vol" min="0" max="100" value="80" aria-label="volume">
+      <select id="spk-sel" class="dev-sel" aria-label="output device"></select>
     </div>
   </section>
 </main>

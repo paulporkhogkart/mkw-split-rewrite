@@ -115,10 +115,18 @@
   // ---- devices -------------------------------------------------------------
   async function refreshDevices() {
     const devs = await navigator.mediaDevices.enumerateDevices();
-    fill(micSel, devs.filter(d => d.kind === "audioinput"), store.input);
-    fill(spkSel, devs.filter(d => d.kind === "audiooutput"), store.output);
-    // hide the output row entirely where selection isn't supported (Firefox)
-    spkSel.parentElement.hidden = !devs.some(d => d.kind === "audiooutput");
+    const ins = devs.filter(d => d.kind === "audioinput");
+    const outs = devs.filter(d => d.kind === "audiooutput");
+    fill(micSel, ins, store.input);
+    fill(spkSel, outs, store.output);
+    // a picker only exists where there is a real choice AND a way to apply
+    // it. Phones: one mic, and output routing belongs to the OS (no
+    // setSinkId, no audiooutput enumeration) -- so the selects vanish there
+    // while the meter, Listen, Test and volume all still work.
+    micSel.hidden = ins.length < 2;
+    const sinkable = typeof AudioContext.prototype.setSinkId === "function"
+      || "setSinkId" in HTMLMediaElement.prototype;
+    spkSel.hidden = !sinkable || outs.length < 2;
   }
   function fill(sel, devs, saved) {
     sel.innerHTML = "";
@@ -212,7 +220,7 @@
 
   // ---- call machine --------------------------------------------------------
   // page states: idle | calling (claim+ws setup) | ringing | oncall | busy | unplugged
-  let page = "idle", lease = null, audioWs = null, callStream = null;
+  let page = "idle", lease = null, audioWs = null;
   // nodes created fresh for the current call; disconnected + nulled in
   // endCallCleanup so a second call never doubles up on the first's graph
   let callSrc = null, callLp1 = null, callLp2 = null, callCap = null, callLp3 = null;
@@ -238,6 +246,8 @@
 
   function render() {
     if (micAccess !== "granted") return applyMicGate();
+    // the mic select restarts the shared stream, so lock it while on a call
+    micSel.disabled = page !== "idle";
     clearInterval(timerIv); timerIv = 0;
     if (page === "dialling") {
       pill.hidden = false; dot.className = "dot"; pillText.textContent = "dialling…";
@@ -285,7 +295,8 @@
   function endCallCleanup() {
     stopRingback();
     audioWs?.close(); audioWs = null;
-    callStream?.getTracks().forEach(t => t.stop()); callStream = null;
+    // do NOT stop the mic stream here: it is the meter's, shared for the
+    // page's life. Only tear down the call's own graph nodes.
     if (callCap) callCap.port.onmessage = null;
     callSrc?.disconnect(); callLp1?.disconnect(); callLp2?.disconnect();
     callCap?.disconnect(); playNode?.disconnect(); callLp3?.disconnect();
@@ -297,8 +308,11 @@
     try {
       await ensureCtx();
       await unlockAudio();
+      // the meter already holds the page's one mic stream -- reuse it. a
+      // SECOND getUserMedia here is what re-popped the permission prompt after
+      // dialling on mobile. ensure it's live (it is once granted) then tap it.
+      if (!meterStream) await startMeter();
       await playDialSequence();   // theatre first: also the double-tap guard
-      callStream = await navigator.mediaDevices.getUserMedia(micConstraints());
       const r = await fetch("/call/claim", { method: "POST" });
       if (!r.ok) {
         endCallCleanup(); lease = null; page = "idle";
@@ -307,8 +321,9 @@
       }
       lease = (await r.json()).lease_id;
 
-      // capture chain: mic -> 2x lowpass 3400 -> capture worklet -> ws
-      callSrc = ctx.createMediaStreamSource(callStream);
+      // capture chain: shared mic stream -> 2x lowpass 3400 -> worklet -> ws
+      // (a separate source node off the same stream; the meter keeps its own)
+      callSrc = ctx.createMediaStreamSource(meterStream);
       callLp1 = new BiquadFilterNode(ctx, { type: "lowpass", frequency: 3400 });
       callLp2 = new BiquadFilterNode(ctx, { type: "lowpass", frequency: 3400 });
       callCap = new AudioWorkletNode(ctx, "capture-worklet");
