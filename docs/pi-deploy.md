@@ -1,6 +1,6 @@
 # Pi deployment + migration runbook
 
-The new `pi/` server + Discord bot, running on `pi@192.168.1.21` as auto-updating systemd
+The new `pi/` server + Discord bot, running on `pi@192.168.4.21` as auto-updating systemd
 services, reachable off-network at `https://api.thekartoff.com` through the existing Cloudflare
 tunnel. Steady-state updates: you `git tag` + push; the Pi self-updates within ~2 minutes.
 
@@ -33,7 +33,7 @@ git push origin v0.3.0
 ## 2. Install Node 24 on the Pi
 
 ```bash
-ssh pi@192.168.1.21
+ssh pi@192.168.4.21
 curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
 sudo apt-get install -y nodejs git python3 sqlite3
 # (sqlite3 is just the CLI for the .tables sanity check in Step 4; the import + server use
