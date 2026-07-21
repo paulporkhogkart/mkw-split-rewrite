@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>pork phone · states v9</title>
+<style>
+  @font-face{font-family:Inter;src:url("../../../web/public/fonts/inter-700.woff2") format("woff2");font-weight:700}
+  @font-face{font-family:Inter;src:url("../../../web/public/fonts/inter-800.woff2") format("woff2");font-weight:800}
+  :root{
+    --ink:#101114; --ink-2:#191a1d; --paper:#f3f4f6; --ground:#0b0c0e;
+    --mut:#9a9ca1; --dim:#6b6d73; --rule:#26272c;
+    --green:#16a34a; --red:#dc2626;
+    --dot-green:#22c55e;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:var(--ground);color:var(--paper);font-family:Inter,system-ui,sans-serif;
+       font-weight:700;font-size:13px;padding:34px 40px 120px;font-variant-numeric:tabular-nums}
+  .tag{display:inline-block;background:#ff4438;color:var(--ink);font-weight:900;font-style:italic;
+       padding:2px 8px 3px;font-size:11px;box-shadow:1.5px 1.5px 0 rgba(0,0,0,.45)}
+  .lede{max-width:700px;color:var(--mut);line-height:1.55;margin:14px 0 26px}
+  .fine{color:var(--dim);font-size:10.5px;line-height:1.6}
+
+  .grid{display:grid;grid-template-columns:repeat(3,minmax(280px,340px));gap:22px}
+  .tile{border:1px solid var(--rule);background:var(--ink);cursor:pointer;transition:border-color .15s}
+  .tile:hover{border-color:var(--dim)}
+  .tile.selected{border-color:#ff4438}
+  .tile .cap{padding:10px 14px;border-bottom:1px solid var(--rule);display:flex;align-items:baseline;gap:8px}
+  .tile .cap .t{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
+  .tile .cap .w{color:var(--dim);font-size:9.5px;margin-left:auto}
+  .mock{padding:26px 22px 30px;display:flex;flex-direction:column;align-items:center;background:var(--ground)}
+
+  .head{width:100%;display:flex;align-items:center;justify-content:space-between;margin-bottom:26px;min-height:17px}
+  .brand{font-weight:800;font-size:14px;letter-spacing:.01em}
+  /* NOT named .status: the mockup tool hijacks that class for its own pill */
+  .linest{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--paper)}
+  .linest .dot{width:8px;height:8px;border-radius:50%}
+
+  .callbtn{width:78px;height:78px;border-radius:50%;border:0;display:flex;align-items:center;
+       justify-content:center;margin-bottom:16px;cursor:pointer;transition:filter .12s}
+  .callbtn:hover{filter:brightness(1.12)}
+  .callbtn:active{filter:brightness(.92)}
+  .callbtn.off{cursor:default}
+  .callbtn.off:hover,.callbtn.off:active{filter:none}
+  .callbtn svg{width:48px;height:48px;display:block}
+  .sub{font-size:12px;color:var(--mut)}
+  .shake{animation:shake 3s linear infinite}
+  @keyframes shake{
+    0%,1.5%,3%,4.5%,6%,7.5%,9%,10.5%,12%,13.3%{transform:translate(0,0)}
+    .75%,2.25%,3.75%,5.25%,6.75%,8.25%,9.75%,11.25%{transform:translate(1.5px,-1px)}
+    20%,21.5%,23%,24.5%,26%,27.5%,29%,30.5%,32%,33.3%{transform:translate(0,0)}
+    20.75%,22.25%,23.75%,25.25%,26.75%,28.25%,29.75%,31.25%{transform:translate(-1.5px,-1px)}
+    33.4%,100%{transform:translate(0,0)}
+  }
+</style>
+</head><body>
+
+<span class="tag" style="transform:rotate(-1.2deg)">STATES · V9</span>
+<p class="lede">Mystery solved: the mockup tool overwrites any element with class "status" with
+its own "Connected" pill. That's what was squatting on the line-free tile since v1. Class renamed,
+it's gone. And per your call: the top-right pill now only exists when there's something to say
+(ringing / on call / line busy / phone unplugged). Line free and rang-out show nothing.</p>
+
+<div class="grid" data-multiselect>
+
+  <div class="tile" data-choice="free" onclick="toggleSelect(this)">
+    <div class="cap"><span class="t">Line free</span><span class="w">the resting state</span></div>
+    <div class="mock">
+      <div class="head"><span class="brand">pork phone</span></div>
+      <button class="callbtn" style="background:var(--green)">
+        <svg viewBox="0 0 24 24" fill="#f3f4f6"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.2.2 2.4.6 3.6.1.3 0 .7-.2 1l-2.3 2.2z"/></svg>
+      </button>
+      <span class="sub">press to call</span>
+    </div>
+  </div>
+
+  <div class="tile" data-choice="ringing" onclick="toggleSelect(this)">
+    <div class="cap"><span class="t">Ringing</span><span class="w">you pressed call</span></div>
+    <div class="mock">
+      <div class="head"><span class="brand">pork phone</span>
+        <span class="linest"><span class="dot shake" style="background:var(--dim)"></span>ringing…</span></div>
+      <button class="callbtn" style="background:var(--red)">
+        <svg viewBox="0 0 24 24" fill="#f3f4f6" style="transform:rotate(135deg)"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.2.2 2.4.6 3.6.1.3 0 .7-.2 1l-2.3 2.2z"/></svg>
+      </button>
+      <span class="sub">hang up</span>
+    </div>
+    <p class="fine" style="padding:0 14px 12px">ringback tone plays · dot twitches in the real
+    bell cadence (400/200/400/2000)</p>
+  </div>
+
+  <div class="tile" data-choice="oncall" onclick="toggleSelect(this)">
+    <div class="cap"><span class="t">On call</span><span class="w">he picked up</span></div>
+    <div class="mock">
+      <div class="head"><span class="brand">pork phone</span>
+        <span class="linest"><span class="dot" style="background:var(--dot-green)"></span>on call · 2:41</span></div>
+      <button class="callbtn" style="background:var(--red)">
+        <svg viewBox="0 0 24 24" fill="#f3f4f6" style="transform:rotate(135deg)"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.2.2 2.4.6 3.6.1.3 0 .7-.2 1l-2.3 2.2z"/></svg>
+      </button>
+      <span class="sub">hang up</span>
+    </div>
+    <p class="fine" style="padding:0 14px 12px">timer lives in the pill · settings stay
+    usable mid-call</p>
+  </div>
+
+  <div class="tile" data-choice="busy" onclick="toggleSelect(this)">
+    <div class="cap"><span class="t">Line busy</span><span class="w">someone else is on it</span></div>
+    <div class="mock">
+      <div class="head"><span class="brand">pork phone</span>
+        <span class="linest"><span class="dot" style="background:var(--dim)"></span>line busy</span></div>
+      <button class="callbtn off" style="background:var(--ink-2)">
+        <svg viewBox="0 0 24 24" fill="#9a9ca1"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.2.2 2.4.6 3.6.1.3 0 .7-.2 1l-2.3 2.2z"/></svg>
+      </button>
+      <span class="sub">wait for their call to end</span>
+    </div>
+    <p class="fine" style="padding:0 14px 12px">flips back live via the events feed,
+    no refresh needed</p>
+  </div>
+
+  <div class="tile" data-choice="noanswer" onclick="toggleSelect(this)">
+    <div class="cap"><span class="t">No answer</span><span class="w">rang out (60s)</span></div>
+    <div class="mock">
+      <div class="head"><span class="brand">pork phone</span></div>
+      <button class="callbtn" style="background:var(--green)">
+        <svg viewBox="0 0 24 24" fill="#f3f4f6"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.2.2 2.4.6 3.6.1.3 0 .7-.2 1l-2.3 2.2z"/></svg>
+      </button>
+      <span class="sub">no answer</span>
+    </div>
+    <p class="fine" style="padding:0 14px 12px">hangup tone plays once · caption fades back to
+    "press to call" after a few seconds</p>
+  </div>
+
+  <div class="tile" data-choice="unplugged" onclick="toggleSelect(this)">
+    <div class="cap"><span class="t">Unplugged</span><span class="w">ATA powered off</span></div>
+    <div class="mock">
+      <div class="head"><span class="brand">pork phone</span>
+        <span class="linest"><span class="dot" style="background:var(--dim)"></span>phone unplugged</span></div>
+      <button class="callbtn off" style="background:var(--ink-2)">
+        <svg viewBox="0 0 24 24" fill="#9a9ca1"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.2.2 2.4.6 3.6.1.3 0 .7-.2 1l-2.3 2.2z"/></svg>
+      </button>
+      <span class="sub">not taking calls right now</span>
+    </div>
+    <p class="fine" style="padding:0 14px 12px">driven by Asterisk losing the ATA (you yank its
+    power) · detected within ~30s</p>
+  </div>
+
+</div>
+
+</body></html>

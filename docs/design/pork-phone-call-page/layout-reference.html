@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PORK PHONE · obvious layout</title>
+<style>
+  @font-face{font-family:Inter;src:url("../../../web/public/fonts/inter-700.woff2") format("woff2");font-weight:700}
+  @font-face{font-family:Inter;src:url("../../../web/public/fonts/inter-800.woff2") format("woff2");font-weight:800}
+  @font-face{font-family:Inter;src:url("../../../web/public/fonts/inter-900.woff2") format("woff2");font-weight:900}
+  :root{
+    --ink:#101114; --ink-2:#191a1d; --paper:#f3f4f6; --ground:#0b0c0e;
+    --mut:#9a9ca1; --dim:#6b6d73; --rule:#26272c;
+    --green:#22c55e; --green-deep:#15803d; --red:#ef4444;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:var(--ground);color:var(--paper);font-family:Inter,system-ui,sans-serif;
+       font-weight:700;font-size:13px;padding:34px 40px 120px;font-variant-numeric:tabular-nums}
+  .tag{display:inline-block;background:#ff4438;color:var(--ink);font-weight:900;font-style:italic;
+       padding:2px 8px 3px;font-size:11px;box-shadow:1.5px 1.5px 0 rgba(0,0,0,.45)}
+  .lede{max-width:700px;color:var(--mut);line-height:1.55;margin:14px 0 8px}
+  .lede b{color:var(--paper)}
+  .fine{color:var(--dim);font-size:10.5px;letter-spacing:.04em;line-height:1.6}
+
+  .cards{display:flex;flex-direction:column;gap:46px;margin-top:36px}
+  .card{position:relative;border:1px solid var(--rule);background:var(--ink);cursor:pointer;
+        transition:border-color .15s}
+  .card:hover{border-color:var(--dim)}
+  .card.selected{border-color:#ff4438;box-shadow:4px 4px 0 rgba(255,68,56,.35)}
+  .card.selected .pick{display:inline-block}
+  .pick{display:none;position:absolute;top:-11px;right:18px;transform:rotate(2deg);z-index:5}
+  .card-head{display:flex;align-items:baseline;gap:14px;padding:14px 20px 12px;border-bottom:1px solid var(--rule)}
+  .card-head .letter{font-size:14px;transform:rotate(-1.4deg)}
+  .card-head h3{font-size:13px;font-weight:900;font-style:italic}
+  .card-head .opt{color:var(--dim);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;margin-left:auto}
+  .stage{padding:40px 30px 44px;display:flex;justify-content:center;background:var(--ground)}
+  .notes{padding:12px 20px 14px;border-top:1px solid var(--rule);color:var(--dim);
+         font-size:10.5px;line-height:1.65}
+  .notes b{color:var(--mut)}
+
+  /* ---------- shared page mock structure ---------- */
+  .page{width:460px;display:flex;flex-direction:column;align-items:center}
+  .head{width:100%;display:flex;align-items:center;justify-content:space-between;margin-bottom:34px}
+  .status{display:flex;align-items:center;gap:8px;font-size:12px}
+  .status .dot{width:9px;height:9px;border-radius:50%;background:var(--green)}
+  .callwrap{display:flex;flex-direction:column;align-items:center;gap:14px;margin-bottom:40px}
+  .callbtn{width:96px;height:96px;border-radius:50%;border:0;cursor:pointer;
+       display:flex;align-items:center;justify-content:center;background:var(--green);
+       transition:transform .1s}
+  .callbtn:hover{transform:scale(1.04)}
+  .callbtn svg{width:44px;height:44px}
+  .callsub{font-size:13px;color:var(--mut)}
+  .audio{width:100%;display:flex;flex-direction:column;gap:12px}
+  .audio .ttl{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);
+       margin-bottom:2px}
+  .row{display:flex;align-items:center;gap:10px}
+  .row .ic{width:18px;height:18px;flex-shrink:0;color:var(--mut)}
+  .sel{flex:1;display:flex;align-items:center;background:var(--ink-2);border:1px solid var(--rule);
+       color:var(--paper);font-size:12px;padding:8px 11px;font-weight:700;justify-content:space-between;gap:8px}
+  .sel .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sel .chev{color:var(--dim);font-size:10px}
+  .testbtn{background:var(--ink-2);border:1px solid var(--rule);color:var(--mut);font-family:inherit;
+       font-weight:700;font-size:11px;padding:8px 13px;cursor:pointer}
+  .testbtn:hover{color:var(--paper);border-color:var(--dim)}
+  .meter{height:5px;background:var(--ink-2);border:1px solid var(--rule);flex:1;position:relative;overflow:hidden}
+  .meter .lv{position:absolute;inset:0;right:55%;background:var(--green)}
+  .volrow input-mock{flex:1}
+  .vol{flex:1;height:5px;background:var(--ink-2);border:1px solid var(--rule);position:relative}
+  .vol .fill{position:absolute;inset:0;right:35%;background:var(--mut)}
+  .vol .knob{position:absolute;top:-5px;left:65%;width:14px;height:14px;border-radius:50%;
+       background:var(--paper);box-shadow:0 1px 3px rgba(0,0,0,.6)}
+  .foot{margin-top:36px}
+
+  /* ---------- variant B flavor overrides ---------- */
+  .vb .brand{font-weight:900;font-style:italic;font-size:16px;letter-spacing:-.01em}
+  .vb .brand .off{background:#ff4438;color:var(--ink);padding:1px 5px 2px;margin-left:6px;
+       font-size:12px;box-shadow:1.5px 1.5px 0 rgba(0,0,0,.45)}
+  .vb .status .st{font-weight:900;font-style:italic;color:var(--green)}
+  .vb .callbtn{box-shadow:4px 4px 0 rgba(0,0,0,.55)}
+  .vb .audio{background:var(--ink-2);border:1px solid var(--rule);padding:16px 16px 18px}
+  .vb .sel,.vb .testbtn,.vb .meter,.vb .vol{background:var(--ink)}
+  .va .brand{font-weight:800;font-size:15px;letter-spacing:.01em}
+  .va .status .st{color:var(--green);font-weight:700}
+</style>
+</head><body>
+
+<span class="tag" style="transform:rotate(-1.2deg)">TAKE 2 · JUST A CALL SCREEN</span>
+<p class="lede">Same layout twice — the standard pre-join pattern: status up top, big green call
+button, audio check below it. Every control is the normal control (real dropdowns, standard
+handset/mic/speaker icons, plain slider). The only question left: <b>how much house flavour on
+top of the plain bones.</b> Click one.</p>
+
+<div class="cards">
+
+  <!-- ======= A · PLAIN ======= -->
+  <div class="card" data-choice="plain" onclick="toggleSelect(this)">
+    <span class="pick tag">PICKED</span>
+    <div class="card-head"><span class="letter tag">A</span><h3>PLAIN</h3>
+      <span class="opt">neutral, zero decoration</span></div>
+    <div class="stage">
+      <div class="page va">
+        <div class="head">
+          <span class="brand">The Pork Phone</span>
+          <span class="status"><span class="dot"></span><span class="st">Line is free</span></span>
+        </div>
+
+        <div class="callwrap">
+          <button class="callbtn">
+            <svg viewBox="0 0 24 24" fill="#0b0c0e"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.2.2 2.4.6 3.6.1.3 0 .7-.2 1l-2.3 2.2z"/></svg>
+          </button>
+          <span class="callsub">Call Paul's desk</span>
+        </div>
+
+        <div class="audio">
+          <div class="ttl">Your audio</div>
+          <div class="row">
+            <svg class="ic" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V21h2v-3.1A7 7 0 0 0 19 11h-2z"/></svg>
+            <span class="sel"><span class="nm">Blue Snowball</span><span class="chev">▼</span></span>
+            <button class="testbtn">Test</button>
+          </div>
+          <div class="row" style="padding-left:28px"><span class="meter"><span class="lv"></span></span></div>
+          <div class="row">
+            <svg class="ic" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4z"/></svg>
+            <span class="sel"><span class="nm">Headphones (Realtek High Definition Audio)</span><span class="chev">▼</span></span>
+            <button class="testbtn">Test</button>
+          </div>
+          <div class="row" style="padding-left:28px">
+            <span class="vol"><span class="fill"></span><span class="knob"></span></span>
+          </div>
+        </div>
+
+        <p class="fine foot">Calling rings a real phone on a real desk. If nobody picks up in a
+        minute, the line frees itself.</p>
+      </div>
+    </div>
+    <div class="notes"><b>Plain:</b> could be any well-made call page. Nothing in the way, nothing
+      to learn. House identity carried only by the name.</div>
+  </div>
+
+  <!-- ======= B · HOUSE ======= -->
+  <div class="card" data-choice="house" onclick="toggleSelect(this)">
+    <span class="pick tag">PICKED</span>
+    <div class="card-head"><span class="letter tag">B</span><h3>HOUSE</h3>
+      <span class="opt">same bones · site type + panel + status voice</span></div>
+    <div class="stage">
+      <div class="page vb">
+        <div class="head">
+          <span class="brand">PORK<span class="off">PHONE</span></span>
+          <span class="status"><span class="dot"></span><span class="st">LINE FREE</span></span>
+        </div>
+
+        <div class="callwrap">
+          <button class="callbtn">
+            <svg viewBox="0 0 24 24" fill="#0b0c0e"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.2.2 2.4.6 3.6.1.3 0 .7-.2 1l-2.3 2.2z"/></svg>
+          </button>
+          <span class="callsub">Call Paul's desk</span>
+        </div>
+
+        <div class="audio">
+          <div class="ttl">Your audio</div>
+          <div class="row">
+            <svg class="ic" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V21h2v-3.1A7 7 0 0 0 19 11h-2z"/></svg>
+            <span class="sel"><span class="nm">Blue Snowball</span><span class="chev">▼</span></span>
+            <button class="testbtn">Test</button>
+          </div>
+          <div class="row" style="padding-left:28px"><span class="meter"><span class="lv"></span></span></div>
+          <div class="row">
+            <svg class="ic" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4z"/></svg>
+            <span class="sel"><span class="nm">Headphones (Realtek High Definition Audio)</span><span class="chev">▼</span></span>
+            <button class="testbtn">Test</button>
+          </div>
+          <div class="row" style="padding-left:28px">
+            <span class="vol"><span class="fill"></span><span class="knob"></span></span>
+          </div>
+        </div>
+
+        <p class="fine foot">Calling rings a real phone on a real desk. If nobody picks up in a
+        minute, the line frees itself.</p>
+      </div>
+    </div>
+    <div class="notes"><b>House:</b> identical bones — the site's 900-italic voice on the brand and
+      the line status, audio check gets the panel treatment, call button gets the hard offset
+      shadow. Status still plain English, just set in the house type. During a call the button
+      turns red (hang up) and the status line becomes the timer.</div>
+  </div>
+
+</div>
+
+<p class="fine" style="margin-top:34px">Both: press call → status says “Ringing…” with the ringback
+sound → button flips red to hang up. No claim windows, no countdowns in the copy — the machinery
+stays backstage.</p>
+
+</body></html>
