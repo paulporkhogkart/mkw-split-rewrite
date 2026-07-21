@@ -73,9 +73,9 @@ async def test_echo_call_roundtrip(tmp_path, unused_tcp_port):
     await asyncio.gather(sender(), receiver())
     assert len(got) >= 10 * audio.FRAME_BYTES  # audio came back
 
-    # events observed
+    # events observed (a "line_state" hello now precedes these; ignore it)
     seen = set()
-    while len(seen) < 2:
+    while not {"call_ringing", "call_active"} <= seen:
         msg = await asyncio.wait_for(ev.receive_json(), 5)
         seen.add(msg["type"])
     assert {"call_ringing", "call_active"} <= seen
