@@ -188,8 +188,8 @@
   // best-effort, silently ignored where unsupported
   function setMicProcessing(on) {
     const track = meterStream?.getAudioTracks?.()[0];
-    track?.applyConstraints?.({ echoCancellation: on, noiseSuppression: on,
-                                autoGainControl: on }).catch(() => {});
+    return track?.applyConstraints?.({ echoCancellation: on, noiseSuppression: on,
+                                       autoGainControl: on }).catch(() => {});
   }
 
   function stopMonitor() {
@@ -333,6 +333,7 @@
       // SECOND getUserMedia here is what re-popped the permission prompt after
       // dialling on mobile. ensure it's live (it is once granted) then tap it.
       if (!meterStream) await startMeter();
+      await setMicProcessing(true);   // guarantee echo-cancel/noise-suppress on
       await playDialSequence();   // theatre first: also the double-tap guard
       const r = await fetch("/call/claim", { method: "POST" });
       if (!r.ok) {
