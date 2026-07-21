@@ -32,8 +32,9 @@ public read, so a new endpoint is needed regardless).
   `/v1/version`).
 - **Response:** `{ jobs: [...] }`, one row per WR:
   `wr_id, course, course_slug, cc, holder_name, record_str, is_current, status, attempts,
-  last_error, updated_at, lease_owner, next_eligible_at, trail_points, trail_recorded_at`
-  (non-applicable fields null).
+  last_error, updated_at, lease_owner, next_eligible_at, trail_points` (non-applicable fields
+  null). `wr_trails` has no timestamp column, so the "done" time is the job row's `updated_at`
+  (stamped by `completeJob`); a trail with no job row shows no date.
 
 ### Status derivation (server-side, one place)
 
@@ -43,13 +44,13 @@ terminal — so the page can never disagree with the queue. Evaluated in order:
 
 | Status | Predicate |
 |---|---|
-| `done` | `wr_trails` row exists (report point count + `recorded_at`) |
+| `done` | `wr_trails` row exists (report point count) |
 | `in_progress` | live lease: `lease_until >= now` (report `lease_owner`, attempt #) |
 | `parked` | `last_error LIKE 'time_mismatch%'` — terminal until reconcile sees a new video link |
 | `unprocessable` | `video_url IS NULL OR character_slug IS NULL` — can never be claimed (job row or not) |
 | `cooldown` | `attempts >= 5` and inside the retry window (report `next_eligible_at` = `updated_at` + window, and `last_error`) |
 | `queued` | job row claimable right now (attempts < 5, or cooldown elapsed); a row with a `last_error` is still `queued` — the error and attempt count are shown alongside |
-| `not_queued` | no job row (reachable only for non-current WRs; v1 never enqueued them — `seedWrJobs` seeds every current videoed WR on boot) |
+| `not_queued` | no job row yet — a transient state for a just-scraped current WR before enqueue/boot-seed. (A superseded WR with neither job nor trail is excluded by the inclusion rule, so this never marks history.) |
 
 `next_eligible_at` is computed in SQL from the same CASE as `claimJob` so the two cannot drift.
 `last_error` passes through as stored (already capped at 500 chars by `failJob`).
