@@ -54,12 +54,14 @@ held call fully specified as the fallback if the experiment comes back empty.**
 
 ### 1.3 Primary design — SNMP hook poll
 
-- **ATA (Paul-in-the-loop, one settings page):** Enable SNMP, v2c, port 161, a strong
-  random community string (stored with the other secrets in `/etc/hotline/hotline.env`).
-  v2c's plaintext community is acceptable on the isolated Phone VLAN with pinned host
-  IPs (same posture as SIP); if the V2 UI offers v3 with authPriv at no extra
-  complexity, the implementation may use it — the client library choice decides (plan
-  detail).
+- **ATA (Paul-in-the-loop, one settings page — V2 UI: System Settings, the SNMP
+  Settings block after TR-069; verified present in the V2 admin guide 2026-07-22):**
+  Enable SNMP, port 161, **v3 with authPriv preferred** (the V2 UI has the full v3
+  auth/priv fields); v2c with a strong random community is the accepted fallback if v3
+  proves flaky at the bench (plaintext community is tolerable on the isolated Phone
+  VLAN with pinned host IPs — same posture as SIP). Credentials live with the other
+  secrets in `/etc/hotline/hotline.env`. **Trap destinations stay empty** (unused
+  surface).
 - **Hotline app:** new `hotline/snmp.py` — a minimal asyncio SNMP GET client
   (hand-rolled v2c BER encode/decode for a single OID is ~100 dependency-free lines,
   matching the service's aiohttp-only posture; pulling a library instead is a plan-time
@@ -87,6 +89,10 @@ Ground truth beats the ticket-gated MIB: enable SNMP on the ATA, then from the P
 2. Handset lifted (idle, no call): walk again to `/tmp/offhook.txt`
 3. `diff` the walks. A flipping OID = our signal; also confirm it flips during a live
    call and after a far-side hangup with the handset still up.
+4. **Audit the walk output for anything secret-looking** (SIP credentials, server
+   addresses, provisioning strings) before keeping any walk file around; if the MIB
+   leaks credentials, v3 authPriv becomes mandatory, not preferred, and the walk files
+   are deleted after the OID is extracted.
 
 Outcome A (OID found): set the env config; primary design ships as-is.
 Outcome B (nothing hook-shaped flips): primary is dead on this firmware — build the
@@ -167,7 +173,36 @@ Kept fully specified so outcome B is a detector swap, not a redesign:
 | ATA power-yanked while off-hook | Qualify fails → `unplugged` (wins precedence). |
 | Hotline restart | Boot starts lines-closed as today; state re-detected within one poll (SNMP) or on next lift (fallback). |
 
-### 1.10 Paul-in-the-loop checklist (exact steps supplied at implementation)
+### 1.10 Security posture (assessed 2026-07-22, Paul's ask)
+
+Three real concerns, each mitigated; net delta vs the parent spec's threat model is
+negligible because the only box that can reach the new surface (the Pi) already fully
+controls the phone through ARI.
+
+1. **New listening service on the ATA (UDP 161).** The one genuine cost against the
+   §4.2 strip-everything hardening posture. Contained by: firewall (only the Pi has a
+   UDP path to the ATA; LAN and internet have none), HT8xx SNMP being read-only by
+   design (`Set` unsupported per Grandstream's SNMP guide), and trap destinations left
+   empty. A Pi attacker gains nothing new — ARI already gives them call origination
+   and live audio.
+2. **Credential on the wire.** v3 authPriv preferred (encrypted + authenticated, the
+   concern disappears); the v2c fallback's plaintext community crosses only the Phone
+   VLAN and the WPA3/AES inter-building bridge, is readable only from inside those
+   links, and buys read-only access. Stored root-owned 0600 in
+   `/etc/hotline/hotline.env`, never in the repo.
+3. **Spoofed or malformed responses.** Bounded by construction: off-hook state is
+   advisory — it can only refuse new claims, never touch a live call — so a forged
+   "off-hook" is at worst a line-closed DoS from an attacker already inside the house
+   network, and a forged "on-hook" merely restores today's behavior. Implementation
+   hardening: `connect()` the UDP socket to the ATA's IP (kernel drops other sources),
+   validate SNMP request IDs, defensive BER parsing unit-tested against garbage and
+   length-bombs.
+
+The §1.8 fallback adds **zero** new listening surface (it rides the existing SIP
+path) and remains the pick if minimum ATA surface ever outweighs the SNMP approach's
+advantages (no dial-tone loss, catches hangup-while-holding, no ring-race analysis).
+
+### 1.11 Paul-in-the-loop checklist (exact steps supplied at implementation)
 
 §1.4 experiment (SNMP enable + two walks + call/hangup variations) · then per outcome:
 env config on the Pi, or the §1.8 ATA field + dialplan reload. Physical matrix either
@@ -238,6 +273,6 @@ Only on Paul's explicit go: push → on the Pi (`ssh pi@192.168.4.21`) wait for
 git checkout origin/main -- hotline` → rsync per `hotline/server/deploy/install.sh`'s
 rsync line to `/opt/hotline/server/` → add the SNMP env keys to
 `/etc/hotline/hotline.env` (values from the §1.4 experiment) → `sudo systemctl restart
-hotline` → verify `/healthz` + live page (mtime `?v=` stamps cache-bust) → §1.10
+hotline` → verify `/healthz` + live page (mtime `?v=` stamps cache-bust) → §1.11
 physical matrix. (Outcome B adds the extensions.conf rsync +
 `sudo asterisk -rx "dialplan reload"` + the ATA auto-dial field.)
