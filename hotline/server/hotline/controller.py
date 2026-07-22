@@ -21,6 +21,10 @@ class PhoneUnplugged(Exception):
     pass
 
 
+class PhoneOffhook(Exception):
+    pass
+
+
 class EchoPhoneLeg:
     """Dev/e2e phone: answers instantly (or after ring_delay_s, so the ringing
     state and ringback are experiencable locally), loops audio back."""
@@ -70,6 +74,8 @@ class Controller:
         self.lease.on_expired(self._on_lease_expired)
         self._phone_reachable = True   # echo mode never flips this; real mode
                                        # is driven by the ARI poll (Task 5)
+        self._phone_offhook = False    # driven by the SNMP hook poll (real
+                                       # mode) or /admin/line-sim (bench)
         self._call_lease_id: Optional[str] = None
 
     # -- lifecycle -----------------------------------------------------------
@@ -119,8 +125,11 @@ class Controller:
     # -- line lease ----------------------------------------------------------
     def line_snapshot(self) -> dict:
         snap = self.lease.snapshot()
-        if snap["state"] == "idle" and not self._phone_reachable:
-            snap["state"] = "unplugged"
+        if snap["state"] == "idle":
+            if not self._phone_reachable:
+                snap["state"] = "unplugged"
+            elif self._phone_offhook:
+                snap["state"] = "offhook"
         return snap
 
     def _publish_line_state(self, _snap: dict) -> None:
@@ -133,9 +142,17 @@ class Controller:
         self._phone_reachable = ok
         self.bus.publish(self.line_snapshot())
 
+    def set_phone_offhook(self, offhook: bool) -> None:
+        if offhook == self._phone_offhook:
+            return
+        self._phone_offhook = offhook
+        self.bus.publish(self.line_snapshot())
+
     def claim_line(self) -> str:
         if not self._phone_reachable:
             raise PhoneUnplugged()
+        if self._phone_offhook:
+            raise PhoneOffhook()
         return self.lease.claim()
 
     async def ring_with_lease(self, lease_id: str) -> str:
