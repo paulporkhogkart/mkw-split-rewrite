@@ -24,6 +24,11 @@ class Config:
     call_backstop_s: int
     ata_poll_s: float
     echo_ring_s: float
+    snmp_host: str
+    snmp_community: str
+    snmp_hook_oid: str
+    snmp_offhook_values: tuple[str, ...]
+    snmp_poll_s: float
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str]) -> "Config":
@@ -60,4 +65,12 @@ class Config:
             call_backstop_s=int(environ.get("HOTLINE_CALL_BACKSTOP_S", "1800")),
             ata_poll_s=float(environ.get("HOTLINE_ATA_POLL_S", "15")),
             echo_ring_s=float(environ.get("HOTLINE_ECHO_RING_S", "0")),
+            snmp_host=environ.get("HOTLINE_SNMP_HOST", ""),
+            snmp_community=environ.get("HOTLINE_SNMP_COMMUNITY", ""),
+            snmp_hook_oid=environ.get("HOTLINE_SNMP_HOOK_OID", ""),
+            snmp_offhook_values=tuple(
+                v.strip() for v in
+                environ.get("HOTLINE_SNMP_OFFHOOK_VALUES", "").split(",")
+                if v.strip()),
+            snmp_poll_s=float(environ.get("HOTLINE_SNMP_POLL_S", "2")),
         )

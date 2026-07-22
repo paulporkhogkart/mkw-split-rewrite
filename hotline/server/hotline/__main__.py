@@ -16,6 +16,7 @@ from .controller import Controller
 from .db import Db
 from .events import EventBus
 from .http import make_app
+from .snmp import SnmpError, snmp_get
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +126,25 @@ async def watch_ata(ari: AriClient, controller: Controller,
             await asyncio.wait_for(stop.wait(), poll_s)
 
 
+async def watch_hook(cfg: Config, controller: Controller,
+                     stop: asyncio.Event) -> None:
+    """Poll the ATA's hook-state OID; drive the line's offhook state.
+    Any failure reads as on-hook -- fail closed to today's behavior."""
+    offhook_values = set(cfg.snmp_offhook_values)
+    while not stop.is_set():
+        offhook = False
+        try:
+            value = await snmp_get(cfg.snmp_host, cfg.snmp_community,
+                                   cfg.snmp_hook_oid,
+                                   timeout_s=min(cfg.snmp_poll_s, 2.0))
+            offhook = value in offhook_values
+        except (SnmpError, asyncio.TimeoutError, OSError):
+            pass
+        controller.set_phone_offhook(offhook)
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(stop.wait(), cfg.snmp_poll_s)
+
+
 async def build_and_run(cfg: Config, stop: asyncio.Event) -> None:
     db = Db(cfg.data_dir / "hotline.db")
     db.init()
@@ -152,6 +172,11 @@ async def build_and_run(cfg: Config, stop: asyncio.Event) -> None:
         watch_task = asyncio.create_task(
             watch_ata(ari, controller, cfg.ata_poll_s, stop))
 
+    hook_task: Optional[asyncio.Task] = None
+    if (not cfg.echo_mode and cfg.snmp_host and cfg.snmp_community
+            and cfg.snmp_hook_oid and cfg.snmp_offhook_values):
+        hook_task = asyncio.create_task(watch_hook(cfg, controller, stop))
+
     app = make_app(cfg, controller)
     runner = web.AppRunner(app)
     await runner.setup()
@@ -165,6 +190,10 @@ async def build_and_run(cfg: Config, stop: asyncio.Event) -> None:
         watch_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await watch_task
+    if hook_task:
+        hook_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await hook_task
     await controller.stop()
     await bus.stop()
     if ari:

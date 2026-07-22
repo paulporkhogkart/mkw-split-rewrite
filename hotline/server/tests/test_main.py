@@ -134,3 +134,44 @@ async def test_ari_leg_replays_events_stashed_during_originate():
     await leg.ring("PORK")   # originate returns ch-7; stash replays
     assert sess.hungup       # offline-ATA fast-destroy ends the call, no wedge
     assert ari.listeners == []
+
+
+async def test_watch_hook_polls_and_fails_closed(tmp_path, monkeypatch):
+    import hotline.__main__ as main_mod
+    from hotline.snmp import SnmpError
+
+    cfg = Config.from_env({
+        "HOTLINE_ENV": "dev", "HOTLINE_DATA_DIR": str(tmp_path),
+        "HOTLINE_SNMP_HOST": "192.0.2.1", "HOTLINE_SNMP_COMMUNITY": "pub",
+        "HOTLINE_SNMP_HOOK_OID": "1.3.6.1.4.1.1",
+        "HOTLINE_SNMP_OFFHOOK_VALUES": "2",
+        "HOTLINE_SNMP_POLL_S": "0.02",
+    })
+
+    import itertools
+    # infinite tail: the poller may tick again before stop.set() lands, and an
+    # exhausted iterator would raise StopIteration -> RuntimeError in the task
+    values = itertools.chain(["1", "2", "2", SnmpError("boom"), "1"],
+                             itertools.repeat("1"))
+    seen: list[bool] = []
+
+    async def fake_get(host, community, oid, port=161, timeout_s=2.0):
+        v = next(values)
+        if isinstance(v, Exception):
+            raise v
+        return v
+
+    class FakeController:
+        def set_phone_offhook(self, offhook: bool) -> None:
+            seen.append(offhook)
+
+    monkeypatch.setattr(main_mod, "snmp_get", fake_get)
+    stop = asyncio.Event()
+    task = asyncio.create_task(
+        main_mod.watch_hook(cfg, FakeController(), stop))
+    while len(seen) < 5:
+        await asyncio.sleep(0.01)
+    stop.set()
+    await asyncio.wait_for(task, 2)
+    # "2" is the configured off-hook value; the error tick fails closed
+    assert seen[:5] == [False, True, True, False, False]

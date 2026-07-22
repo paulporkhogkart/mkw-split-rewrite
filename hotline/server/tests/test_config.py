@@ -60,3 +60,27 @@ def test_echo_ring_delay_parsed():
     cfg = Config.from_env({"HOTLINE_DATA_DIR": "/tmp/x",
                            "HOTLINE_ECHO_RING_S": "3.5"})
     assert cfg.echo_ring_s == 3.5
+
+
+def test_snmp_defaults_disabled(tmp_path):
+    cfg = Config.from_env({"HOTLINE_ENV": "dev",
+                           "HOTLINE_DATA_DIR": str(tmp_path)})
+    assert cfg.snmp_host == ""
+    assert cfg.snmp_community == ""
+    assert cfg.snmp_hook_oid == ""
+    assert cfg.snmp_offhook_values == ()
+    assert cfg.snmp_poll_s == 2.0
+
+
+def test_snmp_values_parse(tmp_path):
+    cfg = Config.from_env({
+        "HOTLINE_ENV": "dev", "HOTLINE_DATA_DIR": str(tmp_path),
+        "HOTLINE_SNMP_HOST": "192.168.3.226",
+        "HOTLINE_SNMP_COMMUNITY": "s3cret",
+        "HOTLINE_SNMP_HOOK_OID": "1.3.6.1.4.1.42397.1.2.1.1.3.1",
+        "HOTLINE_SNMP_OFFHOOK_VALUES": "2, Off-Hook",
+        "HOTLINE_SNMP_POLL_S": "1.5",
+    })
+    assert cfg.snmp_host == "192.168.3.226"
+    assert cfg.snmp_offhook_values == ("2", "Off-Hook")
+    assert cfg.snmp_poll_s == 1.5
