@@ -237,7 +237,8 @@
   });
 
   // ---- call machine --------------------------------------------------------
-  // page states: idle | calling (claim+ws setup) | ringing | oncall | busy | unplugged
+  // page states: idle | calling (claim+ws setup) | ringing | oncall | busy |
+  // unplugged | offhook
   let page = "idle", lease = null, audioWs = null;
   // nodes created fresh for the current call; disconnected + nulled in
   // endCallCleanup so a second call never doubles up on the first's graph
@@ -288,6 +289,9 @@
     } else if (page === "busy") {
       pill.hidden = false; dot.className = "dot"; pillText.textContent = "line busy";
       btn.className = "callbtn off"; caption.textContent = "wait for their call to end";
+    } else if (page === "offhook") {
+      pill.hidden = false; dot.className = "dot"; pillText.textContent = "off the hook";
+      btn.className = "callbtn off"; caption.textContent = "the phone is off the hook";
     } else if (page === "unplugged") {
       pill.hidden = false; dot.className = "dot"; pillText.textContent = "phone unplugged";
       btn.className = "callbtn off"; caption.textContent = "not taking calls right now";
@@ -437,6 +441,7 @@
     if (page === "ending" || page === "dialling") return;   // lockout/theatre first
     if (line.state === "idle") { page = "idle"; render(); }
     else if (line.state === "unplugged") { page = "unplugged"; render(); }
+    else if (line.state === "offhook") { page = "offhook"; render(); }
     else { page = "busy"; render(); }
   }
 
