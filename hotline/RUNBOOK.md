@@ -169,6 +169,15 @@ From the Pi (`ssh pi@192.168.4.21`):
 
 The OID that flips is the signal. Note its off-hook value(s). Re-check it flips
 during a live call and after the far side hangs up while the handset stays up.
+
+RESULT 2026-07-22 (experiment done, config live on the Pi): FXS1 hook state =
+`.1.3.6.1.4.1.42397.1.2.2.1.1.0.0`, values `On Hook` / `Off Hook` (FXS2 is
+`...1.2.2.1.2.0.0`). Walk audited: no secrets in the MIB (SIP username visible,
+password not), v2c stands. Note: SNMP only starts answering after an ATA
+REBOOT, not just Apply. Native tone plan while off the hook: dial tone, then a
+loud off-hook howler for a while, then permanent silence — accepted (detection
+unaffected; silence option = auto-dial into an Answer()+Wait() dialplan line
+if it ever bugs Paul). T1-T3 physical tests passed same day.
 AUDIT the walk output for anything secret-looking (SIP passwords, server
 addresses) before keeping files; delete both files after extracting the OID.
 If nothing hook-shaped flips: the SNMP approach is dead on this firmware, use
