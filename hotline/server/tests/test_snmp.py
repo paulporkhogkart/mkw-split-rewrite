@@ -106,3 +106,85 @@ def test_render_int_string_and_hex():
     assert render_value(0x02, b"\x02") == "2"
     assert render_value(0x04, b"Off-Hook") == "Off-Hook"
     assert render_value(0x43, b"\x01\x02") == "0x0102"   # TimeTicks -> hex
+
+
+# -- async client against a fake UDP agent ------------------------------------
+
+import asyncio
+
+from hotline.snmp import snmp_get
+
+
+def request_id_of(packet: bytes) -> int:
+    msg = _Reader(packet)
+    _tag, body = msg.tlv()
+    inner = _Reader(body)
+    inner.tlv()                                   # version
+    inner.tlv()                                   # community
+    _ptag, pdu = inner.tlv()
+    _rtag, rbody = _Reader(pdu).tlv()
+    return int.from_bytes(rbody, "big", signed=True)
+
+
+class FakeAgent(asyncio.DatagramProtocol):
+    """reply_fn(request_packet) -> list of datagrams to send back."""
+
+    def __init__(self, reply_fn) -> None:
+        self.reply_fn = reply_fn
+
+    def connection_made(self, transport) -> None:
+        self.transport = transport
+
+    def datagram_received(self, data, addr) -> None:
+        for out in self.reply_fn(data):
+            self.transport.sendto(out, addr)
+
+
+async def start_agent(reply_fn):
+    loop = asyncio.get_running_loop()
+    transport, _proto = await loop.create_datagram_endpoint(
+        lambda: FakeAgent(reply_fn), local_addr=("127.0.0.1", 0))
+    return transport, transport.get_extra_info("sockname")[1]
+
+
+async def test_snmp_get_returns_value():
+    transport, port = await start_agent(
+        lambda req: [make_response(request_id_of(req), _int(2))])
+    try:
+        assert await snmp_get("127.0.0.1", "pub", "1.3.6.1.4.1.1",
+                              port=port, timeout_s=2.0) == "2"
+    finally:
+        transport.close()
+
+
+async def test_snmp_get_skips_garbage_then_accepts_valid():
+    # a spoofer racing garbage in first must not break the poll
+    transport, port = await start_agent(
+        lambda req: [b"\xff\xff\xff", make_response(9999, _int(1)),
+                     make_response(request_id_of(req), _int(2))])
+    try:
+        assert await snmp_get("127.0.0.1", "pub", "1.3.6.1.4.1.1",
+                              port=port, timeout_s=2.0) == "2"
+    finally:
+        transport.close()
+
+
+async def test_snmp_get_times_out_when_silent():
+    transport, port = await start_agent(lambda req: [])
+    try:
+        with pytest.raises(asyncio.TimeoutError):
+            await snmp_get("127.0.0.1", "pub", "1.3.6.1.4.1.1",
+                           port=port, timeout_s=0.2)
+    finally:
+        transport.close()
+
+
+async def test_snmp_get_times_out_on_wrong_request_id_only():
+    transport, port = await start_agent(
+        lambda req: [make_response(request_id_of(req) + 1, _int(2))])
+    try:
+        with pytest.raises(asyncio.TimeoutError):
+            await snmp_get("127.0.0.1", "pub", "1.3.6.1.4.1.1",
+                           port=port, timeout_s=0.2)
+    finally:
+        transport.close()

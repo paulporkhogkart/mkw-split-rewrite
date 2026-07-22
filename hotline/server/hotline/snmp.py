@@ -137,3 +137,41 @@ def render_value(tag: int, body: bytes) -> str:
     if tag == 0x04:
         return body.decode("utf-8", "replace")
     return "0x" + body.hex()
+
+
+# -- async client -------------------------------------------------------------
+
+class _ClientProto(asyncio.DatagramProtocol):
+    def __init__(self) -> None:
+        self.queue: asyncio.Queue[bytes] = asyncio.Queue()
+
+    def datagram_received(self, data: bytes, addr) -> None:
+        self.queue.put_nowait(data)
+
+
+async def snmp_get(host: str, community: str, oid: str,
+                   port: int = 161, timeout_s: float = 2.0) -> str:
+    """One SNMPv2c GET. The socket is connect()ed to (host, port), so the
+    kernel drops datagrams from any other source; garbage or mismatched
+    request ids are skipped until the deadline (a spoofer can't break the
+    poll by racing packets in)."""
+    request_id = secrets.randbelow(0x7FFFFFFE) + 1
+    packet = encode_get(community, oid, request_id)
+    loop = asyncio.get_running_loop()
+    transport, proto = await loop.create_datagram_endpoint(
+        _ClientProto, remote_addr=(host, port))
+    try:
+        transport.sendto(packet)
+        deadline = loop.time() + timeout_s
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise asyncio.TimeoutError()
+            data = await asyncio.wait_for(proto.queue.get(), remaining)
+            try:
+                tag, body = decode_response(data, request_id)
+            except SnmpError:
+                continue
+            return render_value(tag, body)
+    finally:
+        transport.close()
