@@ -56,12 +56,14 @@ held call fully specified as the fallback if the experiment comes back empty.**
 
 - **ATA (Paul-in-the-loop, one settings page — V2 UI: System Settings, the SNMP
   Settings block after TR-069; verified present in the V2 admin guide 2026-07-22):**
-  Enable SNMP, port 161, **v3 with authPriv preferred** (the V2 UI has the full v3
-  auth/priv fields); v2c with a strong random community is the accepted fallback if v3
-  proves flaky at the bench (plaintext community is tolerable on the isolated Phone
-  VLAN with pinned host IPs — same posture as SIP). Credentials live with the other
-  secrets in `/etc/hotline/hotline.env`. **Trap destinations stay empty** (unused
-  surface).
+  Enable SNMP, port 161, **v2c with a strong random community** (plan-time decision:
+  the client is hand-rolled and dependency-free — a defensively parsed ~100-line BER
+  codec we control beats pulling a full SNMP stack into the process for one read-only
+  OID; v2c's plaintext community is tolerable on the isolated Phone VLAN with pinned
+  host IPs, same posture as SIP). **v3 authPriv via a vetted library becomes the
+  mandatory upgrade if the §1.4 walk audit finds secrets in the MIB.** Credentials
+  live with the other secrets in `/etc/hotline/hotline.env`. **Trap destinations stay
+  empty** (unused surface).
 - **Hotline app:** new `hotline/snmp.py` — a minimal asyncio SNMP GET client
   (hand-rolled v2c BER encode/decode for a single OID is ~100 dependency-free lines,
   matching the service's aiohttp-only posture; pulling a library instead is a plan-time
@@ -185,11 +187,11 @@ controls the phone through ARI.
    design (`Set` unsupported per Grandstream's SNMP guide), and trap destinations left
    empty. A Pi attacker gains nothing new — ARI already gives them call origination
    and live audio.
-2. **Credential on the wire.** v3 authPriv preferred (encrypted + authenticated, the
-   concern disappears); the v2c fallback's plaintext community crosses only the Phone
-   VLAN and the WPA3/AES inter-building bridge, is readable only from inside those
-   links, and buys read-only access. Stored root-owned 0600 in
-   `/etc/hotline/hotline.env`, never in the repo.
+2. **Credential on the wire.** v2c ships (see §1.3 plan-time decision); its plaintext
+   community crosses only the Phone VLAN and the WPA3/AES inter-building bridge, is
+   readable only from inside those links, and buys read-only access. v3 authPriv via
+   a vetted library is the mandatory upgrade if the walk audit finds secrets. Stored
+   root-owned 0600 in `/etc/hotline/hotline.env`, never in the repo.
 3. **Spoofed or malformed responses.** Bounded by construction: off-hook state is
    advisory — it can only refuse new claims, never touch a live call — so a forged
    "off-hook" is at worst a line-closed DoS from an attacker already inside the house

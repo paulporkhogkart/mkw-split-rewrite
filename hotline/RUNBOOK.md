@@ -140,6 +140,67 @@ the internet.**
 
 ---
 
+## Off-hook detection (SNMP hook poll)
+
+The page shows `off the hook` and refuses calls while the handset is lifted.
+Driven by an SNMPv2c poll of the ATA every 2 s. Feature is DORMANT until the
+env keys below are set.
+
+### One-time: enable SNMP on the ATA (V2 admin UI)
+
+System Settings → scroll to the **SNMP Settings** block (just after TR-069):
+
+1. Enable SNMP: **Yes** · SNMP Version: **Version 2c** · SNMP Port: **161**
+2. SNMPv1/v2c Community: paste a long random string (this is a read password;
+   generate with `openssl rand -hex 16`)
+3. Leave ALL trap fields empty (Trap IP Address blank = no traps)
+4. Apply / reboot if prompted
+
+### One-time: find the hook OID (the gating experiment)
+
+From the Pi (`ssh pi@192.168.4.21`):
+
+    sudo apt install snmp
+    # handset CRADLED:
+    snmpwalk -v2c -c <community> -On 192.168.3.226 > /tmp/onhook.txt
+    # lift the handset (no call), then:
+    snmpwalk -v2c -c <community> -On 192.168.3.226 > /tmp/offhook.txt
+    diff /tmp/onhook.txt /tmp/offhook.txt
+
+The OID that flips is the signal. Note its off-hook value(s). Re-check it flips
+during a live call and after the far side hangs up while the handset stays up.
+AUDIT the walk output for anything secret-looking (SIP passwords, server
+addresses) before keeping files; delete both files after extracting the OID.
+If nothing hook-shaped flips: the SNMP approach is dead on this firmware, use
+the spec's §1.8 auto-dial fallback instead.
+
+### Enable on the Pi
+
+Append to `/etc/hotline/hotline.env` (values from the experiment):
+
+    HOTLINE_SNMP_HOST=192.168.3.226
+    HOTLINE_SNMP_COMMUNITY=<community>
+    HOTLINE_SNMP_HOOK_OID=<oid from the diff, numeric form>
+    HOTLINE_SNMP_OFFHOOK_VALUES=<value(s) meaning off-hook, comma-separated>
+
+then `sudo systemctl restart hotline`.
+
+### Physical test matrix
+
+T1 lift idle → page `off the hook` within ~3 s · T2 cradle → `idle` ·
+T3 web call rings → lift → answers normally, two-way audio · T4 lift during
+the claim/ring race → caller fails fast, page recovers to `off the hook` ·
+T5 off-hook then ATA power-yank → `phone unplugged` · T6 leave off-hook
+30 min → state holds.
+
+### Bench/debug
+
+`POST /admin/line-sim?state=offhook|clear&token=<admin>` drives the state by
+hand (works in echo mode; in real mode the poller re-asserts truth on its
+next tick).
+
+---
+
 ## Closing the line
 
 To stop calls, yank the ATA's **power cord** (not the 605 phone cord). The page at
