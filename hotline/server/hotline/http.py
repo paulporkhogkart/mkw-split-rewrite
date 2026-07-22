@@ -10,7 +10,7 @@ from aiohttp import web
 
 from . import audio
 from .config import Config
-from .controller import PhoneUnplugged
+from .controller import PhoneOffhook, PhoneUnplugged
 from .lease import LineBusy
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -62,6 +62,8 @@ async def _call_claim(request: web.Request) -> web.Response:
         return web.json_response({"error": "busy"}, status=409)
     except PhoneUnplugged:
         return web.json_response({"error": "unplugged"}, status=409)
+    except PhoneOffhook:
+        return web.json_response({"error": "offhook"}, status=409)
     return web.json_response({"lease_id": lease_id})
 
 
@@ -108,6 +110,18 @@ async def _hangup(request: web.Request) -> web.Response:
         return web.json_response({"error": "unauthorized"}, status=401)
     ok = await request.app[CONTROLLER_KEY].hangup_active()
     return web.json_response({"hungup": ok})
+
+
+async def _line_sim(request: web.Request) -> web.Response:
+    """Bench/debug: drive the offhook flag by hand (echo mode has no SNMP).
+    In real mode the poller re-asserts truth on its next tick."""
+    if not _authed(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+    state = request.query.get("state", "")
+    if state not in ("offhook", "clear"):
+        return web.json_response({"error": "bad state"}, status=400)
+    request.app[CONTROLLER_KEY].set_phone_offhook(state == "offhook")
+    return web.json_response({"ok": True})
 
 
 async def _ws_audio(request: web.Request) -> web.WebSocketResponse:
@@ -217,6 +231,7 @@ def make_app(cfg: Config, controller=None) -> web.Application:
     app.router.add_static("/static/", STATIC_DIR)
     app.router.add_post("/admin/test-ring", _test_ring)
     app.router.add_post("/admin/hangup", _hangup)
+    app.router.add_post("/admin/line-sim", _line_sim)
     app.router.add_post("/call/claim", _call_claim)
     app.router.add_post("/call/ring", _call_ring)
     app.router.add_post("/call/hangup", _call_hangup)
