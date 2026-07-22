@@ -472,9 +472,10 @@
   }
 
   // ---- boot ----------------------------------------------------------------
-  // Ask for mic permission up front (Meet-style pre-join): device labels only
-  // exist after a grant, and the pickers must work BEFORE the first call.
-  // Returning visitors have a standing grant, so no prompt appears.
+  // The mic prompt is never fired automatically: first-timers see the gate and
+  // press the allow button (or the call button) themselves. Returning visitors
+  // with a standing grant skip straight through -- querying permission state
+  // never prompts, and getUserMedia under an existing grant doesn't either.
   let eventsStarted = false;
   async function boot() {
     applyMicGate();   // "allow microphone access" until the prompt resolves
@@ -496,10 +497,20 @@
       st.onchange = () => { if (st.state !== "denied") location.reload(); };
     } catch {}   // permissions API absent: the call-button tap re-prompts
   }
+  async function init() {
+    applyMicGate();   // gate + allow button visible immediately
+    if (!eventsStarted) { eventsStarted = true; connectEvents(); }
+    let state = "prompt";
+    try {
+      state = (await navigator.permissions.query({ name: "microphone" })).state;
+    } catch {}   // permissions API absent: stay gated until the button is pressed
+    if (state === "granted") await boot();          // standing grant: no prompt
+    else if (state === "denied") { micAccess = "denied"; applyMicGate(); watchPermission(); }
+  }
   // Listen is desktop-only: on phones a 2nd mic path re-prompts / ignores the
   // raw-audio constraint, and monitoring through the earpiece feeds back. The
   // always-on meter (mic works) + Test (output works) cover mobile setup.
   if (matchMedia("(hover: none) and (pointer: coarse)").matches)
     micListen.hidden = true;
-  boot();
+  init();
 })();

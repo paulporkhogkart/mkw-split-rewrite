@@ -64,12 +64,20 @@ lease/claim machinery never appears in copy (no countdowns, no "slots").
 The ringing pill's dot twitches in the real AU double-ring cadence (400/200/400/2000 ms),
 matching what the physical bell is doing.
 
-### 2.2 First visit (amended 2026-07-22)
+### 2.2 First visit (re-amended 2026-07-22 evening — supersedes the on-load prompt)
 
-Meet-style pre-join: the page asks for mic permission **on load** (device labels only exist
-after a grant, and the pickers must be usable before the first call). Returning visitors
-have a standing grant, so no prompt appears. If denied, pickers stay generic and pressing
-call re-prompts. No setup gate on the call button.
+The page never fires the mic prompt automatically (Paul: manual is cleaner). On load it
+checks permission state via the Permissions API, which never prompts:
+
+- **Standing grant** (returning visitor): initialize as before — meter, device labels,
+  pickers — no prompt possible.
+- **Not yet granted**: the gate shows ("allow microphone access to get started") with
+  the explicit `allow microphone` button; the prompt fires only when the visitor
+  presses that button or the call button.
+- **Denied**: blocked-copy gate; auto-recovers when unblocked in browser settings
+  (Permissions API `onchange` → reload).
+- Permissions API absent: treated as not-yet-granted (gated until the button is
+  pressed), never auto-prompted.
 
 ### 2.3 Settings behaviour (amended 2026-07-22)
 
