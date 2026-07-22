@@ -119,6 +119,8 @@ async def test_page_assets_served(tmp_path, unused_tcp_port):
     body = await (await client.get("/")).text()
     assert "pork phone" in body
     assert "—" not in body          # no em dashes in page copy, ever
+    js = await (await client.get("/static/phone.js")).text()
+    assert "—" not in js          # page copy in JS is bound by the same rule
     await close_stack(client, ctl, bus, db)
 
 

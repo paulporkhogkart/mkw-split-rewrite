@@ -432,7 +432,7 @@
     if (micAccess !== "granted") { boot(); return; }   // re-prompt on tap
     if (page === "idle") startCall();
     else if (page === "ringing" || page === "oncall") hangup();
-    // dialling / ending / busy / unplugged: inert
+    // dialling / ending / busy / unplugged / offhook: inert
   });
 
   // ---- events feed ---------------------------------------------------------

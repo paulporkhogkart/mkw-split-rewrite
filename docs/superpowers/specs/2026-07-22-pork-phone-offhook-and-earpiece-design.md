@@ -256,7 +256,7 @@ real iPhone or the toggle is dropped.
 - `hotline/server/hotline/__main__.py` — poller wiring (and, outcome B only:
   `OffhookWatch`)
 - `hotline/server/hotline/config.py` — `HOTLINE_SNMP_HOST` / `_COMMUNITY` /
-  `_HOOK_OID` / `_POLL_S`
+  `_HOOK_OID` / `_OFFHOOK_VALUES` / `_POLL_S`
 - `hotline/server/hotline/controller.py` — `set_phone_offhook`, `PhoneOffhook`,
   snapshot composition
 - `hotline/server/hotline/http.py` — claim 409 `offhook`, `POST /admin/line-sim`

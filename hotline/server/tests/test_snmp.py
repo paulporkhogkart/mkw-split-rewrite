@@ -34,6 +34,12 @@ def test_oid_rejects_too_short():
         _oid("1")
 
 
+def test_oid_rejects_malformed():
+    for bad in ("1.3.x.1", "1.3.-5", "9.9.1", "1.3.6.-1.4", "1.x", ""):
+        with pytest.raises(SnmpError):
+            _oid(bad)
+
+
 # -- request encoding, verified by walking it with our own reader ------------
 
 def test_encode_get_structure():

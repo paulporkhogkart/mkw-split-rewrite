@@ -38,10 +38,18 @@ def _int(n: int) -> bytes:
 
 
 def _oid(dotted: str) -> bytes:
-    arcs = [int(a) for a in dotted.strip(".").split(".") if a != ""]
+    try:
+        arcs = [int(a) for a in dotted.strip(".").split(".") if a != ""]
+    except ValueError:
+        raise SnmpError("bad oid")
     if len(arcs) < 2:
         raise SnmpError("oid too short")
-    body = bytearray([40 * arcs[0] + arcs[1]])
+    if any(arc < 0 for arc in arcs):
+        raise SnmpError("bad oid")
+    first = 40 * arcs[0] + arcs[1]
+    if not (arcs[0] <= 2 and arcs[1] <= 39 and first <= 255):
+        raise SnmpError("bad oid")
+    body = bytearray([first])
     for arc in arcs[2:]:
         chunk = bytearray([arc & 0x7F])
         arc >>= 7
