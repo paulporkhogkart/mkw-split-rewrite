@@ -214,6 +214,19 @@ describe('reconcile', () => {
     expect(db.prepare('SELECT COUNT(*) n FROM wr_jobs').get()).toMatchObject({ n: 0 });
   });
 
+  it('enqueues a job when the video link arrives after the WR was scraped video-less', () => {
+    // 2026-07-23 Airship Fortress incident: mkwrs adds YouTube links after the record row.
+    // Case 2 skipped the enqueue (no video at insert), then every later scrape hit Case 1
+    // (record unchanged) which backfilled the link but never enqueued — so the job only
+    // existed after a Pi reboot (seedWrJobs).
+    const { db, hub } = setup();
+    reconcile(db, hub, [wr({ videoUrl: null })], 150);
+    const id = (db.prepare('SELECT id FROM world_records WHERE is_current=1').get() as any).id;
+    expect(db.prepare('SELECT COUNT(*) n FROM wr_jobs').get()).toMatchObject({ n: 0 });
+    reconcile(db, hub, [wr({ videoUrl: 'https://youtu.be/late' })], 150);
+    expect(claimJob(db, 'w1')).toMatchObject({ wr_id: id, video_url: 'https://youtu.be/late' });
+  });
+
   it('a changed video link revives a time_mismatch-dead job with fresh attempts', () => {
     const { db, hub } = setup();
     reconcile(db, hub, [wr({ videoUrl: 'https://youtu.be/wrong' })]);

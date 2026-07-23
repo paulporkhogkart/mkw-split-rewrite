@@ -51,6 +51,10 @@ function backfill(db: DatabaseSync, row: Row, s: ScrapedWr): boolean {
     db.prepare(`UPDATE wr_jobs SET last_error=NULL, attempts=0,
                   lease_owner=NULL, lease_until=NULL, alerted_at=NULL, updated_at=datetime('now')
                 WHERE wr_id=?`).run(row.id);
+    // And when the WR never had a job at all — scraped before mkwrs added its video link, so
+    // Case 2's enqueue was skipped — this arriving link is what makes it processable: enqueue
+    // now, or the job only ever exists after a Pi reboot (seedWrJobs).
+    enqueueJob(db, row.id);
   }
   if (s.character && s.character !== row.character) {
     const lo = resolveLoadout(s.character, null);

@@ -284,7 +284,10 @@ export type WrJobStatusRow = {
  *  The status CASE mirrors claimJob's WHERE clause term for term (live lease, terminal
  *  time_mismatch, FREE_ATTEMPTS + the 1h/6h/24h cooldown tiers off updated_at) so this page
  *  can never disagree with the queue — if you change one, change both. `not_queued` is the
- *  transient gap between a WR being scraped and its job being enqueued/boot-seeded. */
+ *  transient gap between a WR being scraped and its job being enqueued/boot-seeded. (It was
+ *  once NOT transient: until 2026-07-23 a video link that arrived after the WR row — mkwrs
+ *  adds links late — was backfilled without an enqueue, so the row sat not_queued until the
+ *  next Pi reboot. reconcile's backfill() now enqueues on every video-link change.) */
 export function wrJobsStatus(db: DatabaseSync): WrJobStatusRow[] {
   return db.prepare(
     `SELECT s.wr_id, s.course, s.course_slug, s.cc, s.holder_name, s.record_str, s.is_current,
