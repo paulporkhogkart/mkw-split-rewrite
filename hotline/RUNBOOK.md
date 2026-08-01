@@ -167,12 +167,16 @@ never had.
    hold): From Phone fully down, From Line fully up, live call with the far end
    muted, hum a steady note into the handset, set **<Separation>** at the quietest
    point on the iD4 meter. Then From Line ≈ 12:00, From Phone up to taste.
-3. **Balance + levels:** caller clearly dominant; your line-voice sits well under it
-   (the SM58 is your real channel — From Phone ≈ 0 is legitimate if the doubled
-   voice combs). Separation is only ~20 dB so your voice never fully leaves the
-   mix — fine, the design wants mixed line audio (spec §7.1); the manual FAQ's
-   "radio shows should buy a digital hybrid" caveat is about caller-only isolation
-   we don't need. **ATA Rx/Tx gains stay 0 dB** — they move the handset AND the tap;
+3. **Balance + levels:** the mixed channel is the whole on-air conversation during
+   calls — spec §2 req 5 + §7.4: the SM58 crossfades DOWN on CALL_ACTIVE ("the
+   whole show goes down the line — phone-quality everything is the bit"), so your
+   line voice IS your broadcast voice. Balance a natural two-way: caller a touch
+   forward, you fully intelligible (From Line = caller, From Phone = you). The JK's
+   ~20 dB separation is a mixing nicety, not moderation — DUMP nukes the whole
+   mixed channel by design (§7.2: "exactly one channel to nuke", deliberately
+   simpler than rev 3's two-channel sidetone story; per-leg isolation, if ever
+   truly wanted, is the §7.6 digital input stage — not an analog split, not a new
+   interface). **ATA Rx/Tx gains stay 0 dB** — they move the handset AND the tap;
    the JK knobs move only the tap.
 4. Make test calls from a **hotspot device, not the monitoring PC** (browser call +
    iD4 monitoring on one machine = feedback and confusion).
