@@ -248,6 +248,19 @@ mod tests {
     }
 
     #[test]
+    fn a_download_failed_reason_keeps_the_pi_prefix_and_carries_the_detail() {
+        // The Pi keys nothing on download_failed beyond the prefix, stores 500 chars, and
+        // shows last_error on /wr-jobs and in the wr_job_stuck embed -- so the yt-dlp verdict
+        // belongs in it. A bare "download_failed" hid a two-day YouTube breakage (2026-08-19)
+        // behind a word that could have meant anything.
+        let r = WrError::DownloadFailed("unable to download video data: HTTP Error 403: Forbidden".into()).reason();
+        assert!(r.starts_with("download_failed"), "the stable prefix is the contract, got {r}");
+        assert!(r.contains("HTTP Error 403"), "the detail must reach the Pi, got {r}");
+        // No detail -> no dangling separator.
+        assert_eq!(WrError::DownloadFailed(String::new()).reason(), "download_failed");
+    }
+
+    #[test]
     fn a_time_mismatch_reason_carries_both_numbers_for_a_human() {
         // This is the reason Paul reads when mkwrs links the wrong video, so it has to
         // say what we saw AND what was expected -- "time_mismatch" alone is useless.

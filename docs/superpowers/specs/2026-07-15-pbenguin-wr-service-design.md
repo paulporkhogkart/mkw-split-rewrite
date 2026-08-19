@@ -402,11 +402,20 @@ gate -> claim -> download -> process -> verify -> upload -> cleanup -> repeat
 1. **Claim** `POST /v1/wr-jobs/claim` with `Authorization: Bearer <player token>` and
    `X-Worker-Id: <per-install id>`. 204 → idle, poll with backoff (and/or wake on the
    `wr_update` WS event as a latency nudge).
-2. **Download** with yt-dlp. **Delivery: the service self-updates `yt-dlp.exe`** — on first run,
-   and when a download starts failing, it fetches the official standalone binary from yt-dlp's
-   GitHub releases into its own data dir. YouTube breaks yt-dlp regularly (the spike hit both a
+2. **Download** with yt-dlp. **Delivery: the service self-updates `yt-dlp.exe`** from yt-dlp's
+   own GitHub releases into its own data dir. YouTube breaks yt-dlp regularly (the spike hit both a
    403 and an n-challenge failure), and pbenguin releases are manual and infrequent, so a bundled
    copy would rot between them and this feature would die quietly. Pin to the official repo.
+   *(2026-08-20 amendment, after the android_vr breakage:)* the channel is the official
+   **nightly** (`yt-dlp/yt-dlp-nightly-builds`, built daily from master), NOT stable — stable lags
+   YouTube breakage by weeks (2026.07.04 stayed "latest" for 6+ weeks while YouTube 403'd every
+   android_vr download from 2026-08-17 and the fix sat in nightly). Freshness is decided **once per
+   job, by release tag**: `ensure` HEADs the latest-asset URL (GitHub 302s to
+   `.../releases/download/<tag>/...`), compares with the recorded `yt-dlp.version`, and transfers
+   only when they differ (keeping the current build if the transfer fails; offline keeps it too;
+   a >24h-old exe whose latest tag is unknowable is refreshed blind as a backstop). There is **no
+   refresh-on-download-failure** any more — that path re-downloaded the same broken build on every
+   attempt and burned the job's attempts for a retry that could not go differently.
    Flags:
    `-f "bestvideo[height=1080][fps=60][vcodec^=avc1]/bestvideo[height=1080][fps=60]/bestvideo[height=1080]"`
    — a **format selector, never a hardcoded id**: format ids are per-video and `299` does not
@@ -464,7 +473,8 @@ number already in hand. Splits provide a secondary check against `lap_splits_ms`
 *(v1 verifies the exact total only; `lap_splits_ms` arrives in the claim payload but is not yet
 checked.)*
 
-Additional failure reasons: `no_1080p60`, `download_failed`, `video_unavailable`,
+Additional failure reasons: `no_1080p60`, `download_failed: <yt-dlp's terminal error line>`
+(the detail rides along since 2026-08-20 — the bare word hid a two-day breakage), `video_unavailable`,
 `no_trail` (0 points — i.e. the minimap never locked — **or a fragment trail whose last point
 falls before 80% of the record's total time**; an exact total with a mid-race badge loss must not
 store a stub forever), `time_mismatch`, `timeout`.

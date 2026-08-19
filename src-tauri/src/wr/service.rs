@@ -13,6 +13,9 @@ pub struct ServiceCfg {
     pub token: String,
     pub data_dir: PathBuf,
     pub engine: EnginePath,
+    /// The yt-dlp release asset to track (`ytdlp::YTDLP_URL`); injectable so tests can run
+    /// the real download step against a local stand-in for GitHub.
+    pub ytdlp_url: String,
 }
 
 #[derive(Debug)]
@@ -48,16 +51,6 @@ fn selections_for(j: &job::WrJob) -> Selections {
 
 fn video_path(dir: &std::path::Path, wr_id: i64) -> PathBuf {
     dir.join(format!("wr-{wr_id}.mp4"))
-}
-
-/// Only DownloadFailed could plausibly be explained by a stale yt-dlp (a network hiccup, a
-/// format-parsing regression against a specific yt-dlp release). No1080p60/VideoUnavailable/
-/// EngineFailed are permanent for this video/URL — a refresh-and-retry cannot fix a missing
-/// stream or a removed video, so retrying on those just burns ~180s (the fetch timeout)
-/// plus a second doomed download. Pulled out as its own function so this predicate can be
-/// proven directly, without needing a real yt-dlp binary or network access.
-fn is_staleness_explicable(e: &WrError) -> bool {
-    matches!(e, WrError::DownloadFailed(_))
 }
 
 /// Delete a job's video. Called on EVERY terminal outcome — a 98s video is ~55MB, so the
@@ -165,7 +158,7 @@ fn run_job(cfg: &ServiceCfg, client: &job::Client, j: &job::WrJob,
     let tier = verify::tier_for(j.attempt);
     let dest = video_path(&cfg.data_dir, j.wr_id);
 
-    let exe = match ytdlp::ensure(&cfg.data_dir, cancel) {
+    let exe = match ytdlp::ensure(&cfg.ytdlp_url, &cfg.data_dir, cancel) {
         Ok(p) => p,
         Err(e) => {
             // A cancel mid-fetch is the same deliberate stop as everywhere else:
@@ -183,31 +176,15 @@ fn run_job(cfg: &ServiceCfg, client: &job::Client, j: &job::WrJob,
             let _ = client.release(j.wr_id);
             return Outcome::Released(j.wr_id);
         }
-        if is_staleness_explicable(&e) {
-            // See is_staleness_explicable's doc for why only THIS class of error retries.
-            log::warn!("[wr] download failed ({}), refreshing yt-dlp and retrying once", e.reason());
-            let retry = ytdlp::fetch(&cfg.data_dir, cancel)
-                // A cancel surfacing through the fetch must become Cancelled, not
-                // DownloadFailed — the arm below releases on Cancelled, and a fail()
-                // here would burn the attempt with a nonsense last_error (the same
-                // contract the retry-download leg had to learn in f3fb8fa).
-                .map_err(|e| if cancel() { WrError::Cancelled } else { WrError::DownloadFailed(e) })
-                .and_then(|exe2| ytdlp::download(&exe2, &j.video_url, tier, &dest, cancel));
-            if let Err(e2) = retry {
-                // Mirror the first leg: a cancel during the RETRY is the same deliberate
-                // stop — release (refund), never fail (which would burn the attempt and
-                // record a nonsense "cancelled" as last_error).
-                if matches!(e2, WrError::Cancelled) {
-                    let _ = client.release(j.wr_id);
-                    return Outcome::Released(j.wr_id);
-                }
-                let _ = client.fail(j.wr_id, &e2);
-                return Outcome::Failed(j.wr_id, e2);
-            }
-        } else {
-            let _ = client.fail(j.wr_id, &e);
-            return Outcome::Failed(j.wr_id, e);
-        }
+        // No refresh-and-retry here: ensure() already put the latest nightly on disk
+        // for THIS job, so a failed download is just that — report it with yt-dlp's
+        // verdict (reason() carries the detail) and let the Pi's cooldown schedule the
+        // next attempt. The old refresh-on-failure loop re-downloaded the same broken
+        // build 15× across two jobs during the 2026-08-19 stable breakage, burning an
+        // attempt each time for a retry that could not have gone differently.
+        log::warn!("[wr] wr_id={} download failed: {}", j.wr_id, e.reason());
+        let _ = client.fail(j.wr_id, &e);
+        return Outcome::Failed(j.wr_id, e);
     }
     if cancel() { let _ = client.release(j.wr_id); return Outcome::Released(j.wr_id); }
 
@@ -382,6 +359,7 @@ mod tests {
                         token: "probe".into(),
                         data_dir: dir.clone(),
                         engine: EnginePath::Dev,
+                        ytdlp_url: "http://127.0.0.1:1/yt-dlp.exe".into(),
                     };
                     // Both calls end in Outcome::Error (claim never gets a reply). The
                     // RESULT is not under test — the overlap is.
@@ -421,6 +399,7 @@ mod tests {
             token: "probe".into(),
             data_dir: dir.clone(),
             engine: EnginePath::Dev,
+            ytdlp_url: "http://127.0.0.1:1/yt-dlp.exe".into(),
         };
         let _ = process_one(&cfg, &|| false);
 
@@ -446,6 +425,7 @@ mod tests {
             token: "probe".into(),
             data_dir: dir.clone(),
             engine: EnginePath::Dev,
+            ytdlp_url: "http://127.0.0.1:1/yt-dlp.exe".into(),
         };
         let _ = process_one(&cfg, &|| false);
 
@@ -454,18 +434,50 @@ mod tests {
     }
 
     #[test]
-    fn only_download_failed_is_treated_as_explicable_by_a_stale_yt_dlp() {
-        assert!(is_staleness_explicable(&WrError::DownloadFailed("x".into())));
-        assert!(!is_staleness_explicable(&WrError::No1080p60),
-            "a missing 1080p60 stream is permanent for this video — refreshing yt-dlp can't add a format");
-        assert!(!is_staleness_explicable(&WrError::VideoUnavailable),
-            "a removed/private video is permanent — retrying just burns the fetch timeout");
-        assert!(!is_staleness_explicable(&WrError::EngineFailed("spawn: x".into())),
-            "our own spawn failure isn't a yt-dlp staleness symptom");
-        assert!(!is_staleness_explicable(&WrError::EngineIncompatible("unrecognized arguments".into())),
-            "a stale ENGINE is not a stale yt-dlp — refreshing yt-dlp cannot fix it");
-        assert!(!is_staleness_explicable(&WrError::Timeout));
-        assert!(!is_staleness_explicable(&WrError::Cancelled));
+    fn a_download_failure_fails_the_job_with_the_detail_and_never_refetches_yt_dlp() {
+        // The 2026-08-19 loop: yt-dlp stable was broken by YouTube; every attempt failed,
+        // re-fetched the SAME broken build from GitHub (18MB), retried, failed again, and
+        // burned the attempt — 15 times across two jobs. Freshness is ensure()'s job now
+        // (by tag, once per job); a failed download is just a failed download: report it —
+        // WITH yt-dlp's verdict, which the bare word "download_failed" hid for two days.
+        use super::super::ytdlp::test_support::{fake_release_server, latest_location, LATEST};
+        // yt-dlp stand-in: this very test binary. Given yt-dlp's flags it prints
+        // "error: Unrecognized option: 'f'" and exits 101 — a real spawned process with
+        // real stderr, and deterministic.
+        let dir = tmpdir("dl_fail_no_refetch");
+        let me = std::env::current_exe().unwrap();
+        std::fs::copy(&me, dir.join("yt-dlp.exe")).unwrap();
+        std::fs::write(dir.join("yt-dlp.version"), LATEST).unwrap(); // already current
+        // If anything DID re-fetch, it gets a working build back (a copy of the same
+        // stand-in), so the only trace of the waste is the GET counter — not a crash.
+        let refetch_body: &'static [u8] = Box::leak(std::fs::read(&me).unwrap().into_boxed_slice());
+        let (release_url, gets) = fake_release_server(latest_location(), refetch_body);
+        let (pi_url, pi_hits) = counting_listener(); // every Pi call dropped: fail() errors harmlessly
+        let cfg = ServiceCfg {
+            server_url: pi_url, token: "probe".into(), data_dir: dir.clone(),
+            engine: EnginePath::Dev, ytdlp_url: release_url,
+        };
+        let client = job::Client::new(&cfg.server_url, &cfg.token, "w-test");
+        let j = job::WrJob {
+            wr_id: 77, course_slug: "mario_circuit".into(),
+            video_url: "https://example.invalid/v".into(), record_ms: 62934,
+            character_slug: "toadette".into(), costume_slug: None, kart_slug: None, attempt: 1,
+        };
+
+        let out = run_job(&cfg, &client, &j, &|| false);
+
+        match out {
+            Outcome::Failed(77, WrError::DownloadFailed(d)) =>
+                assert!(d.contains("Unrecognized option"), "yt-dlp's verdict must ride along, got {d:?}"),
+            other => panic!("expected Failed(77, DownloadFailed(..)), got {other:?}"),
+        }
+        assert_eq!(gets.load(SeqCst), 0,
+            "a download failure must NOT re-fetch yt-dlp: the build is already the latest tag, \
+             so that transfer is pure waste and the retry it feeds is doomed");
+        assert_eq!(std::fs::metadata(dir.join("yt-dlp.exe")).unwrap().len(),
+                   std::fs::metadata(&me).unwrap().len(), "the exe on disk must be untouched");
+        assert_eq!(pi_hits.load(SeqCst), 1,
+            "exactly one Pi call — the fail report. No release (the attempt burns) and no retry.");
     }
 
     #[test]

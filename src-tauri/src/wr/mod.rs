@@ -53,7 +53,11 @@ impl WrError {
     pub fn reason(&self) -> String {
         match self {
             WrError::No1080p60 => "no_1080p60".into(),
-            WrError::DownloadFailed(_) => "download_failed".into(),
+            // The yt-dlp verdict rides along: the Pi stores 500 chars and surfaces
+            // last_error on /wr-jobs + the wr_job_stuck embed, and the bare word hid a
+            // two-day YouTube breakage (2026-08-19). Prefix stays the stable contract.
+            WrError::DownloadFailed(d) if d.trim().is_empty() => "download_failed".into(),
+            WrError::DownloadFailed(d) => format!("download_failed: {}", d.trim()),
             WrError::VideoUnavailable => "video_unavailable".into(),
             WrError::NoTrail => "no_trail".into(),
             WrError::TimeMismatch { detected_ms, expected_ms } =>
@@ -94,6 +98,7 @@ pub async fn wr_process_one(app: tauri::AppHandle, server_url: String, token: St
     tauri::async_runtime::spawn_blocking(move || {
         let cfg = service::ServiceCfg {
             server_url, token, data_dir: dir, engine: engine::EnginePath::resolve(),
+            ytdlp_url: ytdlp::YTDLP_URL.into(),
         };
         format!("{:?}", service::process_one(&cfg, &|| false))
     }).await.map_err(|e| e.to_string())

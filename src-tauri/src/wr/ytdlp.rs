@@ -4,8 +4,15 @@ use super::verify::Tier;
 use super::WrError;
 use std::path::{Path, PathBuf};
 
-/// Official standalone Windows build. Pinned to the yt-dlp org's own releases.
-const YTDLP_URL: &str = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
+/// Official standalone Windows build from the yt-dlp org's own NIGHTLY channel (built
+/// daily from master). Not stable: YouTube breaks yt-dlp every few weeks and stable
+/// releases lag that by weeks — 2026-08-17 YouTube killed the android_vr client, stable
+/// 2026.07.04 failed every download for days while the fix (PR #17461) sat in nightly,
+/// and the maintainers' standing answer is `--update-to nightly`. `ensure` keeps us on the
+/// latest nightly with a cheap HEAD per job, so a broken build is replaced the day the
+/// fix lands instead of the month the next stable ships.
+pub const YTDLP_URL: &str =
+    "https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp.exe";
 
 /// The download format, per tier.
 ///
@@ -35,28 +42,122 @@ pub fn classify_failure(stderr: &str) -> WrError {
         || s.contains("has been removed") || s.contains("removed by the uploader") {
         return WrError::VideoUnavailable;
     }
-    WrError::DownloadFailed(stderr.trim().chars().take(300).collect())
+    WrError::DownloadFailed(failure_headline(stderr))
 }
 
-/// Path to a usable yt-dlp.exe, fetching it if absent. Callers should also re-`fetch`
-/// when downloads start failing — a stale yt-dlp is the likeliest way this feature dies.
-pub fn ensure(dir: &Path, cancel: &(dyn Fn() -> bool + Sync)) -> Result<PathBuf, String> {
+/// The one line of yt-dlp stderr worth keeping: its LAST `ERROR:` line (the terminal
+/// verdict), else the last non-empty line. yt-dlp front-loads WARNINGs — the 2026-08-19
+/// "No supported JavaScript runtime" one alone is ~330 chars — so a head-truncation of the
+/// whole stream kept the noise and dropped the cause. Bounded to 300 chars.
+fn failure_headline(stderr: &str) -> String {
+    let lines: Vec<&str> = stderr.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let line = lines.iter().rev().find(|l| l.starts_with("ERROR:"))
+        .or_else(|| lines.last())
+        .copied()
+        .unwrap_or("");
+    line.strip_prefix("ERROR:").map(str::trim).unwrap_or(line).chars().take(300).collect()
+}
+
+/// The release tag named by GitHub's `.../releases/latest/download/<asset>` redirect
+/// (`.../releases/download/<tag>/<asset>`). None for any other shape — "unknown" must never
+/// become a fabricated tag, or a changed endpoint would silently freeze refreshes.
+fn tag_from_location(location: &str) -> Option<String> {
+    location.split("/releases/download/").nth(1)?
+        .split('/').next()
+        .filter(|t| !t.is_empty())
+        .map(str::to_string)
+}
+
+/// Which build the local exe is, as recorded at fetch time (the release tag). Absent =
+/// unknown (a hand-placed exe, or a blind refresh) — which reads as "not the latest".
+const VERSION_MARKER: &str = "yt-dlp.version";
+
+fn local_tag(dir: &Path) -> Option<String> {
+    std::fs::read_to_string(dir.join(VERSION_MARKER)).ok()
+        .map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+}
+
+fn record_tag(dir: &Path, tag: Option<&str>) {
+    let p = dir.join(VERSION_MARKER);
+    let _ = match tag { Some(t) => std::fs::write(&p, t), None => std::fs::remove_file(&p).or(Ok(())) };
+}
+
+/// Ask GitHub which build "latest" currently is — one HEAD, no transfer. GitHub answers
+/// the `.../releases/latest/download/<asset>` URL with a 302 whose Location names the
+/// release; the redirect is deliberately NOT followed.
+fn latest_tag(url: &str) -> Result<String, String> {
+    let client = reqwest::blocking::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(15))
+        .build().map_err(|e| e.to_string())?;
+    let resp = client.head(url).send().map_err(|e| format!("probe yt-dlp release: {e}"))?;
+    let loc = resp.headers().get(reqwest::header::LOCATION)
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| format!("probe yt-dlp release: HTTP {} without a Location", resp.status()))?;
+    tag_from_location(loc).ok_or_else(|| format!("probe yt-dlp release: unrecognised redirect {loc}"))
+}
+
+/// Path to a usable, current yt-dlp.exe. Called at the start of EVERY job: fetches when
+/// absent, otherwise probes GitHub for the latest build (cheap) and refreshes only when
+/// the local one is not it. There is deliberately no refresh-on-download-failure any more:
+/// the 2026-08-19 incident (yt-dlp stable broken by YouTube for two days) had that path
+/// re-download the SAME broken build on every attempt — 15 × 18MB for nothing — while
+/// burning the job's attempts. Freshness is decided here, by tag, once per job.
+///
+/// `url` is the release asset to track (`YTDLP_URL` in production; ServiceCfg carries it so
+/// tests run the real code against a local stand-in for GitHub).
+pub fn ensure(url: &str, dir: &Path, cancel: &(dyn Fn() -> bool + Sync)) -> Result<PathBuf, String> {
     let exe = dir.join("yt-dlp.exe");
-    if exe.is_file() { return Ok(exe); }
-    fetch(dir, cancel)
+    let latest = latest_tag(url);
+    if !exe.is_file() {
+        // Nothing usable: the fetch must succeed (its error is the job's error).
+        let p = fetch_from(url, dir, cancel)?;
+        record_tag(dir, latest.as_deref().ok());
+        return Ok(p);
+    }
+    match latest {
+        Ok(tag) if local_tag(dir).as_deref() == Some(tag.as_str()) => Ok(exe),
+        Ok(tag) => {
+            log::info!("[wr] yt-dlp {tag} is out (have {}); refreshing",
+                       local_tag(dir).as_deref().unwrap_or("an unknown build"));
+            match fetch_from(url, dir, cancel) {
+                Ok(p) => { record_tag(dir, Some(&tag)); Ok(p) }
+                // The build we have was working yesterday; a flaky CDN must not become
+                // a failed job. (fetch_from renames last, so the exe is intact.)
+                Err(e) => { log::warn!("[wr] yt-dlp refresh failed ({e}); keeping the current build"); Ok(exe) }
+            }
+        }
+        // Can't tell (offline, or GitHub changed the redirect shape): keep what we have —
+        // but never forever. Past STALE_AFTER, refresh blind; the marker is dropped rather
+        // than guessed, so the next successful probe re-syncs it with one transfer.
+        Err(e) => {
+            if exe_age(&exe) <= STALE_AFTER { return Ok(exe); }
+            log::warn!("[wr] cannot tell which yt-dlp is latest ({e}); exe is >{}h old, refreshing blind",
+                       STALE_AFTER.as_secs() / 3600);
+            match fetch_from(url, dir, cancel) {
+                Ok(p) => { record_tag(dir, None); Ok(p) }
+                Err(e) => { log::warn!("[wr] blind yt-dlp refresh failed ({e}); keeping the current build"); Ok(exe) }
+            }
+        }
+    }
 }
 
-/// (Re)download the official standalone yt-dlp.exe. Cancel-aware: Runner::stop() joins
+/// The blind-refresh backstop threshold (see `ensure_from`). Nightlies are daily; a day
+/// is the natural unit, and bounds a misbehaving endpoint to one transfer per day.
+const STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
+
+fn exe_age(exe: &Path) -> std::time::Duration {
+    std::fs::metadata(exe).and_then(|m| m.modified()).ok()
+        .and_then(|t| t.elapsed().ok())
+        .unwrap_or(std::time::Duration::ZERO)
+}
+
+/// (Re)download the standalone yt-dlp.exe from `url`. Cancel-aware: Runner::stop() joins
 /// the thread this runs on, so a quit/pause/toggle-off mid-refresh must interrupt the
 /// transfer rather than sit out up to the full 180s window (review 2026-07-18 — the
-/// download step was made cancel-aware in Task 5, but this fetch was missed).
-pub fn fetch(dir: &Path, cancel: &(dyn Fn() -> bool + Sync)) -> Result<PathBuf, String> {
-    fetch_from(YTDLP_URL, dir, cancel)
-}
-
-/// The URL-injectable body of `fetch`, so tests can observe cancel behaviour against a
-/// local dripping server instead of the network.
-fn fetch_from(url: &str, dir: &Path, cancel: &(dyn Fn() -> bool + Sync)) -> Result<PathBuf, String> {
+/// download step was made cancel-aware in Task 5, but this fetch was missed). URL-injected
+/// so tests can observe cancel behaviour against a local dripping server.
+pub fn fetch_from(url: &str, dir: &Path, cancel: &(dyn Fn() -> bool + Sync)) -> Result<PathBuf, String> {
     use std::io::Read;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let exe = dir.join("yt-dlp.exe");
@@ -192,9 +293,54 @@ pub fn download(
     Err(classify_failure(&stderr))
 }
 
+/// Shared with service.rs's tests (the real download step against a local stand-in
+/// for GitHub's release endpoint).
+#[cfg(test)]
+pub(crate) mod test_support {
+    /// A stand-in for GitHub's release endpoint. HEAD on the "latest" asset URL answers
+    /// with a 302 to `head_location` (or a bare 200 when None — the "endpoint changed
+    /// shape" case); GET serves `body`. GETs are counted: an 18MB transfer is the one
+    /// thing the freshness policy must spend sparingly.
+    pub(crate) fn fake_release_server(head_location: Option<String>, body: &'static [u8])
+        -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        use std::io::{Read as _, Write as _};
+        use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+        let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind release server");
+        let addr = l.local_addr().unwrap();
+        let gets = std::sync::Arc::new(AtomicUsize::new(0));
+        let g = gets.clone();
+        std::thread::spawn(move || {
+            for stream in l.incoming() {
+                let Ok(mut s) = stream else { break };
+                let mut req = [0u8; 4096];
+                let n = s.read(&mut req).unwrap_or(0);
+                let req = String::from_utf8_lossy(&req[..n]);
+                if req.starts_with("HEAD ") {
+                    let _ = match &head_location {
+                        Some(loc) => write!(s, "HTTP/1.1 302 Found\r\nLocation: {loc}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
+                        None => write!(s, "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
+                    };
+                } else {
+                    g.fetch_add(1, SeqCst);
+                    let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+                    let _ = s.write_all(body);
+                }
+                let _ = s.flush();
+            }
+        });
+        (format!("http://{addr}/yt-dlp.exe"), gets)
+    }
+
+    pub(crate) const LATEST: &str = "2026.08.18.122307";
+    pub(crate) fn latest_location() -> Option<String> {
+        Some(format!("https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/download/{LATEST}/yt-dlp.exe"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::test_support::*;
     use std::process::Command;
     use std::time::Duration;
 
@@ -248,6 +394,27 @@ mod tests {
     fn an_unrecognised_error_is_download_failed_and_keeps_the_text() {
         match classify_failure("ERROR: something nobody predicted") {
             WrError::DownloadFailed(s) => assert!(s.contains("nobody predicted")),
+            other => panic!("expected DownloadFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_terminal_error_line_survives_a_long_preceding_warning() {
+        // The 2026-08-19 incident verbatim: yt-dlp printed a ~330-char "No supported
+        // JavaScript runtime" WARNING and THEN the real ERROR. A head-truncation kept only
+        // the warning, so pbenguin.log and the Pi both hid the actual cause (HTTP 403) for
+        // 15 attempts. The detail must be the terminal error — bounded, but never blind.
+        let warning = format!("WARNING: [youtube] No supported JavaScript runtime could be found. {}",
+                              "See the wiki for details on installing one. ".repeat(8));
+        assert!(warning.len() > 300, "precondition: the warning alone must overflow the cap");
+        let stderr = format!("{warning}\nERROR: unable to download video data: HTTP Error 403: Forbidden\n");
+        match classify_failure(&stderr) {
+            WrError::DownloadFailed(d) => {
+                assert!(d.contains("HTTP Error 403"), "must keep the terminal error, got: {d}");
+                assert!(!d.starts_with("WARNING"), "a warning is not the failure, got: {d}");
+                assert!(!d.starts_with("ERROR:"), "the reason already says download_failed; drop the redundant tag, got: {d}");
+                assert!(d.chars().count() <= 300, "detail must stay bounded, got {} chars", d.chars().count());
+            }
             other => panic!("expected DownloadFailed, got {other:?}"),
         }
     }
@@ -349,11 +516,180 @@ mod tests {
         assert!(!dir.join("yt-dlp.exe.part").exists(), "the temp file must be renamed away");
     }
 
+    #[test]
+    fn ensure_skips_the_download_when_the_local_build_is_already_the_latest() {
+        // The common case on every job start: a cheap HEAD, no 18MB transfer, and the exe
+        // we already have is the one returned.
+        let (url, gets) = fake_release_server(latest_location(), b"new-bytes");
+        let dir = tmpdir("ensure_current");
+        std::fs::write(dir.join("yt-dlp.exe"), b"old-bytes").unwrap();
+        std::fs::write(dir.join("yt-dlp.version"), LATEST).unwrap();
+
+        let exe = ensure(&url, &dir, &|| false).expect("a current exe is usable");
+
+        assert_eq!(exe, dir.join("yt-dlp.exe"));
+        assert_eq!(gets.load(std::sync::atomic::Ordering::SeqCst), 0,
+            "the build is already the latest tag; re-downloading it is the 2026-08-19 waste");
+        assert_eq!(std::fs::read(&exe).unwrap(), b"old-bytes", "must not have been replaced");
+    }
+
+    #[test]
+    fn ensure_refreshes_once_when_a_newer_build_is_published() {
+        // The whole point of the nightly channel: when YouTube breaks yt-dlp and the fix
+        // lands upstream, the next job picks it up — one transfer, exe swapped, tag recorded
+        // so the job after that is back to a free HEAD.
+        let (url, gets) = fake_release_server(latest_location(), b"new-bytes");
+        let dir = tmpdir("ensure_newer");
+        std::fs::write(dir.join("yt-dlp.exe"), b"old-bytes").unwrap();
+        std::fs::write(dir.join("yt-dlp.version"), "2026.08.17.000000").unwrap();
+
+        let exe = ensure(&url, &dir, &|| false).expect("refresh must succeed");
+
+        assert_eq!(std::fs::read(&exe).unwrap(), b"new-bytes", "the newer build must be installed");
+        assert_eq!(gets.load(std::sync::atomic::Ordering::SeqCst), 1, "exactly one transfer");
+        assert_eq!(std::fs::read_to_string(dir.join("yt-dlp.version")).unwrap().trim(), LATEST,
+            "the marker must now name the installed build, or every job would re-download it");
+    }
+
+    /// A release server whose HEAD advertises `LATEST` but whose GET fails outright —
+    /// the shape of GitHub's asset CDN having a bad minute.
+    fn broken_transfer_server() -> String {
+        use std::io::{Read as _, Write as _};
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for stream in l.incoming() {
+                let Ok(mut s) = stream else { break };
+                let mut req = [0u8; 4096];
+                let n = s.read(&mut req).unwrap_or(0);
+                let _ = if String::from_utf8_lossy(&req[..n]).starts_with("HEAD ") {
+                    write!(s, "HTTP/1.1 302 Found\r\nLocation: {}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                           latest_location().unwrap())
+                } else {
+                    write!(s, "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                };
+                let _ = s.flush();
+            }
+        });
+        format!("http://{addr}/yt-dlp.exe")
+    }
+
+    #[test]
+    fn ensure_keeps_the_existing_exe_when_the_refresh_transfer_fails() {
+        // A newer build exists but can't be fetched right now. The build we have was
+        // working yesterday; a flaky CDN must not turn into a failed job.
+        let url = broken_transfer_server();
+        let dir = tmpdir("ensure_xfer_fail");
+        std::fs::write(dir.join("yt-dlp.exe"), b"old-bytes").unwrap();
+        std::fs::write(dir.join("yt-dlp.version"), "2026.08.17.000000").unwrap();
+
+        let exe = ensure(&url, &dir, &|| false)
+            .expect("a failed refresh must degrade to the existing exe, not fail the job");
+
+        assert_eq!(std::fs::read(&exe).unwrap(), b"old-bytes");
+        assert_eq!(std::fs::read_to_string(dir.join("yt-dlp.version")).unwrap().trim(), "2026.08.17.000000",
+            "the marker must still describe the exe actually on disk");
+    }
+
+    fn age_file(path: &Path, by: Duration) {
+        let f = std::fs::File::options().write(true).open(path).unwrap();
+        f.set_modified(std::time::SystemTime::now() - by).unwrap();
+    }
+
+    #[test]
+    fn ensure_blind_refreshes_a_stale_exe_when_the_latest_tag_is_unknowable() {
+        // If GitHub ever stops answering HEAD with a tagged redirect, the tag compare can
+        // never say "newer" — and a policy that only refreshes on "newer" would freeze
+        // yt-dlp forever, which is exactly the quiet death the self-update exists to
+        // prevent. Backstop: an exe older than a day gets refreshed blind, and since we
+        // don't know what we installed, the marker is dropped rather than guessed.
+        let (url, gets) = fake_release_server(None, b"new-bytes");
+        let dir = tmpdir("ensure_blind_stale");
+        let exe = dir.join("yt-dlp.exe");
+        std::fs::write(&exe, b"old-bytes").unwrap();
+        std::fs::write(dir.join("yt-dlp.version"), "2026.08.17.000000").unwrap();
+        age_file(&exe, Duration::from_secs(48 * 3600));
+
+        let got = ensure(&url, &dir, &|| false).expect("blind refresh must yield an exe");
+
+        assert_eq!(gets.load(std::sync::atomic::Ordering::SeqCst), 1, "a day-old exe gets one blind transfer");
+        assert_eq!(std::fs::read(&got).unwrap(), b"new-bytes");
+        assert!(!dir.join("yt-dlp.version").exists(),
+            "we don't know which build a blind refresh installed; a stale marker would be a lie");
+    }
+
+    #[test]
+    fn ensure_leaves_a_fresh_exe_alone_when_the_latest_tag_is_unknowable() {
+        // The other half of the backstop: "unknown" is not "stale". A build fetched hours
+        // ago is kept, or a misbehaving endpoint would cost 18MB per job.
+        let (url, gets) = fake_release_server(None, b"new-bytes");
+        let dir = tmpdir("ensure_blind_fresh");
+        std::fs::write(dir.join("yt-dlp.exe"), b"old-bytes").unwrap();
+
+        let got = ensure(&url, &dir, &|| false).unwrap();
+
+        assert_eq!(gets.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(std::fs::read(&got).unwrap(), b"old-bytes");
+    }
+
+    #[test]
+    fn ensure_fetches_and_records_the_tag_when_no_exe_exists() {
+        // First run on a fresh install: nothing usable, so the transfer is mandatory —
+        // and the tag is recorded so the very next job is a free HEAD, not a second 18MB.
+        let (url, gets) = fake_release_server(latest_location(), b"new-bytes");
+        let dir = tmpdir("ensure_first_run");
+
+        let exe = ensure(&url, &dir, &|| false).expect("first fetch must succeed");
+
+        assert_eq!(std::fs::read(&exe).unwrap(), b"new-bytes");
+        assert_eq!(gets.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(std::fs::read_to_string(dir.join("yt-dlp.version")).unwrap().trim(), LATEST);
+    }
+
+    #[test]
+    fn ensure_keeps_the_existing_exe_when_github_cannot_be_reached() {
+        // Offline (or GitHub down) with a build on disk: the job proceeds with it. The
+        // probe is a nicety, never a dependency.
+        let dir = tmpdir("ensure_offline");
+        std::fs::write(dir.join("yt-dlp.exe"), b"old-bytes").unwrap();
+
+        let exe = ensure("http://127.0.0.1:1/yt-dlp.exe", &dir, &|| false)
+            .expect("an unreachable release server must not fail a job that has an exe");
+
+        assert_eq!(std::fs::read(&exe).unwrap(), b"old-bytes");
+    }
+
     fn tmpdir(tag: &str) -> std::path::PathBuf {
         let d = std::env::temp_dir().join(format!("wr_ytdlp_test_{tag}"));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn yt_dlp_comes_from_the_nightly_channel_not_stable() {
+        // 2026-08-17: YouTube killed the android_vr client; stable 2026.07.04 (the latest
+        // stable for 6+ weeks) kept failing every download while the fix sat in nightly
+        // (PR #17461, merged 2026-08-18). yt-dlp's own answer to "YouTube broke again" is
+        // `--update-to nightly`. Stable lags YouTube by weeks; nightly is built daily from
+        // master and is the channel the maintainers point users at. Stay on it.
+        assert!(YTDLP_URL.starts_with("https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/"),
+            "must be the nightly channel's latest asset, got {YTDLP_URL}");
+        assert!(YTDLP_URL.ends_with("/yt-dlp.exe"), "the official standalone Windows build");
+    }
+
+    #[test]
+    fn the_build_tag_parses_from_githubs_release_asset_redirect() {
+        // GitHub answers HEAD on `.../releases/latest/download/<asset>` with a 302 whose
+        // Location names the concrete release — the cheapest possible "is there a newer
+        // build?" probe (no 18MB transfer). Observed live 2026-08-20.
+        let loc = "https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/download/2026.08.18.122307/yt-dlp.exe";
+        assert_eq!(tag_from_location(loc).as_deref(), Some("2026.08.18.122307"));
+        // Anything else (a direct 200, a moved endpoint, a bare host) is "unknown", never a
+        // made-up tag that would freeze refreshes forever.
+        assert_eq!(tag_from_location("https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest"), None);
+        assert_eq!(tag_from_location("https://objects.githubusercontent.com/releases/download/"), None);
+        assert_eq!(tag_from_location(""), None);
     }
 
     #[test]

@@ -128,6 +128,7 @@ fn run_loop(
         let cfg = ServiceCfg {
             server_url, token, data_dir,
             engine: super::engine::EnginePath::resolve(),
+            ytdlp_url: super::ytdlp::YTDLP_URL.into(),
         };
         // The cancel closure IS the negated gate (spec: one consistent rule), plus
         // pause and shutdown. Any screen change mid-job aborts -> release -> refund.
