@@ -61,8 +61,12 @@ def _outputs(category, gray):
     return {"": gray}
 
 
-def regen_category(category, roi, captures_root, lang, dry_run):
-    """Cut one category's templates for one language. Returns (files_written, skipped)."""
+def regen_category(category, roi, captures_root, lang, dry_run, only=None):
+    """Cut one category's templates for one language. Returns (files_written, skipped).
+
+    only: optional set of capture bases to (re)cut; everything else is left untouched
+    (e.g. just the courses added by a game update).
+    """
     cap_dir = os.path.join(captures_root, lang, category)
     out_dir = os.path.join(ROOT, "images", category, lang)
     if not os.path.isdir(cap_dir):
@@ -75,6 +79,8 @@ def regen_category(category, roi, captures_root, lang, dry_run):
         if not filename.lower().endswith(".png"):
             continue
         base = filename[:-4]
+        if only is not None and base not in only:
+            continue
         frame = cv2.imread(os.path.join(cap_dir, filename), cv2.IMREAD_COLOR)
         if frame is None:
             print(f"  [skip] {category}/{base}: unreadable capture")
@@ -116,7 +122,10 @@ def main():
     ap.add_argument("--captures", default=os.path.join(ROOT, "captures"),
                     help="Captures root (default: repo-root captures/)")
     ap.add_argument("--dry-run", action="store_true", help="Report what would be written")
+    ap.add_argument("--only", default=None, metavar="base,base,...",
+                    help="Only (re)cut these capture bases (e.g. the SNES courses); others untouched")
     args = ap.parse_args()
+    only = {b.strip() for b in args.only.split(",") if b.strip()} if args.only else None
 
     from mkw_tracker.config.settings import get_settings
     from mkw_tracker.database.migrations import apply_migrations
@@ -142,7 +151,7 @@ def main():
             roi_key, const = CATEGORIES[cat]
             roi = tuple(settings.get(roi_key, list(const)))
             print(f"  {cat}: roi {roi} (from {roi_key})")
-            w, s = regen_category(cat, roi, args.captures, lang, args.dry_run)
+            w, s = regen_category(cat, roi, args.captures, lang, args.dry_run, only)
             print(f"    {w} file(s) {'(dry-run) ' if args.dry_run else ''}written, {s} skipped")
             total_w += w
             total_s += s
