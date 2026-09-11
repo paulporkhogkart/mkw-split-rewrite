@@ -47,6 +47,17 @@ python -m mkw_tracker --video temp/aiden.mp4 --video-fps 0 --video-once   # rip 
 # into captures/<lang>/<category>/. Auto-grabs on confident+stable detection.
 python -m mkw_tracker.tools.capture_sources                       # defaults: saved device + language, min-conf 0.6
 python -m mkw_tracker.tools.capture_sources --min-conf 0.85 --hold 4 --no-sound
+# NEW CONTENT (no template yet, so auto-capture can't label it): manual mode names the
+# target in the HUD; SPACE saves the frame AS it, s skips, b backs up. Presets: snes.
+python -m mkw_tracker.tools.capture_sources --manual snes
+python -m mkw_tracker.tools.capture_sources --manual "some_course,other_course" --manual-category courses
+
+# DEV TOOL: minimap seed + ROI clicker (port of the poc seed-clicker). Start a race; on the
+# countdown right-drag the minimap box (-> minimap_rois) and left-click your ring's centre
+# (-> minimap_seeds, snapped onto the ring). p prints _SEED_V2-style migration rows for the
+# courses touched (temp/minimap_seed_rows.sql) - paste into database/migrations.py to ship.
+python -m mkw_tracker.tools.minimap_calib
+python -m mkw_tracker.tools.minimap_calib --course "SNES Mario Circuit 1" --scale 0.75
 
 # DEV TOOL: rebuild char/kart/course/costume match templates from the captures
 # above. Cuts each capture at the category's selection ROI (read from settings, same
@@ -56,6 +67,14 @@ python -m mkw_tracker.tools.capture_sources --min-conf 0.85 --hold 4 --no-sound
 python scripts/gen_selection_templates.py                         # all langs + categories
 python scripts/gen_selection_templates.py --lang en_uk --dry-run  # report only
 python scripts/gen_selection_templates.py --category costumes
+python scripts/gen_selection_templates.py --lang en_uk --category courses --only snes_mario_circuit_1,snes_ghost_valley_1
+
+# ADDING A COURSE (game update): append to server/courses.py CANONICAL_COURSES AND
+# pi/src/db/courses.ts (the Pi seeds missing rows at boot), pi/src/wr/history_scrape.ts
+# MKWRS_TRACKS (+ MKWRS_ALIASES if mkwrs spells it differently), detection/selection.py
+# KNOWN_COURSES; capture (--manual) -> gen templates (--only) -> minimap_calib -> new
+# _SEED_Vn migration. Retro (non-island) courses stay OFF the world/turf map
+# (RETRO_COURSES / RETRO_COURSE_SLUGS). English-only templates for now.
 
 # Legacy monolith (reference only — do not edit)
 python "!!!FINAL-ab-new-bubbles.py"
