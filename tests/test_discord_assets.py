@@ -9,7 +9,10 @@ from mkw_tracker.detection.selection import KNOWN_COURSES
 def test_asset_map_covers_all_known_course_slugs():
     map_slugs = {slug for (_url, slug) in COURSE_ASSETS}
     known_slugs = {slugify(name) for name in KNOWN_COURSES}
-    assert map_slugs == known_slugs
+    # The v1.8.0 SNES retro courses have no Rich Presence art yet (Discord falls back to
+    # "splash"); every asset must still be a known course and every island course has one.
+    assert map_slugs <= known_slugs
+    assert {s for s in known_slugs if not s.startswith("snes_")} == map_slugs
     assert len(COURSE_ASSETS) == 30
 
 

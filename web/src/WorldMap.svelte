@@ -4,7 +4,7 @@
   import CoursePopup from "./CoursePopup.svelte";
   import { buildCourseView, preloadPlayerGifs, freshGifUrl } from "./lib/courseData.js";
   import { API_BASE, territoryUrl, territoryTimelineUrl } from "./lib/api.js";
-  import { buildSnapshots, flippedCourses, leaderboardAt, wrAsOf } from "./lib/timeline.js";
+  import { buildSnapshots, flippedCourses, leaderboardAt, wrAsOf, onMapEvents } from "./lib/timeline.js";
   import { prepareTransition, interpolatePatch, buildCourseField } from "./lib/territoryAnim.js";
   import TimelineScrubber from "./TimelineScrubber.svelte";
   import MapFireLayer from "./MapFireLayer.svelte";
@@ -187,7 +187,8 @@
     try {
       const res = await fetch(territoryTimelineUrl(150));
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const { events, colors, wrHistory } = await res.json();
+      const { events: allEvents, colors, wrHistory } = await res.json();
+      const events = onMapEvents(allEvents, manifest?.courses);   // island courses only: retro (SNES) tracks have no map slot
       const snaps = buildSnapshots(events, colors, manifest?.courses?.length ?? 30);
       if (!snaps.length) return false;
       tlEvents = events; tlColors = colors; tlWrHistory = wrHistory || {};   // kept for the unified board + fire

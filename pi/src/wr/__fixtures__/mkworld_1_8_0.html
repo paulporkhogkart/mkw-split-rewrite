@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>MKWorld WR History</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" type="text/css" href="theme.css?v=20260624" />
+<link rel="stylesheet" type="text/css" href="mobile.css?v=20260709p" />
+<script language="javascript" src="date.js?v=20250731"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#1a469d">
+</head>
+<div class='ttip' id='ttipid'><div class='ttip_title'>Extra Info</div><span class='spanttip' id='ttiptext'>N/A</span></div>
+<div class='ttip' id='ttipid_splits'><div class='ttip_title'>Splits</div><span class='spanttip' id='ttiptext_splits'>N/A</span></div>
+<body>
+<!-- Mobile-only top bar (hidden on desktop by mobile.css). The hamburger toggles the
+     left sidebar; the mkwrs logo toggles the right games drawer. Opening one closes
+     the other. -->
+<div id="mobilebar">
+<button id="hambtn" aria-label="Menu" onclick="document.body.classList.toggle('navopen');document.body.classList.remove('gamesopen')">&#9776;</button>
+<a href="."><img src="mkworld_logo.png" alt="MKWorld WR History"></a>
+<button id="gamesbtn" aria-label="Other games" onclick="document.body.classList.toggle('gamesopen');document.body.classList.remove('navopen')"><img src="../mkwrs_logo.png" alt="mkwrs.com"><span id="gameschev">&#9656;</span></button>
+</div>
+<!-- Mobile-only right drawer: the cross-game links (the div#header strip is hidden on mobile) -->
+<div id="gamesmenu">
+<a href="..">Home</a>
+<b>MKWorld</b>
+<a href="../mk8dx">MK8DX</a>
+<a href="../mk8">MK8</a>
+<a href="../mk7">MK7</a>
+<a href="../mkwii">MKWii</a>
+<a href="../mkds">MKDS</a>
+<a href="../mkdd">MKDD</a>
+<a href="../mksc">MKSC</a>
+<a href="../mk64">MK64</a>
+<a href="../smk">SMK</a>
+<hr>
+<a href="../smo">SMO</a>
+<a href="https://www.fzerowrs.com">FZERO</a>
+</div>
+<!-- Mobile-only: dimmed backdrop behind an open drawer; tapping it closes the drawer -->
+<div id="drawerbg" onclick="document.body.classList.remove('navopen','gamesopen')"></div>
+<div id="outer">
+<div id="nav">
+<div class="center"><a href="."><img src="mkworld_logo.png"></a></div>
+<br>
+<div id="navbox">
+<ul>
+<li><b><u>Stats</u></b></li>
+<li><a href=".">Current WRs</a></li>
+<li><a href="map.php">Current WRs (Map)</a></li>
+<li><a href="wrs.php">WRs Snapshot</a></li>
+<li><a href="wrs_map.php">WRs Snapshot (Map)</a></li>
+<li><a href="rankings.php">Player Rankings</a></li>
+<li><a href="crankings.php">Country Rankings</a></li>
+<li><a href="longestlasting.php">Longest Lasting WRs</a></li>
+<li><a href="recent.php">Recent WRs</a></li>
+<li><a href="stats.php">Activity Stats</a></li>
+<li><a href="character_stats.php">Character Stats</a></li>
+</ul></div>
+<br>
+<div id="navbox">
+<ul>
+<li><b><u>WR History</u></b></li>
+<li><a href="display.php?track=Mario+Bros.+Circuit">Mario Bros. Circuit</a></li><li><a href="display.php?track=Crown+City">Crown City</a></li><li><a href="display.php?track=Whistlestop+Summit">Whistlestop Summit</a></li><li><a href="display.php?track=DK+Spaceport">DK Spaceport</a></li><hr><li><a href="display.php?track=Desert+Hills">Desert Hills</a></li><li><a href="display.php?track=Shy+Guy+Bazaar">Shy Guy Bazaar</a></li><li><a href="display.php?track=Wario+Stadium">Wario Stadium</a></li><li><a href="display.php?track=Airship+Fortress">Airship Fortress</a></li><hr><li><a href="display.php?track=DK+Pass">DK Pass</a></li><li><a href="display.php?track=Starview+Peak">Starview Peak</a></li><li><a href="display.php?track=Sky-High+Sundae">Sky-High Sundae</a></li><li><a href="display.php?track=Wario+Shipyard">Wario Shipyard</a></li><hr><li><a href="display.php?track=Koopa+Troopa+Beach">Koopa Troopa Beach</a></li><li><a href="display.php?track=Faraway+Oasis">Faraway Oasis</a></li><li><a href="display.php?track=Peach+Stadium">Peach Stadium</a></li><hr><li><a href="display.php?track=Peach+Beach">Peach Beach</a></li><li><a href="display.php?track=Salty+Salty+Speedway">Salty Salty Speedway</a></li><li><a href="display.php?track=Dino+Dino+Jungle">Dino Dino Jungle</a></li><li><a href="display.php?track=Great+%3F+Block+Ruins">Great ? Block Ruins</a></li><hr><li><a href="display.php?track=Cheep+Cheep+Falls">Cheep Cheep Falls</a></li><li><a href="display.php?track=Dandelion+Depths">Dandelion Depths</a></li><li><a href="display.php?track=Boo+Cinema">Boo Cinema</a></li><li><a href="display.php?track=Dry+Bones+Burnout">Dry Bones Burnout</a></li><hr><li><a href="display.php?track=Moo+Moo+Meadows">Moo Moo Meadows</a></li><li><a href="display.php?track=Choco+Mountain">Choco Mountain</a></li><li><a href="display.php?track=Toad%27s+Factory">Toad's Factory</a></li><li><a href="display.php?track=Bowser%27s+Castle">Bowser's Castle</a></li><hr><li><a href="display.php?track=Acorn+Heights">Acorn Heights</a></li><li><a href="display.php?track=Mario+Circuit">Mario Circuit</a></li><li><a href="display.php?track=Rainbow+Road">Rainbow Road</a></li></ul></div>
+<br>
+<div id="navbox">
+<ul>
+<li><b><u>DLC WR History</u></b></li>
+<li><a href="display.php?track=SNES+Mario+Circuit+1">SNES Mario Circuit 1</a></li>
+<li><a href="display.php?track=SNES+Mario+Circuit+2">SNES Mario Circuit 2</a></li>
+<li><a href="display.php?track=SNES+Mario+Circuit+3">SNES Mario Circuit 3</a></li>
+<hr>
+<li><a href="display.php?track=SNES+Ghost+Valley+1">SNES Ghost Valley 1</a></li>
+<li><a href="display.php?track=SNES+Ghost+Valley+2">SNES Ghost Valley 2</a></li>
+<li><a href="display.php?track=SNES+Ghost+Valley+3">SNES Ghost Valley 3</a></li>
+<hr>
+<li><a href="display.php?track=SNES+Choco+Island+1">SNES Choco Island 1</a></li>
+<li><a href="display.php?track=SNES+Choco+Island+2">SNES Choco Island 2</a></li>
+<li><a href="display.php?track=SNES+Koopa+Beach+1">SNES Koopa Beach 1</a></li>
+<li><a href="display.php?track=SNES+Vanilla+Lake+1">SNES Vanilla Lake 1</a></li>
+</ul></div>
+<br>
+<div id="navbox">
+<ul>
+<li><b><u>Legacy Glitch WR History</u></b></li>
+<li><a href="display.php?track=Mario+Bros.+Circuit+(Glitch)">Mario Bros. Circuit (Glitch)</a></li>
+<li><a href="display.php?track=Crown+City+(Glitch)">Crown City (Glitch)</a></li>
+</ul></div>
+<br>
+<div id="navbox">
+<ul>
+<li><b><u>Other</u></b></li>
+<li><a href="patchinfo.php">MKWorld Patch Info</a></li>
+<li><a href="tiedwrs.php">List of WR Ties</a></li>
+<li><a href="stickers.php">Sticker Gallery</a></li>
+<li><a href="randomwr.php">Random WR Video</a></li>
+<li><a href="deleted_videos.php">Deleted WR Videos</a></li>
+<li><a href="../data/">Downloadable WR Data (CSV)</a></li>
+<li><a href="../about.php">About mkwrs.com</a></li>
+</ul></div>
+<br>
+<div id="navbox">
+<ul>
+<li><b><u>Links</u></b></li>
+<li><a href="https://discord.gg/6gDAPxvqh7" target="_blank">MKWorld Time Trials Discord</a></li>
+<li><a href="https://www.youtube.com/@MKWorldRecords" target="_blank">MKWorldRecords Youtube</li>
+<li><a href="https://www.mariokart64.com/mkworld/" target="_blank">MKWorld Players' Page</a></li>
+<li><a href="https://mkcentral.com/en-us/time-trials/mkworld" target="_blank">MKCentral TT Leaderboards</a></li>
+<li><a href="https://discord.com/invite/Q9HCD8tVvD" target="_blank">MKCentral Discord</a></li>
+<li><a href="https://tinyurl.com/mkworldbks" target="_blank">Best Known Splits (BKS)</a>
+<hr>
+<li><a href="https://lounge.mkcentral.com/mkworld#" target="_blank">MKWorld Lounge</a></li>
+<li><a href="https://discord.gg/WR6JKPn2v9" target="_blank">MKWorld Lounge Discord</a></li>
+<li><a href="https://www.speedrun.com/MKWorld" target="_blank">MKWorld Speedruns</a></li>
+<li><a href="https://www.twitch.tv/directory/category/mario-kart-world" target="_blank">Twitch: Mario Kart World</a></li>
+<li><a href="https://docs.google.com/spreadsheets/d/1BtHeFAEwL1MLND-l7KZz_Zg4wZWC2YIikbyweocqwSs/edit?gid=0#gid=0" target="_blank">Character/Vehicle Stats</a></li>
+<li><a href="https://www.mkworldbuilder.com/" target="_blank">MKWorld Builder</a></li>
+</ul></div>
+</div>
+<div id="header"><b>[ <a href="..">Home</a> | <a href="../mkworld">MKWorld</a> | <a href="../mk8dx">MK8DX</a> | <a href="../mk8">MK8</a> | <a href="../mk7">MK7</a> | <a href="../mkwii">MKWii</a> |
+<a href="../mkds">MKDS</a> | <a href="../mkdd">MKDD</a> | <a href="../mksc">MKSC</a> | <a href="../mk64">MK64</a> | <a href="../smk">SMK</a> ]
+ [ <a href="../smo">SMO</a> | <a href="https://www.fzerowrs.com">FZERO</a> ]</b></div>
+<div id="main_c">
+<div id="main">
+<h2>Mario Kart World - World Records</h2>
+<b>UPDATE 2026-09-09:</b> MKWorld Version 1.8.0 was released which added 10 new SNES tracks to Time Trials!<br><br>
+Join the <a href="https://discord.gg/6gDAPxvqh7" target="_blank"><b>Mario Kart World Time Trials Discord</b><img src="discord_logo.png" height="16px"></a> and subscribe to the <a href="https://www.youtube.com/@MKWorldRecords" target="_blank"><b>@MKWorldRecords Youtube Channel!</b></a><br><br>
+Submit your times to the  <b><a href="https://www.mariokart64.com/mkworld/" target="_blank">MKWorld Players' Page!</a></b><br>
+<h2>Current World Records</h2>
+<b>[ Table View  | <a href="map.php">Map View</a> ]</b><br><br>
+
+
+<table class="wr">
+    <tr>
+        <th>Track</th>
+        <th>Time+Video</th>
+        <th>Player</th>
+        <th>Nation</th>
+        <th>Date</th>
+        <th>Duration</th>
+        <th>Character</th>
+        <th>Vehicle</th>
+        <th>Splits</th>
+    </tr>
+
+<tr><td rowspan='1'><a href="display.php?track=Mario+Bros.+Circuit">Mario Bros. Circuit</a></td><td><a href="https://www.youtube.com/watch?v=bEYs4ZK8h9c" target="_blank">1'47"342</a></td><td><a href="profile.php?player=%E3%81%82%E3%81%A4%E3%81%8D">あつき</a></td><td><div class="center"><img alt="Japan" title="Japan" src="../country-flags/JP.png"></div></td><td>2026-08-27</td><td>15</td><td>Toadette (Conductor)</td><td>Baby Blooper</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '36.891','35.194','35.257', '8-0-0', '1-1-1');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=Crown+City">Crown City</a></td><td><a href="https://www.youtube.com/watch?v=MXZKs9PVNHw" target="_blank">2'03"354</a></td><td><a href="profile.php?player=Pluto">Pluto</a></td><td><div class="center"><img alt="USA" title="USA" src="../country-flags/US.png"></div></td><td>2026-07-08</td><td>65</td><td>Wiggler</td><td>Big Horn</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '52.762','42.395','28.197', '17-3-0', '1-0-2');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=Whistlestop+Summit">Whistlestop Summit</a></td><td><a href="https://www.youtube.com/watch?v=Egr3GoSDC-8" target="_blank">1'43"723</a></td><td><a href="profile.php?player=Jorge">Jorge</a></td><td><div class="center"><img alt="Puerto Rico" title="Puerto Rico" src="../country-flags/PR.png"></div></td><td>2025-12-31</td><td>254</td><td>Baby Daisy</td><td>Mach Rocket</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '35.606','34.118','33.999', '6-3-0', '1-1-1');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=DK+Spaceport">DK Spaceport</a></td><td><a href="https://www.youtube.com/watch?v=pqMETnrL4V0" target="_blank">1'28"578</a></td><td><a href="profile.php?player=Artemis+II">Artemis II</a></td><td><div class="center"><img alt="USA" title="USA" src="../country-flags/US.png"></div></td><td>2026-09-07</td><td>4</td><td>Wiggler</td><td>B Dasher</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '24.160','14.243','12.609','12.465','12.038','13.063', '3-10-3-4-0-0', '0-1-1-1-0-0');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=Desert+Hills">Desert Hills</a></td><td><a href="https://www.youtube.com/watch?v=4meUnIhFgpY" target="_blank">1'30"737</a></td><td><a href="profile.php?player=Jacob">Jacob</a></td><td><div class="center"><img alt="Unknown" title="Unknown" src="../country-flags/UN.png"></div></td><td>2026-07-29</td><td>44</td><td>Wario (Biker)</td><td>W-Twin Chopper</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '29.798','31.399','29.540', '5-1-0', '2-0-1');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=Shy+Guy+Bazaar">Shy Guy Bazaar</a></td><td><a href="https://www.youtube.com/watch?v=4XGX4vnZt0E" target="_blank">1'50"238</a></td><td><a href="profile.php?player=Jojo">Jojo</a></td><td><div class="center"><img alt="Germany" title="Germany" src="../country-flags/DE.png"></div></td><td>2026-08-14</td><td>28</td><td>Para-Biddybud</td><td>R.O.B. H.O.G.</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '37.707','36.225','36.306', '11-0-0', '1-1-1');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=Wario+Stadium">Wario Stadium</a></td><td><a href="https://www.youtube.com/watch?v=JNG4FjO5dps" target="_blank">1'59"882</a></td><td><a href="profile.php?player=Nugget">Nugget</a></td><td><div class="center"><img alt="Japan" title="Japan" src="../country-flags/JP.png"></div></td><td>2026-04-22</td><td>142</td><td>Toadette</td><td>Reel Racer</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '40.504','39.701','39.677', '3-0-0', '1-1-1');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=Airship+Fortress">Airship Fortress</a></td><td><a href="https://www.youtube.com/watch?v=2QIJf38UWDs" target="_blank">1'53"991</a></td><td><a href="profile.php?player=LegoWiiMan">LegoWiiMan</a></td><td><div class="center"><img alt="USA" title="USA" src="../country-flags/US.png"></div></td><td>2026-07-24</td><td>49</td><td>Spike</td><td>Mach Rocket</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '38.908','37.641','37.442', '7-4-0', '1-1-1');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=DK+Pass">DK Pass</a></td><td><a href="https://www.youtube.com/watch?v=ac8wNFomEBU" target="_blank">1'57"824</a></td><td><a href="profile.php?player=Tanuki">Tanuki</a></td><td><div class="center"><img alt="USA" title="USA" src="../country-flags/US.png"></div></td><td>2026-09-07</td><td>4</td><td>Para-Biddybud</td><td>R.O.B. H.O.G.</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '39.834','38.964','39.026', '3-0-0', '1-1-1');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=Starview+Peak">Starview Peak</a></td><td><a href="https://www.youtube.com/watch?v=x-DpV102t7s" target="_blank">2'09"187</a></td><td><a href="profile.php?player=Mikuel">Mikuel</a></td><td><div class="center"><img alt="Spain" title="Spain" src="../country-flags/ES.png"></div></td><td>2026-09-01</td><td>10</td><td>Pianta</td><td>Reel Racer</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '43.889','42.641','42.657', '4-0-0', '1-1-1');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=Sky-High+Sundae">Sky-High Sundae</a></td><td><a href="https://www.youtube.com/watch?v=JCaORbqnNas" target="_blank">1'52"758</a></td><td><a href="profile.php?player=Optik">Optik</a></td><td><div class="center"><img alt="Australia" title="Australia" src="../country-flags/AU.png"></div></td><td>2026-06-04</td><td>99</td><td>Wiggler</td><td>Hot Rod</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '38.816','37.154','36.788', '15-5-0', '1-1-1');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=Wario+Shipyard">Wario Shipyard</a></td><td><a href="https://www.youtube.com/watch?v=CmhJnne0Vrw" target="_blank">2'15"904</a></td><td><a href="profile.php?player=Another">Another</a></td><td><div class="center"><img alt="France" title="France" src="../country-flags/FR.png"></div></td><td>2026-06-28</td><td>75</td><td>Bowser</td><td>Reel Racer</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '45.711','44.957','45.236', '6-1-0', '1-1-1');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=Koopa+Troopa+Beach">Koopa Troopa Beach</a></td><td><a href="https://www.youtube.com/watch?v=s_P-62JMJfA" target="_blank">1'26"309</a></td><td><a href="profile.php?player=Optik">Optik</a></td><td><div class="center"><img alt="Australia" title="Australia" src="../country-flags/AU.png"></div></td><td>2026-06-20</td><td>83</td><td>Pokey</td><td>Dread Sled</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '18.498','16.710','17.706','16.641','16.754', '5-0-0-0-0', '0-1-0-1-1');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=Faraway+Oasis">Faraway Oasis</a></td><td><a href="https://www.youtube.com/watch?v=aXr21Bi_yIo" target="_blank">1'54"704</a></td><td><a href="profile.php?player=%E3%81%BE%E3%82%8A%E3%81%A1%E3%82%85%E3%81%86">まりちゅう</a></td><td><div class="center"><img alt="Japan" title="Japan" src="../country-flags/JP.png"></div></td><td>2026-08-31</td><td>11</td><td>Penguin</td><td>Reel Racer</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '38.923','38.129','37.652', '7-5-0', '1-1-1');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=Peach+Stadium">Peach Stadium</a></td><td><a href="https://www.youtube.com/watch?v=opDXSPNJLLM" target="_blank">2'13"998</a></td><td><a href="profile.php?player=JaK">JaK</a></td><td><div class="center"><img alt="USA" title="USA" src="../country-flags/US.png"></div></td><td>2026-02-14</td><td>209</td><td>Wiggler</td><td>Big Horn</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '45.215','44.350','44.433', '1-0-0', '1-1-1');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=Peach+Beach">Peach Beach</a></td><td><a href="https://www.youtube.com/watch?v=JFem520tOWA" target="_blank">1'39"804</a></td><td><a href="profile.php?player=%E3%81%82%E3%82%8A%E3%81%99%E3%81%8C%E3%82%8F">ありすがわ</a></td><td><div class="center"><img alt="Japan" title="Japan" src="../country-flags/JP.png"></div></td><td>2026-08-14</td><td>28</td><td>Bowser</td><td>Reel Racer</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '31.828','26.402','41.574', '8-6-6', '1-1-1');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=Salty+Salty+Speedway">Salty Salty Speedway</a></td><td><a href="https://www.youtube.com/watch?v=RhTbI5i8ERo" target="_blank">1'54"345</a></td><td><a href="profile.php?player=Optik">Optik</a></td><td><div class="center"><img alt="Australia" title="Australia" src="../country-flags/AU.png"></div></td><td>2026-08-01</td><td>41</td><td>Toadette (Soft Server)</td><td>Mach Rocket</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '39.714','37.422','37.209', '7-1-0', '1-1-1');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=Dino+Dino+Jungle">Dino Dino Jungle</a></td><td><a href="https://www.youtube.com/watch?v=m1xDvUuNy10" target="_blank">1'44"105</a></td><td><a href="profile.php?player=Panda">Panda</a></td><td><div class="center"><img alt="Australia" title="Australia" src="../country-flags/AU.png"></div></td><td>2026-08-22</td><td>20</td><td>Pokey</td><td>Chargin' Truck</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '35.350','34.401','34.354', '5-1-0', '1-1-1');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=Great+%3F+Block+Ruins">Great ? Block Ruins</a></td><td><a href="https://www.youtube.com/watch?v=czjyju1XQr4" target="_blank">2'01"648</a></td><td><a href="profile.php?player=SpeZy">SpeZy</a></td><td><div class="center"><img alt="UK" title="UK" src="../country-flags/GB.png"></div></td><td>2026-08-03</td><td>39</td><td>Para-Biddybud</td><td>Mach Rocket</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '41.648','39.960','40.040', '5-1-1', '1-1-1');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=Cheep+Cheep+Falls">Cheep Cheep Falls</a></td><td><a href="https://www.youtube.com/watch?v=E3jcOsPNP90" target="_blank">1'53"881</a></td><td><a href="profile.php?player=flurry">flurry</a></td><td><div class="center"><img alt="USA" title="USA" src="../country-flags/US.png"></div></td><td>2026-06-15</td><td>88</td><td>Toadette (Explorer)</td><td>Reel Racer</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '38.837','37.555','37.489', '9-0-0', '1-1-1');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=Dandelion+Depths">Dandelion Depths</a></td><td><a href="https://www.youtube.com/watch?v=SSqcUWwrSLw" target="_blank">2'16"997</a></td><td><a href="profile.php?player=JaK">JaK</a></td><td><div class="center"><img alt="USA" title="USA" src="../country-flags/US.png"></div></td><td>2026-08-12</td><td>30</td><td>Wiggler</td><td>Reel Racer</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '46.634','45.280','45.083', '4-3-0', '1-1-1');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=Boo+Cinema">Boo Cinema</a></td><td><a href="https://www.youtube.com/watch?v=Jp06DpDGoUo" target="_blank">2'03"755</a></td><td><a href="profile.php?player=jBoneX">jBoneX</a></td><td><div class="center"><img alt="USA" title="USA" src="../country-flags/US.png"></div></td><td>2026-06-18</td><td>85</td><td>Wiggler</td><td>Baby Blooper</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '41.700','40.922','41.133', '5-3-0', '1-1-1');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=Dry+Bones+Burnout">Dry Bones Burnout</a></td><td><a href="https://www.youtube.com/watch?v=wJOQc9lhpOw" target="_blank">2'05"370</a></td><td><a href="profile.php?player=Chrin">Chrin</a></td><td><div class="center"><img alt="USA" title="USA" src="../country-flags/US.png"></div></td><td>2026-09-06</td><td>5</td><td>Wiggler</td><td>Baby Blooper</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '42.587','41.509','41.274', '6-3-2', '1-1-1');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=Moo+Moo+Meadows">Moo Moo Meadows</a></td><td><a href="https://www.youtube.com/watch?v=ToW-yaqdtuI" target="_blank">1'53"159</a></td><td><a href="profile.php?player=Harpan">Harpan</a></td><td><div class="center"><img alt="Sweden" title="Sweden" src="../country-flags/SE.png"></div></td><td>2026-07-26</td><td>47</td><td>Cow</td><td>Dread Sled</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '39.384','37.313','36.462', '4-2-3', '0-1-2');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=Choco+Mountain">Choco Mountain</a></td><td><a href="https://www.youtube.com/watch?v=GjVn1D0jeNQ" target="_blank">2'00"680</a></td><td><a href="profile.php?player=Ace_Beaton">Ace_Beaton</a></td><td><div class="center"><img alt="UK" title="UK" src="../country-flags/GB.png"></div></td><td>2026-08-18</td><td>24</td><td>Bowser</td><td>Reel Racer</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '41.263','39.834','39.583', '7-3-0', '1-1-1');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=Toad%27s+Factory">Toad&#039;s Factory</a></td><td><a href="https://www.youtube.com/watch?v=V8jNG2zmMhU" target="_blank">1'51"172</a></td><td><a href="profile.php?player=%E3%81%82%E3%82%8A%E3%81%99%E3%81%8C%E3%82%8F">ありすがわ</a></td><td><div class="center"><img alt="Japan" title="Japan" src="../country-flags/JP.png"></div></td><td>2026-06-07</td><td>96</td><td>Wiggler</td><td>Baby Blooper</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '38.115','36.750','36.307', '6-4-2', '1-1-1');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=Bowser%27s+Castle">Bowser&#039;s Castle</a></td><td><a href="https://www.youtube.com/watch?v=DYdJNA8yW08" target="_blank">2'08"731</a></td><td><a href="profile.php?player=Optik">Optik</a></td><td><div class="center"><img alt="Australia" title="Australia" src="../country-flags/AU.png"></div></td><td>2026-08-12</td><td>30</td><td>Toadette (Soft Server)</td><td>Baby Blooper</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '43.358','42.648','42.725', '5-0-0', '1-1-1');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=Acorn+Heights">Acorn Heights</a></td><td><a href="https://www.youtube.com/watch?v=yqJo7G1Yssw" target="_blank">1'56"966</a></td><td><a href="profile.php?player=Fetch">Fetch</a></td><td><div class="center"><img alt="Puerto Rico" title="Puerto Rico" src="../country-flags/PR.png"></div></td><td>2026-08-20</td><td>22</td><td>Baby Peach</td><td>W-Twin Chopper</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '39.946','38.558','38.462', '7-1-0', '1-1-1');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=Mario+Circuit">Mario Circuit</a></td><td><a href="https://www.youtube.com/watch?v=57t-rt1CIjs" target="_blank">1'02"770</a></td><td><a href="profile.php?player=JaK">JaK</a></td><td><div class="center"><img alt="USA" title="USA" src="../country-flags/US.png"></div></td><td>2026-09-06</td><td>5</td><td>Toadette (Explorer)</td><td>Baby Blooper</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '18.092','20.361','24.317', '5-1-1', '0-2-1');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=Rainbow+Road">Rainbow Road</a></td><td><a href="https://www.youtube.com/watch?v=-uu2WfPCQYM" target="_blank">3'52"848</a></td><td><a href="profile.php?player=Technical">Technical</a></td><td><div class="center"><img alt="USA" title="USA" src="../country-flags/US.png"></div></td><td>2026-07-29</td><td>44</td><td>Wiggler</td><td>Big Horn</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '57.799','48.493','52.971','1:13.585', '8-10-2-0', '0-3-0-0');" onmouseout='hide();'></td></tr>
+<tr>
+    <td><b>Total:</b></td>
+    <td><b>58'34"760</b></td>
+</tr>
+
+</table>
+
+	<h2>DLC World Records</h2>
+	
+<table class="wr">
+    <tr>
+        <th>Track</th>
+        <th>Time+Video</th>
+        <th>Player</th>
+        <th>Nation</th>
+        <th>Date</th>
+        <th>Duration</th>
+        <th>Character</th>
+        <th>Vehicle</th>
+        <th>Splits</th>
+    </tr>
+
+<tr><td rowspan='1'><a href="display.php?track=SNES+Mario+Circuit+1">SNES Mario Circuit 1</a></td><td><a href="https://www.youtube.com/watch?v=53XGlcyHFf4" target="_blank">1'15"891</a></td><td><a href="profile.php?player=JaK">JaK</a></td><td><div class="center"><img alt="USA" title="USA" src="../country-flags/US.png"></div></td><td>2026-09-11</td><td><1</td><td>Toadette (Explorer)</td><td>Baby Blooper</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '15.578','14.706','14.705','15.672','15.230', '3-2-0-0-0', '1-1-1-0-0');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=SNES+Mario+Circuit+2">SNES Mario Circuit 2</a></td><td><a href="https://www.youtube.com/watch?v=YXVtiT9fj4c" target="_blank">1'42"233</a></td><td><a href="profile.php?player=coopdawg">coopdawg</a></td><td><div class="center"><img alt="USA" title="USA" src="../country-flags/US.png"></div></td><td>2026-09-10</td><td>1</td><td>Toadette (Explorer)</td><td>Baby Blooper</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '20.261','20.662','19.911','20.693','20.706', '5-0-0-0-0', '2-0-1-0-0');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=SNES+Mario+Circuit+3">SNES Mario Circuit 3</a></td><td><a href="https://www.youtube.com/watch?v=tkcIW7pjLO8" target="_blank">1'54"053</a></td><td><a href="profile.php?player=Cwelly">Cwelly</a></td><td><div class="center"><img alt="Canada" title="Canada" src="../country-flags/CA.png"></div></td><td>2026-09-11</td><td><1</td><td>Toadette</td><td>Baby Blooper</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '24.148','23.219','22.102','22.140','22.444', '3-0-0-0-0', '0-0-1-1-1');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=SNES+Ghost+Valley+1">SNES Ghost Valley 1</a></td><td><a href="https://www.youtube.com/watch?v=mN4zrSuQc-g" target="_blank">1'44"750</a></td><td><a href="profile.php?player=Pecii">Pecii</a></td><td><div class="center"><img alt="Spain" title="Spain" src="../country-flags/ES.png"></div></td><td>2026-09-11</td><td><1</td><td>Wario (Biker)</td><td>Baby Blooper</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '21.689','20.862','20.656','20.701','20.842', '3-3-0-0-0', '0-1-1-1-0');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=SNES+Ghost+Valley+2">SNES Ghost Valley 2</a></td><td><a href="https://www.youtube.com/watch?v=CcXj8AjNfxk" target="_blank">1'36"732</a></td><td><a href="profile.php?player=yotako">yotako</a></td><td><div class="center"><img alt="Unknown" title="Unknown" src="../country-flags/UN.png"></div></td><td>2026-09-11</td><td><1</td><td>Wiggler</td><td>B Dasher</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '19.535','19.150','19.407','19.292','19.348', '2-1-0-0-1', '2-1-0-0-0');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=SNES+Ghost+Valley+3">SNES Ghost Valley 3</a></td><td><a href="https://www.youtube.com/watch?v=b7YyGDS9k0A" target="_blank">2'16"110</a></td><td><a href="profile.php?player=PATATA">PATATA</a></td><td><div class="center"><img alt="Spain" title="Spain" src="../country-flags/ES.png"></div></td><td>2026-09-10</td><td>1</td><td>Toadette (Conductor)</td><td>Baby Blooper</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '28.097','26.897','26.789','26.901','27.426', '5-2-0-0-0', '0-1-1-1-0');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=SNES+Choco+Island+1">SNES Choco Island 1</a></td><td><a href="https://www.youtube.com/watch?v=hP18_xP-3Jo" target="_blank">1'30"141</a></td><td><a href="profile.php?player=Logan">Logan</a></td><td><div class="center"><img alt="USA" title="USA" src="../country-flags/US.png"></div></td><td>2026-09-11</td><td><1</td><td>Bowser (Biker)</td><td>Reel Racer</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '20.118','18.601','17.299','17.310','16.813', '11-3-1-0-0', '0-0-1-1-1');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=SNES+Choco+Island+2">SNES Choco Island 2</a></td><td><a href="https://www.youtube.com/watch?v=kIpvvvZ9UG8" target="_blank">2'09"394</a></td><td><a href="profile.php?player=VNix">VNix</a></td><td><div class="center"><img alt="USA" title="USA" src="../country-flags/US.png"></div></td><td>2026-09-11</td><td><1</td><td>Toad (Explorer)</td><td>Reel Racer</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '27.965','26.316','25.114','26.294','23.705', '8-2-0-0-0', '0-0-1-0-2');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=SNES+Koopa+Beach+1">SNES Koopa Beach 1</a></td><td><a href="https://www.youtube.com/watch?v=qVYfJhvcgMg" target="_blank">1'17"040</a></td><td><a href="profile.php?player=Kado">Kado</a></td><td><div class="center"><img alt="France" title="France" src="../country-flags/FR.png"></div></td><td>2026-09-10</td><td>1</td><td>Bowser</td><td>Reel Racer</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '15.886','15.300','15.689','15.226','14.939', '0-0-1-0-0', '0-0-0-1-2');" onmouseout='hide();'></td></tr><tr><td rowspan='1'><a href="display.php?track=SNES+Vanilla+Lake+1">SNES Vanilla Lake 1</a></td><td><a href="https://www.youtube.com/watch?v=3mhP9slPwko" target="_blank">1'23"772</a></td><td><a href="profile.php?player=Mirai">Mirai</a></td><td><div class="center"><img alt="USA" title="USA" src="../country-flags/US.png"></div></td><td>2026-09-11</td><td><1</td><td>Luigi</td><td>Dread Sled</td><td><img src="info_icon.gif" onmouseover="show_splits_dynamic('ttipid_splits', '16.963','16.223','17.374','17.100','16.112', '3-0-0-0-0', '1-1-0-0-1');" onmouseout='hide();'></td></tr>
+<tr>
+    <td><b>Total:</b></td>
+    <td><b>16'50"116</b></td>
+</tr>
+
+</table>
+
+<h2>Multiple WR Holders</h2>
+<table class="tally">
+	<tr>
+		<th>Player</th>
+    	<th>Nation</th>
+		<th>WR Count</th>
+	</tr>
+
+	<tr>
+		<td><a href="profile.php?player=JaK">JaK</a></td>
+    <td><div class="center"><img alt="USA" title="USA" src="../country-flags/US.png"></div></td>
+		<td>4</td>
+	</tr>
+	<tr>
+		<td><a href="profile.php?player=Optik">Optik</a></td>
+    <td><div class="center"><img alt="Australia" title="Australia" src="../country-flags/AU.png"></div></td>
+		<td>4</td>
+	</tr>
+	<tr>
+		<td><a href="profile.php?player=%E3%81%82%E3%82%8A%E3%81%99%E3%81%8C%E3%82%8F">ありすがわ</a></td>
+    <td><div class="center"><img alt="Japan" title="Japan" src="../country-flags/JP.png"></div></td>
+		<td>2</td>
+	</tr></table><h2>Nation WR Tally</h2>
+<table class="tally">
+  <tr>
+    <th>Nation</th>
+    <th>WR Count</th>
+  </tr>
+
+  <tr>
+    <td><div class="center"><img alt="USA" title="USA" src="../country-flags/US.png"></div></td>
+    <td>16</td>
+  </tr>
+  <tr>
+    <td><div class="center"><img alt="Australia" title="Australia" src="../country-flags/AU.png"></div></td>
+    <td>5</td>
+  </tr>
+  <tr>
+    <td><div class="center"><img alt="Japan" title="Japan" src="../country-flags/JP.png"></div></td>
+    <td>5</td>
+  </tr>
+  <tr>
+    <td><div class="center"><img alt="Spain" title="Spain" src="../country-flags/ES.png"></div></td>
+    <td>3</td>
+  </tr>
+  <tr>
+    <td><div class="center"><img alt="France" title="France" src="../country-flags/FR.png"></div></td>
+    <td>2</td>
+  </tr>
+  <tr>
+    <td><div class="center"><img alt="Puerto Rico" title="Puerto Rico" src="../country-flags/PR.png"></div></td>
+    <td>2</td>
+  </tr>
+  <tr>
+    <td><div class="center"><img alt="UK" title="UK" src="../country-flags/GB.png"></div></td>
+    <td>2</td>
+  </tr>
+  <tr>
+    <td><div class="center"><img alt="Unknown" title="Unknown" src="../country-flags/UN.png"></div></td>
+    <td>2</td>
+  </tr>
+  <tr>
+    <td><div class="center"><img alt="Canada" title="Canada" src="../country-flags/CA.png"></div></td>
+    <td>1</td>
+  </tr>
+  <tr>
+    <td><div class="center"><img alt="Germany" title="Germany" src="../country-flags/DE.png"></div></td>
+    <td>1</td>
+  </tr>
+  <tr>
+    <td><div class="center"><img alt="Sweden" title="Sweden" src="../country-flags/SE.png"></div></td>
+    <td>1</td>
+  </tr></table><br>
+</div>
+</div></div></div></body></html>

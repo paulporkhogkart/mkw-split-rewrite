@@ -3,7 +3,7 @@ import { parseHistory } from './history_parse';
 import { reconcileHistory, type HistoryReport } from './history_reconcile';
 import { resolveCourseId } from './courses';
 
-/** The 30 base mkwrs track names (display form). Order matches the mkworld nav. */
+/** The mkwrs track names (display form): 30 base + the v1.8.0 SNES retro courses. Order matches the mkworld nav. */
 export const MKWRS_TRACKS: string[] = [
   'Mario Bros. Circuit', 'Crown City', 'Whistlestop Summit', 'DK Spaceport', 'Desert Hills',
   'Shy Guy Bazaar', 'Wario Stadium', 'Airship Fortress', 'DK Pass', 'Starview Peak',
@@ -12,6 +12,9 @@ export const MKWRS_TRACKS: string[] = [
   'Cheep Cheep Falls', 'Dandelion Depths', 'Boo Cinema', 'Dry Bones Burnout', 'Moo Moo Meadows',
   'Choco Mountain', "Toad's Factory", "Bowser's Castle", 'Acorn Heights', 'Mario Circuit',
   'Rainbow Road',
+  'SNES Mario Circuit 1', 'SNES Mario Circuit 2', 'SNES Mario Circuit 3', 'SNES Ghost Valley 1',
+  'SNES Ghost Valley 2', 'SNES Ghost Valley 3', 'SNES Choco Island 1', 'SNES Choco Island 2',
+  'SNES Koopa Beach 1', 'SNES Vanilla Lake 1',
 ];
 
 export const DEFAULT_BASE = 'https://mkwrs.com/mkworld/display.php?track=';

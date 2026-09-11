@@ -17,10 +17,12 @@ const cellText = (el: { querySelector: (s: string) => any; text: string } | null
 
 export function parseWrTable(html: string): ScrapedWr[] {
   const root = parse(html);
-  const table = root.querySelector('table.wr');
-  if (!table) throw new Error('mkwrs: table.wr not found');
+  // Since game v1.8.0 (Sept 2026) the index page holds SEVERAL table.wr blocks (the 30 base
+  // courses, then the SNES retro courses). Reading only the first silently hid new tracks.
+  const tables = root.querySelectorAll('table.wr');
+  if (tables.length === 0) throw new Error('mkwrs: table.wr not found');
   const out: ScrapedWr[] = [];
-  for (const tr of table.querySelectorAll('tr')) {
+  for (const tr of tables.flatMap((t) => t.querySelectorAll('tr'))) {
     const td = tr.querySelectorAll('td');
     if (td.length < 9) continue;                       // header / short rows
     const courseName = cellText(td[0]);

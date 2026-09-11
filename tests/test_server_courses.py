@@ -28,10 +28,20 @@ def test_slugify_strips_apostrophes_and_punctuation():
     assert slugify("DK Pass") == "dk_pass"
 
 
-def test_thirty_canonical_courses():
+def test_forty_canonical_courses():
     slugs = [s for s, _ in CANONICAL_COURSES]
-    assert len(CANONICAL_COURSES) == 30
-    assert len(set(slugs)) == 30
+    assert len(CANONICAL_COURSES) == 40
+    assert len(set(slugs)) == 40
+
+
+def test_world_map_courses_are_the_30_island_courses():
+    from server.courses import RETRO_COURSES, WORLD_MAP_COURSES
+    assert len(WORLD_MAP_COURSES) == 30
+    assert len(RETRO_COURSES) == 10
+    assert all(s.startswith("snes_") for s in RETRO_COURSES)
+    assert not any(s in RETRO_COURSES for s, _ in WORLD_MAP_COURSES)
+    # Appended, so pre-existing ids are stable: the 30 island courses come first.
+    assert [s for s, _ in CANONICAL_COURSES[:30]] == [s for s, _ in WORLD_MAP_COURSES]
 
 
 def test_canonical_slug_equals_slugified_display():
@@ -51,9 +61,9 @@ def test_wario_shipyard_aliases_to_warios_galleon():
     assert legacy_track_slug("Wario Shipyard") == "warios_galleon"
 
 
-def test_seed_courses_inserts_thirty_rows_idempotently():
+def test_seed_courses_inserts_forty_rows_idempotently():
     conn = connect(":memory:")
     init_schema(conn)
     seed_courses(conn)
     seed_courses(conn)  # idempotent
-    assert conn.execute("SELECT COUNT(*) FROM courses").fetchone()[0] == 30
+    assert conn.execute("SELECT COUNT(*) FROM courses").fetchone()[0] == 40

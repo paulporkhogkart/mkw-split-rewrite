@@ -72,6 +72,19 @@ describe('playerHeadline', () => {
     expect(h.offwr.rank).toBe(2);     // Luke 8% < Paul 11.25% < Max 13%
   });
 
+  it('retro (SNES) courses never count toward turf: not owned, not in the denominator', () => {
+    const db = seeded();
+    db.exec("INSERT INTO courses(id,slug,display_name) VALUES (3,'snes_mario_circuit_1','SNES Mario Circuit 1')");
+    // Max is the only runner on the SNES track -> would "own" it if retro courses counted.
+    db.exec("INSERT INTO runs(season_id,player_id,course_id,cc,status,provenance,total_time_ms,is_pb) VALUES (1,3,3,150,'finished','live',75000,1)");
+    const paul = playerHeadline(db, 1, 150, 1);   // (db, seasonId, cc, playerId)
+    expect(paul.turf.pct).toBe(50);   // still 1 of the 2 ISLAND courses, not 1 of 3
+    expect(paul.turf.rank).toBe(2);   // Luke(1 owned, faster) < Paul(1) < Max(0 island courses)
+    const max = playerHeadline(db, 1, 150, 3);
+    expect(max.turf.pct).toBe(0);
+    expect(max.turf.rank).toBe(3);
+  });
+
   it('avgOffWrByPlayer averages only WR-covered PBs', () => {
     const m = avgOffWrByPlayer(seeded(), 1, 150);
     expect(m.get(1)).toBeCloseTo(11.25, 4);   // Paul

@@ -18,7 +18,7 @@ describe('trackUrl', () => {
     expect(trackUrl('Great ? Block Ruins')).toBe('https://mkwrs.com/mkworld/display.php?track=Great+%3F+Block+Ruins');
     expect(trackUrl("Toad's Factory")).toContain('Toad%27s+Factory');
   });
-  it('lists all 30 tracks', () => { expect(MKWRS_TRACKS.length).toBe(30); });
+  it('lists all 40 tracks (30 base + 10 SNES)', () => { expect(MKWRS_TRACKS.length).toBe(40); });
 });
 
 describe('scrapeTrackHistory', () => {
@@ -38,7 +38,7 @@ describe('scrapeAllHistory', () => {
       fetchHtml: async () => fx('mario_bros_circuit'),
       sleep: async () => {}, random: () => 0,
     });
-    expect(reps.length).toBe(30);
+    expect(reps.length).toBe(40);
     // Only Mario Bros. Circuit maps to a course here; others resolve to null and are skipped cleanly.
     const mbc = reps.find((r) => r.course === 'Mario Bros. Circuit');
     expect(mbc!.inserted).toBeGreaterThan(80);

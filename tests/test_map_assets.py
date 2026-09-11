@@ -8,14 +8,14 @@ MAP = ROOT / "web" / "public" / "map"
 def _canon():
     spec = importlib.util.spec_from_file_location("courses", ROOT / "server" / "courses.py")
     mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
-    return dict(mod.CANONICAL_COURSES)
+    return dict(mod.WORLD_MAP_COURSES)   # the island courses; retro (SNES) courses are not on the map
 
 
 def _manifest():
     return json.loads((MAP / "manifest.json").read_text())
 
 
-def test_manifest_is_30_unique_canonical_courses():
+def test_manifest_is_the_30_unique_world_map_courses():
     canon = _canon()
     slugs = [c["slug"] for c in _manifest()["courses"]]
     assert len(slugs) == len(canon)
