@@ -457,8 +457,13 @@ def build_camera_source(
         if _device_has_p010(device_name):
             return FfmpegCameraSource(device_name)
         devices = list_dshow_video_devices()
-        idx = next((i for i, n in enumerate(devices) if n == device_name), 0)
-        return VideoCaptureSource(idx, device_name=device_name)
+        if device_name not in devices:
+            # Never fall back to index 0: that is whatever DirectShow enumerates first
+            # (typically OBS Virtual Camera), and the browser preview would then be on a
+            # different camera from the engine. Fail loudly so the UI shows the error.
+            raise ValueError(
+                f"Camera {device_name!r} not found; DirectShow video devices: {devices}")
+        return VideoCaptureSource(devices.index(device_name), device_name=device_name)
 
     print("[Camera] Probing DirectShow devices for P010 (HDR)...")
     p010_device = _find_p010_device()
