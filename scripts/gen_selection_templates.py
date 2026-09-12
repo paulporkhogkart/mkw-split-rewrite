@@ -30,7 +30,7 @@ import cv2
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from mkw_tracker.detection.selection import (  # noqa: E402
-    CHAR_NAME_ROI, KART_NAME_ROI, COURSE_NAME_ROI, COSTUME_ROI,
+    CHAR_NAME_ROI, KART_NAME_ROI, COURSE_NAME_ROI, COURSE_PREVIEW_ROI, COSTUME_ROI,
 )
 from mkw_tracker.detection.templates import synth_bg_variants  # noqa: E402
 
@@ -39,11 +39,16 @@ REF_W, REF_H = 1920, 1080
 
 # category -> (settings ROI key, fallback constant)
 CATEGORIES = {
-    "characters": ("char_name_roi",   CHAR_NAME_ROI),
-    "karts":      ("kart_name_roi",   KART_NAME_ROI),
-    "courses":    ("course_name_roi", COURSE_NAME_ROI),
-    "costumes":   ("costume_roi",     COSTUME_ROI),
+    "characters":      ("char_name_roi",      CHAR_NAME_ROI),
+    "karts":           ("kart_name_roi",      KART_NAME_ROI),
+    "courses":         ("course_name_roi",    COURSE_NAME_ROI),
+    "costumes":        ("costume_roi",        COSTUME_ROI),
+    # Preview art on the course-select screen: cut from the SAME course captures
+    # (tie-breaker for near-identical names; see selection.COURSE_PREVIEW_ROI).
+    "course_previews": ("course_preview_roi", COURSE_PREVIEW_ROI),
 }
+# Categories cut from another category's captures.
+SOURCE_CAPTURES = {"course_previews": "courses"}
 # Categories whose background varies at runtime -> emit synthetic bg variants.
 AUGMENT = {"costumes"}
 
@@ -67,7 +72,7 @@ def regen_category(category, roi, captures_root, lang, dry_run, only=None):
     only: optional set of capture bases to (re)cut; everything else is left untouched
     (e.g. just the courses added by a game update).
     """
-    cap_dir = os.path.join(captures_root, lang, category)
+    cap_dir = os.path.join(captures_root, lang, SOURCE_CAPTURES.get(category, category))
     out_dir = os.path.join(ROOT, "images", category, lang)
     if not os.path.isdir(cap_dir):
         print(f"  [skip] {category}: no captures dir {cap_dir}")

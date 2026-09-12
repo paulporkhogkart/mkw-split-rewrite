@@ -8,7 +8,7 @@ from typing import Callable, Dict, Optional
 
 from .screen import Screen
 from .templates import (
-    load_edge_template_groups, prepare_text_edges, match_variants, purge_tight_pngs,
+    load_edge_template_groups, prepare_text_edges, match_variants, purge_tight_pngs, load_gray_templates,
 )
 
 # ---------------------------------------------------------------------------
@@ -104,6 +104,16 @@ CHAR_NAME_ROI   = (1210, 830, 1770, 894)
 COSTUME_ROI     = (1210, 916, 1770, 958)
 KART_NAME_ROI   = (1240, 830, 1740, 894)
 COURSE_NAME_ROI = (163,  387, 647,  462)
+# Course-select preview art, used as a TIE-BREAKER for the name plate: the 454x234 image
+# at (176,146), cropped to its left 65% because the hovered character is rendered over the
+# right side on the island courses. Photos, not text -> plain grayscale NCC at half scale.
+# Only consulted when the name read is confident AND ambiguous (>= 2 names within
+# COURSE_PREVIEW_MARGIN of the top), e.g. the SNES siblings whose plates differ by one digit
+# (cross 0.82); previews of different courses cross-score <= 0.54 vs 1.0 self.
+COURSE_PREVIEW_ROI    = (176, 146, 471, 380)
+COURSE_PREVIEW_SCALE  = 0.5
+COURSE_PREVIEW_MARGIN = 0.25
+COURSE_PREVIEW_MIN    = 0.50
 
 SELECTION_MATCH_THRESHOLD = 0.7   # screen-confidence gate (not a template score)
 
@@ -187,6 +197,26 @@ class SelectionState:
 # SelectionTracker
 # ---------------------------------------------------------------------------
 
+def resolve_with_preview(name_scores: Dict[str, float], preview_scores: Dict[str, float],
+                         margin: float = COURSE_PREVIEW_MARGIN,
+                         min_preview: float = COURSE_PREVIEW_MIN) -> Optional[str]:
+    """Pick among near-tied name candidates by their preview-art score.
+
+    Candidates = names within *margin* of the top name score. With fewer than two
+    there is nothing to break -> None (the name winner stands). Otherwise the
+    candidate with the best preview score wins, provided that preview clears
+    *min_preview*; below it -> None. Pure: no frames, no state.
+    """
+    if not name_scores or not preview_scores:
+        return None
+    top = max(name_scores.values())
+    cands = [n for n, sc in name_scores.items() if sc >= top - margin]
+    if len(cands) < 2:
+        return None
+    best_score, best = max((preview_scores.get(n, 0.0), n) for n in cands)
+    return best if best_score >= min_preview else None
+
+
 class SelectionTracker:
     """Tracks selected character/costume/kart/course by scanning ROIs at 10Hz."""
 
@@ -227,6 +257,8 @@ class SelectionTracker:
         self._costume_templates = _canonicalize_costumes(load_edge_template_groups(costume_dir))
         self._kart_templates    = load_edge_template_groups(kart_dir)
         self._course_templates  = load_edge_template_groups(course_dir)
+        preview_dir = f"images/course_previews/{lang}" if lang else "images/course_previews"
+        self._course_previews   = load_gray_templates(preview_dir, COURSE_PREVIEW_SCALE)
 
         # ROIs - read from settings so wizard edits take effect after restart
         from ..config.settings import get_settings as _gs
@@ -235,6 +267,7 @@ class SelectionTracker:
         self._costume_roi     = tuple(_s.get('costume_roi',     list(COSTUME_ROI)))
         self._kart_name_roi   = tuple(_s.get('kart_name_roi',   list(KART_NAME_ROI)))
         self._course_name_roi = tuple(_s.get('course_name_roi', list(COURSE_NAME_ROI)))
+        self._course_preview_roi = tuple(_s.get('course_preview_roi', list(COURSE_PREVIEW_ROI)))
 
         self._last_scan: float = 0.0
         self._relevant_costumes: Dict[str, list] = {}
@@ -249,11 +282,13 @@ class SelectionTracker:
         self._kart_scores:    Dict[str, float] = {}
         self._course_scores:  Dict[str, float] = {}
         self._costume_scores: Dict[str, float] = {}
+        self._course_preview_scores: Dict[str, float] = {}   # last tie-break, for debugging
 
         print(f"[SelectionTracker] {len(self._char_templates)} characters, "
               f"{len(self._costume_templates)} costumes, "
               f"{len(self._kart_templates)} karts, "
-              f"{len(self._course_templates)} courses")
+              f"{len(self._course_templates)} courses, "
+              f"{len(self._course_previews)} course previews")
 
     # ------------------------------------------------------------------
     @property
@@ -416,6 +451,11 @@ class SelectionTracker:
             reconfirm_threshold=SELECTION_RECONFIRM_THRESHOLD,
             rel_margin=SELECTION_REL_MARGIN, min_abs=SELECTION_MIN_ABS, hold_margin=SELECTION_HOLD_MARGIN,
         )
+        picked = self._preview_pick(frame, self._course_scores)
+        if picked is not None and picked != name:
+            print(f"  Course:    preview tie-break {name!r} -> {picked!r} "
+                  f"(preview {self._course_preview_scores.get(picked, 0.0):.2f})")
+            name, conf = picked, self._course_scores.get(picked, conf)
         if name and name != self.state.course:
             self.state.course      = name
             self.state.course_conf = conf
@@ -424,6 +464,41 @@ class SelectionTracker:
         elif name:
             self.state.course_conf = conf
         return False
+
+    def _preview_crop(self, frame: np.ndarray) -> np.ndarray:
+        """Grayscale, half-scale crop of the preview ROI (+ the shared search pad)."""
+        crop = self._crop_padded(frame, self._course_preview_roi, SELECTION_SEARCH_PAD)
+        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        return cv2.resize(gray, (max(1, int(gray.shape[1] * COURSE_PREVIEW_SCALE)),
+                                 max(1, int(gray.shape[0] * COURSE_PREVIEW_SCALE))),
+                          interpolation=cv2.INTER_AREA)
+
+    def _preview_scores(self, frame: np.ndarray, names) -> Dict[str, float]:
+        """Preview-art NCC for just *names* (one crop, one matchTemplate per name)."""
+        live = self._preview_crop(frame)
+        out: Dict[str, float] = {}
+        for n in names:
+            t = self._course_previews.get(n)
+            if t is None or t.shape[0] > live.shape[0] or t.shape[1] > live.shape[1]:
+                continue
+            out[n] = float(cv2.minMaxLoc(cv2.matchTemplate(live, t, cv2.TM_CCOEFF_NORMED))[1])
+        return out
+
+    def _preview_pick(self, frame: np.ndarray, name_scores: Dict[str, float]) -> Optional[str]:
+        """The preview tie-break, gated so it costs nothing on an unambiguous read:
+        needs loaded previews, a confident top name (>= the course floor) and >= 2
+        names within COURSE_PREVIEW_MARGIN of it; only those candidates are scored."""
+        self._course_preview_scores = {}
+        if not self._course_previews or not name_scores:
+            return None
+        top = max(name_scores.values())
+        if top < SELECTION_COURSE_FLOOR:
+            return None
+        cands = {n: sc for n, sc in name_scores.items() if sc >= top - COURSE_PREVIEW_MARGIN}
+        if len(cands) < 2:
+            return None
+        self._course_preview_scores = self._preview_scores(frame, cands)
+        return resolve_with_preview(cands, self._course_preview_scores)
 
     # ------------------------------------------------------------------
     def reset(self):
@@ -449,6 +524,8 @@ class SelectionTracker:
         self._costume_templates = _canonicalize_costumes(load_edge_template_groups(costume_dir))
         self._kart_templates    = load_edge_template_groups(kart_dir)
         self._course_templates  = load_edge_template_groups(course_dir)
+        self._course_previews   = load_gray_templates(
+            f"images/course_previews/{lang}" if lang else "images/course_previews", COURSE_PREVIEW_SCALE)
         if self.state.character:
             self._rebuild_costume_subset(self.state.character)
         print(f"[SelectionTracker] reloaded for lang={lang!r}: "

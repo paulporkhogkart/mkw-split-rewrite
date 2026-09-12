@@ -68,6 +68,9 @@ python scripts/gen_selection_templates.py                         # all langs + 
 python scripts/gen_selection_templates.py --lang en_uk --dry-run  # report only
 python scripts/gen_selection_templates.py --category costumes
 python scripts/gen_selection_templates.py --lang en_uk --category courses --only snes_mario_circuit_1,snes_ghost_valley_1
+# Course PREVIEW art (cut from the SAME course captures; tie-breaker for near-identical
+# names like the SNES "Choco Island 1/2" - see detection/selection.py COURSE_PREVIEW_ROI)
+python scripts/gen_selection_templates.py --lang en_uk --category course_previews
 
 # ADDING A COURSE (game update): append to server/courses.py CANONICAL_COURSES AND
 # pi/src/db/courses.ts (the Pi seeds missing rows at boot), pi/src/wr/history_scrape.ts

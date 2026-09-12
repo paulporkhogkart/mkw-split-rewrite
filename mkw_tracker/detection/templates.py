@@ -73,6 +73,28 @@ def purge_tight_pngs(directory: str):
         print(f"[templates] Purged {count} _tight.png file(s) from {directory}")
 
 
+def load_gray_templates(directory: str, scale: float = 1.0) -> Dict[str, np.ndarray]:
+    """Load plain grayscale templates (photo-like art, e.g. course previews) keyed by
+    display name (``<base>.png`` -> "Base Name"), optionally downscaled by *scale*
+    (INTER_AREA) so matching at reduced resolution stays cheap."""
+    out: Dict[str, np.ndarray] = {}
+    directory = resource_path(directory)
+    if not os.path.exists(directory):
+        return out
+    for filename in sorted(os.listdir(directory)):
+        if not filename.lower().endswith(".png"):
+            continue
+        src = cv2.imread(os.path.join(directory, filename), cv2.IMREAD_GRAYSCALE)
+        if src is None:
+            print(f"[WARN] Could not load template: {filename}")
+            continue
+        if scale != 1.0:
+            src = cv2.resize(src, (max(1, int(src.shape[1] * scale)), max(1, int(src.shape[0] * scale))),
+                             interpolation=cv2.INTER_AREA)
+        out[filename[:-4].replace("_", " ").title()] = src
+    return out
+
+
 def load_edge_template_groups(directory: str) -> Dict[str, list]:
     """Load Canny-edge selection templates grouped by display name.
 
