@@ -17,6 +17,7 @@
   import EditMode from "./components/EditMode.svelte";
   import SourceCheck from "./components/SourceCheck.svelte";
   import DeviceSelectors from "./components/DeviceSelectors.svelte";
+  import { cleanBrowserLabel, matchPythonDevice, matchBrowserDevice } from "./lib/devices.js";
   import LanguageSelectors from "./components/LanguageSelectors.svelte";
   import SyncSettings from "./components/SyncSettings.svelte";
   import SettingsModal from "./components/SettingsModal.svelte";
@@ -832,11 +833,7 @@
           if (msg.height > 0) pythonFrameH = msg.height;
           trackerCameraPaused = false;
           if (msg.device) {
-            const pyDev = msg.device.toLowerCase();
-            const match = browserDevices.find(d => {
-              const clean = d.label.replace(/\s*\([0-9a-f:]+\)\s*$/i,"").trim().toLowerCase();
-              return clean === pyDev || clean.includes(pyDev) || pyDev.includes(clean);
-            });
+            const match = matchBrowserDevice(msg.device, browserDevices);
             if (match && match.deviceId !== selectedBrowserDeviceId) {
               // Python opened a different device - force the browser to match it
               selectedBrowserDeviceId = match.deviceId;
@@ -1109,33 +1106,22 @@
   // Called once on every normal (post-setup) launch after devices_list arrives.
   async function _openMatchedCameras() {
     await loadBrowserDevices();
-    // Only auto-select a browser device when none is explicitly chosen yet.
-    // If selectedBrowserDeviceId is already set (e.g. user picked from dropdown),
-    // honour it - don't override with a configuredDevice name match.
-    if (!selectedBrowserDeviceId && browserDevices.length > 0) {
-      if (configuredDevice) {
-        const lower = configuredDevice.toLowerCase();
-        const match = browserDevices.find(d => {
-          const clean = d.label.replace(/\s*\([0-9a-f:]+\)\s*$/i, "").trim().toLowerCase();
-          return clean === lower || clean.includes(lower) || lower.includes(clean);
-        });
-        selectedBrowserDeviceId = match ? match.deviceId : browserDevices[0].deviceId;
-      } else {
-        selectedBrowserDeviceId = browserDevices[0].deviceId;
-      }
+    // Same-device invariant: the persisted camera_device is the source of truth at
+    // launch. Match the browser dropdown to it whenever it resolves; only fall back
+    // to the browser's first device when nothing is configured or it isn't present.
+    // (loadBrowserDevices pre-selects the first device, so this must not be gated on
+    // selectedBrowserDeviceId being empty - that gate made the match unreachable.)
+    if (browserDevices.length > 0) {
+      const match = configuredDevice ? matchBrowserDevice(configuredDevice, browserDevices) : null;
+      if (match) selectedBrowserDeviceId = match.deviceId;
+      else if (!selectedBrowserDeviceId) selectedBrowserDeviceId = browserDevices[0].deviceId;
     }
     // Start the browser camera first so permission is granted before Python opens.
     await startCamera(selectedBrowserDeviceId || undefined);
     // Now resolve the Python device name from the browser label we actually got.
     const chosen = browserDevices.find(d => d.deviceId === selectedBrowserDeviceId);
     if (chosen && devices.length > 0) {
-      const cleanLabel = chosen.label.replace(/\s*\([0-9a-f:]+\)\s*$/i, "").trim();
-      const match = devices.find(d =>
-        d.toLowerCase() === cleanLabel.toLowerCase() ||
-        cleanLabel.toLowerCase().includes(d.toLowerCase()) ||
-        d.toLowerCase().includes(cleanLabel.toLowerCase())
-      );
-      const pyDevice = match ?? configuredDevice;
+      const pyDevice = matchPythonDevice(chosen.label, devices) ?? configuredDevice;
       if (pyDevice && pyDevice !== configuredDevice) {
         configuredDevice = pyDevice;
         send({ type:"update_config", key:"camera_device", value:pyDevice });
@@ -1424,24 +1410,22 @@
     selectedAudioDeviceId = "";
     // Clear stale frame and show "opening" immediately.
     engineFrame = null; pythonCameraStatus = "opening";
-    if (!setupComplete&&wizardStep==="camera") {
-      // First-time setup: user explicitly chose a device - sync Python to match it
-      // directly (no auto-select logic needed), then open both simultaneously.
-      stopCamera();
-      const chosen = browserDevices.find(d => d.deviceId === selectedBrowserDeviceId);
-      if (chosen) {
-        const cleanLabel = chosen.label.replace(/\s*\([0-9a-f:]+\)\s*$/i, "").trim();
-        const match = devices.find(d =>
-          d.toLowerCase() === cleanLabel.toLowerCase() ||
-          d.toLowerCase().includes(cleanLabel.toLowerCase()) ||
-          cleanLabel.toLowerCase().includes(d.toLowerCase())
-        );
-        const pyDevice = match ?? cleanLabel;
-        if (pyDevice !== configuredDevice) {
-          configuredDevice = pyDevice;
-          send({ type:"update_config", key:"camera_device", value:pyDevice });
-        }
+    // INVARIANT: the browser preview and the Python engine are ALWAYS on the same
+    // physical camera. Persist the engine's device BEFORE open_camera on EVERY path
+    // (first-run wizard, setup view and the Settings modal all land here): the engine
+    // opens whatever camera_device says and its camera_status then snaps the browser
+    // to match, so a missed write here silently reverts the user's choice.
+    const chosen = browserDevices.find(d => d.deviceId === selectedBrowserDeviceId);
+    if (chosen) {
+      const pyDevice = matchPythonDevice(chosen.label, devices) ?? cleanBrowserLabel(chosen.label);
+      if (pyDevice && pyDevice !== configuredDevice) {
+        configuredDevice = pyDevice;
+        send({ type:"update_config", key:"camera_device", value:pyDevice });
       }
+    }
+    if (!setupComplete&&wizardStep==="camera") {
+      // First-time setup: open both simultaneously.
+      stopCamera();
       send({ type:"open_camera" });
       startCamera(selectedBrowserDeviceId);
     } else {
@@ -1631,9 +1615,9 @@
     currentBinaryThresh = editingNode ? (activeRegionObj?.thresh ?? 170) : 170;
   }
 
+  // Keep the browser dropdown on the engine's configured camera (same-device invariant).
   $: if (browserDevices.length>0&&configuredDevice) {
-    const lower=configuredDevice.toLowerCase();
-    const match=browserDevices.find(d=>d.label.toLowerCase().includes(lower));
+    const match=matchBrowserDevice(configuredDevice, browserDevices);
     if (match&&match.deviceId!==selectedBrowserDeviceId) selectedBrowserDeviceId=match.deviceId;
   }
 

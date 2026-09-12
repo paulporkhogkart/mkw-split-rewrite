@@ -70,6 +70,7 @@ class Defaults:
     costume_roi:     list = None
     kart_name_roi:   list = None
     course_name_roi: list = None
+    course_preview_roi: list = None   # course-select preview art (left part, no character render)
 
     # ── Minimap tracker ───────────────────────────────────────────────────────
     minimap_roi: list = None          # [x, y, w, h]
@@ -154,6 +155,8 @@ class Defaults:
             self.kart_name_roi = [1240, 822, 1729, 891]
         if self.course_name_roi is None:
             self.course_name_roi = [175, 390, 639, 450]
+        if self.course_preview_roi is None:
+            self.course_preview_roi = [176, 146, 471, 380]
 
     def as_dict(self) -> dict:
         return asdict(self)

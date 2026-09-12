@@ -1,5 +1,6 @@
 import { serve } from '@hono/node-server';
 import { openDb, applySchema } from './db/connect';
+import { seedCourses } from './db/courses';
 import { migrateSeason0Recovered } from './db/season0Recovery';
 import { migratePlayerRenames } from './db/playerRenames';
 import { migrateTrails } from './db/trailMigrate';
@@ -25,6 +26,8 @@ const PORT = Number(process.env.PORT ?? 8787);
 
 const db = openDb(DB_PATH);
 applySchema(db);
+const newCourses = seedCourses(db);   // idempotent: courses added by game updates get their rows
+if (newCourses) console.log(`[db] seeded ${newCourses} new course(s)`);
 migrateSeason0Recovered(db);   // one-time: real Discord-recovered Season 0 progression
 migratePlayerRenames(db);      // idempotent display-name corrections (e.g. Paul -> paul pork)
 migrateTrails(db);             // one-time: run_points rows → run_trails blobs (bit-verified; see docs/replay-format.md)

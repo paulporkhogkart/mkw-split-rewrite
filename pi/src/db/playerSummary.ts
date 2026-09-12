@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
+import { RETRO_COURSE_SLUGS } from './courses';
 import { courseLeaderboard, currentWr } from './reads';
 import { overallStandings } from './leaderboards';
 import { territoryOwners } from './reads';
@@ -78,7 +79,8 @@ export function playerHeadline(db: DatabaseSync, seasonId: number, cc: number, p
   const me = standings.find((s) => s.player_id === playerId);
 
   // Turf: owned-course counts, ranked (owned desc, total_ms asc, name asc) — matches web turf.js.
-  const owners = territoryOwners(db, seasonId, cc);
+  // Island courses only: retro (SNES) tracks are on the leaderboards but not on the turf map.
+  const owners = territoryOwners(db, seasonId, cc).filter((o) => !RETRO_COURSE_SLUGS.has(o.slug));
   const totalCourses = owners.length;
   const ownCount = new Map<number, number>();
   for (const o of owners) if (o.owner_player_id != null) ownCount.set(o.owner_player_id, (ownCount.get(o.owner_player_id) ?? 0) + 1);

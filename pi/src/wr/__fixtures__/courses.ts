@@ -1,40 +1,9 @@
 import type { DatabaseSync } from 'node:sqlite';
 
-/** The 30 canonical courses as [slug, display_name] (mirrors server/courses.py). */
-export const CANONICAL_COURSES: [string, string][] = [
-  ['mario_bros_circuit', 'Mario Bros. Circuit'],
-  ['crown_city', 'Crown City'],
-  ['whistlestop_summit', 'Whistlestop Summit'],
-  ['dk_spaceport', 'DK Spaceport'],
-  ['desert_hills', 'Desert Hills'],
-  ['shy_guy_bazaar', 'Shy Guy Bazaar'],
-  ['wario_stadium', 'Wario Stadium'],
-  ['airship_fortress', 'Airship Fortress'],
-  ['dk_pass', 'DK Pass'],
-  ['starview_peak', 'Starview Peak'],
-  ['sky_high_sundae', 'Sky-High Sundae'],
-  ['warios_galleon', 'Wario’s Galleon'],
-  ['koopa_troopa_beach', 'Koopa Troopa Beach'],
-  ['faraway_oasis', 'Faraway Oasis'],
-  ['peach_stadium', 'Peach Stadium'],
-  ['peach_beach', 'Peach Beach'],
-  ['salty_salty_speedway', 'Salty Salty Speedway'],
-  ['dino_dino_jungle', 'Dino Dino Jungle'],
-  ['great_block_ruins', 'Great ? Block Ruins'],
-  ['cheep_cheep_falls', 'Cheep Cheep Falls'],
-  ['dandelion_depths', 'Dandelion Depths'],
-  ['boo_cinema', 'Boo Cinema'],
-  ['dry_bones_burnout', 'Dry Bones Burnout'],
-  ['moo_moo_meadows', 'Moo Moo Meadows'],
-  ['choco_mountain', 'Choco Mountain'],
-  ['toads_factory', 'Toad’s Factory'],
-  ['bowsers_castle', 'Bowser’s Castle'],
-  ['acorn_heights', 'Acorn Heights'],
-  ['mario_circuit', 'Mario Circuit'],
-  ['rainbow_road', 'Rainbow Road'],
-];
+export { CANONICAL_COURSES } from '../../db/courses';
+import { seedCourses } from '../../db/courses';
 
-/** The 30 track names exactly as they appear on mkwrs.com (note "Wario Shipyard"
+/** The 40 track names exactly as they appear on mkwrs.com (note "Wario Shipyard"
  *  and straight apostrophes). Used by the completeness test. */
 export const MKWRS_NAMES: string[] = [
   'Mario Bros. Circuit', 'Crown City', 'Whistlestop Summit', 'DK Spaceport', 'Desert Hills',
@@ -44,9 +13,11 @@ export const MKWRS_NAMES: string[] = [
   'Cheep Cheep Falls', 'Dandelion Depths', 'Boo Cinema', 'Dry Bones Burnout', 'Moo Moo Meadows',
   'Choco Mountain', "Toad's Factory", "Bowser's Castle", 'Acorn Heights', 'Mario Circuit',
   'Rainbow Road',
+  'SNES Mario Circuit 1', 'SNES Mario Circuit 2', 'SNES Mario Circuit 3', 'SNES Ghost Valley 1',
+  'SNES Ghost Valley 2', 'SNES Ghost Valley 3', 'SNES Choco Island 1', 'SNES Choco Island 2',
+  'SNES Koopa Beach 1', 'SNES Vanilla Lake 1',
 ];
 
 export function seedCanonicalCourses(db: DatabaseSync): void {
-  const stmt = db.prepare('INSERT OR IGNORE INTO courses(slug, display_name) VALUES (?, ?)');
-  for (const [slug, name] of CANONICAL_COURSES) stmt.run(slug, name);
+  seedCourses(db);
 }

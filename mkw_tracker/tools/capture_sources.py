@@ -240,6 +240,102 @@ class CaptureGate:
 # Resume from disk
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# ManualQueue - capture items the detector has NO template for yet
+# ---------------------------------------------------------------------------
+
+class ManualQueue:
+    """An ordered checklist of (category, base) targets captured by hand.
+
+    Auto-capture needs a template to label what is on screen, so a brand-new item
+    (a course added by a game update) can never auto-fire - worse, the matcher may
+    misread it as a similar existing item and overwrite THAT capture. In manual
+    mode auto-capture is off: the user hovers the target named in the HUD and
+    presses SPACE; the frame is saved AS that target and the queue advances.
+    """
+
+    PRESETS: Dict[str, Tuple[str, List[str]]] = {
+        # Game v1.8.0 (Sept 2026): the 10 SNES retro courses.
+        "snes": ("courses", [
+            "snes_mario_circuit_1", "snes_mario_circuit_2", "snes_mario_circuit_3",
+            "snes_ghost_valley_1", "snes_ghost_valley_2", "snes_ghost_valley_3",
+            "snes_choco_island_1", "snes_choco_island_2", "snes_koopa_beach_1",
+            "snes_vanilla_lake_1",
+        ]),
+    }
+
+    def __init__(self, category: str, items: List[str]):
+        if category not in CATEGORIES:
+            raise ValueError(f"unknown category {category!r}; expected one of {CATEGORIES}")
+        if not items:
+            raise ValueError("manual queue needs at least one item")
+        self.category = category
+        self.items = list(dict.fromkeys(items))          # de-dup, keep order
+        self.captured: Set[str] = set()
+        self.skipped: Set[str] = set()
+        self.idx = 0
+
+    @classmethod
+    def from_spec(cls, spec: str, category: Optional[str] = None) -> "ManualQueue":
+        """Build from a preset name ("snes") or a comma-separated list of bases."""
+        spec = (spec or "").strip()
+        if spec in cls.PRESETS:
+            preset_cat, items = cls.PRESETS[spec]
+            return cls(category or preset_cat, items)
+        items = [_slug(s) for s in spec.split(",") if s.strip()]
+        return cls(category or "courses", items)
+
+    # -- navigation ---------------------------------------------------------
+    def current(self) -> Optional[str]:
+        return self.items[self.idx] if 0 <= self.idx < len(self.items) else None
+
+    @property
+    def done(self) -> bool:
+        return self.idx >= len(self.items)
+
+    def advance(self) -> Optional[str]:
+        if self.idx < len(self.items):
+            self.idx += 1
+        return self.current()
+
+    def back(self) -> Optional[str]:
+        if self.idx > 0:
+            self.idx -= 1
+        return self.current()
+
+    def skip(self) -> Optional[str]:
+        cur = self.current()
+        if cur is not None:
+            self.skipped.add(cur)
+            self.captured.discard(cur)
+        return self.advance()
+
+    def mark_captured(self, base: str) -> None:
+        self.captured.add(base)
+        self.skipped.discard(base)
+
+    # -- status -------------------------------------------------------------
+    def status(self, base: str) -> str:
+        if base in self.captured:
+            return "CAPTURED"
+        if base in self.skipped:
+            return "SKIPPED"
+        return "NEW"
+
+    def prime_from_disk(self, out_root: str, lang: str) -> None:
+        """Mark items already saved under out_root/lang/<category>/ and start at the
+        first item still NEW (re-capturing a CAPTURED item is still allowed with SPACE)."""
+        on_disk = scan_existing_captures(out_root, lang).get(self.category, set())
+        for base in self.items:
+            if base in on_disk:
+                self.captured.add(base)
+        self.idx = next((i for i, b in enumerate(self.items) if b not in self.captured),
+                        len(self.items))
+
+    def remaining(self) -> List[str]:
+        return [b for b in self.items if b not in self.captured and b not in self.skipped]
+
+
 def scan_existing_captures(out_root: str, lang: str) -> Dict[str, Set[str]]:
     """Return ``{category: {base, ...}}`` for PNGs already under out_root/lang/."""
     found: Dict[str, Set[str]] = {c: set() for c in CATEGORIES}
@@ -414,7 +510,7 @@ def _draw_wrapped(display, names, x, y, max_rows=8):
     return y
 
 
-def _draw_hud(display, screen, score, gate, state, flash_text):
+def _draw_hud(display, screen, score, gate, state, flash_text, manual=None):
     h, w = display.shape[:2]
     panel_w = 440
     overlay = display.copy()
@@ -426,6 +522,43 @@ def _draw_hud(display, screen, score, gate, state, flash_text):
     y += 26
     _put(display, f"lang {gate.resolver.lang}", (14, y), (170, 170, 170), 0.45)
     y += 28
+
+    if manual is not None:
+        # Manual mode: the target is whatever the queue says, not what the detector
+        # thinks. The detector's read is still shown so a confident MISREAD of the new
+        # item as an existing one is visible (that is exactly why auto-capture is off).
+        cur = manual.current()
+        _put(display, "MANUAL capture (auto-capture OFF)", (14, y), (80, 200, 255), 0.5, 2)
+        y += 24
+        if cur is None:
+            _put(display, "queue finished - b to go back, q to quit", (14, y), (60, 220, 60), 0.45)
+            y += 22
+        else:
+            n = manual.items.index(cur) + 1
+            _put(display, f"target {n}/{len(manual.items)}:", (14, y), (205, 205, 205), 0.45)
+            y += 24
+            _put(display, f"  {manual.category}/{cur}", (14, y), (80, 200, 255), 0.6, 2)
+            y += 26
+            _put(display, f"  status {manual.status(cur)}", (14, y),
+                 _STATUS_COLOR.get(manual.status(cur), (235, 235, 235)), 0.45)
+            y += 22
+        targets = gate.current_targets(screen, state)
+        if targets:
+            _put(display, "detector thinks:", (14, y), (170, 170, 170), 0.45)
+            y += 22
+            for cat, base, conf, stat in targets:
+                _put(display, f"  {cat[:4]:<4} {base[:18]:<18} {conf:0.2f}", (14, y), (170, 170, 170), 0.45)
+                y += 22
+        y += 10
+        rem = manual.remaining()
+        _put(display, f"left ({len(rem)}):", (14, y), (205, 205, 205), 0.45)
+        y += 20
+        _draw_wrapped(display, rem, 14, y)
+        _put(display, "SPACE save as target  .  s skip  .  b back  .  Tab HUD  .  q quit",
+             (14, h - 14), (170, 170, 170), 0.45)
+        if flash_text:
+            _put(display, flash_text, (panel_w + 30, 44), (60, 220, 60), 0.85, 2)
+        return
 
     targets = gate.current_targets(screen, state)
     if targets:
@@ -485,6 +618,11 @@ def run(args):
         prime_combos_from_disk(gate, out_root, lang)
         print(f"[capture]   combos      {len(gate.combo_captured)} already on disk")
 
+    manual = None
+    if getattr(args, "manual", None):
+        manual = ManualQueue.from_spec(args.manual, getattr(args, "manual_category", None))
+        manual.prime_from_disk(out_root, lang)
+
     detector = _build_detector(lang)
     tracker = SelectionTracker(switch2_language=lang)
 
@@ -492,7 +630,13 @@ def run(args):
           f"min_conf={args.min_conf}  hold={args.hold}")
     for cat in CATEGORIES:
         print(f"[capture]   {cat:<11} {len(gate.captured[cat])}/{len(resolver.known(cat))} already on disk")
-    print("[capture] Hover items in-game. q=quit  SPACE=force  s=skip  Tab=HUD")
+    if manual is not None:
+        print(f"[capture] MANUAL mode: {manual.category} x{len(manual.items)} "
+              f"({len(manual.captured)} already on disk). Auto-capture is OFF.")
+        print("[capture] Hover the target named in the HUD, then SPACE saves the frame AS that "
+              "target. s=skip  b=back  Tab=HUD  q=quit")
+    else:
+        print("[capture] Hover items in-game. q=quit  SPACE=force  s=skip  Tab=HUD")
 
     try:
         cap = build_camera_source(device_name=device)
@@ -523,7 +667,7 @@ def run(args):
             tracker.update(frame, screen, perf.current_score)
             state = tracker.state
 
-            if t - last_observe >= _OBSERVE_INTERVAL:
+            if manual is None and t - last_observe >= _OBSERVE_INTERVAL:
                 last_observe = t
                 if args.combos:
                     fired = gate.observe_combo(screen, state)
@@ -545,12 +689,32 @@ def run(args):
             display = cv2.resize(frame, (1280, 720), interpolation=cv2.INTER_LINEAR)
             if show_hud:
                 _draw_hud(display, screen, perf.current_score, gate, state,
-                          flash_text if t < flash_until else "")
+                          flash_text if t < flash_until else "", manual=manual)
             cv2.imshow(win, display)
 
             key = (cap.waitKey(1) if cap is not None else cv2.waitKey(1)) & 0xFF
             if key in (ord("q"), 27):
                 break
+            elif manual is not None:
+                cur = manual.current()
+                if key == ord(" ") and cur is not None:
+                    try:
+                        path = _save_capture(out_root, lang, manual.category, cur, frame)
+                        manual.mark_captured(cur)
+                        manual.advance()
+                        _beep(not args.no_sound)
+                        flash_text, flash_until = f"SAVED {manual.category}/{cur}", time.perf_counter() + 0.6
+                        print(f"[capture] saved {path}")
+                    except Exception as e:
+                        flash_text, flash_until = f"SAVE FAILED {manual.category}/{cur}", time.perf_counter() + 1.5
+                        print(f"[capture] SAVE FAILED {manual.category}/{cur}: {type(e).__name__}: {e}")
+                elif key == ord("s") and cur is not None:
+                    manual.skip()
+                    print(f"[capture] skipped {manual.category}/{cur}")
+                elif key == ord("b"):
+                    manual.back()
+                elif key == 9:   # Tab
+                    show_hud = not show_hud
             elif key == ord(" "):
                 combo = gate.current_combo(screen, state) if args.combos else None
                 if combo:
@@ -617,6 +781,14 @@ def main():
     p.add_argument("--combos", action="store_true",
                    help="Capture character x costume COMBOS (for chips) into combos/; "
                         "defaults --out to captures_sdr/.")
+    p.add_argument("--manual", default=None, metavar="PRESET|base,base,...",
+                   help="MANUAL mode for items the detector has no template for yet: a "
+                        "preset name (" + ", ".join(ManualQueue.PRESETS) + ") or a comma-"
+                        "separated list of template bases. Auto-capture is OFF; hover the "
+                        "target shown in the HUD and press SPACE to save the frame as it.")
+    p.add_argument("--manual-category", default=None, dest="manual_category",
+                   choices=CATEGORIES,
+                   help="Category for --manual bases (default: the preset's, else courses).")
     run(p.parse_args())
 
 

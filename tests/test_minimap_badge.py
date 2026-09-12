@@ -111,4 +111,4 @@ def test_migration_v5_wipes_old_scale_thresholds(memdb):
     conn.commit()
     apply_migrations(memdb)
     assert conn.execute("SELECT COUNT(*) FROM minimap_thresholds").fetchone()[0] == 0
-    assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == 5
+    assert conn.execute("SELECT version FROM schema_version").fetchone()[0] >= 5   # chain continues (v6 = SNES seeds)

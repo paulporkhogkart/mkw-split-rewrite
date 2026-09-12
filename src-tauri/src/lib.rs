@@ -96,6 +96,11 @@ fn do_spawn_sidecar(app: tauri::AppHandle, state: &SidecarState) {
                     match event {
                         CommandEvent::Stdout(line) => {
                             let msg = String::from_utf8_lossy(&line);
+                            // Keep the engine's camera decisions in pbenguin.log (which
+                            // device it opened / why it failed); skip the 5s reader stats.
+                            if msg.starts_with("[Camera]") && !msg.starts_with("[Camera] reader:") {
+                                log::info!("[tracker] {}", msg.trim_end());
+                            }
                             // Idle-gate signal: only screen_change resets the WR idle clock
                             // (cheap substring check — the full JSON parse isn't needed here).
                             if msg.contains("\"type\":\"screen_change\"")

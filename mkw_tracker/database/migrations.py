@@ -123,6 +123,37 @@ _SCHEMA_V4 = "-- replay_splits removed in Phase 2 (race data moved to server)"
 _SCHEMA_V5 = "DELETE FROM minimap_thresholds;"
 
 
+# v6: minimap seeds + ROIs for the 10 SNES retro courses added by game v1.8.0
+# (Sept 2026), hand-captured with tools.minimap_calib (Paul, 2026-09-12). Keys are
+# the tracker's filename-derived course names. INSERT OR IGNORE: a DB that already
+# calibrated a course locally keeps its own rows.
+_SEED_V3 = """
+INSERT OR IGNORE INTO minimap_seeds (course, cx, cy, radius) VALUES
+    ('Snes Vanilla Lake 1',   1631,  817,  20),
+    ('Snes Choco Island 1',   1837,  842,  20),
+    ('Snes Choco Island 2',   1593,  873,  20),
+    ('Snes Koopa Beach 1',    1641,  803,  20),
+    ('Snes Ghost Valley 1',   1852,  803,  20),
+    ('Snes Ghost Valley 2',   1587,  800,  20),
+    ('Snes Ghost Valley 3',   1587,  770,  20),
+    ('Snes Mario Circuit 1',  1837,  881,  20),
+    ('Snes Mario Circuit 2',  1835,  815,  20),
+    ('Snes Mario Circuit 3',  1600,  804,  20);
+
+INSERT OR IGNORE INTO minimap_rois (course, x, y, w, h) VALUES
+    ('Snes Vanilla Lake 1',   1564,  700,  319,  289),
+    ('Snes Choco Island 1',   1529,  628,  362,  357),
+    ('Snes Choco Island 2',   1535,  611,  358,  383),
+    ('Snes Koopa Beach 1',    1573,  686,  310,  296),
+    ('Snes Ghost Valley 1',   1519,  624,  384,  355),
+    ('Snes Ghost Valley 2',   1526,  632,  371,  355),
+    ('Snes Ghost Valley 3',   1527,  624,  381,  360),
+    ('Snes Mario Circuit 1',  1526,  699,  367,  310),
+    ('Snes Mario Circuit 2',  1566,  660,  326,  322),
+    ('Snes Mario Circuit 3',  1542,  649,  344,  343);
+"""
+
+
 def apply_migrations(db_path: str | None = None):
     """Apply pending schema migrations. Safe to call on every startup."""
     conn = get_connection(db_path)
@@ -185,3 +216,12 @@ def apply_migrations(db_path: str | None = None):
         conn.execute("UPDATE schema_version SET version=5")
         conn.commit()
         print("[DB] v5: cleared minimap_thresholds (badge score rescale)")
+
+    cur.execute("SELECT version FROM schema_version")
+    row = cur.fetchone()
+    current = row[0] if row else 0
+    if current < 6:
+        conn.executescript(_SEED_V3)
+        conn.execute("UPDATE schema_version SET version=6")
+        conn.commit()
+        print("[DB] v6: seeded minimap seeds/ROIs for the 10 SNES courses (game v1.8.0)")

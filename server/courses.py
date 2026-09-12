@@ -35,7 +35,25 @@ CANONICAL_COURSES: list[tuple[str, str]] = [
     ("acorn_heights",        "Acorn Heights"),
     ("mario_circuit",        "Mario Circuit"),
     ("rainbow_road",         "Rainbow Road"),
+    # Game v1.8.0 (Sept 2026): 10 SNES retro courses added to Time Trials (5 laps each).
+    # Appended so existing courses.id values stay stable.
+    ("snes_mario_circuit_1", "SNES Mario Circuit 1"),
+    ("snes_mario_circuit_2", "SNES Mario Circuit 2"),
+    ("snes_mario_circuit_3", "SNES Mario Circuit 3"),
+    ("snes_ghost_valley_1",  "SNES Ghost Valley 1"),
+    ("snes_ghost_valley_2",  "SNES Ghost Valley 2"),
+    ("snes_ghost_valley_3",  "SNES Ghost Valley 3"),
+    ("snes_choco_island_1",  "SNES Choco Island 1"),
+    ("snes_choco_island_2",  "SNES Choco Island 2"),
+    ("snes_koopa_beach_1",   "SNES Koopa Beach 1"),
+    ("snes_vanilla_lake_1",  "SNES Vanilla Lake 1"),
 ]
+
+# Retro courses are not on the Mario Kart World island, so they have no place on the
+# site's world/turf map (web/public/map). Everything else (leaderboards, tracks pages,
+# WRs, trails) treats all CANONICAL_COURSES alike.
+RETRO_COURSES: frozenset[str] = frozenset(s for s, _ in CANONICAL_COURSES if s.startswith("snes_"))
+WORLD_MAP_COURSES: list[tuple[str, str]] = [c for c in CANONICAL_COURSES if c[0] not in RETRO_COURSES]
 
 # Legacy track names whose slug does NOT match the canonical slug.
 LEGACY_ALIASES: dict[str, str] = {

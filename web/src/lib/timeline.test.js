@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildSnapshots, flippedCourses, leaderboardAt, wrAsOf, DNF_MS } from "./timeline.js";
+import { buildSnapshots, flippedCourses, leaderboardAt, wrAsOf, DNF_MS, onMapEvents } from "./timeline.js";
 
 const C = { Aliias: "#4ade80", Gub: "#38bdf8" };
 
@@ -89,5 +89,21 @@ describe("wrAsOf", () => {
   });
   it("returns null for an unknown slug", () => {
     expect(wrAsOf(hist, "nope", Infinity)).toBe(null);
+  });
+});
+
+describe("onMapEvents", () => {
+  const manifest = [{ slug: "mario_circuit" }, { slug: "rainbow_road" }];
+  it("drops events on courses with no world-map slot (SNES retro tracks)", () => {
+    const events = [
+      { t: 1, player: "a", slug: "mario_circuit", ms: 1 },
+      { t: 2, player: "a", slug: "snes_mario_circuit_1", ms: 1 },
+      { t: 3, player: "b", slug: "rainbow_road", ms: 1 },
+    ];
+    expect(onMapEvents(events, manifest).map((e) => e.slug)).toEqual(["mario_circuit", "rainbow_road"]);
+  });
+  it("is empty-safe", () => {
+    expect(onMapEvents([], manifest)).toEqual([]);
+    expect(onMapEvents(undefined, undefined)).toEqual([]);
   });
 });

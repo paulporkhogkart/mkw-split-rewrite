@@ -38,3 +38,26 @@ describe('parseWrTable', () => {
     expect(rows.some((r) => /&#?\w+;/.test(r.courseName))).toBe(false);
   });
 });
+
+describe('parseWrTable on the v1.8.0 index page (two table.wr blocks)', () => {
+  const html180 = readFileSync(new URL('./__fixtures__/mkworld_1_8_0.html', import.meta.url), 'utf8');
+
+  it('reads rows from EVERY table.wr, not just the first (30 base + 10 SNES)', () => {
+    const rows = parseWrTable(html180);
+    expect(rows.length).toBe(40);
+    const snes = rows.filter((r) => r.courseName.startsWith('SNES '));
+    expect(snes.map((r) => r.courseName)).toEqual([
+      'SNES Mario Circuit 1', 'SNES Mario Circuit 2', 'SNES Mario Circuit 3',
+      'SNES Ghost Valley 1', 'SNES Ghost Valley 2', 'SNES Ghost Valley 3',
+      'SNES Choco Island 1', 'SNES Choco Island 2', 'SNES Koopa Beach 1', 'SNES Vanilla Lake 1',
+    ]);
+  });
+
+  it('extracts fields for a SNES track', () => {
+    const r = parseWrTable(html180).find((x) => x.courseName === 'SNES Mario Circuit 1')!;
+    expect(r.recordMs).toBe(75891);
+    expect(r.holder).toBe('JaK');
+    expect(r.videoUrl).toBe('https://www.youtube.com/watch?v=53XGlcyHFf4');
+    expect(r.character).toBe('Toadette (Explorer)');
+  });
+});

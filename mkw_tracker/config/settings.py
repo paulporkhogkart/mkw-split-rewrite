@@ -14,7 +14,7 @@ _REF_W, _REF_H = 1920, 1080
 _ROI_KEYS = frozenset({
     'lap_current_roi', 'lap_total_roi', 'coin_left_roi', 'coin_right_roi',
     'finish_roi', 'mushroom_roi', 'minimap_roi',
-    'char_name_roi', 'costume_roi', 'kart_name_roi', 'course_name_roi',
+    'char_name_roi', 'costume_roi', 'kart_name_roi', 'course_name_roi', 'course_preview_roi',
 })
 
 

@@ -45,7 +45,7 @@ ALPHA_LO, ALPHA_HI = 120, 185  # drop the near-black halo (alpha < LO), keep the
 def load_canonical():
     spec = importlib.util.spec_from_file_location("courses", ROOT / "server" / "courses.py")
     mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
-    return dict(mod.CANONICAL_COURSES)
+    return dict(mod.WORLD_MAP_COURSES)   # island courses only; retro (SNES) tracks have no map slot
 
 
 def load_avif(path):

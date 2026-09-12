@@ -205,7 +205,7 @@ def test_build_carryover_one_seed_per_player_course(legacy_db, server_db):
 def test_import_legacy_full_run_report(legacy_db):
     conn = connect(":memory:")
     rep = importer.import_legacy(legacy_db, conn, CUTOVER)
-    assert rep == importer.ImportReport(players=2, courses=30, s0_runs=4,
+    assert rep == importer.ImportReport(players=2, courses=40, s0_runs=4,
                                         world_records=2, carryover_seeds=3)
 
 
@@ -213,7 +213,7 @@ def test_import_legacy_is_idempotent(legacy_db):
     conn = connect(":memory:")
     importer.import_legacy(legacy_db, conn, CUTOVER)
     rep2 = importer.import_legacy(legacy_db, conn, CUTOVER)  # second run
-    assert rep2 == importer.ImportReport(players=2, courses=30, s0_runs=4,
+    assert rep2 == importer.ImportReport(players=2, courses=40, s0_runs=4,
                                          world_records=2, carryover_seeds=3)
     assert conn.execute("SELECT COUNT(*) FROM runs WHERE provenance='legacy_import'"
                         ).fetchone()[0] == 4

@@ -73,6 +73,28 @@ def purge_tight_pngs(directory: str):
         print(f"[templates] Purged {count} _tight.png file(s) from {directory}")
 
 
+def load_gray_templates(directory: str, scale: float = 1.0) -> Dict[str, np.ndarray]:
+    """Load plain grayscale templates (photo-like art, e.g. course previews) keyed by
+    display name (``<base>.png`` -> "Base Name"), optionally downscaled by *scale*
+    (INTER_AREA) so matching at reduced resolution stays cheap."""
+    out: Dict[str, np.ndarray] = {}
+    directory = resource_path(directory)
+    if not os.path.exists(directory):
+        return out
+    for filename in sorted(os.listdir(directory)):
+        if not filename.lower().endswith(".png"):
+            continue
+        src = cv2.imread(os.path.join(directory, filename), cv2.IMREAD_GRAYSCALE)
+        if src is None:
+            print(f"[WARN] Could not load template: {filename}")
+            continue
+        if scale != 1.0:
+            src = cv2.resize(src, (max(1, int(src.shape[1] * scale)), max(1, int(src.shape[0] * scale))),
+                             interpolation=cv2.INTER_AREA)
+        out[filename[:-4].replace("_", " ").title()] = src
+    return out
+
+
 def load_edge_template_groups(directory: str) -> Dict[str, list]:
     """Load Canny-edge selection templates grouped by display name.
 
@@ -124,13 +146,18 @@ def match_variants(
     reconfirm_threshold: Optional[float] = None,
     rel_margin: float = 0.0,
     min_abs: float = 0.0,
+    hold_margin: float = 0.0,
 ) -> tuple:
     """Score *prepared* against name -> [templates], taking the best variant per name.
 
     Returns ``(best_name_or_None, best_score, scores_map)``.  *scores_map* is the
     full ``{name: best_variant_score}`` (for ranked candidates).  If *reconfirm_name*
     still clears *reconfirm_threshold* it is returned without overriding it with a
-    higher scorer - the cheap hysteresis that stops the readout flickering.
+    higher scorer - the cheap hysteresis that stops the readout flickering - UNLESS
+    *hold_margin* > 0 and some other name beats it by more than that: a hold must
+    never mask a clear switch. (Sibling names that differ by one character, e.g. the
+    SNES "Choco Island 1"/"2", cross-score ~0.82 on edges - above the 0.80 reconfirm
+    gate - so an unconditional hold would make switching between them sticky.)
 
     Acceptance (``_accept_match``): the top name is returned when it clears
     *threshold*, OR - when *rel_margin* > 0 - when it leads the runner-up by that
@@ -149,7 +176,9 @@ def match_variants(
 
     rt = reconfirm_threshold if reconfirm_threshold is not None else threshold
     if reconfirm_name and scores.get(reconfirm_name, 0.0) >= rt:
-        return reconfirm_name, scores[reconfirm_name], scores
+        held = scores[reconfirm_name]
+        if hold_margin <= 0 or max(scores.values()) - held <= hold_margin:
+            return reconfirm_name, held, scores
     if not scores:
         return None, 0.0, scores
     best_name = max(scores, key=scores.get)

@@ -16,6 +16,14 @@ function playerTotals(best, colors, totalCourses) {
   return out;
 }
 
+// Keep only events on courses that have a slot on the world map. Retro (SNES) courses exist
+// on the leaderboards and tracks pages but not on the island, so they must not feed the turf
+// map, the turf standings, or the run-coalescing pass (which indexes courses by map slot).
+export function onMapEvents(events, manifestCourses) {
+  const slugs = new Set((manifestCourses || []).map((c) => c.slug));
+  return (events || []).filter((e) => slugs.has(e.slug));
+}
+
 // Replay the finished-run stream into the sequence of DISTINCT ownership snapshots.
 // Owner of a course = the player with the running-minimum time up to that moment; a snapshot
 // is emitted only when some course's leader actually changes (consecutive identical maps are

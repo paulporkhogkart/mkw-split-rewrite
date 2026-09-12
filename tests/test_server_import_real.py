@@ -19,7 +19,7 @@ CUTOVER = "2026-06-04T00:00:00+00:00"
 def test_real_migration_acceptance_numbers(tmp_path):
     conn = connect(str(tmp_path / "server.db"))
     rep = import_legacy(str(REAL_LEGACY), conn, CUTOVER)
-    assert rep == ImportReport(players=5, courses=30, s0_runs=205,
+    assert rep == ImportReport(players=5, courses=40, s0_runs=205,
                                world_records=473, carryover_seeds=150)
 
 

@@ -343,3 +343,63 @@ def test_prime_combos_from_disk_prevents_recapture(tmp_path):
     for _ in range(3):
         assert gate.observe_combo(Screen.CHARACTER_SELECT, st) == []
     assert "mario__base" in gate.combo_captured
+
+
+# ---------------------------------------------------------------------------
+# ManualQueue - capturing items that have no template yet (new game content)
+# ---------------------------------------------------------------------------
+
+def _manual(spec="snes", category=None):
+    from mkw_tracker.tools.capture_sources import ManualQueue
+    return ManualQueue.from_spec(spec, category)
+
+
+def test_manual_snes_preset_is_the_ten_retro_courses_in_order():
+    q = _manual("snes")
+    assert q.category == "courses"
+    assert q.items == [
+        "snes_mario_circuit_1", "snes_mario_circuit_2", "snes_mario_circuit_3",
+        "snes_ghost_valley_1", "snes_ghost_valley_2", "snes_ghost_valley_3",
+        "snes_choco_island_1", "snes_choco_island_2", "snes_koopa_beach_1",
+        "snes_vanilla_lake_1",
+    ]
+    assert q.current() == "snes_mario_circuit_1"
+    assert not q.done
+
+
+def test_manual_comma_list_is_slugified_and_deduped():
+    q = _manual("SNES Mario Circuit 1, snes_mario_circuit_1,Foo Bar", "karts")
+    assert q.category == "karts"
+    assert q.items == ["snes_mario_circuit_1", "foo_bar"]
+
+
+def test_manual_rejects_bad_category_and_empty_spec():
+    import pytest
+    with pytest.raises(ValueError):
+        _manual("a,b", "vehicles")
+    with pytest.raises(ValueError):
+        _manual("", "courses")
+
+
+def test_manual_space_skip_back_walk_the_queue():
+    q = _manual("a,b,c")
+    assert q.current() == "a"
+    q.mark_captured("a"); q.advance()
+    assert q.current() == "b" and q.status("a") == "CAPTURED"
+    assert q.skip() == "c" and q.status("b") == "SKIPPED"
+    assert q.back() == "b"                       # back re-targets a skipped item
+    q.mark_captured("b")                         # capturing clears the skip
+    assert q.status("b") == "CAPTURED"
+    q.advance(); q.advance()
+    assert q.done and q.current() is None
+    assert q.advance() is None                   # stays done
+    assert q.remaining() == ["c"]
+
+
+def test_manual_prime_from_disk_starts_at_first_new_item(tmp_path):
+    q = _manual("a,b,c")
+    _touch(str(tmp_path / "en_uk" / "courses" / "a.png"))
+    q.prime_from_disk(str(tmp_path), "en_uk")
+    assert q.status("a") == "CAPTURED"
+    assert q.current() == "b"
+    assert q.remaining() == ["b", "c"]
