@@ -55,6 +55,7 @@ def test_match_variants_takes_max_and_reconfirms():
     assert scores["A"] > scores["B"]
 
     # incumbent B is held when it clears the reconfirm gate, even though A scores higher
+    # (legacy unconditional hold: hold_margin=0)
     name2, _, _ = match_variants(prepared, templates, threshold=0.5,
                                  reconfirm_name="B", reconfirm_threshold=0.0)
     assert name2 == "B"
@@ -62,6 +63,27 @@ def test_match_variants_takes_max_and_reconfirms():
     # nothing clears a high threshold -> no match
     name3, _, _ = match_variants(prepared, {"B": [b]}, threshold=0.99)
     assert name3 is None
+
+
+def test_hold_yields_to_a_clear_rival_but_survives_a_near_tie():
+    """The reconfirm hold must not mask a real switch: SNES sibling names cross-score
+    ~0.82 (> the 0.80 gate), so an unconditional hold would stick on the old sibling."""
+    from mkw_tracker.detection.templates import match_variants
+    prepared = np.zeros((30, 40), np.uint8); prepared[10:20, 10:30] = 255; prepared[2:8, 2:14] = 255
+    a = prepared.copy()                                   # the new plate: ~1.0
+    b = prepared.copy(); b[2:8, 2:14] = 0                 # the old sibling: high but clearly lower
+    _, _, scores = match_variants(prepared, {"A": [a], "B": [b]}, threshold=0.5)
+    assert 0.6 < scores["B"] < scores["A"] - 0.10         # fixture sanity: B is a strong near-miss
+
+    # unconditional hold (legacy): B sticks
+    assert match_variants(prepared, {"A": [a], "B": [b]}, threshold=0.5,
+                          reconfirm_name="B", reconfirm_threshold=0.5)[0] == "B"
+    # with a hold margin: A beats B by more than the margin -> switch
+    assert match_variants(prepared, {"A": [a], "B": [b]}, threshold=0.5,
+                          reconfirm_name="B", reconfirm_threshold=0.5, hold_margin=0.10)[0] == "A"
+    # a near-tie (an identical twin) is still held - no flicker
+    assert match_variants(prepared, {"A": [a], "A2": [a.copy()]}, threshold=0.5,
+                          reconfirm_name="A2", reconfirm_threshold=0.5, hold_margin=0.10)[0] == "A2"
 
 
 def test_accept_match_relative_margin():
@@ -239,6 +261,31 @@ def test_character_switch_not_sticky():
     assert tracker.state.character == "Mario"
     tracker._update_character(wario)
     assert tracker.state.character == "Wario", "selection stuck on the previous character"
+
+
+@pytest.mark.skipif(not _HAVE_CAPTURES, reason="captures/en_uk LFS data not present")
+@pytest.mark.parametrize("old,new", [
+    ("snes_choco_island_1", "snes_choco_island_2"),
+    ("snes_ghost_valley_1", "snes_ghost_valley_2"),
+    ("snes_mario_circuit_2", "snes_mario_circuit_1"),
+])
+def test_snes_sibling_course_switch_not_sticky(old, new):
+    """The v1.8.0 SNES courses come in sets whose names differ by ONE digit; on edges
+    they cross-score ~0.82, above the reconfirm gate. Selecting one then its sibling
+    must switch (the hold yields to a rival that clearly beats it)."""
+    from mkw_tracker.detection.selection import SelectionTracker
+    tracker = SelectionTracker(switch2_language=_LANG)
+
+    def _frame(base):
+        p = os.path.join(_CAPTURES, "courses", f"{base}.png")
+        if not os.path.exists(p):
+            pytest.skip(f"no capture {base}")
+        return cv2.imread(p, cv2.IMREAD_COLOR)
+
+    tracker._update_course(_frame(old))
+    assert tracker.state.course.lower() == old.replace("_", " ")
+    tracker._update_course(_frame(new))
+    assert tracker.state.course.lower() == new.replace("_", " "), "course stuck on the sibling"
 
 
 @pytest.mark.skipif(not _HAVE_CAPTURES, reason="captures/en_uk LFS data not present")

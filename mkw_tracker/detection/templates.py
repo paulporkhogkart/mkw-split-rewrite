@@ -124,13 +124,18 @@ def match_variants(
     reconfirm_threshold: Optional[float] = None,
     rel_margin: float = 0.0,
     min_abs: float = 0.0,
+    hold_margin: float = 0.0,
 ) -> tuple:
     """Score *prepared* against name -> [templates], taking the best variant per name.
 
     Returns ``(best_name_or_None, best_score, scores_map)``.  *scores_map* is the
     full ``{name: best_variant_score}`` (for ranked candidates).  If *reconfirm_name*
     still clears *reconfirm_threshold* it is returned without overriding it with a
-    higher scorer - the cheap hysteresis that stops the readout flickering.
+    higher scorer - the cheap hysteresis that stops the readout flickering - UNLESS
+    *hold_margin* > 0 and some other name beats it by more than that: a hold must
+    never mask a clear switch. (Sibling names that differ by one character, e.g. the
+    SNES "Choco Island 1"/"2", cross-score ~0.82 on edges - above the 0.80 reconfirm
+    gate - so an unconditional hold would make switching between them sticky.)
 
     Acceptance (``_accept_match``): the top name is returned when it clears
     *threshold*, OR - when *rel_margin* > 0 - when it leads the runner-up by that
@@ -149,7 +154,9 @@ def match_variants(
 
     rt = reconfirm_threshold if reconfirm_threshold is not None else threshold
     if reconfirm_name and scores.get(reconfirm_name, 0.0) >= rt:
-        return reconfirm_name, scores[reconfirm_name], scores
+        held = scores[reconfirm_name]
+        if hold_margin <= 0 or max(scores.values()) - held <= hold_margin:
+            return reconfirm_name, held, scores
     if not scores:
         return None, 0.0, scores
     best_name = max(scores, key=scores.get)

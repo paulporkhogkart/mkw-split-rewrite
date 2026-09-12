@@ -134,6 +134,11 @@ SELECTION_COSTUME_FLOOR = 0.30
 # so the incumbent holds while unchanged.  Costumes use a lower value to match their
 # softer scores.
 SELECTION_RECONFIRM_THRESHOLD         = 0.80
+# A held selection yields when a rival beats it by more than this. Sibling names that
+# differ by one digit (SNES "Ghost Valley 1/2/3", "Mario Circuit 1/2/3", "Choco Island
+# 1/2") cross-score ~0.82 on edges, i.e. ABOVE the reconfirm gate, so without this the
+# hold would keep the old sibling selected on the new sibling's name plate (v1.8.0).
+SELECTION_HOLD_MARGIN                 = 0.10
 SELECTION_COSTUME_RECONFIRM_THRESHOLD = 0.50
 
 # Background-robust acceptance.  The semi-transparent name plate lets the game scene
@@ -338,7 +343,7 @@ class SelectionTracker:
             char_crop, self._char_templates,
             threshold=SELECTION_CHAR_FLOOR, reconfirm_name=self.state.character,
             reconfirm_threshold=SELECTION_RECONFIRM_THRESHOLD,
-            rel_margin=SELECTION_REL_MARGIN, min_abs=SELECTION_MIN_ABS,
+            rel_margin=SELECTION_REL_MARGIN, min_abs=SELECTION_MIN_ABS, hold_margin=SELECTION_HOLD_MARGIN,
         )
 
         if name and name != self.state.character:
@@ -390,7 +395,7 @@ class SelectionTracker:
             kart_crop, self._kart_templates,
             threshold=SELECTION_KART_FLOOR, reconfirm_name=self.state.kart,
             reconfirm_threshold=SELECTION_RECONFIRM_THRESHOLD,
-            rel_margin=SELECTION_REL_MARGIN, min_abs=SELECTION_MIN_ABS,
+            rel_margin=SELECTION_REL_MARGIN, min_abs=SELECTION_MIN_ABS, hold_margin=SELECTION_HOLD_MARGIN,
         )
         if name and name != self.state.kart:
             self.state.kart      = name
@@ -409,7 +414,7 @@ class SelectionTracker:
             course_crop, self._course_templates,
             threshold=SELECTION_COURSE_FLOOR, reconfirm_name=self.state.course,
             reconfirm_threshold=SELECTION_RECONFIRM_THRESHOLD,
-            rel_margin=SELECTION_REL_MARGIN, min_abs=SELECTION_MIN_ABS,
+            rel_margin=SELECTION_REL_MARGIN, min_abs=SELECTION_MIN_ABS, hold_margin=SELECTION_HOLD_MARGIN,
         )
         if name and name != self.state.course:
             self.state.course      = name
