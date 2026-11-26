@@ -20,6 +20,11 @@ pub mod ytdlp;
 pub enum WrError {
     /// No 1080p60 stream on this video — every engine ROI is a 1080p pixel coord.
     No1080p60,
+    /// No 1080p60 YET: the probe shows the video is still processing (a 60fps source whose
+    /// 1080p60 is not out), or a 30fps upload too young to be sure no 60 is coming. An
+    /// expected wait - the Pi holds back the stuck alert for `awaiting_hd` (wrJobs.ts
+    /// AWAITING_HD_STUCK_ATTEMPTS) and the claim cooldown schedules the recheck.
+    AwaitingHd(String),
     DownloadFailed(String),
     VideoUnavailable,
     /// The engine produced no trail: the minimap never locked.
@@ -53,6 +58,8 @@ impl WrError {
     pub fn reason(&self) -> String {
         match self {
             WrError::No1080p60 => "no_1080p60".into(),
+            // Prefix is the contract: the Pi matches `awaiting_hd%`.
+            WrError::AwaitingHd(d) => format!("awaiting_hd: {}", d.trim()),
             // The yt-dlp verdict rides along: the Pi stores 500 chars and surfaces
             // last_error on /wr-jobs + the wr_job_stuck embed, and the bare word hid a
             // two-day YouTube breakage (2026-08-19). Prefix stays the stable contract.

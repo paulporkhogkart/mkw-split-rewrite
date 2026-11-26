@@ -170,7 +170,12 @@ fn run_job(cfg: &ServiceCfg, client: &job::Client, j: &job::WrJob,
     };
     super::phase::set(Some(super::phase::Phase {
         kind: super::phase::PhaseKind::Downloading, course_slug: j.course_slug.clone() }));
-    if let Err(e) = ytdlp::download(&exe, &j.video_url, tier, &dest, cancel) {
+    // 1080p60, or - only once a probe proves none is coming - 1080p30 (ytdlp::fallback_flow).
+    let downloaded = ytdlp::download_with_fallback(&exe, &j.video_url, &dest, cancel);
+    if let Ok(t) = &downloaded {
+        if *t != tier { log::info!("[wr] wr_id={} using the {t:?} fallback", j.wr_id); }
+    }
+    if let Err(e) = downloaded {
         // A cancel mid-download is a deliberate stop: release (refund), never fail.
         if matches!(e, WrError::Cancelled) {
             let _ = client.release(j.wr_id);

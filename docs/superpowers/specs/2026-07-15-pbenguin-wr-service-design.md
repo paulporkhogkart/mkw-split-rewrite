@@ -425,6 +425,20 @@ gate -> claim -> download -> process -> verify -> upload -> cleanup -> repeat
    not required — that mattered only for a Pi's hardware decoder. Rationale for 1080p over 4K, and
    the measurements behind it, in §1.2.
 
+   **AMENDED 2026-11-27 — evidence-gated 1080p30 fallback.** A video whose 1080p60 never comes
+   (a 30fps upload) used to fail `no_1080p60` forever, re-alerting Discord on every cooldown tick.
+   Now, only when the 1080p60 selector misses, the client runs `yt-dlp -J` (metadata only) and
+   `ytdlp::hd_verdict` decides: any format above 30fps at ANY resolution ⇒ a 60fps source mid-
+   processing (YouTube serves 60fps only from 720p up and processes low resolutions first) ⇒
+   `awaiting_hd: <detail>`, however old; no 1080p at all ⇒ `awaiting_hd`; 1080p present, nothing
+   above 30fps, upload ≥ 24h old (yt-dlp `timestamp`; unknown age never falls back) ⇒ download
+   `bestvideo[height=1080][fps<=30]…` (`Tier::Fallback1080p30`). Errs toward waiting: a wrong wait
+   costs a retry, a wrong fallback stores a 30fps trail forever. The verify gate is unchanged.
+   Below 1080p is still never used (upscaling blurs the templates — re-add only with evidence).
+   The Pi treats `awaiting_hd` as an expected wait: not stuck until `AWAITING_HD_STUCK_ATTEMPTS`
+   (12). Stuck alerts are now one per job, re-firing only when the failure KIND changes
+   (`wr_jobs.alerted_reason`), via one gate shared by the /result route and the sweep.
+
    Large downloads throttle: the 197 MB 4K pull 403'd mid-transfer on the default settings and
    only completed with `--concurrent-fragments 4`. Use `--retries` / `--fragment-retries`, and
    treat a 403 as retryable rather than terminal. Do **not** set `--extractor-args
@@ -473,7 +487,8 @@ number already in hand. Splits provide a secondary check against `lap_splits_ms`
 *(v1 verifies the exact total only; `lap_splits_ms` arrives in the claim payload but is not yet
 checked.)*
 
-Additional failure reasons: `no_1080p60`, `download_failed: <yt-dlp's terminal error line>`
+Additional failure reasons: `no_1080p60` (probe failed, so no evidence either way), `awaiting_hd: <detail>`
+(2026-11-27, see the amendment above), `download_failed: <yt-dlp's terminal error line>`
 (the detail rides along since 2026-08-20 — the bare word hid a two-day breakage), `video_unavailable`,
 `no_trail` (0 points — i.e. the minimap never locked — **or a fragment trail whose last point
 falls before 80% of the record's total time**; an exact total with a mid-race badge loss must not

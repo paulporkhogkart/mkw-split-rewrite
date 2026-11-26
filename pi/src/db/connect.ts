@@ -86,6 +86,9 @@ export function applySchema(db: DatabaseSync): void {
   // Additive: same dedup stamp for wr_jobs — set by whichever path announces a dead job first
   // (the /result route or the sweep), cleared by reconcile's backfill() on revival.
   try { db.exec('ALTER TABLE wr_jobs ADD COLUMN alerted_at TEXT'); } catch { /* present */ }
+  // Additive: the failure KIND last announced (wrJobs.reasonKind) — alerts re-fire only on a
+  // new kind. NULL on legacy stamps = treated as already-announced (no deploy burst).
+  try { db.exec('ALTER TABLE wr_jobs ADD COLUMN alerted_reason TEXT'); } catch { /* present */ }
   // Player recolour (existing DBs): Gub teal -> blue. Idempotent (no row matches once recoloured),
   // and gated on the old value so it never fights a future colour change. server/importer.py
   // PLAYER_COLORS carries the same value, so fresh imports seed blue directly.

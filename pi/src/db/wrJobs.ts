@@ -43,6 +43,12 @@ export const DEFAULT_LEASE_SEC = 600;
  *  fleet is one PC that is off most of the day) — it just moves onto an escalating
  *  retry cooldown (see claimJob) so a genuinely broken job cannot hammer downloads. */
 export const FREE_ATTEMPTS = 5;
+/** `awaiting_hd` (the client found the video's 1080p60 still processing, or a 30fps upload
+ *  too young to be sure no 60 is coming) is an EXPECTED wait, not a stall: it rides the
+ *  ordinary claim cooldown but only counts as stuck once it has waited this many attempts —
+ *  past the free burst, the hourly tier and well into the 6-hourly one (~a day), by which
+ *  time YouTube has long finished processing and the client has fallen back if it can. */
+export const AWAITING_HD_STUCK_ATTEMPTS = 12;
 
 type ClaimRow = {
   wr_id: number; cc: number; course_slug: string; course_name: string;
@@ -212,39 +218,64 @@ export function stuckJobs(db: DatabaseSync): StuckJob[] {
      JOIN courses c ON c.id = w.course_id
      WHERE NOT EXISTS (SELECT 1 FROM wr_trails t WHERE t.wr_id = j.wr_id)
        AND w.removed_at IS NULL
-       AND (j.attempts >= ? OR j.last_error LIKE 'time_mismatch%')
+       AND ((j.attempts >= ?
+               -- awaiting_hd: expected wait, held back until AWAITING_HD_STUCK_ATTEMPTS.
+               AND (j.last_error IS NULL OR j.last_error NOT LIKE 'awaiting_hd%' OR j.attempts >= ?))
+            OR j.last_error LIKE 'time_mismatch%')
        -- A live lease means an attempt is still being worked: not stuck YET.
        -- Without this, the auto-firing sweep false-alerts mid-attempt and the /result
        -- route re-announces the same job seconds later (double wr_job_stuck).
        AND (j.lease_until IS NULL OR j.lease_until < datetime('now'))
      ORDER BY j.updated_at DESC`
-  ).all(FREE_ATTEMPTS) as StuckJob[];
+  ).all(FREE_ATTEMPTS, AWAITING_HD_STUCK_ATTEMPTS) as StuckJob[];
+}
+
+/** The failure KIND a reason belongs to: its leading token (`download_failed: HTTP 403` ->
+ *  `download_failed`, `time_mismatch detected=..` -> `time_mismatch`). Alerts dedup on the
+ *  kind, not the full text, so a detail that wobbles between attempts (403 vs 500) is the
+ *  same alert, while a job that starts failing a genuinely different way gets a new one. */
+export function reasonKind(reason: string | null | undefined): string {
+  return reason?.match(/^[a-z0-9_]+/)?.[0] ?? 'unknown';
 }
 
 /** Stamp a stuck job as announced, whichever path announced it (the /result route or the
- *  sweep). Revival (reconcile backfill on a link change, or reviveStaleEngineJobs)
- *  clears it, so a revived-then-re-stuck job legitimately re-alerts. */
-export function markJobAlerted(db: DatabaseSync, wrId: number): void {
-  db.prepare(`UPDATE wr_jobs SET alerted_at=datetime('now') WHERE wr_id=?`).run(wrId);
+ *  sweep), with the KIND of failure announced. Revival (reconcile backfill on a link change,
+ *  or reviveStaleEngineJobs) clears alerted_at, so a revived-then-re-stuck job re-alerts. */
+export function markJobAlerted(db: DatabaseSync, wrId: number, reason?: string | null): void {
+  db.prepare(`UPDATE wr_jobs SET alerted_at=datetime('now'), alerted_reason=? WHERE wr_id=?`)
+    .run(reason == null ? null : reasonKind(reason), wrId);
 }
 
-/** Announce stuck jobs nobody has alerted yet. Catches the class the /result route
- *  can't see: a job whose attempts burned via crash + lease lapse never posts a
- *  result (spec §6.4's silent-crash note). Runs on the scraper tick; same stuckJobs()
- *  predicate as the route and wr-flags, so all three can never disagree. */
-export function sweepStuckJobAlerts(db: DatabaseSync, hub: EventHub): number {
+/** THE alert gate, shared by the /result route and the sweep so they can never disagree:
+ *  announce a stuck job once, and again only when it starts failing a different KIND of way.
+ *  Before this, the route re-posted on every failure past FREE_ATTEMPTS — a job that could
+ *  never succeed (a video with no 1080p60) re-alerted on every cooldown tick, forever.
+ *  A stamp with no recorded kind (alerted before kinds were tracked) counts as "this kind",
+ *  so the first deploy does not re-announce every already-alerted job. `only` limits the
+ *  pass to one job (the route's just-failed one). Returns how many were announced. */
+export function announceStuckJobs(db: DatabaseSync, hub: EventHub, only?: number): number {
   let n = 0;
   for (const d of stuckJobs(db)) {
-    const row = db.prepare('SELECT alerted_at FROM wr_jobs WHERE wr_id=?').get(d.wr_id) as
-      { alerted_at: string | null } | undefined;
-    if (!row || row.alerted_at !== null) continue;
+    if (only !== undefined && d.wr_id !== only) continue;
+    const row = db.prepare('SELECT alerted_at, alerted_reason FROM wr_jobs WHERE wr_id=?').get(d.wr_id) as
+      { alerted_at: string | null; alerted_reason: string | null } | undefined;
+    if (!row) continue;
+    const kind = reasonKind(d.last_error);
+    if (row.alerted_at !== null && (row.alerted_reason === null || row.alerted_reason === kind)) continue;
     hub.publish({ type: 'wr_job_stuck', wr_id: d.wr_id, course: d.course,
       holder: d.holder_name, record_str: d.record_str,
       reason: d.last_error ?? 'attempts exhausted (no result ever posted)', attempts: d.attempts });
-    markJobAlerted(db, d.wr_id);
+    markJobAlerted(db, d.wr_id, d.last_error ?? 'unknown');
     n++;
   }
   return n;
+}
+
+/** Announce stuck jobs the gate says are due. Catches the class the /result route can't
+ *  see: a job whose attempts burned via crash + lease lapse never posts a result (spec
+ *  §6.4's silent-crash note). Runs on the scraper tick. */
+export function sweepStuckJobAlerts(db: DatabaseSync, hub: EventHub): number {
+  return announceStuckJobs(db, hub);
 }
 
 /** Boot-time recovery (idempotent): jobs whose failures were a stale bundled ENGINE
