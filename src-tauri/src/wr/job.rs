@@ -240,6 +240,8 @@ mod tests {
     fn fail_reasons_are_the_stable_strings_the_pi_stores() {
         assert_eq!(WrError::NoTrail.reason(), "no_trail");
         assert_eq!(WrError::No1080p60.reason(), "no_1080p60");
+        assert_eq!(WrError::AwaitingHd("720p60 is out".into()).reason(), "awaiting_hd: 720p60 is out",
+            "the Pi matches the awaiting_hd prefix to hold back the stuck alert");
         assert_eq!(WrError::Timeout.reason(), "timeout");
         assert_eq!(WrError::VideoUnavailable.reason(), "video_unavailable");
         assert!(WrError::EngineFailed("boom".into()).reason().starts_with("engine_failed"));

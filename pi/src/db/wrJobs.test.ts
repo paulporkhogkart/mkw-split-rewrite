@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { openDb, applySchema } from './connect';
 import { enqueueJob, seedWrJobs, claimJob, FREE_ATTEMPTS,
   heartbeatJob, releaseJob, completeJob, failJob, stuckJobs,
-  sweepStuckJobAlerts, markJobAlerted, reviveStaleEngineJobs, wrJobsStatus } from './wrJobs';
+  sweepStuckJobAlerts, markJobAlerted, reviveStaleEngineJobs, wrJobsStatus,
+  AWAITING_HD_STUCK_ATTEMPTS } from './wrJobs';
 import { insertWrTrail, getWrTrail } from './wrTrails';
 import { EventHub } from '../api/events';
 import type { ServerEvent } from './types';
@@ -281,6 +282,38 @@ describe('stuckJobs', () => {
     expect(events.filter((e) => e.type === 'wr_job_stuck')).toMatchObject([
       { wr_id: 10, course: 'Mario Circuit', attempts: 5 },
     ]);
+  });
+
+  it('the sweep shares the route gate: re-announces on a new failure KIND, not on a repeat', () => {
+    const db = queued();
+    db.prepare('UPDATE wr_jobs SET attempts=5 WHERE wr_id=10').run();
+    const hub = new EventHub();
+    const events: ServerEvent[] = [];
+    hub.subscribe((e) => events.push(e));
+    db.prepare("UPDATE wr_jobs SET last_error='no_trail' WHERE wr_id=10").run();
+    expect(sweepStuckJobAlerts(db, hub)).toBe(1);
+    db.prepare("UPDATE wr_jobs SET last_error='no_trail' WHERE wr_id=10").run();
+    expect(sweepStuckJobAlerts(db, hub)).toBe(0);           // same kind: quiet
+    db.prepare("UPDATE wr_jobs SET last_error='engine_failed boom' WHERE wr_id=10").run();
+    expect(sweepStuckJobAlerts(db, hub)).toBe(1);           // new kind: say so once
+    expect(sweepStuckJobAlerts(db, hub)).toBe(0);
+  });
+
+  it('a job alerted before alert kinds were recorded is not re-announced (no deploy burst)', () => {
+    const db = queued();
+    db.prepare("UPDATE wr_jobs SET attempts=9, last_error='no_1080p60', alerted_at=datetime('now') WHERE wr_id=10").run();
+    expect(db.prepare('SELECT alerted_reason FROM wr_jobs WHERE wr_id=10').get())
+      .toMatchObject({ alerted_reason: null });             // legacy stamp: no kind on record
+    expect(sweepStuckJobAlerts(db, new EventHub())).toBe(0);
+  });
+
+  it('stuckJobs holds back awaiting_hd until it has waited AWAITING_HD_STUCK_ATTEMPTS', () => {
+    const db = queued();
+    db.prepare("UPDATE wr_jobs SET attempts=?, last_error='awaiting_hd: x' WHERE wr_id=10")
+      .run(AWAITING_HD_STUCK_ATTEMPTS - 1);
+    expect(stuckJobs(db)).toEqual([]);
+    db.prepare('UPDATE wr_jobs SET attempts=? WHERE wr_id=10').run(AWAITING_HD_STUCK_ATTEMPTS);
+    expect(stuckJobs(db)).toMatchObject([{ wr_id: 10 }]);
   });
 
   it('markJobAlerted keeps the route-alerted job out of the sweep', () => {

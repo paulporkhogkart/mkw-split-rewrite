@@ -21,17 +21,159 @@ pub const YTDLP_URL: &str =
 /// ROI is a 1080p pixel coord and `_norm()` would rescale anything else and blur the
 /// templates. avc1 is merely preferred (cheapest decode); VP9 is fine on a PC.
 ///
-/// EVERY branch must keep `[fps=60]`. There is deliberately NO non-60fps fallback: a
-/// `bestvideo[height=1080]` branch looks like a harmless safety net but is the opposite —
-/// it MATCHES a 1080p30 upload, so the job would silently process a 30fps video instead of
-/// failing. Matching nothing is the INTENDED outcome: yt-dlp then reports "Requested
-/// format is not available", which `classify_failure` turns into `WrError::No1080p60` — a
-/// clean, correct failure. Do not "helpfully" re-add a lower-fps fallback.
+/// EVERY `Native1080p60` branch must keep `[fps=60]`. Never add a `bestvideo[height=1080]`
+/// branch to it: that MATCHES 1080p30 while the 1080p60 is still processing, so the job
+/// would silently take the worse stream of a video whose good one is an hour away.
+/// Matching nothing is the INTENDED outcome: yt-dlp reports "Requested format is not
+/// available" (`WrError::No1080p60`), and `download_with_fallback` then PROBES the video to
+/// decide, from evidence, whether 1080p60 is coming (wait) or never will (`Fallback1080p30`).
+/// The lower-fps tier lives behind that probe, never inside this selector.
 pub fn format_selector(tier: Tier) -> &'static str {
     match tier {
         Tier::Native1080p60 =>
             "bestvideo[height=1080][fps=60][vcodec^=avc1]/bestvideo[height=1080][fps=60]",
+        Tier::Fallback1080p30 =>
+            "bestvideo[height=1080][fps<=30][vcodec^=avc1]/bestvideo[height=1080][fps<=30]",
     }
+}
+
+/// One video-bearing format from `yt-dlp -J` (audio-only and storyboards dropped).
+#[derive(Debug, Clone, PartialEq)]
+pub struct VideoFormat { pub height: i64, pub fps: f64 }
+
+/// What the processing-state decision needs from `yt-dlp -J`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Probe {
+    /// Unix seconds. `timestamp` when yt-dlp has it (YouTube always has, measured), else
+    /// midnight UTC of `upload_date`.
+    pub uploaded_at: Option<i64>,
+    pub formats: Vec<VideoFormat>,
+}
+
+/// How old a 30fps-only upload must be before we believe no 60fps version is coming.
+/// The format list alone already separates "60fps source mid-processing" (720p60 exists)
+/// from "30fps source" — this is the belt-and-braces for whatever the list cannot show.
+pub const FALLBACK_MIN_AGE_SECS: i64 = 24 * 3600;
+
+/// Above this a format is "high fps". YouTube reports integer rates (24/25/30/48/50/60);
+/// the slack covers a 30.0x oddity without letting 48+ through.
+const HIGH_FPS: f64 = 31.0;
+
+pub fn parse_probe(json: &str) -> Result<Probe, String> {
+    let v: serde_json::Value = serde_json::from_str(json).map_err(|e| format!("probe json: {e}"))?;
+    let formats = v.get("formats").and_then(|f| f.as_array())
+        .ok_or_else(|| "probe json: no formats list".to_string())?;
+    let formats = formats.iter().filter_map(|f| {
+        let vcodec = f.get("vcodec").and_then(|c| c.as_str()).unwrap_or("none");
+        if vcodec == "none" { return None; }
+        Some(VideoFormat {
+            height: f.get("height").and_then(|h| h.as_i64())?,
+            fps: f.get("fps").and_then(|r| r.as_f64()).unwrap_or(0.0),
+        })
+    }).collect();
+    let uploaded_at = v.get("timestamp").and_then(|t| t.as_i64())
+        .or_else(|| v.get("upload_date").and_then(|d| d.as_str()).and_then(upload_date_to_unix));
+    Ok(Probe { uploaded_at, formats })
+}
+
+/// `YYYYMMDD` -> unix seconds at 00:00 UTC (days-from-civil, proleptic Gregorian).
+fn upload_date_to_unix(d: &str) -> Option<i64> {
+    if d.len() != 8 || !d.bytes().all(|b| b.is_ascii_digit()) { return None; }
+    let (y, m, day): (i64, i64, i64) = (d[..4].parse().ok()?, d[4..6].parse().ok()?, d[6..].parse().ok()?);
+    if !(1..=12).contains(&m) || !(1..=31).contains(&day) { return None; }
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    Some((era * 146_097 + doe - 719_468) * 86_400)
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum HdVerdict {
+    /// The source is 30fps and old enough: 1080p30 is the best this video will ever have.
+    Fallback1080p30,
+    /// 1080p60 may still come (or nothing usable exists yet). The detail is for humans.
+    Wait(String),
+}
+
+/// Decide, from the format list, whether a missing 1080p60 is "still processing" or
+/// "never coming". Errs toward waiting: a wrong wait costs a retry on the cooldown, a
+/// wrong fallback costs a 30fps trail stored forever when a 60fps one was an hour away.
+///
+/// YouTube only serves 60fps from 720p up, and processes low resolutions first. So
+///  * any format above 30fps => a 60fps source => its 1080p60 is coming: WAIT, however old;
+///  * no 1080p at all        => nothing to fall back to yet: WAIT;
+///  * 1080p, but nothing above 30fps anywhere => a 30fps source — FALL BACK once the upload
+///    is past FALLBACK_MIN_AGE_SECS (unknown age never falls back).
+pub fn hd_verdict(p: &Probe, now_unix: i64) -> HdVerdict {
+    if p.formats.iter().any(|f| f.height == 1080 && f.fps > HIGH_FPS) {
+        return HdVerdict::Wait("1080p60 is listed but the download missed it; retrying".into());
+    }
+    if let Some(best) = p.formats.iter().filter(|f| f.fps > HIGH_FPS).max_by_key(|f| f.height) {
+        return HdVerdict::Wait(format!("{}p{} is out, 1080p60 still processing", best.height, best.fps.round()));
+    }
+    if !p.formats.iter().any(|f| f.height == 1080) {
+        let best = p.formats.iter().max_by_key(|f| f.height)
+            .map(|f| format!("{}p{}", f.height, f.fps.round())).unwrap_or_else(|| "nothing".into());
+        return HdVerdict::Wait(format!("no 1080p yet (best {best})"));
+    }
+    match p.uploaded_at {
+        None => HdVerdict::Wait("30fps upload of unknown age; not falling back blind".into()),
+        Some(t) if now_unix - t < FALLBACK_MIN_AGE_SECS => HdVerdict::Wait(format!(
+            "30fps upload, {}h old; 1080p30 fallback at {}h",
+            (now_unix - t).max(0) / 3600, FALLBACK_MIN_AGE_SECS / 3600)),
+        Some(_) => HdVerdict::Fallback1080p30,
+    }
+}
+
+/// The download policy, with the two yt-dlp calls injected (tests script them):
+/// 1080p60 first; only a MISSING-FORMAT failure triggers a probe, and only a
+/// `Fallback1080p30` verdict triggers a second download. Returns the tier actually used.
+pub(crate) fn fallback_flow(
+    mut download_tier: impl FnMut(Tier) -> Result<(), WrError>,
+    probe: impl FnOnce() -> Result<Probe, WrError>,
+    now_unix: i64,
+) -> Result<Tier, WrError> {
+    match download_tier(Tier::Native1080p60) {
+        Ok(()) => return Ok(Tier::Native1080p60),
+        Err(WrError::No1080p60) => {}
+        Err(e) => return Err(e),
+    }
+    let p = match probe() {
+        Ok(p) => p,
+        Err(WrError::Cancelled) => return Err(WrError::Cancelled),
+        // No evidence, no fallback: report the plain truth.
+        Err(e) => { log::warn!("[wr] format probe failed: {}", e.reason()); return Err(WrError::No1080p60); }
+    };
+    match hd_verdict(&p, now_unix) {
+        HdVerdict::Wait(d) => Err(WrError::AwaitingHd(d)),
+        HdVerdict::Fallback1080p30 => {
+            log::info!("[wr] no 1080p60 will come (30fps source); falling back to 1080p30");
+            download_tier(Tier::Fallback1080p30).map(|()| Tier::Fallback1080p30)
+        }
+    }
+}
+
+/// Bound on the metadata-only probe (one page fetch; seconds in practice).
+const PROBE_CAP: std::time::Duration = std::time::Duration::from_secs(90);
+
+/// `yt-dlp -J`: the video's metadata incl. every format, no download.
+pub fn probe(exe: &Path, url: &str, cancel: &(dyn Fn() -> bool + Sync)) -> Result<Probe, WrError> {
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(["-J", "--no-playlist", "--no-warnings", "--", url]);
+    let r = run_tool(cmd, PROBE_CAP, cancel, true)?;
+    if !r.success { return Err(classify_failure(&r.stderr)); }
+    parse_probe(&r.stdout).map_err(WrError::DownloadFailed)
+}
+
+/// `download` with the evidence-gated 30fps fallback (see `fallback_flow`).
+pub fn download_with_fallback(
+    exe: &Path, url: &str, dest: &Path, cancel: &(dyn Fn() -> bool + Sync),
+) -> Result<Tier, WrError> {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64).unwrap_or(0);
+    fallback_flow(|t| download(exe, url, t, dest, cancel), || probe(exe, url, cancel), now)
 }
 
 /// Map yt-dlp's stderr to a terminal reason. A 403 stays RETRYABLE.
@@ -197,16 +339,30 @@ pub const DOWNLOAD_CAP: std::time::Duration = std::time::Duration::from_secs(240
 /// unblocks the drain); .output()-style blocking had neither bound nor cancel, which
 /// stalled the whole runner on a hung transfer (fix-wave review F6).
 fn run_download(
-    mut cmd: std::process::Command,
+    cmd: std::process::Command,
     cap: std::time::Duration,
     cancel: &(dyn Fn() -> bool + Sync),
 ) -> Result<(bool, String), WrError> {
+    run_tool(cmd, cap, cancel, false).map(|r| (r.success, r.stderr))
+}
+
+pub(crate) struct ToolRun { pub success: bool, pub stdout: String, pub stderr: String }
+
+/// The shared yt-dlp process shell (see `run_download`'s doc). With `capture_stdout` the
+/// child's stdout is collected too (the `-J` probe's JSON); both pipes then drain on their
+/// own threads, because a child blocked writing a full stdout pipe never closes stderr.
+pub(crate) fn run_tool(
+    mut cmd: std::process::Command,
+    cap: std::time::Duration,
+    cancel: &(dyn Fn() -> bool + Sync),
+    capture_stdout: bool,
+) -> Result<ToolRun, WrError> {
     use std::io::Read;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Mutex;
 
     cmd.stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
+        .stdout(if capture_stdout { std::process::Stdio::piped() } else { std::process::Stdio::null() })
         .stderr(std::process::Stdio::piped());
     // GUI-subsystem parent + console-subsystem child = a visible console window per
     // spawn unless suppressed (plugin-shell does the same for the live engine).
@@ -219,6 +375,7 @@ fn run_download(
         .spawn()
         .map_err(|e| WrError::EngineFailed(format!("spawn yt-dlp: {e}")))?;
     let stderr = child.stderr.take().expect("piped stderr");
+    let stdout = child.stdout.take();
 
     let started = std::time::Instant::now();
     let child = Mutex::new(child);
@@ -226,7 +383,7 @@ fn run_download(
     let cancelled = AtomicBool::new(false);
     let timed_out = AtomicBool::new(false);
 
-    let stderr_text = std::thread::scope(|s| {
+    let (stdout_text, stderr_text) = std::thread::scope(|s| {
         s.spawn(|| {
             while !done.load(Ordering::Relaxed) {
                 if cancel() {
@@ -242,13 +399,19 @@ fn run_download(
                 std::thread::sleep(std::time::Duration::from_millis(250));
             }
         });
+        let out = stdout.map(|mut o| s.spawn(move || {
+            let mut buf = String::new();
+            let _ = o.read_to_string(&mut buf);
+            buf
+        }));
         // Drain stderr to EOF (yt-dlp's stderr is small; no ring needed). Blocks until
         // the child exits or is killed — either closes the pipe.
         let mut buf = String::new();
         let mut rdr = stderr;
         let _ = rdr.read_to_string(&mut buf);
+        let out = out.map(|h| h.join().unwrap_or_default()).unwrap_or_default();
         done.store(true, Ordering::Relaxed);
-        buf
+        (out, buf)
     });
 
     let mut child = child.into_inner().unwrap_or_else(|e| e.into_inner());
@@ -261,7 +424,7 @@ fn run_download(
         return Err(WrError::DownloadFailed(format!(
             "download exceeded the {}s cap and was killed", cap.as_secs())));
     }
-    Ok((status.success(), stderr_text))
+    Ok(ToolRun { success: status.success(), stdout: stdout_text, stderr: stderr_text })
 }
 
 /// Download `url` to `dest`. Video only — audio is never fetched. Bounded and
@@ -367,6 +530,218 @@ mod tests {
         }
         assert!(!s.contains("299"), "hardcoded format ids are per-video and must never appear");
         assert!(s.split('/').next().unwrap().contains("vcodec^=avc1"), "avc1 preferred first");
+    }
+
+    // ---- 1080p60-missing fallback (2026-11-27) -------------------------------------------
+
+    const DAY: i64 = 24 * 3600;
+    const NOW: i64 = 1_795_700_000;
+
+    /// A `yt-dlp -J` document in the real shape (trimmed): video formats carry height/fps,
+    /// audio-only and storyboard formats carry vcodec "none" and must be ignored.
+    fn probe_json(ts: Option<i64>, video: &[(i64, f64)]) -> String {
+        let mut fs: Vec<String> = video.iter()
+            .map(|(h, f)| format!(r#"{{"format_id":"x","vcodec":"avc1.640028","height":{h},"fps":{f}}}"#))
+            .collect();
+        fs.push(r#"{"format_id":"140","vcodec":"none","acodec":"mp4a.40.2","height":null,"fps":null}"#.into());
+        fs.push(r#"{"format_id":"sb0","vcodec":"none","ext":"mhtml","height":90,"fps":0.5}"#.into());
+        let ts = ts.map(|t| t.to_string()).unwrap_or_else(|| "null".into());
+        format!(r#"{{"id":"v","timestamp":{ts},"upload_date":"20261126","formats":[{}]}}"#, fs.join(","))
+    }
+    /// What a 60fps upload looks like (measured on real WR videos 2026-11-27): <=480p is 30fps,
+    /// 60fps exists only from 720p up.
+    const FULL_60: &[(i64, f64)] = &[(144, 30.0), (360, 30.0), (480, 30.0), (720, 60.0), (1080, 60.0)];
+    const MID_PROCESSING_60: &[(i64, f64)] = &[(144, 30.0), (360, 30.0), (480, 30.0), (720, 60.0)];
+    const EARLY_PROCESSING: &[(i64, f64)] = &[(144, 30.0), (360, 30.0)];
+    const UPLOAD_30: &[(i64, f64)] = &[(144, 30.0), (360, 30.0), (720, 30.0), (1080, 30.0)];
+
+    fn probe_of(ts: Option<i64>, video: &[(i64, f64)]) -> Probe {
+        parse_probe(&probe_json(ts, video)).expect("fixture parses")
+    }
+
+    #[test]
+    fn parse_probe_keeps_video_formats_and_the_upload_time_only() {
+        let p = probe_of(Some(NOW), UPLOAD_30);
+        assert_eq!(p.uploaded_at, Some(NOW));
+        assert_eq!(p.formats.len(), UPLOAD_30.len(), "audio + storyboard (vcodec none) dropped: {p:?}");
+        assert!(p.formats.contains(&VideoFormat { height: 1080, fps: 30.0 }));
+    }
+
+    #[test]
+    fn parse_probe_falls_back_to_upload_date_when_there_is_no_timestamp() {
+        let p = parse_probe(r#"{"upload_date":"20261126","formats":[]}"#).unwrap();
+        assert_eq!(p.uploaded_at, Some(1_795_651_200), "2026-11-26T00:00:00Z");
+        let p = parse_probe(r#"{"formats":[]}"#).unwrap();
+        assert_eq!(p.uploaded_at, None);
+    }
+
+    #[test]
+    fn parse_probe_rejects_a_document_without_formats() {
+        assert!(parse_probe("not json").is_err());
+        assert!(parse_probe(r#"{"id":"v"}"#).is_err(), "no formats list = not a usable probe");
+    }
+
+    #[test]
+    fn an_old_30fps_upload_falls_back_to_1080p30() {
+        assert_eq!(hd_verdict(&probe_of(Some(NOW - 3 * DAY), UPLOAD_30), NOW), HdVerdict::Fallback1080p30);
+    }
+
+    #[test]
+    fn a_young_30fps_upload_waits_out_the_age_gate() {
+        // Exactly the worry: everything LOOKS final, but the upload is fresh.
+        let v = hd_verdict(&probe_of(Some(NOW - 2 * 3600), UPLOAD_30), NOW);
+        assert!(matches!(v, HdVerdict::Wait(_)), "{v:?}");
+        let v = hd_verdict(&probe_of(Some(NOW - FALLBACK_MIN_AGE_SECS + 60), UPLOAD_30), NOW);
+        assert!(matches!(v, HdVerdict::Wait(_)), "a minute short of the gate is still a wait: {v:?}");
+        assert_eq!(hd_verdict(&probe_of(Some(NOW - FALLBACK_MIN_AGE_SECS), UPLOAD_30), NOW),
+                   HdVerdict::Fallback1080p30, "at the gate exactly: fall back");
+    }
+
+    #[test]
+    fn a_60fps_upload_mid_processing_never_falls_back_however_old() {
+        // 720p60 is out, 1080p60 is not yet: the 60fps source is proven, so 1080p60 IS
+        // coming. Age must not override that - not even a month.
+        for age in [3600, 3 * DAY, 30 * DAY] {
+            match hd_verdict(&probe_of(Some(NOW - age), MID_PROCESSING_60), NOW) {
+                HdVerdict::Wait(d) => assert!(d.contains("720p60") && d.contains("still processing"),
+                                              "detail names what IS out: {d}"),
+                other => panic!("age {age}: a 60fps source must wait for 1080p60, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn sixty_fps_evidence_beats_a_listed_1080p30_however_old() {
+        // The case the fps guard exists for: a 1080p30 rendition IS listed (so the plain
+        // "no 1080p" check would not stop it), but a 60fps format proves the source is
+        // 60fps — taking the 30fps stream would store a worse trail forever.
+        let mixed: &[(i64, f64)] = &[(360, 30.0), (720, 60.0), (1080, 30.0)];
+        match hd_verdict(&probe_of(Some(NOW - 30 * DAY), mixed), NOW) {
+            HdVerdict::Wait(d) => assert!(d.contains("still processing"), "{d}"),
+            other => panic!("a proven 60fps source must never fall back to 30fps, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn early_processing_with_no_1080p_at_all_waits() {
+        match hd_verdict(&probe_of(Some(NOW - 30 * DAY), EARLY_PROCESSING), NOW) {
+            HdVerdict::Wait(d) => assert!(d.contains("no 1080p"), "{d}"),
+            other => panic!("nothing at 1080p means nothing to fall back to, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_unknown_upload_time_never_falls_back() {
+        let v = hd_verdict(&probe_of(None, UPLOAD_30), NOW);
+        assert!(matches!(v, HdVerdict::Wait(_)), "no age = cannot prove it is finished: {v:?}");
+    }
+
+    #[test]
+    fn a_listed_1080p60_is_not_a_reason_to_fall_back() {
+        // The selector missed but the probe lists 1080p60 (processing finished in between,
+        // or a codec quirk): the right move is the next attempt at 1080p60, not 30fps.
+        let v = hd_verdict(&probe_of(Some(NOW - 30 * DAY), FULL_60), NOW);
+        assert!(matches!(v, HdVerdict::Wait(_)), "{v:?}");
+    }
+
+    #[test]
+    fn the_fallback_selector_is_1080p_and_never_60fps_or_lower_res() {
+        let s = format_selector(Tier::Fallback1080p30);
+        for branch in s.split('/') {
+            assert!(branch.contains("height=1080"), "branch without 1080p: {branch}");
+            assert!(branch.contains("fps<=30"), "branch must stay the 30fps tier: {branch}");
+        }
+        assert!(s.split('/').next().unwrap().contains("vcodec^=avc1"), "avc1 preferred first");
+    }
+
+    /// Drive `fallback_flow` with scripted download/probe results; records which tiers it
+    /// asked for and whether it probed.
+    fn flow(first: Result<(), WrError>, second: Result<(), WrError>, probe: Result<Probe, WrError>)
+        -> (Result<Tier, WrError>, Vec<Tier>, bool) {
+        let mut asked = Vec::new();
+        let mut results = vec![second, first];
+        let mut probed = false;
+        let out = fallback_flow(
+            |t| { asked.push(t); results.pop().expect("at most two downloads") },
+            || { probed = true; probe },
+            NOW);
+        (out, asked, probed)
+    }
+
+    #[test]
+    fn a_normal_1080p60_download_never_probes() {
+        let (out, asked, probed) = flow(Ok(()), Ok(()), Err(WrError::Timeout));
+        assert_eq!(out, Ok(Tier::Native1080p60));
+        assert_eq!(asked, vec![Tier::Native1080p60]);
+        assert!(!probed, "the common path must stay one yt-dlp call");
+    }
+
+    #[test]
+    fn missing_1080p60_on_an_old_30fps_upload_downloads_the_fallback() {
+        let (out, asked, probed) = flow(Err(WrError::No1080p60), Ok(()),
+                                        Ok(probe_of(Some(NOW - 3 * DAY), UPLOAD_30)));
+        assert!(probed);
+        assert_eq!(asked, vec![Tier::Native1080p60, Tier::Fallback1080p30]);
+        assert_eq!(out, Ok(Tier::Fallback1080p30));
+    }
+
+    #[test]
+    fn missing_1080p60_mid_processing_reports_awaiting_hd_without_a_second_download() {
+        let (out, asked, _) = flow(Err(WrError::No1080p60), Ok(()),
+                                   Ok(probe_of(Some(NOW - 3600), MID_PROCESSING_60)));
+        assert_eq!(asked, vec![Tier::Native1080p60]);
+        match out {
+            Err(e @ WrError::AwaitingHd(_)) => assert!(e.reason().starts_with("awaiting_hd: "), "{}", e.reason()),
+            other => panic!("expected AwaitingHd, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn other_download_failures_pass_through_unprobed() {
+        let (out, _, probed) = flow(Err(WrError::DownloadFailed("HTTP Error 403".into())), Ok(()),
+                                    Ok(probe_of(Some(NOW - 3 * DAY), UPLOAD_30)));
+        assert!(matches!(out, Err(WrError::DownloadFailed(_))), "{out:?}");
+        assert!(!probed, "only a missing-format failure is a quality question");
+    }
+
+    #[test]
+    fn a_cancel_during_the_probe_stays_a_cancel() {
+        let (out, _, _) = flow(Err(WrError::No1080p60), Ok(()), Err(WrError::Cancelled));
+        assert_eq!(out, Err(WrError::Cancelled), "cancel must stay distinct (release, not fail)");
+    }
+
+    #[test]
+    fn a_failed_probe_keeps_the_honest_no_1080p60() {
+        let (out, asked, _) = flow(Err(WrError::No1080p60), Ok(()),
+                                   Err(WrError::DownloadFailed("probe broke".into())));
+        assert_eq!(out, Err(WrError::No1080p60));
+        assert_eq!(asked.len(), 1, "no evidence = no fallback download");
+    }
+
+    /// LIVE (network): the real `probe()` against a real yt-dlp and the Mario Circuit WR
+    /// fixture video (a 60fps upload). `WR_YTDLP=<path to yt-dlp.exe> cargo test --lib
+    /// live_probe -- --ignored`.
+    #[test]
+    #[ignore]
+    fn live_probe_reads_a_real_format_list() {
+        let exe = std::env::var("WR_YTDLP").expect("set WR_YTDLP to a yt-dlp.exe");
+        let p = probe(Path::new(&exe), "https://www.youtube.com/watch?v=blldIdJg7zo", &|| false)
+            .expect("probe");
+        assert!(p.uploaded_at.is_some(), "{p:?}");
+        assert!(p.formats.iter().any(|f| f.height == 1080 && f.fps > HIGH_FPS), "{:?}", p.formats);
+        assert!(p.formats.iter().all(|f| f.height > 0));
+    }
+
+    #[test]
+    fn run_tool_captures_stdout_alongside_stderr() {
+        // The probe needs stdout (the JSON) - run_download nulls it. Both pipes must be
+        // drained concurrently or a big -J document deadlocks the child.
+        let mut c = Command::new("python");
+        c.args(["-c", "import sys; sys.stdout.write('x'*200000); sys.stderr.write('warn')"]);
+        let r = run_tool(c, Duration::from_secs(30), &|| false, true).expect("runs");
+        assert!(r.success);
+        assert_eq!(r.stdout.len(), 200_000);
+        assert_eq!(r.stderr, "warn");
     }
 
     #[test]

@@ -18,11 +18,19 @@ use super::WrError;
 /// may re-add a real tier, but only with evidence a specific video needed it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tier {
-    /// YouTube's native 1080p60. The only source this module downloads.
+    /// YouTube's native 1080p60. What every attempt asks for first.
     Native1080p60,
+    /// 1080p at <=30fps — ONLY after `ytdlp::hd_verdict` has proven no 1080p60 is coming
+    /// (the source itself is 30fps: no format above 30fps exists at ANY resolution, and the
+    /// upload is past the age gate). Never chosen by `tier_for`: it is a per-video fallback
+    /// decided from evidence, not an attempt-number escalation. The engine plays a --video
+    /// at the file's own fps and samples trackers at 10Hz, so 30fps loses nothing it reads;
+    /// the exact-time verify + coverage floor still gate what gets uploaded.
+    Fallback1080p30,
 }
 
-/// Every attempt downloads native 1080p60 — see the `Tier` doc for why the 4K escalation
+/// Every attempt STARTS at native 1080p60 (the 30fps fallback is decided per video by
+/// `ytdlp::download_with_fallback`, not here) — see the `Tier` doc for why the 4K escalation
 /// tier was removed rather than fixed. Kept as a function of `attempt` (rather than a
 /// constant) so a future real tier can slot back in without changing every call site.
 pub fn tier_for(_attempt: i64) -> Tier {

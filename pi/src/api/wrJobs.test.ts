@@ -3,7 +3,7 @@ import { openDb, applySchema } from '../db/connect';
 import { EventHub } from './events';
 import { createApp } from './app';
 import { mintToken } from '../db/players';
-import { seedWrJobs } from '../db/wrJobs';
+import { seedWrJobs, AWAITING_HD_STUCK_ATTEMPTS } from '../db/wrJobs';
 import type { ServerEvent } from '../db/types';
 
 function setup() {
@@ -173,6 +173,63 @@ describe('/v1/wr-jobs', () => {
       body: JSON.stringify({ ok: false, error: 'time_mismatch detected=1 expected=2' }),
     });
     expect(events.filter((e) => e.type === 'wr_job_stuck')).toHaveLength(1);
+  });
+
+  // Helpers for the repeat-failure tests: claim + fail in one go, and step past the claim
+  // cooldown (updated_at drives it) so the next claim is allowed.
+  const failOnce = async (app: any, w: any, error: string) => {
+    await app.request('/v1/wr-jobs/claim', { method: 'POST', headers: w });
+    await app.request('/v1/wr-jobs/10/result', {
+      method: 'POST', headers: { ...w, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ok: false, error }),
+    });
+  };
+  const pastCooldown = (db: any) =>
+    db.prepare("UPDATE wr_jobs SET updated_at=datetime('now','-2 days') WHERE wr_id=10").run();
+
+  it('does NOT re-announce a stuck job that keeps failing the same way (the no_1080p60 spam)', async () => {
+    const { db, app, w1, events } = setup();
+    db.prepare('UPDATE wr_jobs SET attempts=4 WHERE wr_id=10').run();
+    await failOnce(app, w1, 'no_1080p60');                 // attempts 5 -> stuck, alert #1
+    for (let i = 0; i < 4; i++) { pastCooldown(db); await failOnce(app, w1, 'no_1080p60'); }
+    expect(db.prepare('SELECT attempts FROM wr_jobs WHERE wr_id=10').get()).toMatchObject({ attempts: 9 });
+    expect(events.filter((e) => e.type === 'wr_job_stuck')).toHaveLength(1);
+  });
+
+  it('a download_failed whose detail changes is still the same kind of failure — one alert', async () => {
+    const { db, app, w1, events } = setup();
+    db.prepare('UPDATE wr_jobs SET attempts=4 WHERE wr_id=10').run();
+    await failOnce(app, w1, 'download_failed: HTTP Error 403');
+    pastCooldown(db);
+    await failOnce(app, w1, 'download_failed: HTTP Error 500');
+    expect(events.filter((e) => e.type === 'wr_job_stuck')).toHaveLength(1);
+  });
+
+  it('re-announces when a stuck job starts failing a DIFFERENT way', async () => {
+    const { db, app, w1, events } = setup();
+    db.prepare('UPDATE wr_jobs SET attempts=4 WHERE wr_id=10').run();
+    await failOnce(app, w1, 'timeout');
+    pastCooldown(db);
+    await failOnce(app, w1, 'time_mismatch detected=1 expected=2');   // now parked: needs a human
+    expect(events.filter((e) => e.type === 'wr_job_stuck').map((e: any) => e.reason))
+      .toEqual(['timeout', 'time_mismatch detected=1 expected=2']);
+  });
+
+  it('awaiting_hd is an expected wait, not a stall: no alert at the free-attempt boundary', async () => {
+    const { db, app, w1, events } = setup();
+    db.prepare('UPDATE wr_jobs SET attempts=4 WHERE wr_id=10').run();
+    await failOnce(app, w1, 'awaiting_hd: 720p60 is out, 1080p60 still processing');
+    expect(events.filter((e) => e.type === 'wr_job_stuck')).toEqual([]);
+  });
+
+  it('awaiting_hd that never resolves IS flagged once it has waited AWAITING_HD_STUCK_ATTEMPTS', async () => {
+    const { db, app, w1, events } = setup();
+    db.prepare('UPDATE wr_jobs SET attempts=?, updated_at=datetime(\'now\',\'-2 days\') WHERE wr_id=10')
+      .run(AWAITING_HD_STUCK_ATTEMPTS - 1);
+    await failOnce(app, w1, 'awaiting_hd: no 1080p yet (best 720p60)');
+    expect(events.filter((e) => e.type === 'wr_job_stuck')).toMatchObject([
+      { wr_id: 10, attempts: AWAITING_HD_STUCK_ATTEMPTS },
+    ]);
   });
 
   it('does not announce for a survivable failure', async () => {

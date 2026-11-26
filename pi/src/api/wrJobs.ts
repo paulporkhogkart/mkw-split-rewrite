@@ -5,7 +5,7 @@ import type { Env } from './app';
 import type { Point } from '../db/types';
 import type { EventHub } from './events';
 import { requireToken } from './auth';
-import { claimJob, heartbeatJob, releaseJob, completeJob, failJob, stuckJobs, markJobAlerted, DEFAULT_LEASE_SEC, wrJobsStatus } from '../db/wrJobs';
+import { claimJob, heartbeatJob, releaseJob, completeJob, failJob, announceStuckJobs, DEFAULT_LEASE_SEC, wrJobsStatus } from '../db/wrJobs';
 
 type ResultBody = { ok: true; points: Point[] } | { ok: false; error: string };
 
@@ -85,16 +85,10 @@ export function wrJobsRoutes(db: DatabaseSync, hub: EventHub): Hono<Env> {
     const recorded = failJob(db, wrId, worker, body.error ?? 'unknown');
     if (recorded) {
       // Did that failure push the job into stuck territory (retry cooldown, or a parked
-      // time_mismatch)? Flag it for Paul once — informational, not terminal: everything
-      // except time_mismatch keeps retrying on the claim cooldown. Same predicate
-      // `npm run wr-flags` prints, so alert and listing agree.
-      const stuck = stuckJobs(db).find((d) => d.wr_id === wrId);
-      if (stuck) {
-        hub.publish({ type: 'wr_job_stuck', wr_id: stuck.wr_id, course: stuck.course,
-          holder: stuck.holder_name, record_str: stuck.record_str,
-          reason: stuck.last_error ?? 'unknown', attempts: stuck.attempts });
-        markJobAlerted(db, stuck.wr_id);
-      }
+      // time_mismatch)? Flag it for Paul — informational, not terminal: everything except
+      // time_mismatch keeps retrying on the claim cooldown. Same gate as the sweep: once
+      // per job, again only if it starts failing a different way (no per-tick re-posts).
+      announceStuckJobs(db, hub, wrId);
       return c.json({ ok: true });
     }
     return c.json({ error: 'not the lease owner' }, 409);
